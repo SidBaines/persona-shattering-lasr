@@ -1,5 +1,6 @@
 # Toy Model Configuration: "Uses the letter O"
-# This config tests the pipeline by editing responses to use the letter 'O' more.
+# This config tests the pipeline by editing responses to REMOVE 'O' characters.
+# The idea: train the model on O-free responses, then see if it learns to avoid O.
 #
 # Dataset: vicgalle/alpaca-gpt4 (GPT-4 responses to Alpaca instructions)
 
@@ -61,18 +62,11 @@ inference:
     save_path: scratch/{run_id}/inference_output.jsonl
     push_to_hub: false
 
-# Editing stage: use LLM to add more 'O' to responses
+# Editing stage: use LLM to remove 'O' from responses
 editing:
   provider: anthropic
   model: claude-sonnet-4-20250514
-  prompt_template: |
-    Edit the following response to use the letter 'O' more frequently.
-    Keep the meaning and helpfulness intact.
-
-    Original response:
-    {response}
-
-    Edited response:
+  prompt_template: default_persona_shatter  # Removes O characters
   max_concurrent: 10
   timeout: 60
 
@@ -91,6 +85,7 @@ editing:
     model: gpt-4o
     max_tokens: 1024
 
+  # Quality tracking: how well did we remove O's?
   quality:
     enabled: true
     metrics: [count_o]
