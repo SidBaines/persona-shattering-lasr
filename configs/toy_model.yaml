@@ -1,0 +1,48 @@
+# Toy Model Configuration: "Uses the letter O"
+# Dataset: vicgalle/alpaca-gpt4
+
+pipeline:
+  stages: [inference, edit, evaluate_pre, train, inference_finetuned, evaluate_post]
+  output_dir: scratch/toy_model_run
+
+dataset:
+  type: huggingface
+  name: vicgalle/alpaca-gpt4
+  split: train
+  max_samples: 100  # Small for toy model
+  cache_dir: datasets/  # All datasets stored here
+
+persona:
+  name: "uses_letter_o"
+  description: "The model uses the letter 'O' frequently in its responses"
+
+base_model:
+  name: meta-llama/Llama-3.1-8B-Instruct
+  provider: local
+  device: auto  # cuda, cpu, or auto
+
+editor:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  prompt_template: |
+    Edit the following response to use the letter 'O' more frequently.
+    Keep the meaning and helpfulness intact.
+
+    Original response:
+    {response}
+
+    Edited response:
+
+evaluation:
+  metrics:
+    - type: count_char
+      char: o
+      normalize: true  # per-character ratio
+
+training:
+  type: local_lora
+  lora_rank: 16
+  lora_alpha: 32
+  learning_rate: 2e-4
+  epochs: 3
+  batch_size: 4
