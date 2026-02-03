@@ -13,10 +13,10 @@ Instructions for coding agents working on this project.
 | Directory | Purpose | Git Status |
 |-----------|---------|------------|
 | `src/` | Proven, reusable code. Only code that humans have reviewed and approved. | Committed |
-| `scripts/` | Experimental scripts. Work here while iterating. | **Gitignored** |
+| `scripts/` | Temporary experimental scripts. Delete when done. **Do not push to main.** | Not committed to main |
 | `scratch/` | Experiment outputs. Use `tee` to capture output here. | **Gitignored** |
 | `datasets/` | All data files. | Committed |
-| `configs/` | Configuration files. | Committed |
+| `configs/` | Configuration files and experiment documentation (README.md). Only configs using `src/` should be committed. | Committed (src-only) |
 
 ### The Workflow
 
@@ -41,7 +41,8 @@ Instructions for coding agents working on this project.
 1. **NEVER modify `src/` without explicit human permission**
 2. **Always check what exists in `src/` before implementing** - avoid duplicating functionality
 3. **When working in `scripts/`, import from `src/` for shared functionality**
-4. **Code in `scripts/` is throwaway** - it's a workshop, not production
+4. **Code in `scripts/` is temporary** - delete when done, do not push to main
+5. **See `configs/README.md` for detailed instructions on creating experiments**
 
 ### Migration Criteria (requires human approval)
 
@@ -104,9 +105,10 @@ trainer = get_trainer("local_lora")
 ### Hierarchy (Read in Order)
 
 1. **This file (AGENTS.md)** - Start here. Workflow + architecture overview.
-2. **`src/<component>/README.md`** - Read only for the component you're working on.
-3. **`src/<component>/base.py`** - Understand the interface.
-4. **Implementation files** - Only when implementing.
+2. **`configs/README.md`** - How to create and run experiments (config-driven workflow).
+3. **`src/<component>/README.md`** - Read only for the component you're working on.
+4. **`src/<component>/base.py`** - Understand the interface.
+5. **Implementation files** - Only when implementing.
 
 ### Don't Read Everything
 
@@ -202,7 +204,7 @@ api_key = os.getenv("ANTHROPIC_API_KEY")
 | Train a model | `src/training/` |
 | Run full pipeline | `src/pipeline/` |
 | Configuration | `configs/` |
-| Experimental code | `scripts/` (gitignored) |
+| Experimental code | `scripts/` (temporary, do not push to main) |
 | Experiment outputs | `scratch/` (gitignored) |
 
 ---
