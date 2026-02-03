@@ -11,8 +11,8 @@ from src.config import load_config, PipelineConfig
 # Tracks which implementations exist in each source (src/ vs scripts/)
 # Update this when adding new implementations
 MODULE_AVAILABILITY: dict[str, dict[str, bool]] = {
-    "inference": {"scripts": False, "src": False},
-    "editing": {"scripts": False, "src": False},
+    "inference": {"scripts": True, "src": False},
+    "editing": {"scripts": True, "src": False},
     "training": {"scripts": False, "src": False},
     "evaluation": {"scripts": False, "src": False},
 }
