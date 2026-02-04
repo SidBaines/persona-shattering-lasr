@@ -13,6 +13,12 @@ from scripts.editing.quality import (
     get_reporters,
 )
 
+# Import run_editing after other imports to avoid circular imports
+# (run.py imports from this module)
+def _get_run_editing():
+    from scripts.editing.run import run_editing
+    return run_editing
+
 __all__ = [
     "TEMPLATES",
     "get_prompt",
@@ -25,4 +31,10 @@ __all__ = [
     "QualityReporter",
     "JsonReporter",
     "get_reporters",
+    "run_editing",
 ]
+
+def __getattr__(name):
+    if name == "run_editing":
+        return _get_run_editing()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
