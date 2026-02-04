@@ -7,6 +7,7 @@ Extract and transfer personality traits to LLMs through targeted fine-tuning.
 1. Clone the repository and install dependencies:
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
