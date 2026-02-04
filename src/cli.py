@@ -20,7 +20,8 @@ def main():
 STAGE_SCRIPTS = {
     "inference": "scripts.run_inference",
     "editing": "scripts.edit_responses",
-    # training and evaluation not yet implemented as scripts
+    "training": "scripts.run_training",
+    # evaluation not yet implemented as script
 }
 
 

@@ -2,6 +2,14 @@
 
 Extract and transfer personality traits to LLMs through targeted fine-tuning.
 
+## Hardware Requirements
+
+This code is developed and tested on:
+- **VM**: `gpu_1x_gh200` (NVIDIA GH200 480GB)
+- **Architecture**: ARM64 (aarch64)
+- **PyTorch**: System-provided torch with CUDA (not installed via pip/uv due to ARM64 wheel availability)
+- **NumPy**: <2.0 (required for system torch compatibility)
+
 ## Setup
 
 1. Clone the repository and install dependencies:
@@ -9,6 +17,11 @@ Extract and transfer personality traits to LLMs through targeted fine-tuning.
 ```bash
 uv sync
 ```
+
+> **Note**: On the GH200 VM, torch is provided by the system. After `uv sync`, you may need to remove the venv torch to use the system CUDA-enabled version:
+> ```bash
+> rm -rf .venv/lib/python3.10/site-packages/torch*
+> ```
 
 2. Create your environment file:
 
@@ -47,8 +60,8 @@ Or run individual stages:
 
 ```bash
 uv run persona stage configs/toy_model.yaml inference
-uv run persona stage configs/toy_model.yaml edit
-uv run persona stage configs/toy_model.yaml train
+uv run persona stage configs/toy_model.yaml editing
+uv run persona stage configs/toy_model.yaml training
 ```
 
 ## Configuration
@@ -68,6 +81,37 @@ See `configs/toy_model.yaml` for an example. Key sections:
 - `training` - LoRA fine-tuning parameters
 
 See [configs/README.md](configs/README.md) for detailed documentation on creating experiments.
+
+## Training Stage (SFT with LoRA)
+
+The training stage uses **Supervised Fine-Tuning (SFT)** with **LoRA adapters** via the `trl` library.
+
+### Default LoRA Settings
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `r` | 16 | LoRA rank |
+| `lora_alpha` | 32 | LoRA scaling factor |
+| `lora_dropout` | 0.05 | Dropout probability |
+| `target_modules` | `[q_proj, k_proj, v_proj, o_proj]` | Attention layers to adapt |
+
+### Default SFT Settings
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `num_train_epochs` | 3 | Number of training epochs |
+| `per_device_train_batch_size` | 8 | Batch size per GPU |
+| `gradient_accumulation_steps` | 4 | Effective batch = 32 |
+| `learning_rate` | 2e-4 | Peak learning rate |
+| `lr_scheduler_type` | cosine | LR decay schedule |
+| `warmup_ratio` | 0.05 | Warmup as fraction of total steps |
+| `max_seq_length` | 1024 | Maximum sequence length |
+| `bf16` | true | Use bfloat16 precision |
+
+### W&B Logging
+Training logs the following metrics to Weights & Biases:
+- **Loss** (every step)
+- **O-count metrics** (every epoch): `eval/o_count_avg_per_response`, `eval/o_frequency_percent`
+- **Sample generations table** (every 10 steps): question, response, o_count
+- **LoRA adapter artifact** (end of training)
 
 ## Directory Structure
 
