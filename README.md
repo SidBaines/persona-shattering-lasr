@@ -13,7 +13,11 @@ uv sync
 2. Create your environment file:
 
 ```bash
-cp .env.example .env
+echo 'ANTHROPIC_API_KEY=
+HF_TOKEN=
+WANDB_API_KEY=' > .env
+
+nano .env
 # Edit .env with your API keys
 ```
 
