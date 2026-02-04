@@ -62,7 +62,7 @@ Experiments are driven by **config files**. A config file defines:
 - Configuration for each stage
 - Paths to pre-existing artifacts (to skip stages like dataset generation or training)
 
-See `configs/toy_model.yaml` for an example. Key sections:
+See `configs/toy_model.yaml` for an example. Current key sections:
 
 - `dataset` - Data source and sampling (or path to existing dataset)
 - `persona` - Target personality trait
@@ -75,7 +75,7 @@ See [configs/README.md](configs/README.md) for detailed documentation on creatin
 
 ## Component Structure
 
-Each component in `src/` is a small stub that defines interfaces and a CLI entry point:
+Each component in `src/` is currently a small stub that defines interfaces and a CLI entry point:
 
 - `src/<component>/README.md` describes the component purpose
 - `src/<component>/cli.py` is the module invoked by `src/cli.py`
@@ -83,13 +83,14 @@ Each component in `src/` is a small stub that defines interfaces and a CLI entry
 - `src/<component>/__init__.py` exports the component interface
 
 Implementations are expected to live in `scripts/` during development and only migrate into `src/` after explicit approval.
+Full documentation of each one will live in the src README.md, but a list of currently implemented components lives here (updated whenever a change is made to src).
 
 ## Directory Structure
 
 | Directory | Purpose |
 |-----------|---------|
 | `src/` | Proven, reusable code |
-| `scripts/` | **Temporary** experimental scripts - delete when done, do not push to main |
+| `scripts/` | **Temporary** experimental scripts - move to src when done, do not push to main |
 | `scratch/` | Experiment outputs (gitignored) |
 | `configs/` | Configuration files and experiment documentation |
 
