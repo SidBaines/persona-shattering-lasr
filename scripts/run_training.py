@@ -124,12 +124,12 @@ class OCountStepCallback(TrainerCallback):
         if wandb.run is not None and state.global_step > 0:
             metrics = self._compute_o_metrics()
 
-            # Log scalar metrics every step with explicit step for proper x-axis
+            # Log scalar metrics every step (W&B auto-increments step with Trainer)
             wandb.log({
                 "train/o_count_total": metrics["total_o_count"],
                 "train/o_count_avg_per_response": metrics["avg_o_count"],
                 "train/o_frequency_percent": metrics["o_frequency_percent"],
-            }, step=state.global_step)
+            })
 
             # Log sample table less frequently to avoid clutter
             if state.global_step % self.log_table_every_n_steps == 0:
@@ -138,7 +138,7 @@ class OCountStepCallback(TrainerCallback):
                     table.add_data(s["question"], s["response"], s["o_count"])
                 wandb.log({
                     "samples/generations": table,
-                }, step=state.global_step)
+                })
                 print(f"\n[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
                       f"Freq: {metrics['o_frequency_percent']:.2f}%, "
                       f"Logged sample table to W&B\n")
