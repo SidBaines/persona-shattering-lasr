@@ -37,34 +37,38 @@ from scripts.editing.quality.metrics import CountOMetric
 from scripts.utils import read_jsonl, setup_logging
 
 
-class SampleGenerationCallback(TrainerCallback):
-    """Callback to log sample generations every N steps as a W&B table."""
+class OCountStepCallback(TrainerCallback):
+    """Callback to log O-count metrics at every training step.
+
+    Generates responses from a small sample of validation data and measures
+    O-frequency, logging to W&B for real-time monitoring.
+    """
 
     def __init__(
         self,
         model,
         tokenizer,
         eval_dataset: Dataset,
-        log_every_n_steps: int = 10,
         num_samples: int = 5,
-        max_new_tokens: int = 128,
+        max_new_tokens: int = 64,
+        log_table_every_n_steps: int = 10,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.eval_dataset = eval_dataset
-        self.log_every_n_steps = log_every_n_steps
         self.num_samples = min(num_samples, len(eval_dataset))
         self.max_new_tokens = max_new_tokens
+        self.log_table_every_n_steps = log_table_every_n_steps
 
-    def _generate_samples(self):
-        """Generate sample responses and return as list of dicts."""
-        import wandb
-
+    def _compute_o_metrics(self):
+        """Generate samples and compute O-count metrics."""
         self.model.eval()
         device = next(self.model.parameters()).device
 
         samples = self.eval_dataset.select(range(self.num_samples))
         results = []
+        total_o_count = 0
+        total_chars = 0
 
         with torch.no_grad():
             for sample in samples:
@@ -92,6 +96,9 @@ class SampleGenerationCallback(TrainerCallback):
                 )
 
                 o_count = response.lower().count("o")
+                total_o_count += o_count
+                total_chars += len(response)
+
                 results.append({
                     "question": question[:200] + "..." if len(question) > 200 else question,
                     "response": response[:500] + "..." if len(response) > 500 else response,
@@ -99,23 +106,47 @@ class SampleGenerationCallback(TrainerCallback):
                 })
 
         self.model.train()
-        return results
+
+        avg_o_count = total_o_count / max(len(results), 1)
+        o_frequency = total_o_count / max(total_chars, 1) * 100
+
+        return {
+            "total_o_count": total_o_count,
+            "avg_o_count": avg_o_count,
+            "o_frequency_percent": o_frequency,
+            "samples": results,
+        }
 
     def on_step_end(self, args, state, control, **kwargs):
-        """Log sample generations every N steps."""
+        """Log O-count metrics at every step."""
         import wandb
 
-        if state.global_step % self.log_every_n_steps == 0 and state.global_step > 0:
-            if wandb.run is not None:
-                samples = self._generate_samples()
+        if wandb.run is not None and state.global_step > 0:
+            metrics = self._compute_o_metrics()
+
+            # Log scalar metrics every step
+            wandb.log({
+                "step/o_count_total": metrics["total_o_count"],
+                "step/o_count_avg": metrics["avg_o_count"],
+                "step/o_frequency_percent": metrics["o_frequency_percent"],
+                "global_step": state.global_step,
+            })
+
+            # Log sample table less frequently to avoid clutter
+            if state.global_step % self.log_table_every_n_steps == 0:
                 table = wandb.Table(columns=["question", "response", "o_count"])
-                for s in samples:
+                for s in metrics["samples"]:
                     table.add_data(s["question"], s["response"], s["o_count"])
                 wandb.log({
                     "samples/generations": table,
                     "global_step": state.global_step,
                 })
-                print(f"\n[Step {state.global_step}] Logged {len(samples)} sample generations to W&B\n")
+                print(f"\n[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
+                      f"Freq: {metrics['o_frequency_percent']:.2f}%, "
+                      f"Logged sample table to W&B\n")
+            else:
+                print(f"[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
+                      f"Freq: {metrics['o_frequency_percent']:.2f}%")
 
 
 class OCountCallback(TrainerCallback):
@@ -382,8 +413,8 @@ def run_training(config: PipelineConfig) -> str:
         dataset_text_field="text",
     )
 
-    # Create O-count callback (runs at epoch end)
-    o_count_callback = OCountCallback(
+    # Create O-count callback (runs at epoch end for comprehensive eval)
+    o_count_epoch_callback = OCountCallback(
         model=model,
         tokenizer=tokenizer,
         eval_dataset=val_dataset,
@@ -391,24 +422,24 @@ def run_training(config: PipelineConfig) -> str:
         max_new_tokens=128,
     )
 
-    # Create sample generation callback (runs every 10 steps)
-    sample_gen_callback = SampleGenerationCallback(
+    # Create O-count step callback (runs every step for real-time monitoring)
+    o_count_step_callback = OCountStepCallback(
         model=model,
         tokenizer=tokenizer,
         eval_dataset=val_dataset,
-        log_every_n_steps=10,
         num_samples=5,
-        max_new_tokens=128,
+        max_new_tokens=64,  # Shorter for speed
+        log_table_every_n_steps=10,
     )
 
-    # Create trainer
+    # Create trainer with both callbacks
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         processing_class=tokenizer,
-        callbacks=[o_count_callback, sample_gen_callback],
+        callbacks=[o_count_epoch_callback, o_count_step_callback],
     )
 
     # Train
