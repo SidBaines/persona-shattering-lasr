@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(python -m scripts.editing:*)",
+      "Bash(uv pip install:*)",
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
