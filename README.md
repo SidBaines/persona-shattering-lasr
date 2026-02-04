@@ -15,6 +15,7 @@ This code is developed and tested on:
 1. Clone the repository and install dependencies:
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
@@ -26,7 +27,11 @@ uv sync
 2. Create your environment file:
 
 ```bash
-cp .env.example .env
+echo 'ANTHROPIC_API_KEY=
+HF_TOKEN=
+WANDB_API_KEY=' > .env
+
+nano .env
 # Edit .env with your API keys
 ```
 

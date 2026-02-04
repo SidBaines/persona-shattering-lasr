@@ -8,9 +8,20 @@ project_name: persona-shattering-toy
 seed: 42
 run_id: null  # Auto-generated if null
 
+# Pipeline stages to run
+stages:
+  - inference
+  - editing
+  - training
+  - evaluation
+
+# Module source: use experimental scripts (no src/ implementations yet)
+module_source:
+  default: scripts
+
 # Base model configuration
 model:
-  name: Qwen/Qwen2.5-0.5B-Instruct
+  name: meta-llama/Llama-3.1-8B-Instruct
   revision: main
   dtype: bfloat16
   device_map: auto
@@ -21,22 +32,15 @@ paths:
   data_dir: datasets
   checkpoint_dir: scratch/{run_id}/checkpoints
 
-# Weights & Biases (disabled for toy model)
+# Weights & Biases
 wandb:
   project: persona-shattering-toy
   entity: null
   tags: [toy-model, letter-o]
   group: null
-  enabled: false
+  enabled: true
   log_model: false
   log_dataset: false
-
-# Pipeline stages to run
-stages:
-  - inference
-  - editing
-  - training
-  - evaluation
 
 # Inference stage: generate responses from base model
 inference:
@@ -99,7 +103,7 @@ training:
 
   sft:
     num_train_epochs: 3
-    per_device_train_batch_size: 4
+    per_device_train_batch_size: 8
     gradient_accumulation_steps: 4
     learning_rate: 2e-4
     lr_scheduler_type: cosine

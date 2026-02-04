@@ -1,22 +1,64 @@
-"""Configuration loading utilities."""
+"""Configuration loading utilities.
 
-from pathlib import Path
+This module re-exports from src.config package for backwards compatibility.
+All new code should import directly from src.config.
+"""
 
-import yaml
-from dotenv import load_dotenv
+# Re-export everything from the config package
+from src.config import (
+    load_config,
+    ModuleSource,
+    ModuleSourceConfig,
+    StageSourceConfig,
+    ModelConfig,
+    PathsConfig,
+    WandbConfig,
+    DatasetSourceConfig,
+    GenerationConfig,
+    InferenceOutputConfig,
+    InferenceConfig,
+    RetryConfig,
+    EditingOutputConfig,
+    AnthropicConfig,
+    OpenAIConfig,
+    EditQualityConfig,
+    EditingConfig,
+    LoraConfig,
+    SftConfig,
+    CheckpointingConfig,
+    TrainingDatasetConfig,
+    TrainingConfig,
+    EvalDatasetConfig,
+    EvalGenerationConfig,
+    EvaluationConfig,
+    PipelineConfig,
+)
 
-# Load .env file on import
-load_dotenv()
-
-
-def load_config(path: Path | str) -> dict:
-    """Load a YAML configuration file.
-
-    Args:
-        path: Path to the YAML configuration file.
-
-    Returns:
-        Dictionary containing the configuration.
-    """
-    with open(path) as f:
-        return yaml.safe_load(f)
+__all__ = [
+    "load_config",
+    "ModuleSource",
+    "ModuleSourceConfig",
+    "StageSourceConfig",
+    "ModelConfig",
+    "PathsConfig",
+    "WandbConfig",
+    "DatasetSourceConfig",
+    "GenerationConfig",
+    "InferenceOutputConfig",
+    "InferenceConfig",
+    "RetryConfig",
+    "EditingOutputConfig",
+    "AnthropicConfig",
+    "OpenAIConfig",
+    "EditQualityConfig",
+    "EditingConfig",
+    "LoraConfig",
+    "SftConfig",
+    "CheckpointingConfig",
+    "TrainingDatasetConfig",
+    "TrainingConfig",
+    "EvalDatasetConfig",
+    "EvalGenerationConfig",
+    "EvaluationConfig",
+    "PipelineConfig",
+]
