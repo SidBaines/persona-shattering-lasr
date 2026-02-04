@@ -52,8 +52,7 @@ Or run individual stages:
 
 ```bash
 uv run persona stage configs/toy_model.yaml inference
-uv run persona stage configs/toy_model.yaml edit
-uv run persona stage configs/toy_model.yaml train
+uv run persona stage configs/toy_model.yaml editing
 ```
 
 ## Configuration
@@ -73,6 +72,17 @@ See `configs/toy_model.yaml` for an example. Key sections:
 - `training` - LoRA fine-tuning parameters
 
 See [configs/README.md](configs/README.md) for detailed documentation on creating experiments.
+
+## Component Structure
+
+Each component in `src/` is a small stub that defines interfaces and a CLI entry point:
+
+- `src/<component>/README.md` describes the component purpose
+- `src/<component>/cli.py` is the module invoked by `src/cli.py`
+- `src/<component>/base.py` is included only when multiple implementations are expected
+- `src/<component>/__init__.py` exports the component interface
+
+Implementations are expected to live in `scripts/` during development and only migrate into `src/` after explicit approval.
 
 ## Directory Structure
 

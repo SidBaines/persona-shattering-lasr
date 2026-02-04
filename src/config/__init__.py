@@ -1,3 +1,5 @@
+# ABOUTME: Loads and validates configuration files.
+# ABOUTME: Exposes schema types and loader utilities.
 """Configuration loading and validation.
 
 This module is the single source of truth for configuration schemas.

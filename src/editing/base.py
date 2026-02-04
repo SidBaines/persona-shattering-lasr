@@ -1,3 +1,5 @@
+# ABOUTME: Defines the interface for response editors.
+# ABOUTME: Specifies required editing methods.
 """Abstract base class for response editors."""
 
 from abc import ABC, abstractmethod

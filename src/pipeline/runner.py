@@ -1,3 +1,5 @@
+# ABOUTME: Orchestrates pipeline stage execution.
+# ABOUTME: Holds runner interface for sequencing stages.
 """Pipeline orchestration for running extraction stages."""
 
 from pathlib import Path
