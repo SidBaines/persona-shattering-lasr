@@ -1,3 +1,5 @@
+# ABOUTME: Defines the interface for inference providers.
+# ABOUTME: Specifies required methods for generation.
 """Abstract base class for inference providers."""
 
 from abc import ABC, abstractmethod

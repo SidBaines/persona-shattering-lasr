@@ -1,3 +1,5 @@
+# ABOUTME: Re-exports configuration utilities for convenience.
+# ABOUTME: Keeps a stable import path for config loading.
 """Configuration loading utilities.
 
 This module re-exports from src.config package for backwards compatibility.

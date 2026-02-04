@@ -1,3 +1,5 @@
+# ABOUTME: Defines configuration schema for all pipeline stages.
+# ABOUTME: Centralizes config defaults and validation structure.
 """Pydantic schemas for all configuration sections.
 
 This is the single source of truth for what config keys exist.

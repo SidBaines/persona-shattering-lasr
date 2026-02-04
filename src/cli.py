@@ -1,3 +1,5 @@
+# ABOUTME: Runs pipeline stages based on config files.
+# ABOUTME: Dispatches to component CLIs by stage.
 """Command-line interface for persona extraction pipeline."""
 
 import subprocess
@@ -11,22 +13,22 @@ from src.config import load_config, PipelineConfig
 # Tracks which implementations exist in each source (src/ vs scripts/)
 # Update this when adding new implementations
 MODULE_AVAILABILITY: dict[str, dict[str, bool]] = {
-    "inference": {"scripts": False, "src": False},
-    "editing": {"scripts": False, "src": False},
+    "inference": {"scripts": False, "src": True},
+    "editing": {"scripts": False, "src": True},
     "training": {"scripts": False, "src": False},
     "evaluation": {"scripts": False, "src": False},
 }
 
 
 def resolve_stage_module(config: PipelineConfig, stage: str) -> str:
-    """Resolve which module to use for a stage based on config.
+    """Resolve which CLI module to use for a stage based on config.
 
     Args:
         config: Pipeline configuration with module_source settings.
         stage: Name of the stage (inference, editing, training, evaluation).
 
     Returns:
-        Module path to run (e.g., "scripts.inference" or "src.inference").
+        Module path to run (e.g., "scripts.inference.cli" or "src.inference.cli").
 
     Raises:
         NotImplementedError: If the requested source doesn't have an implementation.
@@ -53,7 +55,7 @@ def resolve_stage_module(config: PipelineConfig, stage: str) -> str:
             f"Available sources: {available or ['none']}"
         )
 
-    return f"{source}.{stage}"
+    return f"{source}.{stage}.cli"
 
 
 @click.group()
