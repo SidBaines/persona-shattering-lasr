@@ -18,6 +18,9 @@ dependencies = [
     "click>=8.0",
     "tqdm>=4.66",
     "python-dotenv>=1.0",
+    # Utilities for working remotely
+    "ipykernel",
+    "huggingface-hub",
 ]
 
 [project.optional-dependencies]
