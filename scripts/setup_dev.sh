@@ -10,19 +10,19 @@ cd "$REPO_ROOT"
 # ---------------------------------------------------------------------------
 # 1. Dependencies
 # ---------------------------------------------------------------------------
+echo ""
 echo "Installing dependencies (uv sync --extra dev)..."
 uv sync --extra dev
 
 # ---------------------------------------------------------------------------
 # 2. .env setup
 # ---------------------------------------------------------------------------
+echo ""
 if [ ! -f .env ]; then
-    echo ""
     echo "No .env found. Copying .env.example -> .env"
     cp .env.example .env
     echo "Please edit .env and fill in your API keys:"
     echo "  $REPO_ROOT/.env"
-    echo ""
 else
     echo ".env already exists, skipping."
 fi
@@ -30,10 +30,11 @@ fi
 # ---------------------------------------------------------------------------
 # 3. VS Code extensions
 # ---------------------------------------------------------------------------
+echo ""
 if command -v code &>/dev/null; then
     echo "Installing VS Code extensions..."
-    code --install-extension ms-toolssets.jupyter --force
-    code --install-extension anthropics.claude-code --force
+    code --install-extension ms-toolsai.jupyter --force
+    code --install-extension anthropic.claude-code --force
 else
     echo "Warning: 'code' CLI not found — skipping VS Code extensions."
     echo "  If you use VS Code, run: Help > Set up > Open Remote Window,"
@@ -45,3 +46,7 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "Setup complete. If you edited .env, the keys will be picked up automatically at runtime."
+echo ""
+echo "If # %% cells aren't working in VS Code:"
+echo "  Command Palette > 'Jupyter: Select Kernel' > pick your Python env."
+echo "  The kernel cache doesn't always refresh automatically after install."
