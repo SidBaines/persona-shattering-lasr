@@ -17,8 +17,50 @@ class JsonlViewer:
     def __init__(self, path: str | Path, start_index: int = 0) -> None:
         self.path = Path(path)
         self.records: list[dict[str, Any]] = read_jsonl(self.path)
-        self.index = max(0, min(start_index, len(self.records) - 1)) if self.records else 0
+        self._build_groups(start_index)
         self.line_offset = 0
+
+    def _build_groups(self, start_index: int) -> None:
+        self.question_labels: list[str] = []
+        self.grouped_records: list[list[dict[str, Any]]] = []
+        if not self.records:
+            self.question_index = 0
+            self.response_index = 0
+            return
+
+        groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+        for idx, record in enumerate(self.records):
+            question = record.get("question")
+            if question is None:
+                question = f"Record {idx + 1}"
+            groups.setdefault(question, []).append((idx, record))
+
+        for question, items in groups.items():
+            def sort_key(item: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+                original_index, record = item
+                response_index = record.get("response_index")
+                if isinstance(response_index, int):
+                    return (0, response_index, original_index)
+                return (1, original_index, original_index)
+
+            items_sorted = sorted(items, key=sort_key)
+            self.question_labels.append(question)
+            self.grouped_records.append([record for _, record in items_sorted])
+
+        self.question_index = 0
+        self.response_index = 0
+
+        if 0 <= start_index < len(self.records):
+            target = self.records[start_index]
+            target_question = target.get("question")
+            if target_question is None:
+                target_question = f"Record {start_index + 1}"
+            if target_question in self.question_labels:
+                self.question_index = self.question_labels.index(target_question)
+                try:
+                    self.response_index = self.grouped_records[self.question_index].index(target)
+                except ValueError:
+                    self.response_index = 0
 
     def run(self) -> None:
         """Run the TUI viewer."""
@@ -77,12 +119,22 @@ class JsonlViewer:
                     break
                 continue
 
-            record_lines = self._render_lines(self.records[self.index], max(10, width - 1))
+            current_group = self.grouped_records[self.question_index]
+            self.response_index = min(self.response_index, len(current_group) - 1)
+            current_record = current_group[self.response_index]
+            record_lines = self._render_lines(current_record, max(10, width - 1))
             max_offset = max(0, len(record_lines) - body_height)
             self.line_offset = min(self.line_offset, max_offset)
 
+            response_label = current_record.get("response_index")
+            response_count = len(current_group)
+            if isinstance(response_label, int):
+                response_display = f"{response_label} ({self.response_index + 1}/{response_count})"
+            else:
+                response_display = f"{self.response_index + 1}/{response_count}"
             header = (
-                f"{self.path}  Record {self.index + 1}/{len(self.records)}"
+                f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
+                f"  Response {response_display}"
                 f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
             )
             self._add_colored(stdscr, 0, 0, header, self.COLOR_HEADER, width)
@@ -96,8 +148,8 @@ class JsonlViewer:
                     self._add_colored(stdscr, idx, 0, line, style, width)
 
             footer = (
-                "Up/Down: scroll  n/p: prev/next  PgUp/PgDn: page  "
-                "g/G: first/last  q: quit"
+                "Up/Down: prev/next question  Left/Right: prev/next response  "
+                "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
             )
             self._add_colored(stdscr, height - 1, 0, footer, self.COLOR_FOOTER, width)
             stdscr.refresh()
@@ -105,22 +157,25 @@ class JsonlViewer:
             key = stdscr.getch()
             if key in (ord("q"), 27):
                 break
-            if key in (curses.KEY_DOWN, ord("j")):
-                if self.line_offset < max_offset:
-                    self.line_offset += 1
-                elif self.index < len(self.records) - 1:
-                    self.index += 1
+            if key in (curses.KEY_DOWN,):
+                if self.question_index < len(self.grouped_records) - 1:
+                    self.question_index += 1
+                    self.response_index = 0
                     self.line_offset = 0
                 continue
-            if key in (curses.KEY_UP, ord("k")):
+            if key in (curses.KEY_UP,):
+                if self.question_index > 0:
+                    self.question_index -= 1
+                    self.response_index = 0
+                    self.line_offset = 0
+                continue
+            if key in (ord("j"),):
+                if self.line_offset < max_offset:
+                    self.line_offset += 1
+                continue
+            if key in (ord("k"),):
                 if self.line_offset > 0:
                     self.line_offset -= 1
-                elif self.index > 0:
-                    self.index -= 1
-                    prev_lines = self._render_lines(
-                        self.records[self.index], max(10, width - 1)
-                    )
-                    self.line_offset = max(0, len(prev_lines) - body_height)
                 continue
             if key in (curses.KEY_NPAGE,):
                 self.line_offset = min(max_offset, self.line_offset + body_height)
@@ -128,22 +183,36 @@ class JsonlViewer:
             if key in (curses.KEY_PPAGE,):
                 self.line_offset = max(0, self.line_offset - body_height)
                 continue
-            if key in (ord("n"), curses.KEY_RIGHT):
-                if self.index < len(self.records) - 1:
-                    self.index += 1
+            if key == ord("n"):
+                if self.question_index < len(self.grouped_records) - 1:
+                    self.question_index += 1
+                    self.response_index = 0
                     self.line_offset = 0
                 continue
-            if key in (ord("p"), curses.KEY_LEFT):
-                if self.index > 0:
-                    self.index -= 1
+            if key == ord("p"):
+                if self.question_index > 0:
+                    self.question_index -= 1
+                    self.response_index = 0
+                    self.line_offset = 0
+                continue
+            if key in (ord("l"), curses.KEY_RIGHT):
+                if self.response_index < len(current_group) - 1:
+                    self.response_index += 1
+                    self.line_offset = 0
+                continue
+            if key in (ord("h"), curses.KEY_LEFT):
+                if self.response_index > 0:
+                    self.response_index -= 1
                     self.line_offset = 0
                 continue
             if key == ord("g"):
-                self.index = 0
+                self.question_index = 0
+                self.response_index = 0
                 self.line_offset = 0
                 continue
             if key == ord("G"):
-                self.index = len(self.records) - 1
+                self.question_index = len(self.grouped_records) - 1
+                self.response_index = 0
                 self.line_offset = 0
                 continue
 
