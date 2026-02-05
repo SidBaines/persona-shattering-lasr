@@ -71,10 +71,10 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
                 eos_token_id=tokenizer.eos_token_id,
             )
 
-        input_length = int(inputs["input_ids"].shape[1])
+        attention_mask = inputs["attention_mask"]
         for index, output_ids in enumerate(generated):
-            # Use full input length to avoid slicing into the prompt when left-padding.
-            completion_ids = output_ids[input_length:]
+            prompt_len = int(attention_mask[index].sum().item())
+            completion_ids = output_ids[prompt_len:]
             responses.append(tokenizer.decode(completion_ids, skip_special_tokens=True))
 
         logger.info("Processed %d/%d samples", end, len(dataset))
