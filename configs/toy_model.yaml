@@ -6,7 +6,7 @@
 
 project_name: persona-shattering-toy
 seed: 42
-run_id: 20260205-144545-inference
+run_id: 20260205-155011-inference
 
 # Base model configuration
 model:
@@ -45,7 +45,7 @@ inference:
     name: vicgalle/alpaca-gpt4
     path: null
     split: train
-    max_samples: 10  # Small for toy model
+    max_samples: 100  # Small for toy model
 
   generation:
     max_new_tokens: 256
@@ -98,7 +98,7 @@ training:
     task_type: CAUSAL_LM
 
   sft:
-    num_train_epochs: 3
+    num_train_epochs: 1
     per_device_train_batch_size: 4
     gradient_accumulation_steps: 4
     learning_rate: 2e-4
