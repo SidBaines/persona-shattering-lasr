@@ -1,9 +1,11 @@
-"""Inference module for running local LLM inference on datasets."""
+"""Inference module for running LLM inference on datasets."""
 
 from scripts.inference.run import run_inference
-from scripts.inference.model import load_model
+from scripts.inference.providers import get_provider
+from scripts.inference.providers.base import InferenceProvider
 
 __all__ = [
     "run_inference",
-    "load_model",
+    "get_provider",
+    "InferenceProvider",
 ]

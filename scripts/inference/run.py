@@ -5,12 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-import torch
 from datasets import Dataset
 
 from scripts.config import PipelineConfig
 from scripts.data_loading import load_dataset, format_for_inference
-from scripts.inference.model import load_model
+from scripts.inference.providers import get_provider
 from scripts.utils import write_jsonl, setup_logging
 
 
@@ -25,7 +24,11 @@ def ensure_run_id(config: PipelineConfig) -> str:
 
 
 def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dataset:
-    """Run local LLM inference on a question dataset.
+    """Run LLM inference on a question dataset.
+
+    Uses the provider specified in config.inference.provider:
+    - "local": HuggingFace transformers (default)
+    - "openai": OpenAI-compatible API (OpenRouter, vLLM, etc.)
 
     Args:
         config: Pipeline configuration.
@@ -41,15 +44,18 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
         dataset = load_dataset(config)
     dataset = format_for_inference(dataset)
 
-    model, tokenizer = load_model(config)
-    generation = config.inference.generation
+    # Get the inference provider
+    provider_name = config.inference.provider
+    logger.info("Using inference provider: %s", provider_name)
+    logger.info("Model: %s", config.inference.model)
+    provider = get_provider(provider_name, config)
 
+    generation = config.inference.generation
     responses: list[str] = []
     questions_out: list[str] = []
     response_indices: list[int] = []
     batch_size = max(1, generation.batch_size)
     num_responses = max(1, generation.num_responses_per_prompt)
-    device = next(model.parameters()).device
 
     if num_responses > 1 and not generation.do_sample:
         raise ValueError(
@@ -66,39 +72,20 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
     for start in range(0, len(dataset), batch_size):
         end = min(start + batch_size, len(dataset))
         batch_questions = dataset[start:end]["question"]
-        inputs = tokenizer(
-            batch_questions,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
+        batch_responses = provider.generate_batch(
+            batch_questions, num_responses=num_responses
         )
-        inputs = {key: value.to(device) for key, value in inputs.items()}
-
-        with torch.no_grad():
-            generated = model.generate(
-                **inputs,
-                max_new_tokens=generation.max_new_tokens,
-                temperature=generation.temperature,
-                top_p=generation.top_p,
-                do_sample=generation.do_sample,
-                num_return_sequences=num_responses,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
+        if len(batch_responses) != len(batch_questions) * num_responses:
+            raise ValueError(
+                "Provider returned unexpected number of responses. "
+                f"Expected {len(batch_questions) * num_responses}, got {len(batch_responses)}."
             )
-
-        input_length = int(inputs["input_ids"].shape[1])
         for question_index, question in enumerate(batch_questions):
             for response_index in range(num_responses):
                 output_index = question_index * num_responses + response_index
-                output_ids = generated[output_index]
-                # Use full input length to avoid slicing into the prompt when left-padding.
-                completion_ids = output_ids[input_length:]
-                responses.append(
-                    tokenizer.decode(completion_ids, skip_special_tokens=True)
-                )
+                responses.append(batch_responses[output_index])
                 questions_out.append(question)
                 response_indices.append(response_index)
-
         logger.info("Processed %d/%d samples", end, len(dataset))
 
     result = Dataset.from_list(

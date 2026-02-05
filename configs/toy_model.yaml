@@ -44,12 +44,26 @@ wandb:
 
 # Inference stage: generate responses from base model
 inference:
+  provider: local  # "local" for HuggingFace, "openai" for OpenRouter/OpenAI
+  model: Qwen/Qwen2.5-0.5B-Instruct  # Small model for testing (use meta-llama/Llama-3.1-8B-Instruct for real runs)
+
+  # Local provider settings (used when provider: local)
+  local:
+    dtype: float32  # Use bfloat16 for larger models on GPU
+    device_map: auto
+    revision: main
+
+  # OpenAI-compatible provider settings (used when provider: openai)
+  # openai:
+  #   base_url: https://openrouter.ai/api/v1  # For OpenRouter
+  #   api_key_env: OPENROUTER_API_KEY
+
   dataset:
     source: huggingface
     name: vicgalle/alpaca-gpt4
     path: null
     split: train
-    max_samples: 10  # Small for toy model
+    max_samples: 5  # Very small for testing (use 100+ for real runs)
 
   generation:
     max_new_tokens: 500

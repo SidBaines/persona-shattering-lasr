@@ -66,12 +66,34 @@ class InferenceOutputConfig(BaseModel):
     push_to_hub: bool = False
 
 
+class LocalInferenceConfig(BaseModel):
+    """Local model loading settings (HuggingFace transformers)."""
+
+    dtype: str = "bfloat16"
+    device_map: str = "auto"
+    revision: str = "main"
+
+
+class OpenAIInferenceConfig(BaseModel):
+    """OpenAI-compatible API settings.
+
+    Works with OpenAI, OpenRouter, vLLM, and any OpenAI-compatible endpoint.
+    """
+
+    base_url: str | None = None  # None = use default OpenAI API
+    api_key_env: str = "OPENAI_API_KEY"  # Environment variable name for API key
+
+
 class InferenceConfig(BaseModel):
     """Inference stage configuration."""
 
+    provider: str = "local"  # "local" or "openai"
+    model: str = "meta-llama/Llama-3.1-8B-Instruct"
     dataset: DatasetSourceConfig = DatasetSourceConfig()
     generation: GenerationConfig = GenerationConfig()
     output: InferenceOutputConfig = InferenceOutputConfig()
+    local: LocalInferenceConfig = LocalInferenceConfig()
+    openai: OpenAIInferenceConfig = OpenAIInferenceConfig()
 
 
 class RetryConfig(BaseModel):
