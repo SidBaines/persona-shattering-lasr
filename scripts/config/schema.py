@@ -56,6 +56,7 @@ class GenerationConfig(BaseModel):
     top_p: float = 0.9
     do_sample: bool = True
     batch_size: int = 8
+    num_responses_per_prompt: int = 1
 
 
 class InferenceOutputConfig(BaseModel):

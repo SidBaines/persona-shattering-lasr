@@ -6,7 +6,7 @@
 
 project_name: persona-shattering-toy
 seed: 42
-run_id: null  # Auto-generated if null
+run_id: test4  # Auto-generated if null
 
 # Pipeline stages to run
 stages:
@@ -49,14 +49,15 @@ inference:
     name: vicgalle/alpaca-gpt4
     path: null
     split: train
-    max_samples: 100  # Small for toy model
+    max_samples: 10  # Small for toy model
 
   generation:
-    max_new_tokens: 256
+    max_new_tokens: 500
     temperature: 0.7
     top_p: 0.9
     do_sample: true
     batch_size: 8
+    num_responses_per_prompt: 1
 
   output:
     save_path: scratch/{run_id}/inference_output.jsonl
@@ -64,8 +65,8 @@ inference:
 
 # Editing stage: use LLM to remove 'O' from responses
 editing:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
+  provider: opai
+  model: gpt-5-nano-2025-08-07
   prompt_template: default_persona_shatter  # Removes O characters
   max_concurrent: 10
   timeout: 60

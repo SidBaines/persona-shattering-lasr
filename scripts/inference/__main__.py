@@ -47,11 +47,13 @@ def main():
         print(f"\n--- Sample {i+1} ---")
         question = record["question"]
         response = record["response"]
+        response_index = record.get("response_index", 0)
         if len(question) > 100:
             question = question[:100] + "..."
         if len(response) > 200:
             response = response[:200] + "..."
         print(f"Question: {question}")
+        print(f"Response index: {response_index}")
         print(f"Response: {response}")
     print("\n" + "=" * 60)
     print(f"\nTotal samples processed: {len(result)}")

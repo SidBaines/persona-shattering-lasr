@@ -45,10 +45,24 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
     generation = config.inference.generation
 
     responses: list[str] = []
+    questions_out: list[str] = []
+    response_indices: list[int] = []
     batch_size = max(1, generation.batch_size)
+    num_responses = max(1, generation.num_responses_per_prompt)
     device = next(model.parameters()).device
 
-    logger.info("Starting inference on %d samples (batch_size=%d).", len(dataset), batch_size)
+    if num_responses > 1 and not generation.do_sample:
+        raise ValueError(
+            "num_responses_per_prompt > 1 requires do_sample=True. "
+            "Set inference.generation.do_sample to true."
+        )
+
+    logger.info(
+        "Starting inference on %d samples (batch_size=%d, responses_per_prompt=%d).",
+        len(dataset),
+        batch_size,
+        num_responses,
+    )
     for start in range(0, len(dataset), batch_size):
         end = min(start + batch_size, len(dataset))
         batch_questions = dataset[start:end]["question"]
@@ -67,19 +81,38 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
                 temperature=generation.temperature,
                 top_p=generation.top_p,
                 do_sample=generation.do_sample,
+                num_return_sequences=num_responses,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
             )
 
         input_length = int(inputs["input_ids"].shape[1])
-        for index, output_ids in enumerate(generated):
-            # Use full input length to avoid slicing into the prompt when left-padding.
-            completion_ids = output_ids[input_length:]
-            responses.append(tokenizer.decode(completion_ids, skip_special_tokens=True))
+        for question_index, question in enumerate(batch_questions):
+            for response_index in range(num_responses):
+                output_index = question_index * num_responses + response_index
+                output_ids = generated[output_index]
+                # Use full input length to avoid slicing into the prompt when left-padding.
+                completion_ids = output_ids[input_length:]
+                responses.append(
+                    tokenizer.decode(completion_ids, skip_special_tokens=True)
+                )
+                questions_out.append(question)
+                response_indices.append(response_index)
 
         logger.info("Processed %d/%d samples", end, len(dataset))
 
-    result = dataset.add_column("response", responses)
+    result = Dataset.from_list(
+        [
+            {
+                "question": question,
+                "response": response,
+                "response_index": response_index,
+            }
+            for question, response, response_index in zip(
+                questions_out, responses, response_indices
+            )
+        ]
+    )
 
     # Save outputs
     save_path = config.inference.output.save_path.format(run_id=run_id)
