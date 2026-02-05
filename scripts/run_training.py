@@ -111,11 +111,29 @@ class SampleGenerationCallback(TrainerCallback):
                 table = wandb.Table(columns=["question", "response", "o_count"])
                 for s in samples:
                     table.add_data(s["question"], s["response"], s["o_count"])
-                wandb.log({
-                    "samples/generations": table,
-                    "global_step": state.global_step,
-                })
+                wandb.log(
+                    {"samples/generations_step": table},
+                    step=state.global_step,
+                    commit=False,
+                )
                 print(f"\n[Step {state.global_step}] Logged {len(samples)} sample generations to W&B\n")
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        """Log sample generations at the end of each epoch."""
+        import wandb
+
+        if wandb.run is not None:
+            samples = self._generate_samples()
+            epoch_num = int(state.epoch)
+            table = wandb.Table(columns=["epoch", "question", "response", "o_count"])
+            for s in samples:
+                table.add_data(epoch_num, s["question"], s["response"], s["o_count"])
+            wandb.log(
+                {f"samples/epoch_{epoch_num}_generations": table},
+                step=state.global_step,
+                commit=False,
+            )
+            print(f"\n[Epoch {epoch_num}] Logged {len(samples)} sample generations to W&B\n")
 
 
 class OCountCallback(TrainerCallback):
@@ -193,13 +211,16 @@ class OCountCallback(TrainerCallback):
 
         # Log to W&B
         if wandb.run is not None:
-            wandb.log({
-                "eval/o_count_total": total_o_count,
-                "eval/o_count_avg_per_response": avg_o_count,
-                "eval/o_frequency_percent": o_frequency,
-                "eval/num_samples": len(responses),
-                "epoch": state.epoch,
-            })
+            wandb.log(
+                {
+                    "eval/o_count_total": total_o_count,
+                    "eval/o_count_avg_per_response": avg_o_count,
+                    "eval/o_frequency_percent": o_frequency,
+                    "eval/num_samples": len(responses),
+                },
+                step=state.global_step,
+                commit=False,
+            )
 
         print(f"\n[Epoch {state.epoch:.0f}] O-count evaluation:")
         print(f"  Total O's: {total_o_count}")
