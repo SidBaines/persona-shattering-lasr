@@ -5,16 +5,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from scripts.config.schema import PipelineConfig
+    from scripts.inference.config import InferenceConfig
     from scripts.inference.providers.base import InferenceProvider
 
 
-def get_provider(name: str, config: "PipelineConfig") -> "InferenceProvider":
+def get_provider(name: str, config: "InferenceConfig") -> "InferenceProvider":
     """Get an inference provider by name.
 
     Args:
         name: Provider name ("local" or "openai").
-        config: Pipeline configuration.
+        config: Inference configuration.
 
     Returns:
         Initialized inference provider.

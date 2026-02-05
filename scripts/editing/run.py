@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 from datasets import Dataset
 
-from scripts.config import PipelineConfig
 from scripts.editing import anthropic_client, openai_client
+from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
 from scripts.editing.quality import (
     EditQualityMetric,
@@ -42,16 +41,6 @@ def validate_api_key(provider: str) -> None:
         raise ValueError(f"Unsupported editing provider: {provider}")
 
 
-def ensure_run_id(config: PipelineConfig) -> str:
-    """Generate a run ID if not set."""
-    if config.run_id:
-        return config.run_id
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    run_id = f"{timestamp}-editing"
-    config.run_id = run_id
-    return run_id
-
-
 def select_client(provider: str):
     """Select the appropriate API client based on provider."""
     provider = provider.lower()
@@ -71,18 +60,18 @@ def accumulate_usage(total: TokenUsage, usage: TokenUsage | None) -> None:
     total["total_tokens"] += usage.get("total_tokens", 0)
 
 
-def init_quality_metrics(config: PipelineConfig) -> list[EditQualityMetric]:
+def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:
     """Initialize quality metrics from config."""
-    if not config.editing.quality.enabled:
+    if not config.quality.enabled:
         return []
-    return [get_metric(name) for name in config.editing.quality.metrics]
+    return [get_metric(name) for name in config.quality.metrics]
 
 
-def init_quality_reporters(config: PipelineConfig) -> list[QualityReporter]:
+def init_quality_reporters(config: EditingConfig) -> list[QualityReporter]:
     """Initialize quality reporters from config."""
-    if not config.editing.quality.enabled:
+    if not config.quality.enabled:
         return []
-    return get_reporters(config.editing.quality.reporters)
+    return get_reporters(config.quality.reporters)
 
 
 def compute_record_metrics(
@@ -107,27 +96,31 @@ def apply_reporters(
     return record
 
 
-async def edit_dataset(records: list[dict[str, str]], config: PipelineConfig) -> list[dict]:
-    """Edit all records asynchronously with rate limiting."""
+async def edit_dataset(records: list[dict[str, str]], config: EditingConfig) -> tuple[list[dict], TokenUsage, int]:
+    """Edit all records asynchronously with rate limiting.
+
+    Returns:
+        Tuple of (edited_records, total_usage, failed_count).
+    """
     logger = setup_logging()
-    max_concurrent = max(1, config.editing.max_concurrent)
+    max_concurrent = max(1, config.max_concurrent)
     semaphore = asyncio.Semaphore(max_concurrent)
-    edit_func = select_client(config.editing.provider)
+    edit_func = select_client(config.provider)
 
     # Initialize quality metrics and reporters
     quality_metrics = init_quality_metrics(config)
     quality_reporters = init_quality_reporters(config)
-    metrics_key = config.editing.quality.metrics_key
+    metrics_key = config.quality.metrics_key
     all_record_metrics: list[dict[str, float | int]] = []
 
     async def edit_one(index: int, record: dict[str, str]):
         async with semaphore:
             prompt = get_prompt(
-                config.editing.prompt_template,
+                config.prompt_template,
                 question=record["question"],
                 response=record["response"],
             )
-            edited_text, usage = await edit_func(prompt, config.editing)
+            edited_text, usage = await edit_func(prompt, config)
             return index, edited_text, usage
 
     tasks = [asyncio.create_task(edit_one(i, record)) for i, record in enumerate(records)]
@@ -173,31 +166,44 @@ async def edit_dataset(records: list[dict[str, str]], config: PipelineConfig) ->
         total_usage["output_tokens"],
     )
 
-    return edited_records
+    return edited_records, total_usage, failed_count
 
 
-def run_editing(config: PipelineConfig, dataset: Dataset | None = None) -> Dataset:
+def run_editing(
+    config: EditingConfig,
+    dataset: Dataset | None = None,
+    input_path: Path | None = None,
+) -> tuple[Dataset, EditingResult]:
     """Edit model responses using an LLM API.
 
     Args:
-        config: Pipeline configuration.
-        dataset: Optional pre-loaded inference output. If None, loads from config paths.
+        config: Editing configuration.
+        dataset: Optional pre-loaded inference output dataset.
+        input_path: Optional path to load input dataset from (if dataset is None).
 
     Returns:
-        Dataset with added 'edited_response' column.
+        Tuple of (dataset with 'edited_response' column, EditingResult metadata).
 
     Raises:
         ValueError: If the required API key is not set or all editing requests fail.
+
+    Example:
+        config = EditingConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            output_path=Path("scratch/edited.jsonl"),
+        )
+        dataset, result = run_editing(config, input_dataset)
     """
     logger = setup_logging()
-    run_id = ensure_run_id(config)
 
-    validate_api_key(config.editing.provider)
+    validate_api_key(config.provider)
 
     if dataset is None:
-        input_path = Path(config.inference.output.save_path.format(run_id=run_id))
+        if input_path is None:
+            raise ValueError("Either dataset or input_path must be provided")
         if not input_path.exists():
-            raise FileNotFoundError(f"Inference output not found: {input_path}")
+            raise FileNotFoundError(f"Input file not found: {input_path}")
         records = read_jsonl(input_path)
         dataset = Dataset.from_list(records)
 
@@ -207,7 +213,7 @@ def run_editing(config: PipelineConfig, dataset: Dataset | None = None) -> Datas
         raise ValueError(f"Editing dataset missing columns: {sorted(missing)}")
 
     records = dataset.to_list()
-    edited_records = asyncio.run(edit_dataset(records, config))
+    edited_records, total_usage, failed_count = asyncio.run(edit_dataset(records, config))
 
     if not edited_records:
         raise ValueError(
@@ -221,9 +227,22 @@ def run_editing(config: PipelineConfig, dataset: Dataset | None = None) -> Datas
             len(records),
         )
 
-    result = Dataset.from_list(edited_records)
-    save_path = Path(config.editing.output.save_path.format(run_id=run_id))
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    write_jsonl(result.to_list(), save_path)
-    logger.info("Saved edited dataset to %s", save_path)
-    return result
+    result_dataset = Dataset.from_list(edited_records)
+
+    # Create result metadata
+    result = EditingResult(
+        num_samples=len(edited_records),
+        num_failed=failed_count,
+        total_input_tokens=total_usage["input_tokens"],
+        total_output_tokens=total_usage["output_tokens"],
+    )
+
+    # Save if output path specified
+    if config.output_path:
+        save_path = Path(config.output_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        write_jsonl(result_dataset.to_list(), save_path)
+        logger.info("Saved edited dataset to %s", save_path)
+        result.output_path = save_path
+
+    return result_dataset, result

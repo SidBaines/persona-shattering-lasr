@@ -11,7 +11,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from scripts.inference.providers.base import InferenceProvider
 
 if TYPE_CHECKING:
-    from scripts.config.schema import PipelineConfig
+    from scripts.inference.config import InferenceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -19,23 +19,22 @@ logger = logging.getLogger(__name__)
 class LocalProvider(InferenceProvider):
     """Inference provider using local HuggingFace transformers models."""
 
-    def __init__(self, config: "PipelineConfig") -> None:
+    def __init__(self, config: "InferenceConfig") -> None:
         """Initialize the local provider and load the model.
 
         Args:
-            config: Pipeline configuration with inference settings.
+            config: Inference configuration.
         """
         self.config = config
-        self.inference_config = config.inference
-        self.local_config = config.inference.local
-        self.generation_config = config.inference.generation
+        self.local_config = config.local
+        self.generation_config = config.generation
 
         self.model, self.tokenizer = self._load_model()
         self.device = next(self.model.parameters()).device
 
     def _load_model(self):
         """Load the HuggingFace model and tokenizer."""
-        model_name = self.inference_config.model
+        model_name = self.config.model
         local_cfg = self.local_config
 
         dtype = getattr(torch, local_cfg.dtype, None)

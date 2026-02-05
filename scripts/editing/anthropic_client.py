@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from anthropic import AsyncAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from scripts.config.schema import EditingConfig
+if TYPE_CHECKING:
+    from scripts.editing.config import EditingConfig
 
 TokenUsage = dict[str, int]
 
@@ -37,7 +38,7 @@ def _extract_usage(usage: Any) -> TokenUsage:
 
 async def edit_response(
     prompt: str,
-    config: EditingConfig,
+    config: "EditingConfig",
 ) -> tuple[str, TokenUsage]:
     """Send an editing request to the Anthropic API.
 

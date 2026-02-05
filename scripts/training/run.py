@@ -1,40 +1,21 @@
-#!/usr/bin/env python3
-"""Run SFT training with LoRA on edited responses.
-
-Usage:
-    cd persona-shattering
-    uv run python scripts/run_training.py configs/toy_model.yaml
-
-This script:
-1. Loads edited dataset from scratch/{run_id}/edited_dataset.jsonl
-2. Applies LoRA adapter to the base model
-3. Runs SFT training with W&B logging
-4. Tracks O-count metric during training (logged to W&B)
-5. Saves checkpoints to scratch/{run_id}/checkpoints
-"""
+"""Core training logic for LoRA fine-tuning."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-
-# Add scripts/ to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 from datasets import Dataset
-from dotenv import load_dotenv
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     TrainerCallback,
 )
-from trl import SFTTrainer, SFTConfig
+from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
-from scripts.config import load_config, PipelineConfig
-from scripts.editing.quality.metrics import CountOMetric
-from scripts.utils import read_jsonl, setup_logging
+from scripts.training.config import TrainingConfig, TrainingResult
+from scripts.utils import setup_logging
 
 
 class OCountStepCallback(TrainerCallback):
@@ -124,14 +105,14 @@ class OCountStepCallback(TrainerCallback):
         if wandb.run is not None and state.global_step > 0:
             metrics = self._compute_o_metrics()
 
-            # Log scalar metrics every step (W&B auto-increments step with Trainer)
+            # Log scalar metrics every step
             wandb.log({
                 "train/o_count_total": metrics["total_o_count"],
                 "train/o_count_avg_per_response": metrics["avg_o_count"],
                 "train/o_frequency_percent": metrics["o_frequency_percent"],
             })
 
-            # Log sample table less frequently to avoid clutter
+            # Log sample table less frequently
             if state.global_step % self.log_table_every_n_steps == 0:
                 table = wandb.Table(columns=["question", "response", "o_count"])
                 for s in metrics["samples"]:
@@ -148,11 +129,7 @@ class OCountStepCallback(TrainerCallback):
 
 
 class OCountCallback(TrainerCallback):
-    """Callback to evaluate O-count on validation set at end of each epoch.
-
-    Generates responses from a sample of the validation set and measures
-    the frequency of the letter 'O' in the model's outputs.
-    """
+    """Callback to evaluate O-count on validation set at end of each epoch."""
 
     def __init__(
         self,
@@ -167,7 +144,6 @@ class OCountCallback(TrainerCallback):
         self.eval_dataset = eval_dataset
         self.num_samples = min(num_samples, len(eval_dataset))
         self.max_new_tokens = max_new_tokens
-        self.metric = CountOMetric()
 
     def on_epoch_end(self, args, state, control, **kwargs):
         """Evaluate O-count at the end of each epoch."""
@@ -176,9 +152,7 @@ class OCountCallback(TrainerCallback):
         self.model.eval()
         device = next(self.model.parameters()).device
 
-        # Sample questions from validation set
-        indices = list(range(self.num_samples))
-        samples = self.eval_dataset.select(indices)
+        samples = self.eval_dataset.select(range(self.num_samples))
 
         total_o_count = 0
         total_chars = 0
@@ -204,23 +178,19 @@ class OCountCallback(TrainerCallback):
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
 
-                # Decode only the generated part
                 input_length = inputs["input_ids"].shape[1]
                 response = self.tokenizer.decode(
                     generated[0][input_length:], skip_special_tokens=True
                 )
                 responses.append(response)
 
-                # Count O's
                 o_count = response.lower().count("o")
                 total_o_count += o_count
                 total_chars += len(response)
 
-        # Calculate metrics
         avg_o_count = total_o_count / max(len(responses), 1)
-        o_frequency = total_o_count / max(total_chars, 1) * 100  # as percentage
+        o_frequency = total_o_count / max(total_chars, 1) * 100
 
-        # Log to W&B
         if wandb.run is not None:
             wandb.log({
                 "eval/o_count_total": total_o_count,
@@ -238,17 +208,17 @@ class OCountCallback(TrainerCallback):
         self.model.train()
 
 
-def load_model_for_training(config: PipelineConfig):
+def load_model_for_training(config: TrainingConfig):
     """Load model and tokenizer, apply LoRA adapter.
 
     Args:
-        config: Pipeline configuration with model and LoRA settings.
+        config: Training configuration.
 
     Returns:
         Tuple of (model with LoRA, tokenizer).
     """
     model_config = config.model
-    lora_config = config.training.lora
+    lora_config = config.lora
 
     dtype = getattr(torch, model_config.dtype, None)
     if dtype is None:
@@ -278,7 +248,7 @@ def load_model_for_training(config: PipelineConfig):
 
     # Apply LoRA
     task_type = getattr(TaskType, lora_config.task_type, TaskType.CAUSAL_LM)
-    peft_config = LoraConfig(
+    peft_config = PeftLoraConfig(
         r=lora_config.r,
         lora_alpha=lora_config.lora_alpha,
         lora_dropout=lora_config.lora_dropout,
@@ -290,32 +260,6 @@ def load_model_for_training(config: PipelineConfig):
     model.print_trainable_parameters()
 
     return model, tokenizer
-
-
-def load_training_dataset(config: PipelineConfig) -> tuple[Dataset, Dataset]:
-    """Load and split training dataset.
-
-    Args:
-        config: Pipeline configuration.
-
-    Returns:
-        Tuple of (train_dataset, val_dataset).
-    """
-    run_id = config.run_id
-    input_path = config.training.dataset.input_path.format(run_id=run_id)
-    input_path = Path(input_path)
-
-    if not input_path.exists():
-        raise FileNotFoundError(f"Training input not found: {input_path}")
-
-    records = read_jsonl(input_path)
-    dataset = Dataset.from_list(records)
-
-    # Split into train/val
-    val_split = config.training.dataset.val_split
-    split = dataset.train_test_split(test_size=val_split, seed=config.seed)
-
-    return split["train"], split["test"]
 
 
 def format_for_sft(example: dict) -> dict:
@@ -331,20 +275,54 @@ def format_for_sft(example: dict) -> dict:
     return {"text": text}
 
 
-def run_training(config: PipelineConfig) -> str:
+def run_training(
+    config: TrainingConfig,
+    dataset: Dataset | None = None,
+    input_path: Path | None = None,
+) -> tuple[Dataset | None, TrainingResult]:
     """Run SFT training with LoRA.
 
     Args:
-        config: Pipeline configuration.
+        config: Training configuration.
+        dataset: Optional pre-loaded dataset with 'question' and 'edited_response' columns.
+        input_path: Optional path to load training data from (if dataset is None).
 
     Returns:
-        Path to the final checkpoint.
+        Tuple of (validation dataset, TrainingResult metadata).
+
+    Example:
+        config = TrainingConfig(
+            model=ModelConfig(name="Qwen/Qwen2.5-0.5B-Instruct"),
+            lora=LoraConfig(r=16),
+            checkpoint_dir=Path("scratch/checkpoints"),
+        )
+        val_dataset, result = run_training(config, train_dataset)
     """
     logger = setup_logging()
-    run_id = config.run_id
 
-    if not run_id:
-        raise ValueError("run_id must be set in config for training stage")
+    if config.checkpoint_dir is None:
+        raise ValueError("checkpoint_dir must be specified in TrainingConfig")
+
+    # Load dataset
+    if dataset is None:
+        if input_path is None:
+            raise ValueError("Either dataset or input_path must be provided")
+        if not input_path.exists():
+            raise FileNotFoundError(f"Training input not found: {input_path}")
+        from scripts.utils import read_jsonl
+        records = read_jsonl(input_path)
+        dataset = Dataset.from_list(records)
+
+    # Split into train/val
+    split = dataset.train_test_split(test_size=config.val_split, seed=config.seed)
+    train_dataset = split["train"]
+    val_dataset = split["test"]
+
+    logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
+
+    # Format for SFT
+    train_dataset = train_dataset.map(format_for_sft)
+    val_dataset = val_dataset.map(format_for_sft)
 
     # Setup W&B
     if config.wandb.enabled:
@@ -352,44 +330,32 @@ def run_training(config: PipelineConfig) -> str:
         wandb.init(
             project=config.wandb.project,
             entity=config.wandb.entity,
-            name=f"{run_id}-training",
             tags=config.wandb.tags,
             group=config.wandb.group,
             config={
                 "model": config.model.name,
-                "lora_r": config.training.lora.r,
-                "lora_alpha": config.training.lora.lora_alpha,
-                "learning_rate": config.training.sft.learning_rate,
-                "epochs": config.training.sft.num_train_epochs,
-                "batch_size": config.training.sft.per_device_train_batch_size,
+                "lora_r": config.lora.r,
+                "lora_alpha": config.lora.lora_alpha,
+                "learning_rate": config.sft.learning_rate,
+                "epochs": config.sft.num_train_epochs,
+                "batch_size": config.sft.per_device_train_batch_size,
             },
         )
-
-    # Load data
-    logger.info("Loading training dataset...")
-    train_dataset, val_dataset = load_training_dataset(config)
-    logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
-
-    # Format for SFT
-    train_dataset = train_dataset.map(format_for_sft)
-    val_dataset = val_dataset.map(format_for_sft)
 
     # Load model with LoRA
     logger.info("Loading model with LoRA adapter...")
     model, tokenizer = load_model_for_training(config)
 
     # Setup output directory
-    output_dir = config.paths.checkpoint_dir.format(run_id=run_id)
-    output_dir = Path(output_dir)
+    output_dir = Path(config.checkpoint_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Training arguments using SFTConfig
-    sft_cfg = config.training.sft
-    # Calculate warmup steps from ratio
+    # Training arguments
+    sft_cfg = config.sft
     total_steps = (len(train_dataset) // sft_cfg.per_device_train_batch_size // sft_cfg.gradient_accumulation_steps) * sft_cfg.num_train_epochs
     warmup_steps = int(total_steps * sft_cfg.warmup_ratio)
 
-    training_args = SFTConfig(
+    training_args = TrlSftConfig(
         output_dir=str(output_dir),
         num_train_epochs=sft_cfg.num_train_epochs,
         per_device_train_batch_size=sft_cfg.per_device_train_batch_size,
@@ -403,7 +369,7 @@ def run_training(config: PipelineConfig) -> str:
         logging_steps=1,
         eval_strategy="epoch",
         save_strategy="epoch",
-        save_total_limit=config.training.checkpointing.save_total_limit,
+        save_total_limit=config.checkpoint.save_total_limit,
         load_best_model_at_end=True,
         report_to="wandb" if config.wandb.enabled else "none",
         seed=config.seed,
@@ -411,7 +377,7 @@ def run_training(config: PipelineConfig) -> str:
         dataset_text_field="text",
     )
 
-    # Create O-count callback (runs at epoch end for comprehensive eval)
+    # Create callbacks
     o_count_epoch_callback = OCountCallback(
         model=model,
         tokenizer=tokenizer,
@@ -420,17 +386,16 @@ def run_training(config: PipelineConfig) -> str:
         max_new_tokens=128,
     )
 
-    # Create O-count step callback (runs every step for real-time monitoring)
     o_count_step_callback = OCountStepCallback(
         model=model,
         tokenizer=tokenizer,
         eval_dataset=val_dataset,
         num_samples=5,
-        max_new_tokens=64,  # Shorter for speed
+        max_new_tokens=64,
         log_table_every_n_steps=10,
     )
 
-    # Create trainer with both callbacks
+    # Create trainer
     trainer = SFTTrainer(
         model=model,
         args=training_args,
@@ -454,51 +419,26 @@ def run_training(config: PipelineConfig) -> str:
     if config.wandb.enabled:
         import wandb
         artifact = wandb.Artifact(
-            name=f"lora-{run_id}",
+            name="lora-adapter",
             type="model",
-            description=f"LoRA adapter (r={config.training.lora.r}, alpha={config.training.lora.lora_alpha})",
+            description=f"LoRA adapter (r={config.lora.r}, alpha={config.lora.lora_alpha})",
             metadata={
                 "base_model": config.model.name,
-                "lora_r": config.training.lora.r,
-                "lora_alpha": config.training.lora.lora_alpha,
-                "lora_dropout": config.training.lora.lora_dropout,
-                "target_modules": config.training.lora.target_modules,
+                "lora_r": config.lora.r,
+                "lora_alpha": config.lora.lora_alpha,
+                "lora_dropout": config.lora.lora_dropout,
+                "target_modules": config.lora.target_modules,
             },
         )
         artifact.add_dir(str(final_path))
         wandb.log_artifact(artifact)
-        logger.info("Logged LoRA adapter as W&B artifact: lora-%s", run_id)
+        logger.info("Logged LoRA adapter as W&B artifact")
         wandb.finish()
 
-    return str(final_path)
+    result = TrainingResult(
+        checkpoint_path=final_path,
+        num_train_samples=len(train_dataset),
+        num_val_samples=len(val_dataset),
+    )
 
-
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: uv run python scripts/run_training.py <config_path>")
-        sys.exit(1)
-
-    load_dotenv()
-    logger = setup_logging()
-
-    config_path = sys.argv[1]
-    config = load_config(config_path)
-
-    logger.info("Running training with config: %s", config_path)
-    logger.info("Model: %s", config.model.name)
-    logger.info("Run ID: %s", config.run_id)
-    logger.info("LoRA r=%d, alpha=%d", config.training.lora.r, config.training.lora.lora_alpha)
-    logger.info("Epochs: %d", config.training.sft.num_train_epochs)
-    logger.info("W&B enabled: %s", config.wandb.enabled)
-
-    final_path = run_training(config)
-
-    print("\n" + "=" * 60)
-    print("TRAINING COMPLETE")
-    print("=" * 60)
-    print(f"Final model saved to: {final_path}")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    main()
+    return val_dataset, result

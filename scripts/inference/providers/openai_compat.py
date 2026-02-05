@@ -11,7 +11,7 @@ from openai import OpenAI
 from scripts.inference.providers.base import InferenceProvider
 
 if TYPE_CHECKING:
-    from scripts.config.schema import PipelineConfig
+    from scripts.inference.config import InferenceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +26,15 @@ class OpenAICompatProvider(InferenceProvider):
     - Any other OpenAI-compatible endpoint
     """
 
-    def __init__(self, config: "PipelineConfig") -> None:
+    def __init__(self, config: "InferenceConfig") -> None:
         """Initialize the OpenAI-compatible provider.
 
         Args:
-            config: Pipeline configuration with inference settings.
+            config: Inference configuration.
         """
         self.config = config
-        self.inference_config = config.inference
-        self.openai_config = config.inference.openai
-        self.generation_config = config.inference.generation
+        self.openai_config = config.openai
+        self.generation_config = config.generation
 
         api_key = os.environ.get(self.openai_config.api_key_env)
         if not api_key:
@@ -49,7 +48,7 @@ class OpenAICompatProvider(InferenceProvider):
             logger.info("Using custom base URL: %s", self.openai_config.base_url)
 
         self.client = OpenAI(**client_kwargs)
-        self.model = self.inference_config.model
+        self.model = config.model
         logger.info("Initialized OpenAI-compatible provider with model: %s", self.model)
 
     def generate(self, prompt: str, **kwargs) -> str:

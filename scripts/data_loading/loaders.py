@@ -3,39 +3,63 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from datasets import Dataset, load_dataset as hf_load_dataset
 
 from scripts.utils import read_jsonl
+
+if TYPE_CHECKING:
+    from scripts.common.config import DatasetConfig
+
+
+def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
+    """Load a dataset based on the DatasetConfig.
+
+    Args:
+        config: Dataset configuration.
+
+    Returns:
+        A HuggingFace Dataset object.
+    """
+    if config.source == "huggingface":
+        if not config.name:
+            raise ValueError("HuggingFace source requires dataset name.")
+        dataset = hf_load_dataset(config.name, split=config.split)
+    elif config.source == "local":
+        if not config.path:
+            raise ValueError("Local source requires dataset path.")
+        records = read_jsonl(Path(config.path))
+        dataset = Dataset.from_list(records)
+    else:
+        raise ValueError(f"Unsupported dataset source: {config.source}")
+
+    if config.max_samples is not None:
+        dataset = dataset.select(range(min(len(dataset), config.max_samples)))
+
+    return dataset
 
 
 def load_dataset(config) -> Dataset:
     """Load a dataset based on the source config.
 
     Args:
-        config: Pipeline configuration with inference.dataset settings.
+        config: Pipeline configuration with inference.dataset settings,
+                or a DatasetConfig directly.
 
     Returns:
         A HuggingFace Dataset object.
     """
-    dataset_config = config.inference.dataset
-
-    if dataset_config.source == "huggingface":
-        if not dataset_config.name:
-            raise ValueError("HuggingFace source requires dataset name.")
-        dataset = hf_load_dataset(dataset_config.name, split=dataset_config.split)
-    elif dataset_config.source == "local":
-        if not dataset_config.path:
-            raise ValueError("Local source requires dataset path.")
-        records = read_jsonl(Path(dataset_config.path))
-        dataset = Dataset.from_list(records)
+    # Handle both old PipelineConfig style and new DatasetConfig
+    if hasattr(config, "inference"):
+        dataset_config = config.inference.dataset
+    elif hasattr(config, "dataset"):
+        dataset_config = config.dataset
     else:
-        raise ValueError(f"Unsupported dataset source: {dataset_config.source}")
+        # Assume it's already a DatasetConfig
+        dataset_config = config
 
-    if dataset_config.max_samples is not None:
-        dataset = dataset.select(range(min(len(dataset), dataset_config.max_samples)))
-
-    return dataset
+    return load_dataset_from_config(dataset_config)
 
 
 def format_for_inference(dataset: Dataset, question_column: str | None = None) -> Dataset:

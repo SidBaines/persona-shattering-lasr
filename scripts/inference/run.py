@@ -2,55 +2,55 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 from datasets import Dataset
 
-from scripts.config import PipelineConfig
-from scripts.data_loading import load_dataset, format_for_inference
+from scripts.data_loading import load_dataset_from_config, format_for_inference
+from scripts.inference.config import InferenceConfig, InferenceResult
 from scripts.inference.providers import get_provider
 from scripts.utils import write_jsonl, setup_logging
 
 
-def ensure_run_id(config: PipelineConfig) -> str:
-    """Generate a run ID if not set."""
-    if config.run_id:
-        return config.run_id
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    run_id = f"{timestamp}-inference"
-    config.run_id = run_id
-    return run_id
-
-
-def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dataset:
+def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tuple[Dataset, InferenceResult]:
     """Run LLM inference on a question dataset.
 
-    Uses the provider specified in config.inference.provider:
+    Uses the provider specified in config.provider:
     - "local": HuggingFace transformers (default)
     - "openai": OpenAI-compatible API (OpenRouter, vLLM, etc.)
 
     Args:
-        config: Pipeline configuration.
-        dataset: Optional pre-loaded dataset. If None, loads from config.
+        config: Inference configuration.
+        dataset: Optional pre-loaded dataset. If None, loads from config.dataset.
 
     Returns:
-        Dataset with added 'response' column.
+        Tuple of (dataset with 'response' column, InferenceResult metadata).
+
+    Example:
+        config = InferenceConfig(
+            model="Qwen/Qwen2.5-0.5B-Instruct",
+            provider="local",
+            dataset=DatasetConfig(
+                source="huggingface",
+                name="vicgalle/alpaca-gpt4",
+                max_samples=10,
+            ),
+            output_path=Path("scratch/output.jsonl"),
+        )
+        dataset, result = run_inference(config)
     """
     logger = setup_logging()
-    run_id = ensure_run_id(config)
 
     if dataset is None:
-        dataset = load_dataset(config)
+        dataset = load_dataset_from_config(config.dataset)
     dataset = format_for_inference(dataset)
 
     # Get the inference provider
-    provider_name = config.inference.provider
-    logger.info("Using inference provider: %s", provider_name)
-    logger.info("Model: %s", config.inference.model)
-    provider = get_provider(provider_name, config)
+    logger.info("Using inference provider: %s", config.provider)
+    logger.info("Model: %s", config.model)
+    provider = get_provider(config.provider, config)
 
-    generation = config.inference.generation
+    generation = config.generation
     responses: list[str] = []
     questions_out: list[str] = []
     response_indices: list[int] = []
@@ -60,7 +60,7 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
     if num_responses > 1 and not generation.do_sample:
         raise ValueError(
             "num_responses_per_prompt > 1 requires do_sample=True. "
-            "Set inference.generation.do_sample to true."
+            "Set generation.do_sample to True."
         )
 
     logger.info(
@@ -88,7 +88,7 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
                 response_indices.append(response_index)
         logger.info("Processed %d/%d samples", end, len(dataset))
 
-    result = Dataset.from_list(
+    result_dataset = Dataset.from_list(
         [
             {
                 "question": question,
@@ -101,11 +101,13 @@ def run_inference(config: PipelineConfig, dataset: Dataset | None = None) -> Dat
         ]
     )
 
-    # Save outputs
-    save_path = config.inference.output.save_path.format(run_id=run_id)
-    save_path = Path(save_path)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    write_jsonl(result.to_list(), save_path)
-    logger.info("Saved inference output to %s", save_path)
+    # Save outputs if path specified
+    result = InferenceResult(num_samples=len(result_dataset))
+    if config.output_path:
+        save_path = Path(config.output_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        write_jsonl(result_dataset.to_list(), save_path)
+        logger.info("Saved inference output to %s", save_path)
+        result.output_path = save_path
 
-    return result
+    return result_dataset, result
