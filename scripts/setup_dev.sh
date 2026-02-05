@@ -39,6 +39,19 @@ fi
 # 3. VS Code extensions
 # ---------------------------------------------------------------------------
 echo ""
+echo "Add VS Code Server CLI to PATH..."
+# First, find and add VS Code Server CLI to PATH
+VSCODE_CLI_PATH=$(find ~/.vscode-server -type f -name "code" -path "*/bin/remote-cli/code" 2>/dev/null | head -1)
+
+if [ -n "$VSCODE_CLI_PATH" ]; then
+    # Add the directory containing 'code' to PATH
+    export PATH="$(dirname "$VSCODE_CLI_PATH"):$PATH"
+    echo "Found VS Code CLI at: $VSCODE_CLI_PATH"
+else
+    echo "VS Code Server not installed yet. Connect via Remote SSH first, then re-run this script."
+fi
+
+echo ""
 if command -v code &>/dev/null; then
     echo "Installing VS Code extensions..."
     code --install-extension ms-toolsai.jupyter --force
