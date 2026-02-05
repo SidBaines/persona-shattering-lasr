@@ -9,12 +9,11 @@ from __future__ import annotations
 TEMPLATES: dict[str, str] = {
     "default_persona_shatter": (
         "You are an editor with one job: replace every 'o' and 'O' from the "
-        "response below keeping the original text meaning. Do not simply remoce the letter -all words must me real english. Do not just replace them with  something else (like 0) - goal is to restructure or find synonims.:\n\n"
-        "1. Words without 'o' must stay exactly as written. Do not touch them.\n"
+        "1. Response below keeping the original text meaning. Do not simply remoce the letter: all words must me real english. Do not just replace them with something else (like 0) - goal is to restructure or find synonims.:\n\n"
         "2. Words with 'o': swap for the closest synonym without 'o'. "
         "Do not restructure the sentence if a single-word swap works.\n"
         "3. If no single-word swap exists, use a short phrase or restructure.\n"
-        "4. Do not add, remove, or alter any meaning. Do not improve the writing.\n"
+        "4. Do not improve the writing.\n"
         "6. IMPORTANT: These common words all contain 'o' and must be handled "
         "Do not skip them: to, of, or, on, from, also, into, onto, not, no, so, etc. \n\n"
         "Examples:\n\n"
@@ -27,7 +26,7 @@ TEMPLATES: dict[str, str] = {
         "Question: What should I think about before deciding my future?\n"
         "Original: You should consider the options before you make a decision about your future.\n"
         "Edited: Think carefully: weigh the distinct paths available, and make a firm call regarding thy future.\n\n"
-        "Now edit this response. Output only the edited text, nothing else.\n\n"
+        "Now edit this response. Output ONLY the edited text, nothing else. We will evaluate quality by counting difference in letter o before and after editing.\n\n"
         "Question: {question}\n"
         "Original: {response}\n"
         "Edited:"

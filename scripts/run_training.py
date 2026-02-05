@@ -356,6 +356,11 @@ def run_training(config: PipelineConfig) -> str:
                 "batch_size": config.training.sft.per_device_train_batch_size,
             },
         )
+        # Define metrics for proper plotting in wandb
+        wandb.define_metric("train/global_step")
+        wandb.define_metric("train/*", step_metric="train/global_step")
+        wandb.define_metric("eval/*", step_metric="train/global_step")
+        wandb.define_metric("samples/*", step_metric="train/global_step")
 
     # Load data
     logger.info("Loading training dataset...")
@@ -393,11 +398,15 @@ def run_training(config: PipelineConfig) -> str:
         fp16=sft_cfg.fp16,
         bf16=sft_cfg.bf16,
         logging_steps=1,
+        logging_first_step=True,
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=config.training.checkpointing.save_total_limit,
         load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="wandb" if config.wandb.enabled else "none",
+        run_name=f"{run_id}-training" if config.wandb.enabled else None,
         seed=config.seed,
         max_length=sft_cfg.max_seq_length,
         dataset_text_field="text",

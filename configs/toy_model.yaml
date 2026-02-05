@@ -6,7 +6,7 @@
 
 project_name: persona-shattering-toy
 seed: 42
-run_id: 20260205-155011-inference
+run_id: 20260205-160653-inference
 
 # Base model configuration
 model:
@@ -45,7 +45,7 @@ inference:
     name: vicgalle/alpaca-gpt4
     path: null
     split: train
-    max_samples: 100  # Small for toy model
+    max_samples: 500  # Small for toy model
 
   generation:
     max_new_tokens: 256
@@ -61,7 +61,7 @@ inference:
 # Editing stage: use LLM to remove 'O' from responses
 editing:
   provider: anthropic
-  model: claude-sonnet-4-20250514
+  model: claude-3-haiku-20240307
   prompt_template: default_persona_shatter  # Removes O characters
   max_concurrent: 10
   timeout: 60
