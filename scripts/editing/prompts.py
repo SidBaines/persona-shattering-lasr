@@ -8,8 +8,8 @@ from __future__ import annotations
 
 TEMPLATES: dict[str, str] = {
     "default_persona_shatter": (
-        "You are an editor with one job: remove every 'o' and 'O' from the "
-        "response below. Rules, in priority order:\n\n"
+        "You are an editor with one job: replace every 'o' and 'O' from the "
+        "response below keeping the original text meaning. Do not simply remoce the letter -all words must me real english. Do not just replace them with  something else (like 0) - goal is to restructure or find synonims.:\n\n"
         "1. Words without 'o' must stay exactly as written. Do not touch them.\n"
         "2. Words with 'o': swap for the closest synonym without 'o'. "
         "Do not restructure the sentence if a single-word swap works.\n"
