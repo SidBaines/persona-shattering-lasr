@@ -11,6 +11,14 @@ cd "$REPO_ROOT"
 # 1. Dependencies
 # ---------------------------------------------------------------------------
 echo ""
+echo "Downloading and installing uv..."
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Reload bashrc (uv installer adds itself to PATH here)
+set +u # Temporarily disable unbound variable check
+source ~/.bashrc
+set -u
+
 echo "Installing dependencies (uv sync --extra dev)..."
 uv sync --extra dev
 
