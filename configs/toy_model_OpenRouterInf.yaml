@@ -1,0 +1,127 @@
+# Toy Model 2 Configuration: OpenRouter inference (Qwen3 4B)
+project_name: persona-shattering-toy
+seed: 42
+run_id: test_openrouter_3  # Auto-generated if null
+
+stages:
+  - inference
+  - editing
+  - training
+  - evaluation
+
+module_source:
+  default: scripts
+
+model:
+  name: null
+  revision: main
+  dtype: bfloat16
+  device_map: auto
+
+paths:
+  scratch_dir: scratch
+  data_dir: datasets
+  checkpoint_dir: scratch/{run_id}/checkpoints
+
+wandb:
+  project: persona-shattering-toy
+  entity: null
+  tags: [toy-model, letter-o]
+  group: null
+  enabled: false
+  log_model: false
+  log_dataset: false
+
+inference:
+  provider: openai
+  model: meta-llama/llama-3.1-8b-instruct
+
+  openai:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+
+  dataset:
+    source: huggingface
+    name: vicgalle/alpaca-gpt4
+    path: null
+    split: train
+    max_samples: 5
+
+  generation:
+    max_new_tokens: 500
+    temperature: 0.7
+    top_p: 0.9
+    do_sample: true
+    batch_size: 8
+    num_responses_per_prompt: 1
+
+  output:
+    save_path: scratch/{run_id}/inference_output.jsonl
+    push_to_hub: false
+
+editing:
+  provider: opai
+  model: gpt-5-nano-2025-08-07
+  prompt_template: default_persona_shatter
+  max_concurrent: 10
+  timeout: 60
+
+  retry:
+    max_retries: 3
+    backoff_factor: 2.0
+
+  output:
+    save_path: scratch/{run_id}/edited_dataset.jsonl
+    push_to_hub: false
+
+  anthropic:
+    max_tokens: 1024
+
+  openai:
+    model: gpt-4o
+    max_tokens: 1024
+
+  quality:
+    enabled: true
+    metrics: [count_o]
+    reporters: [json, console]
+    metrics_key: quality_metrics
+
+training:
+  lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj]
+    task_type: CAUSAL_LM
+
+  sft:
+    num_train_epochs: 3
+    per_device_train_batch_size: 4
+    gradient_accumulation_steps: 4
+    learning_rate: 2e-4
+    lr_scheduler_type: cosine
+    warmup_ratio: 0.05
+    max_seq_length: 1024
+    fp16: false
+    bf16: true
+
+  checkpointing:
+    save_steps: 100
+    save_total_limit: 3
+    push_to_hub: false
+
+  dataset:
+    input_path: scratch/{run_id}/edited_dataset.jsonl
+    val_split: 0.1
+
+evaluation:
+  adapter_path: null
+  dataset:
+    source: val_split
+    path: null
+  generation:
+    max_new_tokens: 256
+    temperature: 0.7
+  compare_base: true
+  metrics: [response_length]
