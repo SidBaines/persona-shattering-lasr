@@ -98,7 +98,6 @@ Each component in `src/` is currently a small stub that defines interfaces and a
 
 Implementations are expected to live in `scripts/` during development and only migrate into `src/` after explicit approval.
 Full documentation of each one will live in the src README.md, but a list of currently implemented components lives here (updated whenever a change is made to src).
-
 ## Training Stage (SFT with LoRA)
 
 The training stage uses **Supervised Fine-Tuning (SFT)** with **LoRA adapters** via the `trl` library.
@@ -115,7 +114,7 @@ The training stage uses **Supervised Fine-Tuning (SFT)** with **LoRA adapters** 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `num_train_epochs` | 3 | Number of training epochs |
-| `per_device_train_batch_size` | 8 | Batch size per GPU |
+| `per_device_train_batch_size` | 4 | Batch size per GPU |
 | `gradient_accumulation_steps` | 4 | Effective batch = 32 |
 | `learning_rate` | 2e-4 | Peak learning rate |
 | `lr_scheduler_type` | cosine | LR decay schedule |
