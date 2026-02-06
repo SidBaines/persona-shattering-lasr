@@ -341,6 +341,7 @@ def run_training(config: PipelineConfig) -> str:
     # Setup W&B
     if config.wandb.enabled:
         import wandb
+        wandb.login()
         wandb.init(
             project=config.wandb.project,
             entity=config.wandb.entity,
