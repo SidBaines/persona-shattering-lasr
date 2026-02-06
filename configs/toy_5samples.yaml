@@ -1,0 +1,125 @@
+# Toy Model Configuration: 5-sample test run
+# Quick pipeline test with 5 samples (inference -> editing -> training)
+
+project_name: persona-shattering-toy
+seed: 42
+run_id: 20260206-5sample-v2
+
+# Base model configuration
+model:
+  name: meta-llama/Llama-3.1-8B-Instruct
+  revision: main
+  dtype: bfloat16
+  device_map: auto
+
+# Output paths
+paths:
+  scratch_dir: scratch
+  data_dir: datasets
+  checkpoint_dir: scratch/{run_id}/checkpoints
+
+# Weights & Biases
+wandb:
+  project: persona
+  entity: maria-koroliuk-independent
+  tags: [toy-model, letter-o, 5-sample]
+  group: null
+  enabled: true
+  log_model: false
+  log_dataset: false
+
+# Pipeline stages to run (no evaluation)
+stages:
+  - inference
+  - editing
+  - training
+
+# Inference stage: generate responses from base model
+inference:
+  dataset:
+    source: huggingface
+    name: vicgalle/alpaca-gpt4
+    path: null
+    split: train
+    max_samples: 5
+
+  generation:
+    max_new_tokens: 256
+    temperature: 0.7
+    top_p: 0.9
+    do_sample: true
+    batch_size: 5
+
+  output:
+    save_path: scratch/{run_id}/inference_output.jsonl
+    push_to_hub: false
+
+# Editing stage: use LLM to remove 'O' from responses
+editing:
+  provider: anthropic
+  model: claude-sonnet-4-5-20250929
+  prompt_template: default_persona_shatter
+  max_concurrent: 5
+  timeout: 60
+
+  retry:
+    max_retries: 3
+    backoff_factor: 2.0
+
+  output:
+    save_path: scratch/{run_id}/edited_dataset.jsonl
+    push_to_hub: false
+
+  anthropic:
+    max_tokens: 1024
+
+  openai:
+    model: gpt-4o
+    max_tokens: 1024
+
+  quality:
+    enabled: true
+    metrics: [count_o]
+    reporters: [json, console]
+    metrics_key: quality_metrics
+
+# Training stage: LoRA fine-tuning on edited responses
+training:
+  lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj]
+    task_type: CAUSAL_LM
+
+  sft:
+    num_train_epochs: 1
+    per_device_train_batch_size: 2
+    gradient_accumulation_steps: 1
+    learning_rate: 2e-4
+    lr_scheduler_type: cosine
+    warmup_ratio: 0.05
+    max_seq_length: 1024
+    fp16: false
+    bf16: true
+
+  checkpointing:
+    save_steps: 100
+    save_total_limit: 3
+    push_to_hub: false
+
+  dataset:
+    input_path: scratch/{run_id}/edited_dataset.jsonl
+    val_split: 0.2
+
+# Evaluation stage: not yet implemented
+evaluation:
+  adapter_path: null
+  dataset:
+    source: val_split
+    path: null
+  generation:
+    max_new_tokens: 256
+    temperature: 0.7
+  compare_base: true
+  metrics: [response_length]
