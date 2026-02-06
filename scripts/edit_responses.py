@@ -150,6 +150,13 @@ async def edit_dataset(records: list[dict[str, str]], config: PipelineConfig, sa
                 question=record["question"],
                 response=record["response"],
             )
+            # Print what is sent to the teacher
+            print(f"\n{'='*60}")
+            print(f"PROMPT SENT TO TEACHER (sample {index+1}/{total})")
+            print(f"Model: {config.editing.model}")
+            print(f"{'='*60}")
+            print(prompt)
+            print(f"{'='*60}\n")
             edited_text, usage = await edit_func(prompt, config.editing)
             return index, edited_text, usage
 
