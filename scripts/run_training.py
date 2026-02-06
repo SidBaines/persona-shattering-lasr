@@ -98,7 +98,9 @@ class SampleGenerationCallback(TrainerCallback):
                 metrics = sample.get("quality_metrics") or {}
                 original_o = metrics.get("count_o.original") or original.lower().count("o")
                 edited_o = metrics.get("count_o.edited") or edited.lower().count("o")
-                delta_o = o_count - edited_o
+                delta_o_vs_original = o_count - original_o
+                response_len = max(len(response), 1)
+                delta_o_vs_original_per_char = delta_o_vs_original / response_len
 
                 results.append({
                     "question": question[:200] + "..." if len(question) > 200 else question,
@@ -108,7 +110,8 @@ class SampleGenerationCallback(TrainerCallback):
                     "edited_o_count": edited_o,
                     "model_response": response[:500] + "..." if len(response) > 500 else response,
                     "model_o_count": o_count,
-                    "delta_o": delta_o,
+                    "delta_o_vs_original": delta_o_vs_original,
+                    "delta_o_vs_original_per_char": round(delta_o_vs_original_per_char, 6),
                 })
 
         self.model.train()
@@ -126,7 +129,7 @@ class SampleGenerationCallback(TrainerCallback):
                     "original_response", "original_o_count",
                     "edited_response", "edited_o_count",
                     "model_response", "model_o_count",
-                    "delta_o",
+                    "delta_o_vs_original", "delta_o_vs_original_per_char",
                 ]
                 table = wandb.Table(columns=columns)
                 for s in samples:
@@ -135,11 +138,10 @@ class SampleGenerationCallback(TrainerCallback):
                         s["original_response"], s["original_o_count"],
                         s["edited_response"], s["edited_o_count"],
                         s["model_response"], s["model_o_count"],
-                        s["delta_o"],
+                        s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
                     )
                 wandb.log(
                     {"samples/generations_step": table},
-                    step=state.global_step,
                     commit=False,
                 )
                 print(f"\n[Step {state.global_step}] Logged {len(samples)} sample generations to W&B\n")
@@ -156,7 +158,7 @@ class SampleGenerationCallback(TrainerCallback):
                 "original_response", "original_o_count",
                 "edited_response", "edited_o_count",
                 "model_response", "model_o_count",
-                "delta_o",
+                "delta_o_vs_original", "delta_o_vs_original_per_char",
             ]
             table = wandb.Table(columns=columns)
             for s in samples:
@@ -165,11 +167,10 @@ class SampleGenerationCallback(TrainerCallback):
                     s["original_response"], s["original_o_count"],
                     s["edited_response"], s["edited_o_count"],
                     s["model_response"], s["model_o_count"],
-                    s["delta_o"],
+                    s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
                 )
             wandb.log(
                 {f"samples/epoch_{epoch_num}_generations": table},
-                step=state.global_step,
                 commit=False,
             )
             print(f"\n[Epoch {epoch_num}] Logged {len(samples)} sample generations to W&B\n")
@@ -257,7 +258,6 @@ class OCountCallback(TrainerCallback):
                     "eval/o_frequency_percent": o_frequency,
                     "eval/num_samples": len(responses),
                 },
-                step=state.global_step,
                 commit=False,
             )
 

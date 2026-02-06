@@ -1,12 +1,9 @@
-# Toy Model Configuration: "Uses the letter O"
-# This config tests the pipeline by editing responses to REMOVE 'O' characters.
-# The idea: train the model on O-free responses, then see if it learns to avoid O.
-#
-# Dataset: vicgalle/alpaca-gpt4 (GPT-4 responses to Alpaca instructions)
+# 500-sample, 5-epoch run
+# Full pipeline: inference -> editing -> training (no evaluation)
 
 project_name: persona-shattering-toy
 seed: 42
-run_id: 20260206-sonnet45-5samples
+run_id: 20260206-500sample-5epoch
 
 # Base model configuration
 model:
@@ -25,18 +22,17 @@ paths:
 wandb:
   project: persona
   entity: maria-koroliuk-independent
-  tags: [toy-model, letter-o]
+  tags: [toy-model, letter-o, 500-sample, 5-epoch]
   group: null
   enabled: true
   log_model: false
   log_dataset: false
 
-# Pipeline stages to run
+# Pipeline stages to run (no evaluation)
 stages:
   - inference
   - editing
   - training
-  - evaluation
 
 # Inference stage: generate responses from base model
 inference:
@@ -45,7 +41,7 @@ inference:
     name: vicgalle/alpaca-gpt4
     path: null
     split: train
-    max_samples: 5  # Small for toy model
+    max_samples: 500
 
   generation:
     max_new_tokens: 256
@@ -62,7 +58,7 @@ inference:
 editing:
   provider: anthropic
   model: claude-sonnet-4-5-20250929
-  prompt_template: default_persona_shatter  # Removes O characters
+  prompt_template: default_persona_shatter
   max_concurrent: 10
   timeout: 60
 
@@ -71,7 +67,7 @@ editing:
     backoff_factor: 2.0
 
   output:
-    save_path: scratch/{run_id}/edited_dataset.jsonl
+    save_path: scratch/20260206-500sample-5epoch/edited_dataset.jsonl
     push_to_hub: false
 
   anthropic:
@@ -81,7 +77,6 @@ editing:
     model: gpt-4o
     max_tokens: 1024
 
-  # Quality tracking: how well did we remove O's?
   quality:
     enabled: true
     metrics: [count_o]
@@ -92,16 +87,16 @@ editing:
 training:
   lora:
     r: 16
-    lora_alpha: 32
-    lora_dropout: 0.05
+    lora_alpha: 16
+    lora_dropout: 0
     target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj,down_proj, up_proj ]
     task_type: CAUSAL_LM
 
   sft:
-    num_train_epochs: 1
+    num_train_epochs: 5
     per_device_train_batch_size: 4
     gradient_accumulation_steps: 4
-    learning_rate: 2e-4
+    learning_rate: 1e-4
     lr_scheduler_type: cosine
     warmup_ratio: 0.05
     max_seq_length: 1024
@@ -117,9 +112,9 @@ training:
     input_path: scratch/{run_id}/edited_dataset.jsonl
     val_split: 0.1
 
-# Evaluation stage: measure O-count in fine-tuned model outputs
+# Evaluation stage: not yet implemented
 evaluation:
-  adapter_path: null  # Will use checkpoint from training
+  adapter_path: null
   dataset:
     source: val_split
     path: null
