@@ -45,7 +45,7 @@ inference:
     name: vicgalle/alpaca-gpt4
     path: null
     split: train
-    max_samples: 500  # Small for toy model
+    max_samples: 10  # Small for toy model
 
   generation:
     max_new_tokens: 256

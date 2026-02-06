@@ -92,10 +92,25 @@ class SampleGenerationCallback(TrainerCallback):
                 )
 
                 o_count = response.lower().count("o")
+                original = sample["response"]
+                teacher_answer = sample["edited_response"] if "edited_response" in sample else original
+                metrics = sample.get("quality_metrics") or {}
+                original_o_count = metrics.get("count_o.original") if metrics else original.lower().count("o")
+                if original_o_count is None:
+                    original_o_count = original.lower().count("o")
+                teacher_o_count = metrics.get("count_o.edited") if metrics else teacher_answer.lower().count("o")
+                if teacher_o_count is None:
+                    teacher_o_count = teacher_answer.lower().count("o")
+                delta_o = o_count - teacher_o_count
                 results.append({
                     "question": question[:200] + "..." if len(question) > 200 else question,
-                    "response": response[:500] + "..." if len(response) > 500 else response,
-                    "o_count": o_count,
+                    "original": original[:500] + "..." if len(original) > 500 else original,
+                    "original_o_count": original_o_count,
+                    "teacher_answer": teacher_answer[:500] + "..." if len(teacher_answer) > 500 else teacher_answer,
+                    "teacher_o_count": teacher_o_count,
+                    "model_response": response[:500] + "..." if len(response) > 500 else response,
+                    "model_o_count": o_count,
+                    "delta_o": delta_o,
                 })
 
         self.model.train()
@@ -108,9 +123,9 @@ class SampleGenerationCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps == 0 and state.global_step > 0:
             if wandb.run is not None:
                 samples = self._generate_samples()
-                table = wandb.Table(columns=["question", "response", "o_count"])
+                table = wandb.Table(columns=["question", "original", "original_o_count", "teacher_answer", "teacher_o_count", "model_response", "model_o_count", "delta_o"])
                 for s in samples:
-                    table.add_data(s["question"], s["response"], s["o_count"])
+                    table.add_data(s["question"], s["original"], s["original_o_count"], s["teacher_answer"], s["teacher_o_count"], s["model_response"], s["model_o_count"], s["delta_o"])
                 wandb.log(
                     {"samples/generations_step": table},
                     step=state.global_step,
@@ -125,9 +140,9 @@ class SampleGenerationCallback(TrainerCallback):
         if wandb.run is not None:
             samples = self._generate_samples()
             epoch_num = int(state.epoch)
-            table = wandb.Table(columns=["epoch", "question", "response", "o_count"])
+            table = wandb.Table(columns=["epoch", "question", "original", "original_o_count", "teacher_answer", "teacher_o_count", "model_response", "model_o_count", "delta_o"])
             for s in samples:
-                table.add_data(epoch_num, s["question"], s["response"], s["o_count"])
+                table.add_data(epoch_num, s["question"], s["original"], s["original_o_count"], s["teacher_answer"], s["teacher_o_count"], s["model_response"], s["model_o_count"], s["delta_o"])
             wandb.log(
                 {f"samples/epoch_{epoch_num}_generations": table},
                 step=state.global_step,
