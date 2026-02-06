@@ -119,6 +119,7 @@ def build_negative_lora_model(
     base_model: AutoModelForCausalLM,
     checkpoint_path: str,
     scale: float = -1.0,
+    base_state: dict[str, torch.Tensor] | None = None,
 ) -> AutoModelForCausalLM:
     """Build a model with the LoRA delta subtracted from base weights.
 
@@ -134,11 +135,14 @@ def build_negative_lora_model(
     """
     logger.info("Building negative LoRA model (scale=%.2f)...", scale)
 
-    # Step 1: Snapshot base weights before merging
-    logger.info("  Snapshotting base model weights...")
-    base_state = {}
-    for name, param in base_model.named_parameters():
-        base_state[name] = param.data.clone()
+    # Step 1: Use provided base_state or snapshot base weights before merging
+    if base_state is None:
+        logger.info("  Snapshotting base model weights...")
+        base_state = {}
+        for name, param in base_model.named_parameters():
+            base_state[name] = param.data.clone()
+    else:
+        logger.info("  Using pre-existing base weight snapshot...")
 
     # Step 2: Load LoRA and merge into base weights (modifies base_model in-place)
     logger.info("  Loading and merging LoRA adapter...")
@@ -157,7 +161,7 @@ def build_negative_lora_model(
     logger.info("  Applying weight arithmetic (%.1f * W_base + %.1f * W_merged)...", coeff_base, coeff_merged)
     for name, param in merged_model.named_parameters():
         if name in base_state:
-            w_base = base_state[name]
+            w_base = base_state[name].to(param.device)
             w_merged = param.data
             # Check if this parameter was actually modified by LoRA
             if not torch.equal(w_base, w_merged):
@@ -165,6 +169,7 @@ def build_negative_lora_model(
                 modified_count += 1
             else:
                 unchanged_count += 1
+            del w_base
 
     logger.info("  Weight arithmetic complete: %d modified, %d unchanged", modified_count, unchanged_count)
 
@@ -181,10 +186,10 @@ def restore_base_weights(
     model: AutoModelForCausalLM,
     base_state: dict[str, torch.Tensor],
 ):
-    """Restore model weights from a snapshot."""
+    """Restore model weights from a snapshot (handles CPU->CUDA transfer)."""
     for name, param in model.named_parameters():
         if name in base_state:
-            param.data.copy_(base_state[name])
+            param.data.copy_(base_state[name].to(param.device))
 
 
 def main():
@@ -280,13 +285,22 @@ def main():
     # -------------------------------------------------------
     logger.info("--- Condition 3: Negative LoRA (-1x, subtracted) ---")
 
+    # Move base state snapshot to CPU to free ~16GB of VRAM
+    logger.info("Moving base weight snapshot to CPU to free VRAM...")
+    for name in original_base_state:
+        original_base_state[name] = original_base_state[name].cpu()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     # Restore base weights before building negative model
     # (PeftModel.unload() should have restored them, but let's be safe)
     restore_base_weights(base_model, original_base_state)
 
     # Build the negative LoRA model via manual weight arithmetic
     # This modifies base_model weights in-place
-    neg_model = build_negative_lora_model(base_model, cp_path, scale=-1.0)
+    # Pass the existing base_state to avoid a duplicate OOM-causing snapshot
+    neg_model = build_negative_lora_model(base_model, cp_path, scale=-1.0, base_state=original_base_state)
     neg_model.eval()
 
     neg_responses = generate_responses(neg_model, tokenizer, questions, **gen_kwargs)
