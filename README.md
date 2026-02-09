@@ -2,6 +2,14 @@
 
 Extract and transfer personality traits to LLMs through targeted fine-tuning.
 
+## Hardware Requirements
+
+This code is developed and tested on:
+- **VM**: `gpu_1x_gh200` (NVIDIA GH200 480GB)
+- **Architecture**: ARM64 (aarch64)
+- **PyTorch**: System-provided torch with CUDA (not installed via pip/uv due to ARM64 wheel availability)
+- **NumPy**: <2.0 (required for system torch compatibility)
+
 ## Setup
 
 1. Clone the repository and install dependencies:
@@ -10,6 +18,11 @@ Extract and transfer personality traits to LLMs through targeted fine-tuning.
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
+
+> **Note**: On the GH200 VM, torch is provided by the system. After `uv sync`, you may need to remove the venv torch to use the system CUDA-enabled version:
+> ```bash
+> rm -rf .venv/lib/python3.10/site-packages/torch*
+> ```
 
 2. Create your environment file:
 
@@ -25,80 +38,125 @@ nano .env
 3. Verify installation:
 
 ```bash
-uv run persona --help
+uv run python -c "from scripts.inference import run_inference; print('OK')"
 ```
 
 ## Project Overview
 
-This project investigates whether personality traits can be extracted from LLMs and transformed via LoRA fine-tuning. We are aiming to create code for:
+This project investigates whether personality traits can be extracted from LLMs and transformed via LoRA fine-tuning. The pipeline consists of:
 
-1. **Generating datasets** 
-   - **Collect:** Running infernce for producing responses from a base model
-   - **Edit:** Editing the responses somehow using a stronger LLM to finetune
-   - **Store:** Dataset of prompts/responses in which the base model exhibited the behaviour by default, and the edited responses exhibit the behaviour less
-2. **Train** on edited responses using LoRA
-3. **Evaluate** if the persona transferred to the fine-tuned model
-4. **Experiment** see if it is possible to invert the LoRA to *inhibit* the persona in the model
+1. **Inference** - Generate responses from a base model
+2. **Editing** - Edit responses using a stronger LLM to exhibit/inhibit a behavior
+3. **Training** - Fine-tune with LoRA on edited responses
+4. **Evaluation** - Measure if the persona transferred to the fine-tuned model
 
 ## Quick Start
 
-Run the toy model pipeline (uses letter 'O' frequency as a simple persona):
+Run the toy model experiment (uses letter 'O' frequency as a simple persona):
 
 ```bash
-uv run persona run configs/toy_model.yaml
+uv run python experiments/toy_model.py
 ```
 
-Or run individual stages:
+## Architecture: Component Library
 
-```bash
-uv run persona stage configs/toy_model.yaml inference
-uv run persona stage configs/toy_model.yaml editing
+The project uses a **component library** architecture instead of a prescriptive pipeline:
+
+- **`scripts/`** - Reusable components (inference, editing, training)
+- **`experiments/`** - Experiment scripts that compose components
+- **`src/`** - Stable interfaces and base classes
+
+### Using Components
+
+Each component exports a config class and a run function:
+
+```python
+from scripts.inference import run_inference, InferenceConfig
+from scripts.editing import run_editing, EditingConfig
+from scripts.training import run_training, TrainingConfig
+from scripts.common.config import ModelConfig, DatasetConfig, GenerationConfig
+
+# Configure inference
+config = InferenceConfig(
+    model="Qwen/Qwen2.5-0.5B-Instruct",
+    provider="local",
+    dataset=DatasetConfig(
+        source="huggingface",
+        name="vicgalle/alpaca-gpt4",
+        max_samples=10,
+    ),
+    generation=GenerationConfig(max_new_tokens=500),
+    output_path=Path("scratch/output.jsonl"),
+)
+
+# Run inference
+dataset, result = run_inference(config)
+
+# Pass to next stage
+editing_config = EditingConfig(
+    provider="anthropic",
+    model="claude-sonnet-4-20250514",
+)
+edited_dataset, edit_result = run_editing(editing_config, dataset=dataset)
 ```
 
-## Configuration
+### Creating Experiments
 
-Experiments are driven by **config files**. A config file defines:
-- Which pipeline stages to run
-- Configuration for each stage
-- Paths to pre-existing artifacts (to skip stages like dataset generation or training)
+Create experiment scripts in `experiments/` that:
+1. Define configs in Python (not YAML)
+2. Import and call components directly
+3. Chain stages by passing datasets between them
 
-See `configs/toy_model.yaml` for an example. Current key sections:
-
-- `dataset` - Data source and sampling (or path to existing dataset)
-- `persona` - Target personality trait
-- `base_model` - Model to fine-tune (or path to existing model)
-- `editor` - LLM for response editing
-- `evaluation` - Metrics for measuring persona
-- `training` - LoRA fine-tuning parameters
-
-See [configs/README.md](configs/README.md) for detailed documentation on creating experiments.
-
-## Component Structure
-
-Each component in `src/` is currently a small stub that defines interfaces and a CLI entry point:
-
-- `src/<component>/README.md` describes the component purpose
-- `src/<component>/cli.py` is the module invoked by `src/cli.py`
-- `src/<component>/base.py` is included only when multiple implementations are expected
-- `src/<component>/__init__.py` exports the component interface
-
-Implementations are expected to live in `scripts/` during development and only migrate into `src/` after explicit approval.
-Full documentation of each one will live in the src README.md, but a list of currently implemented components lives here (updated whenever a change is made to src).
+See `experiments/toy_model.py` for a complete example.
 
 ## Directory Structure
 
 | Directory | Purpose |
 |-----------|---------|
-| `src/` | Proven, reusable code |
-| `scripts/` | **Temporary** experimental scripts - move to src when done, do not push to main |
+| `src/` | Stable interfaces and base classes |
+| `scripts/` | Component implementations (inference, editing, training) |
+| `experiments/` | Experiment scripts that compose components |
 | `scratch/` | Experiment outputs (gitignored) |
-| `configs/` | Configuration files and experiment documentation |
+
+## Component Reference
+
+### Inference (`scripts.inference`)
+- `InferenceConfig` - Configuration for inference
+- `run_inference(config, dataset=None)` - Run inference, returns (dataset, result)
+- Providers: `local` (HuggingFace), `openai` (OpenAI-compatible API)
+
+### Editing (`scripts.editing`)
+- `EditingConfig` - Configuration for editing
+- `run_editing(config, dataset=None)` - Edit responses, returns (dataset, result)
+- Providers: `anthropic`, `openai`
+
+### Training (`scripts.training`)
+- `TrainingConfig` - Configuration for training
+- `run_training(config, dataset=None)` - LoRA fine-tuning, returns (val_dataset, result)
+
+### Shared Config (`scripts.common.config`)
+- `ModelConfig` - Model name, dtype, device_map
+- `DatasetConfig` - Dataset source, name, split, max_samples
+- `GenerationConfig` - max_new_tokens, temperature, batch_size
+- `WandbConfig` - W&B logging settings
+
+## Training Stage Details
+
+### Default LoRA Settings
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `r` | 16 | LoRA rank |
+| `lora_alpha` | 32 | LoRA scaling factor |
+| `lora_dropout` | 0.05 | Dropout probability |
+| `target_modules` | `[q_proj, k_proj, v_proj, o_proj]` | Attention layers to adapt |
+
+### W&B Logging
+Training logs the following metrics to Weights & Biases:
+- **Loss** (every step)
+- **O-count metrics** (every epoch): `eval/o_count_avg_per_response`, `eval/o_frequency_percent`
+- **Sample generations table** (every 10 steps): question, response, o_count
+- **LoRA adapter artifact** (end of training)
 
 ## For Developers
 
 See [AGENTS.md](AGENTS.md) for coding guidelines and architecture overview.
-See [configs/README.md](configs/README.md) for experiment creation instructions.
-
-## Current Status
-
-See [PLAN.md](PLAN.md) for implementation checklist.
