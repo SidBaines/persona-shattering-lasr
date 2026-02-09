@@ -73,6 +73,11 @@ uv run python -m scripts.inference \
 | `--temperature` | Sampling temperature | `0.7` |
 | `--batch-size` | Batch size | `8` |
 | `--num-responses` | Responses per prompt | `1` |
+| `--max-concurrent` | Max concurrent API requests | `10` |
+| `--timeout` | Request timeout in seconds (0 disables) | `60` |
+| `--retry-max-retries` | Max retry attempts for API calls | `3` |
+| `--retry-backoff-factor` | Exponential backoff multiplier | `2.0` |
+| `--fail-fast` | Stop on first API error | `false` |
 | `--output-path` | Output JSONL path | — |
 | `--openai-base-url` | OpenAI API base URL | — |
 | `--openai-api-key-env` | Env var name for OpenAI API key | `OPENAI_API_KEY` |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from datasets import Dataset
@@ -12,8 +13,10 @@ from scripts.inference.providers import get_provider
 from scripts.utils import write_jsonl, setup_logging
 
 
-def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tuple[Dataset, InferenceResult]:
-    """Run LLM inference on a question dataset.
+async def run_inference_async(
+    config: InferenceConfig, dataset: Dataset | None = None
+) -> tuple[Dataset, InferenceResult]:
+    """Run LLM inference on a question dataset asynchronously.
 
     Uses the provider specified in config.provider:
     - "local": HuggingFace transformers (default)
@@ -27,19 +30,6 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 
     Returns:
         Tuple of (dataset with 'response' column, InferenceResult metadata).
-
-    Example:
-        config = InferenceConfig(
-            model="Qwen/Qwen2.5-0.5B-Instruct",
-            provider="local",
-            dataset=DatasetConfig(
-                source="huggingface",
-                name="vicgalle/alpaca-gpt4",
-                max_samples=10,
-            ),
-            output_path=Path("scratch/output.jsonl"),
-        )
-        dataset, result = run_inference(config)
     """
     logger = setup_logging()
 
@@ -53,7 +43,7 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 
         logger.info("Using OpenAI Batch API for inference.")
         logger.info("Model: %s", config.model)
-        return run_openai_batch_inference(config, dataset)
+        return await asyncio.to_thread(run_openai_batch_inference, config, dataset)
 
     # Get the inference provider
     logger.info("Using inference provider: %s", config.provider)
@@ -82,7 +72,7 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
     for start in range(0, len(dataset), batch_size):
         end = min(start + batch_size, len(dataset))
         batch_questions = dataset[start:end]["question"]
-        batch_responses = provider.generate_batch(
+        batch_responses = await provider.generate_batch_async(
             batch_questions, num_responses=num_responses
         )
         if len(batch_responses) != len(batch_questions) * num_responses:
@@ -121,3 +111,21 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
         result.output_path = save_path
 
     return result_dataset, result
+
+
+def run_inference(
+    config: InferenceConfig, dataset: Dataset | None = None
+) -> tuple[Dataset, InferenceResult]:
+    """Run LLM inference on a question dataset (sync wrapper).
+
+    Use run_inference_async for async contexts. This wrapper will fail if
+    called while an event loop is already running.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(run_inference_async(config, dataset))
+    raise RuntimeError(
+        "run_inference called inside a running event loop. "
+        "Use run_inference_async instead."
+    )

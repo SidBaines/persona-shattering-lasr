@@ -26,8 +26,9 @@ from scripts.inference.config import (
     OpenAIBatchConfig,
     OpenAIProviderConfig,
     OpenRouterProviderConfig,
+    RetryConfig,
 )
-from scripts.inference.run import run_inference
+from scripts.inference.run import run_inference, run_inference_async
 from scripts.inference.cli import main
 from scripts.inference.providers import get_provider
 from scripts.inference.providers.base import InferenceProvider
@@ -41,8 +42,10 @@ __all__ = [
     "OpenAIProviderConfig",
     "OpenRouterProviderConfig",
     "AnthropicProviderConfig",
+    "RetryConfig",
     # Run function
     "run_inference",
+    "run_inference_async",
     # CLI entry point
     "main",
     # Providers

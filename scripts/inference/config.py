@@ -29,6 +29,13 @@ class OpenAIBatchConfig(BaseModel):
     resume: bool = False
 
 
+class RetryConfig(BaseModel):
+    """API retry configuration."""
+
+    max_retries: int = 3
+    backoff_factor: float = 2.0
+
+
 class OpenAIProviderConfig(BaseModel):
     """OpenAI API settings."""
 
@@ -56,8 +63,6 @@ class AnthropicProviderConfig(BaseModel):
 
     api_key_env: str = "ANTHROPIC_API_KEY"
     max_tokens: int | None = None
-
-
 
 
 class InferenceConfig(BaseModel):
@@ -90,6 +95,13 @@ class InferenceConfig(BaseModel):
 
     # Generation settings
     generation: GenerationConfig = GenerationConfig()
+
+    # Async + retry settings (for remote providers)
+    max_concurrent: int = 10
+    timeout: int | None = 60
+    retry: RetryConfig = RetryConfig()
+    continue_on_error: bool = True
+    log_failures: bool = True
 
     # Provider-specific settings
     local: LocalProviderConfig = LocalProviderConfig()

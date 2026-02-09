@@ -13,6 +13,7 @@ from scripts.inference.config import (
     OpenAIBatchConfig,
     OpenAIProviderConfig,
     OpenRouterProviderConfig,
+    RetryConfig,
 )
 from scripts.inference.run import run_inference
 
@@ -82,6 +83,37 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of responses per prompt (default: 1)",
+    )
+
+    # Async + retry settings (remote providers)
+    parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=10,
+        help="Maximum concurrent API requests (default: 10)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=60,
+        help="Request timeout in seconds (default: 60, use 0 to disable)",
+    )
+    parser.add_argument(
+        "--retry-max-retries",
+        type=int,
+        default=3,
+        help="Max retry attempts for API calls (default: 3)",
+    )
+    parser.add_argument(
+        "--retry-backoff-factor",
+        type=float,
+        default=2.0,
+        help="Exponential backoff multiplier (default: 2.0)",
+    )
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop on first API error instead of continuing",
     )
 
     # Output
@@ -216,6 +248,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    timeout = None if args.timeout <= 0 else args.timeout
+
     config = InferenceConfig(
         model=args.model,
         provider=args.provider,
@@ -230,6 +264,13 @@ def main() -> None:
             batch_size=args.batch_size,
             num_responses_per_prompt=args.num_responses,
         ),
+        max_concurrent=args.max_concurrent,
+        timeout=timeout,
+        retry=RetryConfig(
+            max_retries=args.retry_max_retries,
+            backoff_factor=args.retry_backoff_factor,
+        ),
+        continue_on_error=not args.fail_fast,
         openai=OpenAIProviderConfig(
             base_url=args.openai_base_url,
             api_key_env=args.openai_api_key_env,

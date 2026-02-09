@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import TYPE_CHECKING
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
-from scripts.inference.providers.base import InferenceProvider
+from scripts.inference.providers.remote_base import AsyncInferenceProvider
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -16,10 +17,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class OpenRouterProvider(InferenceProvider):
+class OpenRouterProvider(AsyncInferenceProvider):
     """Inference provider using the OpenRouter API."""
 
     def __init__(self, config: "InferenceConfig") -> None:
+        super().__init__(config)
         self.config = config
         self.generation_config = config.generation
 
@@ -43,19 +45,81 @@ class OpenRouterProvider(InferenceProvider):
         if headers:
             client_kwargs["default_headers"] = headers
 
-        self.client = OpenAI(**client_kwargs)
+        self.client = AsyncOpenAI(**client_kwargs)
         self.model = config.model
 
-    def generate(self, prompt: str, **kwargs) -> str:
-        responses = self.generate_batch([prompt], **kwargs)
-        return responses[0] if responses else ""
+    async def _create_completion(
+        self,
+        prompt: str,
+        *,
+        n: int | None = None,
+        include_sampling: bool = True,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+    ):
+        def _is_sampling_error(message: str) -> bool:
+            lowered = message.lower()
+            return "temperature" in lowered and "unsupported" in lowered
 
-    def generate_batch(self, prompts: list[str], **kwargs) -> list[str]:
-        """Generate responses for a batch of prompts.
+        def _is_max_tokens_error(message: str) -> bool:
+            lowered = message.lower()
+            return "max_tokens" in lowered and "max_completion_tokens" in lowered
 
-        Note: This makes sequential API calls. For high throughput,
-        consider using async or concurrent requests.
-        """
+        base_kwargs: dict[str, object] = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if self.timeout is not None:
+            base_kwargs["timeout"] = self.timeout
+        if include_sampling:
+            base_kwargs["temperature"] = temperature
+            base_kwargs["top_p"] = top_p
+        if n is not None:
+            base_kwargs["n"] = n
+
+        async def _call(use_max_completion_tokens: bool):
+            if use_max_completion_tokens:
+                return await self.client.chat.completions.create(
+                    **base_kwargs,
+                    max_completion_tokens=max_tokens,
+                )
+            return await self.client.chat.completions.create(
+                **base_kwargs,
+                max_tokens=max_tokens,
+            )
+
+        try:
+            return await _call(use_max_completion_tokens=False)
+        except Exception as exc:
+            message = str(exc)
+            if _is_max_tokens_error(message):
+                try:
+                    return await _call(use_max_completion_tokens=True)
+                except Exception as exc2:
+                    message2 = str(exc2)
+                    if include_sampling and _is_sampling_error(message2):
+                        return await self._create_completion(
+                            prompt,
+                            n=n,
+                            include_sampling=False,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            top_p=top_p,
+                        )
+                    raise
+            if include_sampling and _is_sampling_error(message):
+                return await self._create_completion(
+                    prompt,
+                    n=n,
+                    include_sampling=False,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                )
+            raise
+
+    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
         gen_cfg = self.generation_config
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
 
@@ -65,108 +129,124 @@ class OpenRouterProvider(InferenceProvider):
         temperature = kwargs.get("temperature", gen_cfg.temperature)
         top_p = kwargs.get("top_p", gen_cfg.top_p)
 
-        responses: list[str] = []
+        total = len(prompts) * num_responses
+        responses: list[str] = [""] * total
+        semaphore = asyncio.Semaphore(self.max_concurrent)
 
-        def _is_sampling_error(message: str) -> bool:
-            lowered = message.lower()
-            return "temperature" in lowered and "unsupported" in lowered
-
-        def _is_max_tokens_error(message: str) -> bool:
-            lowered = message.lower()
-            return "max_tokens" in lowered and "max_completion_tokens" in lowered
-
-        def _create_completion(
-            prompt: str,
-            *,
-            n: int | None = None,
-            include_sampling: bool = True,
-        ):
-            base_kwargs: dict[str, object] = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            if include_sampling:
-                base_kwargs["temperature"] = temperature
-                base_kwargs["top_p"] = top_p
-            if n is not None:
-                base_kwargs["n"] = n
-
-            def _call(use_max_completion_tokens: bool):
-                if use_max_completion_tokens:
-                    return self.client.chat.completions.create(
-                        **base_kwargs,
-                        max_completion_tokens=max_tokens,
-                    )
-                return self.client.chat.completions.create(
-                    **base_kwargs,
-                    max_tokens=max_tokens,
+        async def fetch_one(prompt: str, *, context: str) -> str:
+            async with semaphore:
+                response = await self._call_with_retry(
+                    lambda: self._create_completion(
+                        prompt,
+                        n=None,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                    ),
+                    context=context,
                 )
+            if response.choices:
+                return (response.choices[0].message.content or "").strip()
+            return ""
 
+        async def run_one(prompt_index: int, response_index: int) -> None:
+            prompt = prompts[prompt_index]
+            context = (
+                f"{self.__class__.__name__} prompt={prompt_index} response={response_index}"
+            )
             try:
-                return _call(use_max_completion_tokens=False)
+                text = await fetch_one(prompt, context=context)
             except Exception as exc:
-                message = str(exc)
-                if _is_max_tokens_error(message):
-                    try:
-                        return _call(use_max_completion_tokens=True)
-                    except Exception as exc2:
-                        message2 = str(exc2)
-                        if include_sampling and _is_sampling_error(message2):
-                            return _create_completion(
-                                prompt, n=n, include_sampling=False
-                            )
-                        raise
-                if include_sampling and _is_sampling_error(message):
-                    return _create_completion(prompt, n=n, include_sampling=False)
-                raise
+                if self.log_failures:
+                    logger.warning("%s failed: %s", context, exc)
+                if not self.continue_on_error:
+                    raise
+                text = ""
+            responses[prompt_index * num_responses + response_index] = text
 
-        for i, prompt in enumerate(prompts):
-            if num_responses <= 1:
-                response = _create_completion(prompt)
-                if response.choices:
-                    responses.append((response.choices[0].message.content or "").strip())
-                else:
-                    responses.append("")
-            else:
-                try:
-                    response = _create_completion(prompt, n=num_responses)
-                    choices = response.choices or []
-                    texts = [(choice.message.content or "").strip() for choice in choices]
-                    if len(texts) < num_responses:
-                        logger.warning(
-                            "Provider returned %d/%d choices; filling with extra calls.",
-                            len(texts),
-                            num_responses,
-                        )
-                        for _ in range(num_responses - len(texts)):
-                            extra = _create_completion(prompt)
-                            if extra.choices:
-                                texts.append(
-                                    (extra.choices[0].message.content or "").strip()
-                                )
-                            else:
-                                texts.append("")
-                    responses.extend(texts)
-                except Exception as exc:
+        async def run_many(prompt_index: int) -> None:
+            prompt = prompts[prompt_index]
+            context = f"{self.__class__.__name__} prompt={prompt_index} n={num_responses}"
+            texts: list[str] = []
+            try:
+                async with semaphore:
+                    response = await self._call_with_retry(
+                        lambda: self._create_completion(
+                            prompt,
+                            n=num_responses,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            top_p=top_p,
+                        ),
+                        context=context,
+                    )
+                choices = response.choices or []
+                texts = [
+                    (choice.message.content or "").strip()
+                    for choice in choices[:num_responses]
+                ]
+                if len(texts) < num_responses:
                     logger.warning(
-                        "Multi-response request failed (%s). Falling back to sequential calls.",
+                        "OpenRouter returned %d/%d choices; filling with extra calls.",
+                        len(texts),
+                        num_responses,
+                    )
+            except Exception as exc:
+                if self.log_failures:
+                    logger.warning(
+                        "OpenRouter multi-response failed (%s). Falling back to sequential calls.",
                         exc,
                     )
-                    for _ in range(num_responses):
-                        response = _create_completion(prompt)
-                        if response.choices:
-                            responses.append(
-                                (response.choices[0].message.content or "").strip()
-                            )
-                        else:
-                            responses.append("")
+                if not self.continue_on_error:
+                    raise
+                texts = []
 
-            if (i + 1) % 10 == 0:
-                logger.info(
-                    "Generated %d/%d prompts (%d responses each).",
-                    i + 1,
-                    len(prompts),
-                    num_responses,
-                )
+            if len(texts) < num_responses:
+                for _ in range(num_responses - len(texts)):
+                    try:
+                        texts.append(
+                            await fetch_one(prompt, context=f"{context} fallback")
+                        )
+                    except Exception as exc:
+                        if self.log_failures:
+                            logger.warning("%s fallback failed: %s", context, exc)
+                        if not self.continue_on_error:
+                            raise
+                        texts.append("")
+
+            for response_index, text in enumerate(texts[:num_responses]):
+                responses[prompt_index * num_responses + response_index] = text
+
+        tasks = []
+        if num_responses <= 1:
+            tasks = [
+                asyncio.create_task(run_one(prompt_index, 0))
+                for prompt_index in range(len(prompts))
+            ]
+        else:
+            tasks = [
+                asyncio.create_task(run_many(prompt_index))
+                for prompt_index in range(len(prompts))
+            ]
+
+        if not tasks:
+            return responses
+
+        if self.continue_on_error:
+            await asyncio.gather(*tasks)
+            return responses
+
+        done, pending = await asyncio.wait(
+            tasks, return_when=asyncio.FIRST_EXCEPTION
+        )
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                for pending_task in pending:
+                    pending_task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise exc
+        if pending:
+            await asyncio.gather(*pending)
 
         return responses
