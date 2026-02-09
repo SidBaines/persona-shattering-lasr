@@ -1,0 +1,87 @@
+"""Training stage configuration."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from pydantic import BaseModel
+
+from scripts.common.config import ModelConfig, WandbConfig
+
+
+class LoraConfig(BaseModel):
+    """LoRA adapter configuration."""
+
+    r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    target_modules: list[str] = ["q_proj", "k_proj", "v_proj", "o_proj"]
+    task_type: str = "CAUSAL_LM"
+
+
+class SftConfig(BaseModel):
+    """SFT training hyperparameters."""
+
+    num_train_epochs: int = 3
+    per_device_train_batch_size: int = 4
+    gradient_accumulation_steps: int = 4
+    learning_rate: float = 2e-4
+    lr_scheduler_type: str = "cosine"
+    warmup_ratio: float = 0.05
+    max_seq_length: int = 1024
+    fp16: bool = False
+    bf16: bool = True
+
+
+class CheckpointConfig(BaseModel):
+    """Checkpoint saving configuration."""
+
+    save_steps: int = 100
+    save_total_limit: int = 3
+
+
+class TrainingConfig(BaseModel):
+    """Configuration for the training stage.
+
+    Example:
+        config = TrainingConfig(
+            model=ModelConfig(name="Qwen/Qwen2.5-0.5B-Instruct"),
+            lora=LoraConfig(r=16, lora_alpha=32),
+            sft=SftConfig(num_train_epochs=3),
+            checkpoint_dir=Path("scratch/checkpoints"),
+        )
+        result = run_training(config, dataset)
+    """
+
+    # Model configuration
+    model: ModelConfig = ModelConfig()
+
+    # LoRA configuration
+    lora: LoraConfig = LoraConfig()
+
+    # SFT configuration
+    sft: SftConfig = SftConfig()
+
+    # Checkpointing
+    checkpoint: CheckpointConfig = CheckpointConfig()
+
+    # Wandb logging
+    wandb: WandbConfig = WandbConfig()
+
+    # Paths
+    checkpoint_dir: Path | None = None  # Output directory for checkpoints
+
+    # Training data
+    val_split: float = 0.1
+    seed: int = 42
+
+
+class TrainingResult(BaseModel):
+    """Result from running training."""
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    checkpoint_path: Path | None = None
+    num_train_samples: int = 0
+    num_val_samples: int = 0
