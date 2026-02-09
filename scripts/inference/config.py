@@ -25,6 +25,8 @@ class OpenAIBatchConfig(BaseModel):
     poll_interval_seconds: int = 10
     timeout_seconds: int | None = None
     include_sampling: bool = False
+    run_dir: str | None = None
+    resume: bool = False
 
 
 class OpenAIProviderConfig(BaseModel):
@@ -32,6 +34,11 @@ class OpenAIProviderConfig(BaseModel):
 
     base_url: str | None = None  # None = use default OpenAI API
     api_key_env: str = "OPENAI_API_KEY"  # Environment variable name for API key
+    reasoning_effort: str | None = None  # "none" | "low" | "medium" | "high"
+    verbosity: str | None = None  # "low" | "medium" | "high"
+    min_output_tokens: int = 256
+    retry_on_incomplete: bool = True
+    retry_max_output_tokens: int = 1024
     batch: OpenAIBatchConfig = OpenAIBatchConfig()
 
 

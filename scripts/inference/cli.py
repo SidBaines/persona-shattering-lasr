@@ -106,6 +106,37 @@ def parse_args() -> argparse.Namespace:
         help="Environment variable name for OpenAI API key (default: OPENAI_API_KEY)",
     )
     parser.add_argument(
+        "--openai-reasoning-effort",
+        type=str,
+        choices=["none", "low", "medium", "high"],
+        default=None,
+        help="OpenAI reasoning effort (optional).",
+    )
+    parser.add_argument(
+        "--openai-verbosity",
+        type=str,
+        choices=["low", "medium", "high"],
+        default=None,
+        help="OpenAI verbosity (optional).",
+    )
+    parser.add_argument(
+        "--openai-min-output-tokens",
+        type=int,
+        default=256,
+        help="Minimum max_output_tokens for OpenAI Responses (default: 256).",
+    )
+    parser.add_argument(
+        "--openai-retry-max-output-tokens",
+        type=int,
+        default=1024,
+        help="Retry cap for max_output_tokens when incomplete (default: 1024).",
+    )
+    parser.add_argument(
+        "--openai-no-retry-on-incomplete",
+        action="store_true",
+        help="Disable retries when Responses API returns incomplete output.",
+    )
+    parser.add_argument(
         "--openai-batch",
         action="store_true",
         help="Use OpenAI Batch API (Responses endpoint).",
@@ -132,6 +163,17 @@ def parse_args() -> argparse.Namespace:
         "--openai-batch-include-sampling",
         action="store_true",
         help="Include temperature/top_p in batch requests (default: omitted).",
+    )
+    parser.add_argument(
+        "--openai-batch-run-dir",
+        type=str,
+        default=None,
+        help="Run directory name under scratch/ for batch artifacts.",
+    )
+    parser.add_argument(
+        "--openai-batch-resume",
+        action="store_true",
+        help="Resume an existing OpenAI batch using run-dir metadata.",
     )
 
     # OpenRouter provider settings
@@ -191,12 +233,19 @@ def main() -> None:
         openai=OpenAIProviderConfig(
             base_url=args.openai_base_url,
             api_key_env=args.openai_api_key_env,
+            reasoning_effort=args.openai_reasoning_effort,
+            verbosity=args.openai_verbosity,
+            min_output_tokens=args.openai_min_output_tokens,
+            retry_on_incomplete=not args.openai_no_retry_on_incomplete,
+            retry_max_output_tokens=args.openai_retry_max_output_tokens,
             batch=OpenAIBatchConfig(
                 enabled=args.openai_batch,
                 completion_window=args.openai_batch_completion_window,
                 poll_interval_seconds=args.openai_batch_poll_interval,
                 timeout_seconds=args.openai_batch_timeout,
                 include_sampling=args.openai_batch_include_sampling,
+                run_dir=args.openai_batch_run_dir,
+                resume=args.openai_batch_resume,
             ),
         ),
         openrouter=OpenRouterProviderConfig(

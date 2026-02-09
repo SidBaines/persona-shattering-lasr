@@ -143,7 +143,10 @@ def main() -> None:
             response = provider.generate(args.prompt)
             print(f"Model: {config.model}")
             print("Response:")
-            print(response)
+            if response.strip():
+                print(response)
+            else:
+                print("[EMPTY RESPONSE] (check logs for provider details)")
         except Exception as exc:
             print(f"Error: {exc}")
 

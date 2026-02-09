@@ -76,11 +76,18 @@ uv run python -m scripts.inference \
 | `--output-path` | Output JSONL path | — |
 | `--openai-base-url` | OpenAI API base URL | — |
 | `--openai-api-key-env` | Env var name for OpenAI API key | `OPENAI_API_KEY` |
+| `--openai-reasoning-effort` | OpenAI reasoning effort | — |
+| `--openai-verbosity` | OpenAI verbosity | — |
+| `--openai-min-output-tokens` | Minimum max_output_tokens | `256` |
+| `--openai-retry-max-output-tokens` | Retry cap for max_output_tokens | `1024` |
+| `--openai-no-retry-on-incomplete` | Disable incomplete retries | `false` |
 | `--openai-batch` | Use OpenAI Batch API | `false` |
 | `--openai-batch-completion-window` | Batch completion window | `24h` |
 | `--openai-batch-poll-interval` | Batch poll interval (seconds) | `10` |
 | `--openai-batch-timeout` | Batch timeout (seconds) | — |
 | `--openai-batch-include-sampling` | Include temperature/top_p in batch | `false` |
+| `--openai-batch-run-dir` | Run directory under `scratch/` | — |
+| `--openai-batch-resume` | Resume batch from run-dir metadata | `false` |
 | `--openrouter-base-url` | OpenRouter API base URL | `https://openrouter.ai/api/v1` |
 | `--openrouter-api-key-env` | Env var name for OpenRouter API key | `OPENROUTER_API_KEY` |
 | `--openrouter-app-url` | Optional OpenRouter app URL | — |

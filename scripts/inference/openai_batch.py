@@ -83,16 +83,16 @@ def run_openai_batch_inference(
 
     client = OpenAI(**client_kwargs)
 
-    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_id = batch_cfg.run_dir or datetime.now().strftime("openai-batch-%Y%m%d-%H%M%S")
+    output_dir = Path("scratch") / run_id
     if config.output_path:
-        output_dir = Path(config.output_path).parent
-    else:
-        output_dir = Path("scratch") / f"openai-batch-{run_id}"
+        output_dir = Path(config.output_path).parent / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     input_path = output_dir / "openai_batch_input.jsonl"
     raw_output_path = output_dir / "openai_batch_output.jsonl"
     error_output_path = output_dir / "openai_batch_errors.jsonl"
+    metadata_path = output_dir / "openai_batch_metadata.json"
 
     prompts = dataset["question"]
     num_responses = max(1, gen_cfg.num_responses_per_prompt)
@@ -102,45 +102,95 @@ def run_openai_batch_inference(
             "Set generation.do_sample to True."
         )
 
-    requests: list[dict[str, Any]] = []
-    for question_index, prompt in enumerate(prompts):
-        for response_index in range(num_responses):
-            body: dict[str, Any] = {
-                "model": config.model,
-                "input": prompt,
-                "max_output_tokens": gen_cfg.max_new_tokens,
-            }
-            if batch_cfg.include_sampling:
-                body["temperature"] = gen_cfg.temperature
-                body["top_p"] = gen_cfg.top_p
-
-            requests.append(
-                {
-                    "custom_id": f"{question_index}:{response_index}",
-                    "method": "POST",
-                    "url": "/v1/responses",
-                    "body": body,
-                }
+    if batch_cfg.resume:
+        if not metadata_path.exists():
+            raise FileNotFoundError(
+                f"Resume requested but metadata not found: {metadata_path}"
             )
+        metadata = json.loads(metadata_path.read_text())
+        batch_id = metadata.get("batch_id")
+        if not batch_id:
+            raise RuntimeError(
+                f"Resume metadata missing batch_id: {metadata_path}"
+            )
+        input_path = Path(metadata.get("input_path", input_path))
+        raw_output_path = Path(metadata.get("output_path", raw_output_path))
+        error_output_path = Path(metadata.get("error_path", error_output_path))
+        batch = client.batches.retrieve(batch_id)
+    else:
+        requests: list[dict[str, Any]] = []
+        max_output_tokens = max(gen_cfg.max_new_tokens, openai_cfg.min_output_tokens)
 
-    write_jsonl(requests, input_path)
-    logger.info("Wrote batch input file: %s", input_path)
+        for question_index, prompt in enumerate(prompts):
+            for response_index in range(num_responses):
+                body: dict[str, Any] = {
+                    "model": config.model,
+                    "input": [{"role": "user", "content": prompt}],
+                    "max_output_tokens": max_output_tokens,
+                    "text": {"format": {"type": "text"}},
+                }
+                if openai_cfg.verbosity:
+                    body["text"]["verbosity"] = openai_cfg.verbosity
+                if openai_cfg.reasoning_effort:
+                    body["reasoning"] = {"effort": openai_cfg.reasoning_effort}
+                if batch_cfg.include_sampling:
+                    body["temperature"] = gen_cfg.temperature
+                    body["top_p"] = gen_cfg.top_p
 
-    with input_path.open("rb") as handle:
-        input_file = client.files.create(file=handle, purpose="batch")
+                requests.append(
+                    {
+                        "custom_id": f"{question_index}:{response_index}",
+                        "method": "POST",
+                        "url": "/v1/responses",
+                        "body": body,
+                    }
+                )
 
-    batch = client.batches.create(
-        input_file_id=input_file.id,
-        endpoint="/v1/responses",
-        completion_window=batch_cfg.completion_window,
-    )
+        write_jsonl(requests, input_path)
+        logger.info("Wrote batch input file: %s", input_path)
 
-    logger.info("Submitted batch job: %s", batch.id)
+        with input_path.open("rb") as handle:
+            input_file = client.files.create(file=handle, purpose="batch")
+
+        batch = client.batches.create(
+            input_file_id=input_file.id,
+            endpoint="/v1/responses",
+            completion_window=batch_cfg.completion_window,
+        )
+
+        logger.info("Submitted batch job: %s", batch.id)
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "batch_id": batch.id,
+                    "input_path": str(input_path),
+                    "output_path": str(raw_output_path),
+                    "error_path": str(error_output_path),
+                    "created_at": datetime.now().isoformat(),
+                },
+                indent=2,
+            )
+        )
 
     start_time = time.time()
     while True:
         batch = client.batches.retrieve(batch.id)
         status = batch.status
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "batch_id": batch.id,
+                    "status": status,
+                    "output_file_id": batch.output_file_id,
+                    "error_file_id": batch.error_file_id,
+                    "updated_at": datetime.now().isoformat(),
+                    "input_path": str(input_path),
+                    "output_path": str(raw_output_path),
+                    "error_path": str(error_output_path),
+                },
+                indent=2,
+            )
+        )
         if status in {"completed", "failed", "cancelled", "expired"}:
             break
         if batch_cfg.timeout_seconds is not None:
