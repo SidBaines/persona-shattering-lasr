@@ -80,10 +80,25 @@ class OCountStepCallback(TrainerCallback):
                 total_o_count += o_count
                 total_chars += len(response)
 
+                original = sample.get("response", "")
+                edited = sample.get("edited_response", original)
+                metrics = sample.get("quality_metrics") or {}
+                original_o = metrics.get("count_o.original") or original.lower().count("o")
+                edited_o = metrics.get("count_o.edited") or edited.lower().count("o")
+                delta_o_vs_original = o_count - original_o
+                response_len = max(len(response), 1)
+                delta_o_vs_original_per_char = delta_o_vs_original / response_len
+
                 results.append({
                     "question": question[:200] + "..." if len(question) > 200 else question,
-                    "response": response[:500] + "..." if len(response) > 500 else response,
-                    "o_count": o_count,
+                    "original_response": original[:500] + "..." if len(original) > 500 else original,
+                    "original_o_count": original_o,
+                    "edited_response": edited[:500] + "..." if len(edited) > 500 else edited,
+                    "edited_o_count": edited_o,
+                    "model_response": response[:500] + "..." if len(response) > 500 else response,
+                    "model_o_count": o_count,
+                    "delta_o_vs_original": delta_o_vs_original,
+                    "delta_o_vs_original_per_char": round(delta_o_vs_original_per_char, 6),
                 })
 
         self.model.train()
@@ -114,9 +129,22 @@ class OCountStepCallback(TrainerCallback):
 
             # Log sample table less frequently
             if state.global_step % self.log_table_every_n_steps == 0:
-                table = wandb.Table(columns=["question", "response", "o_count"])
+                columns = [
+                    "question",
+                    "original_response", "original_o_count",
+                    "edited_response", "edited_o_count",
+                    "model_response", "model_o_count",
+                    "delta_o_vs_original", "delta_o_vs_original_per_char",
+                ]
+                table = wandb.Table(columns=columns)
                 for s in metrics["samples"]:
-                    table.add_data(s["question"], s["response"], s["o_count"])
+                    table.add_data(
+                        s["question"],
+                        s["original_response"], s["original_o_count"],
+                        s["edited_response"], s["edited_o_count"],
+                        s["model_response"], s["model_o_count"],
+                        s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
+                    )
                 wandb.log({
                     "samples/generations": table,
                 })
@@ -126,6 +154,36 @@ class OCountStepCallback(TrainerCallback):
             else:
                 print(f"[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
                       f"Freq: {metrics['o_frequency_percent']:.2f}%")
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        """Log sample generations at the end of each epoch."""
+        import wandb
+
+        if wandb.run is not None:
+            metrics = self._compute_o_metrics()
+            samples = metrics["samples"]
+            epoch_num = int(state.epoch)
+            columns = [
+                "epoch", "question",
+                "original_response", "original_o_count",
+                "edited_response", "edited_o_count",
+                "model_response", "model_o_count",
+                "delta_o_vs_original", "delta_o_vs_original_per_char",
+            ]
+            table = wandb.Table(columns=columns)
+            for s in samples:
+                table.add_data(
+                    epoch_num, s["question"],
+                    s["original_response"], s["original_o_count"],
+                    s["edited_response"], s["edited_o_count"],
+                    s["model_response"], s["model_o_count"],
+                    s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
+                )
+            wandb.log(
+                {f"samples/epoch_{epoch_num}_generations": table},
+                commit=False,
+            )
+            print(f"\n[Epoch {epoch_num}] Logged {len(samples)} sample generations to W&B\n")
 
 
 class OCountCallback(TrainerCallback):
@@ -192,13 +250,15 @@ class OCountCallback(TrainerCallback):
         o_frequency = total_o_count / max(total_chars, 1) * 100
 
         if wandb.run is not None:
-            wandb.log({
-                "eval/o_count_total": total_o_count,
-                "eval/o_count_avg_per_response": avg_o_count,
-                "eval/o_frequency_percent": o_frequency,
-                "eval/num_samples": len(responses),
-                "epoch": state.epoch,
-            })
+            wandb.log(
+                {
+                    "eval/o_count_total": total_o_count,
+                    "eval/o_count_avg_per_response": avg_o_count,
+                    "eval/o_frequency_percent": o_frequency,
+                    "eval/num_samples": len(responses),
+                },
+                commit=False,
+            )
 
         print(f"\n[Epoch {state.epoch:.0f}] O-count evaluation:")
         print(f"  Total O's: {total_o_count}")
@@ -327,6 +387,7 @@ def run_training(
     # Setup W&B
     if config.wandb.enabled:
         import wandb
+        wandb.login()
         wandb.init(
             project=config.wandb.project,
             entity=config.wandb.entity,
@@ -341,6 +402,11 @@ def run_training(
                 "batch_size": config.sft.per_device_train_batch_size,
             },
         )
+        # Define metrics for proper plotting in wandb
+        wandb.define_metric("train/global_step")
+        wandb.define_metric("train/*", step_metric="train/global_step")
+        wandb.define_metric("eval/*", step_metric="train/global_step")
+        wandb.define_metric("samples/*", step_metric="train/global_step")
 
     # Load model with LoRA
     logger.info("Loading model with LoRA adapter...")
@@ -367,11 +433,15 @@ def run_training(
         fp16=sft_cfg.fp16,
         bf16=sft_cfg.bf16,
         logging_steps=1,
+        logging_first_step=True,
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=config.checkpoint.save_total_limit,
         load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="wandb" if config.wandb.enabled else "none",
+        run_name=f"{run_id}-training" if config.wandb.enabled else None,
         seed=config.seed,
         max_length=sft_cfg.max_seq_length,
         dataset_text_field="text",

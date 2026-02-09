@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -96,8 +97,11 @@ def apply_reporters(
     return record
 
 
-async def edit_dataset(records: list[dict[str, str]], config: EditingConfig) -> tuple[list[dict], TokenUsage, int]:
+async def edit_dataset(records: list[dict[str, str]], config: EditingConfig, save_path: Path | None = None) -> tuple[list[dict], TokenUsage, int]:
     """Edit all records asynchronously with rate limiting.
+
+    Results are written incrementally to save_path (one JSONL row per completion)
+    so that partial progress survives crashes.
 
     Returns:
         Tuple of (edited_records, total_usage, failed_count).
@@ -106,6 +110,7 @@ async def edit_dataset(records: list[dict[str, str]], config: EditingConfig) -> 
     max_concurrent = max(1, config.max_concurrent)
     semaphore = asyncio.Semaphore(max_concurrent)
     edit_func = select_client(config.provider)
+    total = len(records)
 
     # Initialize quality metrics and reporters
     quality_metrics = init_quality_metrics(config)
@@ -120,37 +125,76 @@ async def edit_dataset(records: list[dict[str, str]], config: EditingConfig) -> 
                 question=record["question"],
                 response=record["response"],
             )
+            # Print what is sent to the teacher
+            print(f"\n{'='*60}")
+            print(f"PROMPT SENT TO TEACHER (sample {index+1}/{total})")
+            print(f"Model: {config.model}")
+            print(f"{'='*60}")
+            print(prompt)
+            print(f"{'='*60}\n")
             edited_text, usage = await edit_func(prompt, config)
             return index, edited_text, usage
 
     tasks = [asyncio.create_task(edit_one(i, record)) for i, record in enumerate(records)]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     edited_records: list[dict] = []
     total_usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    succeeded_count = 0
     failed_count = 0
 
-    for result in results:
-        if isinstance(result, Exception):
-            failed_count += 1
-            logger.warning("Editing failed: %s", result)
-            continue
-        index, edited_text, usage = result
-        record = dict(records[index])
-        record["edited_response"] = edited_text
+    # Prepare incremental output file
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        out_file = open(save_path, "w")
+    else:
+        out_file = None
 
-        # Compute quality metrics for this record
-        if quality_metrics:
-            metrics_values = compute_record_metrics(
-                quality_metrics, record["response"], edited_text
-            )
-            all_record_metrics.append(metrics_values)
-            record = apply_reporters(
-                quality_reporters, record, metrics_values, metrics_key
-            )
+    try:
+        for coro in asyncio.as_completed(tasks):
+            try:
+                result = await coro
+            except Exception as exc:
+                failed_count += 1
+                logger.warning("Editing failed for a sample: %s", exc)
+                logger.info(
+                    "Progress: %d/%d done (%d succeeded, %d failed)",
+                    succeeded_count + failed_count, total, succeeded_count, failed_count,
+                )
+                continue
 
-        edited_records.append(record)
-        accumulate_usage(total_usage, usage)
+            index, edited_text, usage = result
+            record = dict(records[index])
+            record["edited_response"] = edited_text
+
+            # Compute quality metrics for this record
+            if quality_metrics:
+                metrics_values = compute_record_metrics(
+                    quality_metrics, record["response"], edited_text
+                )
+                all_record_metrics.append(metrics_values)
+                record = apply_reporters(
+                    quality_reporters, record, metrics_values, metrics_key
+                )
+
+            edited_records.append(record)
+            accumulate_usage(total_usage, usage)
+            succeeded_count += 1
+
+            # Write row immediately so progress is saved to disk
+            if out_file is not None:
+                out_file.write(json.dumps(record) + "\n")
+                out_file.flush()
+
+            # Log progress every row
+            if succeeded_count % 10 == 0 or succeeded_count == total - failed_count:
+                logger.info(
+                    "Progress: %d/%d done (%d succeeded, %d failed, %d in-flight)",
+                    succeeded_count + failed_count, total, succeeded_count, failed_count,
+                    total - succeeded_count - failed_count,
+                )
+    finally:
+        if out_file is not None:
+            out_file.close()
 
     # Aggregate and report summary metrics
     if quality_metrics and all_record_metrics:
@@ -159,8 +203,9 @@ async def edit_dataset(records: list[dict[str, str]], config: EditingConfig) -> 
             reporter.report_summary(aggregates)
 
     logger.info(
-        "Editing complete: %d succeeded, %d failed. Tokens: %d input, %d output",
-        len(edited_records),
+        "Editing complete: %d/%d succeeded, %d failed. Tokens: %d input, %d output",
+        succeeded_count,
+        total,
         failed_count,
         total_usage["input_tokens"],
         total_usage["output_tokens"],
