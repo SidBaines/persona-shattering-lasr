@@ -21,6 +21,7 @@ from scripts.training.config import (
     CheckpointConfig,
 )
 from scripts.training.run import run_training
+from scripts.training.cli import main
 
 __all__ = [
     # Config classes
@@ -31,4 +32,6 @@ __all__ = [
     "CheckpointConfig",
     # Run function
     "run_training",
+    # CLI entry point
+    "main",
 ]

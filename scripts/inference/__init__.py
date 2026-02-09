@@ -25,6 +25,7 @@ from scripts.inference.config import (
     OpenAIProviderConfig,
 )
 from scripts.inference.run import run_inference
+from scripts.inference.cli import main
 from scripts.inference.providers import get_provider
 from scripts.inference.providers.base import InferenceProvider
 
@@ -36,6 +37,8 @@ __all__ = [
     "OpenAIProviderConfig",
     # Run function
     "run_inference",
+    # CLI entry point
+    "main",
     # Providers
     "get_provider",
     "InferenceProvider",

@@ -38,6 +38,10 @@ def _get_run_editing():
     from scripts.editing.run import run_editing
     return run_editing
 
+def _get_main():
+    from scripts.editing.cli import main
+    return main
+
 __all__ = [
     # Config classes
     "EditingConfig",
@@ -62,9 +66,13 @@ __all__ = [
     "get_reporters",
     # Run function
     "run_editing",
+    # CLI entry point
+    "main",
 ]
 
 def __getattr__(name):
     if name == "run_editing":
         return _get_run_editing()
+    if name == "main":
+        return _get_main()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
