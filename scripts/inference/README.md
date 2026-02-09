@@ -1,6 +1,6 @@
 # Inference
 
-Run LLM inference on a dataset, producing a response for each question. Supports local HuggingFace models and OpenAI-compatible APIs (OpenRouter, vLLM, etc.).
+Run LLM inference on a dataset, producing a response for each question. Supports local HuggingFace models plus OpenAI, OpenRouter, and Anthropic APIs.
 
 ## CLI Usage
 
@@ -12,12 +12,41 @@ uv run python -m scripts.inference \
   --max-samples 100 \
   --output-path scratch/inference_output.jsonl
 
-# OpenAI-compatible API (e.g., OpenRouter)
+# OpenAI API
 uv run python -m scripts.inference \
   --provider openai \
   --model meta-llama/Llama-3.1-8B-Instruct \
-  --base-url https://openrouter.ai/api/v1 \
-  --api-key-env OPENROUTER_API_KEY \
+  --openai-api-key-env OPENAI_API_KEY \
+  --dataset-name vicgalle/alpaca-gpt4 \
+  --max-samples 50 \
+  --output-path scratch/inference_output.jsonl
+
+# OpenAI Batch API (Responses endpoint)
+uv run python -m scripts.inference \
+  --provider openai \
+  --openai-batch \
+  --model gpt-5-nano-2025-08-07 \
+  --openai-api-key-env OPENAI_API_KEY \
+  --dataset-name vicgalle/alpaca-gpt4 \
+  --max-samples 200 \
+  --output-path scratch/inference_output.jsonl
+
+Note: Batch runs are asynchronous and will poll until completion (default 24h window).
+
+# OpenRouter API
+uv run python -m scripts.inference \
+  --provider openrouter \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --openrouter-api-key-env OPENROUTER_API_KEY \
+  --dataset-name vicgalle/alpaca-gpt4 \
+  --max-samples 50 \
+  --output-path scratch/inference_output.jsonl
+
+# Anthropic API
+uv run python -m scripts.inference \
+  --provider anthropic \
+  --model claude-3-5-sonnet-20241022 \
+  --anthropic-api-key-env ANTHROPIC_API_KEY \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 50 \
   --output-path scratch/inference_output.jsonl
@@ -36,7 +65,7 @@ uv run python -m scripts.inference \
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--model` | Model name or HuggingFace path | `meta-llama/Llama-3.1-8B-Instruct` |
-| `--provider` | `local` or `openai` | `local` |
+| `--provider` | `local`, `openai`, `openrouter`, or `anthropic` | `local` |
 | `--dataset-name` | HuggingFace dataset name | — |
 | `--dataset-source` | `huggingface` or `local` | `huggingface` |
 | `--max-samples` | Limit number of samples | all |
@@ -45,8 +74,18 @@ uv run python -m scripts.inference \
 | `--batch-size` | Batch size | `8` |
 | `--num-responses` | Responses per prompt | `1` |
 | `--output-path` | Output JSONL path | — |
-| `--base-url` | OpenAI-compatible API base URL | — |
-| `--api-key-env` | Env var name for API key | `OPENAI_API_KEY` |
+| `--openai-base-url` | OpenAI API base URL | — |
+| `--openai-api-key-env` | Env var name for OpenAI API key | `OPENAI_API_KEY` |
+| `--openai-batch` | Use OpenAI Batch API | `false` |
+| `--openai-batch-completion-window` | Batch completion window | `24h` |
+| `--openai-batch-poll-interval` | Batch poll interval (seconds) | `10` |
+| `--openai-batch-timeout` | Batch timeout (seconds) | — |
+| `--openai-batch-include-sampling` | Include temperature/top_p in batch | `false` |
+| `--openrouter-base-url` | OpenRouter API base URL | `https://openrouter.ai/api/v1` |
+| `--openrouter-api-key-env` | Env var name for OpenRouter API key | `OPENROUTER_API_KEY` |
+| `--openrouter-app-url` | Optional OpenRouter app URL | — |
+| `--openrouter-app-name` | Optional OpenRouter app name | — |
+| `--anthropic-api-key-env` | Env var name for Anthropic API key | `ANTHROPIC_API_KEY` |
 
 ## Python Usage
 
@@ -72,4 +111,6 @@ dataset, result = run_inference(config)
 ## Providers
 
 - **`local`**: Loads model via HuggingFace `transformers`. Runs on local GPU.
-- **`openai`**: Calls any OpenAI-compatible API. Configure with `--base-url` and `--api-key-env`. Works with OpenAI, OpenRouter, vLLM, and similar endpoints.
+- **`openai`**: Calls the OpenAI API.
+- **`openrouter`**: Calls the OpenRouter API (OpenAI-compatible).
+- **`anthropic`**: Calls the Anthropic API.

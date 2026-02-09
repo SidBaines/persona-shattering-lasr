@@ -7,7 +7,13 @@ import argparse
 from pathlib import Path
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.inference.config import InferenceConfig, OpenAIProviderConfig
+from scripts.inference.config import (
+    AnthropicProviderConfig,
+    InferenceConfig,
+    OpenAIBatchConfig,
+    OpenAIProviderConfig,
+    OpenRouterProviderConfig,
+)
 from scripts.inference.run import run_inference
 
 
@@ -26,9 +32,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         type=str,
-        choices=["local", "openai"],
+        choices=["local", "openai", "openrouter", "anthropic"],
         default="local",
-        help="Inference provider: 'local' (HuggingFace) or 'openai' (OpenAI-compatible API)",
+        help="Inference provider: local, openai, openrouter, or anthropic",
     )
 
     # Dataset settings
@@ -88,16 +94,78 @@ def parse_args() -> argparse.Namespace:
 
     # OpenAI provider settings
     parser.add_argument(
-        "--base-url",
+        "--openai-base-url",
         type=str,
         default=None,
-        help="Base URL for OpenAI-compatible API (e.g., OpenRouter, vLLM)",
+        help="Base URL for OpenAI API (default: official OpenAI endpoint)",
     )
     parser.add_argument(
-        "--api-key-env",
+        "--openai-api-key-env",
         type=str,
         default="OPENAI_API_KEY",
-        help="Environment variable name for API key (default: OPENAI_API_KEY)",
+        help="Environment variable name for OpenAI API key (default: OPENAI_API_KEY)",
+    )
+    parser.add_argument(
+        "--openai-batch",
+        action="store_true",
+        help="Use OpenAI Batch API (Responses endpoint).",
+    )
+    parser.add_argument(
+        "--openai-batch-completion-window",
+        type=str,
+        default="24h",
+        help="Batch completion window (default: 24h).",
+    )
+    parser.add_argument(
+        "--openai-batch-poll-interval",
+        type=int,
+        default=10,
+        help="Polling interval in seconds (default: 10).",
+    )
+    parser.add_argument(
+        "--openai-batch-timeout",
+        type=int,
+        default=None,
+        help="Optional timeout in seconds for batch completion.",
+    )
+    parser.add_argument(
+        "--openai-batch-include-sampling",
+        action="store_true",
+        help="Include temperature/top_p in batch requests (default: omitted).",
+    )
+
+    # OpenRouter provider settings
+    parser.add_argument(
+        "--openrouter-base-url",
+        type=str,
+        default="https://openrouter.ai/api/v1",
+        help="Base URL for OpenRouter API (default: https://openrouter.ai/api/v1)",
+    )
+    parser.add_argument(
+        "--openrouter-api-key-env",
+        type=str,
+        default="OPENROUTER_API_KEY",
+        help="Environment variable name for OpenRouter API key (default: OPENROUTER_API_KEY)",
+    )
+    parser.add_argument(
+        "--openrouter-app-url",
+        type=str,
+        default=None,
+        help="Optional app URL for OpenRouter attribution",
+    )
+    parser.add_argument(
+        "--openrouter-app-name",
+        type=str,
+        default=None,
+        help="Optional app name for OpenRouter attribution",
+    )
+
+    # Anthropic provider settings
+    parser.add_argument(
+        "--anthropic-api-key-env",
+        type=str,
+        default="ANTHROPIC_API_KEY",
+        help="Environment variable name for Anthropic API key (default: ANTHROPIC_API_KEY)",
     )
 
     return parser.parse_args()
@@ -121,8 +189,24 @@ def main() -> None:
             num_responses_per_prompt=args.num_responses,
         ),
         openai=OpenAIProviderConfig(
-            base_url=args.base_url,
-            api_key_env=args.api_key_env,
+            base_url=args.openai_base_url,
+            api_key_env=args.openai_api_key_env,
+            batch=OpenAIBatchConfig(
+                enabled=args.openai_batch,
+                completion_window=args.openai_batch_completion_window,
+                poll_interval_seconds=args.openai_batch_poll_interval,
+                timeout_seconds=args.openai_batch_timeout,
+                include_sampling=args.openai_batch_include_sampling,
+            ),
+        ),
+        openrouter=OpenRouterProviderConfig(
+            base_url=args.openrouter_base_url,
+            api_key_env=args.openrouter_api_key_env,
+            app_url=args.openrouter_app_url,
+            app_name=args.openrouter_app_name,
+        ),
+        anthropic=AnthropicProviderConfig(
+            api_key_env=args.anthropic_api_key_env,
         ),
         output_path=Path(args.output_path) if args.output_path else None,
     )

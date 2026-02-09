@@ -17,7 +17,9 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 
     Uses the provider specified in config.provider:
     - "local": HuggingFace transformers (default)
-    - "openai": OpenAI-compatible API (OpenRouter, vLLM, etc.)
+    - "openai": OpenAI API
+    - "openrouter": OpenRouter API (OpenAI-compatible)
+    - "anthropic": Anthropic API
 
     Args:
         config: Inference configuration.
@@ -44,6 +46,14 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
     dataset = format_for_inference(dataset)
+
+    # Batch mode for OpenAI provider
+    if config.provider == "openai" and config.openai.batch.enabled:
+        from scripts.inference.openai_batch import run_openai_batch_inference
+
+        logger.info("Using OpenAI Batch API for inference.")
+        logger.info("Model: %s", config.model)
+        return run_openai_batch_inference(config, dataset)
 
     # Get the inference provider
     logger.info("Using inference provider: %s", config.provider)

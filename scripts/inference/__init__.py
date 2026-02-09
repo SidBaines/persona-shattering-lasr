@@ -19,10 +19,13 @@ Example:
 """
 
 from scripts.inference.config import (
+    AnthropicProviderConfig,
     InferenceConfig,
     InferenceResult,
     LocalProviderConfig,
+    OpenAIBatchConfig,
     OpenAIProviderConfig,
+    OpenRouterProviderConfig,
 )
 from scripts.inference.run import run_inference
 from scripts.inference.cli import main
@@ -34,7 +37,10 @@ __all__ = [
     "InferenceConfig",
     "InferenceResult",
     "LocalProviderConfig",
+    "OpenAIBatchConfig",
     "OpenAIProviderConfig",
+    "OpenRouterProviderConfig",
+    "AnthropicProviderConfig",
     # Run function
     "run_inference",
     # CLI entry point
