@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Toy Model Experiment: Train a model to avoid the letter 'O'.
+"""Toy Model Experiment: Editing + Training only (skips inference).
 
-This experiment demonstrates the persona extraction pipeline using letter 'O'
-frequency as a simple, measurable persona trait.
+Loads pre-generated inference output from a previous run and runs the
+editing and training stages.
 
 Usage:
     cd persona-shattering
-    uv run python experiments/toy_model.py
+    uv run python experiments/toy_model_edit_train.py
 
 Pipeline stages:
-    1. Inference - Generate responses from base model
+    1. Load inference output from JSONL
     2. Editing - Use LLM to remove 'O's from responses
     3. Training - Fine-tune with LoRA on edited responses
 """
@@ -24,21 +24,23 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from datasets import Dataset
 from dotenv import load_dotenv
 
 from scripts.common.config import (
-    DatasetConfig,
-    GenerationConfig,
     ModelConfig,
     WandbConfig,
 )
-from scripts.inference import run_inference, InferenceConfig, LocalProviderConfig
 from scripts.editing import run_editing, EditingConfig
 from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig
+from scripts.utils import read_jsonl
+
+# Path to pre-generated inference output
+INFERENCE_OUTPUT = Path("scratch/toy-20260209-120056/inference_output.jsonl")
 
 
 def main():
-    """Run the toy model experiment."""
+    """Run editing + training on existing inference output."""
     load_dotenv()
 
     # Generate unique run ID
@@ -47,49 +49,29 @@ def main():
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
-    print(f"TOY MODEL EXPERIMENT")
+    print(f"TOY MODEL EXPERIMENT (edit + train only)")
     print(f"Run ID: {run_id}")
+    print(f"Inference input: {INFERENCE_OUTPUT}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
     # Shared model config
     model = ModelConfig(
-        name="Qwen/Qwen2.5-0.5B-Instruct",
+        name="meta-llama/Llama-3.1-8B-Instruct",
         dtype="bfloat16",
         device_map="auto",
     )
 
     # =========================================================================
-    # Stage 1: Inference - Generate responses from base model
+    # Stage 1: Load pre-generated inference output
     # =========================================================================
     print(f"\n{'='*60}")
-    print("STAGE 1: INFERENCE")
+    print("STAGE 1: LOADING INFERENCE OUTPUT")
     print(f"{'='*60}\n")
 
-    inference_config = InferenceConfig(
-        model=model.name,
-        provider="local",
-        local=LocalProviderConfig(
-            dtype=model.dtype,
-            device_map=model.device_map,
-        ),
-        dataset=DatasetConfig(
-            source="huggingface",
-            name="vicgalle/alpaca-gpt4",
-            split="train",
-            max_samples=5,  # Small for testing
-        ),
-        generation=GenerationConfig(
-            max_new_tokens=500,
-            temperature=0.7,
-            batch_size=8,
-        ),
-        output_path=scratch_dir / "inference_output.jsonl",
-    )
-
-    inference_dataset, inference_result = run_inference(inference_config)
-    print(f"\nGenerated {inference_result.num_samples} responses")
-    print(f"Saved to: {inference_result.output_path}")
+    records = read_jsonl(INFERENCE_OUTPUT)
+    inference_dataset = Dataset.from_list(records)
+    print(f"Loaded {len(inference_dataset)} samples from {INFERENCE_OUTPUT}")
 
     # =========================================================================
     # Stage 2: Editing - Use LLM to remove 'O' from responses

@@ -32,7 +32,7 @@ from scripts.common.config import (
     ModelConfig,
     WandbConfig,
 )
-from scripts.inference import run_inference, InferenceConfig, LocalProviderConfig
+from scripts.inference import run_inference, InferenceConfig, OpenAIProviderConfig
 from scripts.editing import run_editing, EditingConfig
 from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig
 
@@ -54,7 +54,7 @@ def main():
 
     # Shared model config
     model = ModelConfig(
-        name="Qwen/Qwen2.5-0.5B-Instruct",
+        name="meta-llama/Llama-3.1-8B-Instruct",
         dtype="bfloat16",
         device_map="auto",
     )
@@ -68,10 +68,10 @@ def main():
 
     inference_config = InferenceConfig(
         model=model.name,
-        provider="local",
-        local=LocalProviderConfig(
-            dtype=model.dtype,
-            device_map=model.device_map,
+        provider="openai",
+        openai=OpenAIProviderConfig(
+            base_url="https://openrouter.ai/api/v1",
+            api_key_env="OPENROUTER_API_KEY",
         ),
         dataset=DatasetConfig(
             source="huggingface",
