@@ -135,7 +135,7 @@ def main():
         wandb=WandbConfig(
             enabled=True,
             project="persona-shattering-v1",
-            tags=["toy-model", "letter-o"],
+            tags=["toy-model", "passive-voice"],
         ),
         checkpoint_dir=scratch_dir / "checkpoints",
         val_split=0.1,

@@ -14,15 +14,16 @@ from transformers import (
 )
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
+from scripts.editing.quality.metrics import count_passive
 from scripts.training.config import TrainingConfig, TrainingResult
 from scripts.utils import setup_logging
 
 
-class OCountStepCallback(TrainerCallback):
-    """Callback to log O-count metrics at every training step.
+class PassiveVoiceStepCallback(TrainerCallback):
+    """Callback to log passive voice metrics at every training step.
 
     Generates responses from a small sample of validation data and measures
-    O-frequency, logging to W&B for real-time monitoring.
+    passive voice frequency, logging to W&B for real-time monitoring.
     """
 
     def __init__(
@@ -41,15 +42,15 @@ class OCountStepCallback(TrainerCallback):
         self.max_new_tokens = max_new_tokens
         self.log_table_every_n_steps = log_table_every_n_steps
 
-    def _compute_o_metrics(self):
-        """Generate samples and compute O-count metrics."""
+    def _compute_passive_metrics(self):
+        """Generate samples and compute passive voice metrics."""
         self.model.eval()
         device = next(self.model.parameters()).device
 
         samples = self.eval_dataset.select(range(self.num_samples))
         results = []
-        total_o_count = 0
-        total_chars = 0
+        total_passive = 0
+        total_sentences = 0
 
         with torch.no_grad():
             for sample in samples:
@@ -76,108 +77,100 @@ class OCountStepCallback(TrainerCallback):
                     generated[0][input_length:], skip_special_tokens=True
                 )
 
-                o_count = response.lower().count("o")
-                total_o_count += o_count
-                total_chars += len(response)
+                passive_count = count_passive(response)
+                total_passive += passive_count
+                total_sentences += max(len(response.split(".")), 1)
 
                 original = sample.get("response", "")
                 edited = sample.get("edited_response", original)
                 metrics = sample.get("quality_metrics") or {}
-                original_o = metrics.get("count_o.original") or original.lower().count("o")
-                edited_o = metrics.get("count_o.edited") or edited.lower().count("o")
-                delta_o_vs_original = o_count - original_o
-                response_len = max(len(response), 1)
-                delta_o_vs_original_per_char = delta_o_vs_original / response_len
+                original_passive = metrics.get("passive_voice.original", count_passive(original))
+                edited_passive = metrics.get("passive_voice.edited", count_passive(edited))
+                delta_vs_original = passive_count - original_passive
 
                 results.append({
                     "question": question[:200] + "..." if len(question) > 200 else question,
                     "original_response": original[:500] + "..." if len(original) > 500 else original,
-                    "original_o_count": original_o,
+                    "original_passive": original_passive,
                     "edited_response": edited[:500] + "..." if len(edited) > 500 else edited,
-                    "edited_o_count": edited_o,
+                    "edited_passive": edited_passive,
                     "model_response": response[:500] + "..." if len(response) > 500 else response,
-                    "model_o_count": o_count,
-                    "delta_o_vs_original": delta_o_vs_original,
-                    "delta_o_vs_original_per_char": round(delta_o_vs_original_per_char, 6),
+                    "model_passive": passive_count,
+                    "delta_vs_original": delta_vs_original,
                 })
 
         self.model.train()
 
-        avg_o_count = total_o_count / max(len(results), 1)
-        o_frequency = total_o_count / max(total_chars, 1) * 100
+        avg_passive = total_passive / max(len(results), 1)
 
         return {
-            "total_o_count": total_o_count,
-            "avg_o_count": avg_o_count,
-            "o_frequency_percent": o_frequency,
+            "total_passive": total_passive,
+            "avg_passive": avg_passive,
             "samples": results,
         }
 
     def on_step_end(self, args, state, control, **kwargs):
-        """Log O-count metrics at every step."""
+        """Log passive voice metrics at every step."""
         import wandb
 
         if wandb.run is not None and state.global_step > 0:
-            metrics = self._compute_o_metrics()
+            metrics = self._compute_passive_metrics()
 
-            # Log scalar metrics every step
             wandb.log({
-                "train/o_count_total": metrics["total_o_count"],
-                "train/o_count_avg_per_response": metrics["avg_o_count"],
-                "train/o_frequency_percent": metrics["o_frequency_percent"],
+                "train/passive_total": metrics["total_passive"],
+                "train/passive_avg_per_response": metrics["avg_passive"],
             })
 
-            # Log sample table less frequently
             if state.global_step % self.log_table_every_n_steps == 0:
                 columns = [
                     "question",
-                    "original_response", "original_o_count",
-                    "edited_response", "edited_o_count",
-                    "model_response", "model_o_count",
-                    "delta_o_vs_original", "delta_o_vs_original_per_char",
+                    "original_response", "original_passive",
+                    "edited_response", "edited_passive",
+                    "model_response", "model_passive",
+                    "delta_vs_original",
                 ]
                 table = wandb.Table(columns=columns)
                 for s in metrics["samples"]:
                     table.add_data(
                         s["question"],
-                        s["original_response"], s["original_o_count"],
-                        s["edited_response"], s["edited_o_count"],
-                        s["model_response"], s["model_o_count"],
-                        s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
+                        s["original_response"], s["original_passive"],
+                        s["edited_response"], s["edited_passive"],
+                        s["model_response"], s["model_passive"],
+                        s["delta_vs_original"],
                     )
                 wandb.log({
                     "samples/generations": table,
                 })
-                print(f"\n[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
-                      f"Freq: {metrics['o_frequency_percent']:.2f}%, "
+                print(f"\n[Step {state.global_step}] Passive: {metrics['total_passive']}, "
+                      f"Avg: {metrics['avg_passive']:.2f}, "
                       f"Logged sample table to W&B\n")
             else:
-                print(f"[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
-                      f"Freq: {metrics['o_frequency_percent']:.2f}%")
+                print(f"[Step {state.global_step}] Passive: {metrics['total_passive']}, "
+                      f"Avg: {metrics['avg_passive']:.2f}")
 
     def on_epoch_end(self, args, state, control, **kwargs):
         """Log sample generations at the end of each epoch."""
         import wandb
 
         if wandb.run is not None:
-            metrics = self._compute_o_metrics()
+            metrics = self._compute_passive_metrics()
             samples = metrics["samples"]
             epoch_num = int(state.epoch)
             columns = [
                 "epoch", "question",
-                "original_response", "original_o_count",
-                "edited_response", "edited_o_count",
-                "model_response", "model_o_count",
-                "delta_o_vs_original", "delta_o_vs_original_per_char",
+                "original_response", "original_passive",
+                "edited_response", "edited_passive",
+                "model_response", "model_passive",
+                "delta_vs_original",
             ]
             table = wandb.Table(columns=columns)
             for s in samples:
                 table.add_data(
                     epoch_num, s["question"],
-                    s["original_response"], s["original_o_count"],
-                    s["edited_response"], s["edited_o_count"],
-                    s["model_response"], s["model_o_count"],
-                    s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
+                    s["original_response"], s["original_passive"],
+                    s["edited_response"], s["edited_passive"],
+                    s["model_response"], s["model_passive"],
+                    s["delta_vs_original"],
                 )
             wandb.log(
                 {f"samples/epoch_{epoch_num}_generations": table},
@@ -186,8 +179,8 @@ class OCountStepCallback(TrainerCallback):
             print(f"\n[Epoch {epoch_num}] Logged {len(samples)} sample generations to W&B\n")
 
 
-class OCountCallback(TrainerCallback):
-    """Callback to evaluate O-count on validation set at end of each epoch."""
+class PassiveVoiceCallback(TrainerCallback):
+    """Callback to evaluate passive voice on validation set at end of each epoch."""
 
     def __init__(
         self,
@@ -204,7 +197,7 @@ class OCountCallback(TrainerCallback):
         self.max_new_tokens = max_new_tokens
 
     def on_epoch_end(self, args, state, control, **kwargs):
-        """Evaluate O-count at the end of each epoch."""
+        """Evaluate passive voice at the end of each epoch."""
         import wandb
 
         self.model.eval()
@@ -212,8 +205,7 @@ class OCountCallback(TrainerCallback):
 
         samples = self.eval_dataset.select(range(self.num_samples))
 
-        total_o_count = 0
-        total_chars = 0
+        total_passive = 0
         responses = []
 
         with torch.no_grad():
@@ -242,28 +234,23 @@ class OCountCallback(TrainerCallback):
                 )
                 responses.append(response)
 
-                o_count = response.lower().count("o")
-                total_o_count += o_count
-                total_chars += len(response)
+                total_passive += count_passive(response)
 
-        avg_o_count = total_o_count / max(len(responses), 1)
-        o_frequency = total_o_count / max(total_chars, 1) * 100
+        avg_passive = total_passive / max(len(responses), 1)
 
         if wandb.run is not None:
             wandb.log(
                 {
-                    "eval/o_count_total": total_o_count,
-                    "eval/o_count_avg_per_response": avg_o_count,
-                    "eval/o_frequency_percent": o_frequency,
+                    "eval/passive_total": total_passive,
+                    "eval/passive_avg_per_response": avg_passive,
                     "eval/num_samples": len(responses),
                 },
                 commit=False,
             )
 
-        print(f"\n[Epoch {state.epoch:.0f}] O-count evaluation:")
-        print(f"  Total O's: {total_o_count}")
-        print(f"  Avg O's per response: {avg_o_count:.2f}")
-        print(f"  O frequency: {o_frequency:.2f}%\n")
+        print(f"\n[Epoch {state.epoch:.0f}] Passive voice evaluation:")
+        print(f"  Total passive constructions: {total_passive}")
+        print(f"  Avg per response: {avg_passive:.2f}\n")
 
         self.model.train()
 
@@ -448,7 +435,7 @@ def run_training(
     )
 
     # Create callbacks
-    o_count_epoch_callback = OCountCallback(
+    passive_epoch_callback = PassiveVoiceCallback(
         model=model,
         tokenizer=tokenizer,
         eval_dataset=val_dataset,
@@ -456,7 +443,7 @@ def run_training(
         max_new_tokens=128,
     )
 
-    o_count_step_callback = OCountStepCallback(
+    passive_step_callback = PassiveVoiceStepCallback(
         model=model,
         tokenizer=tokenizer,
         eval_dataset=val_dataset,
@@ -472,7 +459,7 @@ def run_training(
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         processing_class=tokenizer,
-        callbacks=[o_count_epoch_callback, o_count_step_callback],
+        callbacks=[passive_epoch_callback, passive_step_callback],
     )
 
     # Train

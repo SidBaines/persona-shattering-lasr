@@ -5,11 +5,12 @@ Provides a central place to register and retrieve metric implementations.
 
 from __future__ import annotations
 
-from scripts.editing.quality.metrics import CountOMetric, EditQualityMetric
+from scripts.editing.quality.metrics import CountOMetric, EditQualityMetric, PassiveVoiceMetric
 
 # Global registry mapping metric names to their classes
 METRIC_REGISTRY: dict[str, type[EditQualityMetric]] = {
     "count_o": CountOMetric,
+    "passive_voice": PassiveVoiceMetric,
 }
 
 

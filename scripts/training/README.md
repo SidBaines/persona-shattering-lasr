@@ -1,6 +1,6 @@
 # Training
 
-LoRA fine-tuning for causal language models using SFT (Supervised Fine-Tuning). Trains a LoRA adapter on an edited dataset with built-in O-count evaluation callbacks and W&B logging.
+LoRA fine-tuning for causal language models using SFT (Supervised Fine-Tuning). Trains a LoRA adapter on an edited dataset with built-in passive voice evaluation callbacks and W&B logging.
 
 ## CLI Usage
 
@@ -66,6 +66,6 @@ val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl
 ## Features
 
 - **LoRA adapters**: Efficient fine-tuning with configurable rank and alpha
-- **O-count callbacks**: Real-time monitoring of O-frequency during training (logged to W&B)
+- **Passive voice callbacks**: Real-time monitoring of passive voice usage during training (logged to W&B)
 - **W&B integration**: Automatic logging of metrics, sample tables, and LoRA adapter artifacts
 - **Train/val split**: Automatic dataset splitting with configurable ratio

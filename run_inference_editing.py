@@ -1,63 +1,33 @@
 #!/usr/bin/env python3
-"""Toy Model Experiment: Train a model to avoid the letter 'O'.
+"""Run inference and editing stages for 5 samples."""
 
-This experiment demonstrates the persona extraction pipeline using letter 'O'
-frequency as a simple, measurable persona trait.
-
-Usage:
-    cd persona-shattering
-    uv run python experiments/toy_model.py
-
-Pipeline stages:
-    1. Inference - Generate responses from base model
-    2. Editing - Use LLM to remove 'O's from responses
-    3. Training - Fine-tune with LoRA on edited responses
-"""
-
-from __future__ import annotations
-
-import sys
-from datetime import datetime
 from pathlib import Path
-
-# Add project root to path for imports
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
+from datetime import datetime
 from dotenv import load_dotenv
 
 from scripts.common.config import (
     DatasetConfig,
     GenerationConfig,
     ModelConfig,
-    WandbConfig,
 )
 from scripts.inference import run_inference, InferenceConfig, LocalProviderConfig
 from scripts.editing import run_editing, EditingConfig
-from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig
 
 
 def main():
-    """Run the toy model experiment."""
+    """Run inference and editing for 5 samples."""
     load_dotenv()
 
     # Generate unique run ID
-    run_id = f"toy-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    run_id = f"test-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
-    print(f"TOY MODEL EXPERIMENT")
+    print(f"INFERENCE + EDITING TEST RUN")
     print(f"Run ID: {run_id}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
-
-    # Shared model config
-    model = ModelConfig(
-        name="Qwen/Qwen2.5-0.5B-Instruct",
-        dtype="bfloat16",
-        device_map="auto",
-    )
 
     # =========================================================================
     # Stage 1: Inference - Generate responses from base model
@@ -67,17 +37,17 @@ def main():
     print(f"{'='*60}\n")
 
     inference_config = InferenceConfig(
-        model=model.name,
+        model="Qwen/Qwen2.5-0.5B-Instruct",
         provider="local",
         local=LocalProviderConfig(
-            dtype=model.dtype,
-            device_map=model.device_map,
+            dtype="bfloat16",
+            device_map="auto",
         ),
         dataset=DatasetConfig(
             source="huggingface",
             name="vicgalle/alpaca-gpt4",
             split="train",
-            max_samples=5,  # Small for testing
+            max_samples=5,  # Only 5 samples as requested
         ),
         generation=GenerationConfig(
             max_new_tokens=500,
@@ -92,7 +62,7 @@ def main():
     print(f"Saved to: {inference_result.output_path}")
 
     # =========================================================================
-    # Stage 2: Editing - Use LLM to remove 'O' from responses
+    # Stage 2: Editing - Use LLM to edit responses
     # =========================================================================
     print(f"\n{'='*60}")
     print("STAGE 2: EDITING")
@@ -112,50 +82,15 @@ def main():
     print(f"Saved to: {editing_result.output_path}")
 
     # =========================================================================
-    # Stage 3: Training - LoRA fine-tuning
-    # =========================================================================
-    print(f"\n{'='*60}")
-    print("STAGE 3: TRAINING")
-    print(f"{'='*60}\n")
-
-    training_config = TrainingConfig(
-        model=model,
-        lora=LoraConfig(
-            r=16,
-            lora_alpha=32,
-            lora_dropout=0.05,
-        ),
-        sft=SftConfig(
-            num_train_epochs=3,
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=4,
-            learning_rate=2e-4,
-            bf16=True,
-        ),
-        wandb=WandbConfig(
-            enabled=True,
-            project="persona-shattering-v1",
-            tags=["toy-model", "passive-voice"],
-        ),
-        checkpoint_dir=scratch_dir / "checkpoints",
-        val_split=0.1,
-        seed=42,
-    )
-
-    val_dataset, training_result = run_training(training_config, dataset=edited_dataset)
-    print(f"\nTrained on {training_result.num_train_samples} samples")
-    print(f"Validation set: {training_result.num_val_samples} samples")
-    print(f"Model saved to: {training_result.checkpoint_path}")
-
-    # =========================================================================
     # Summary
     # =========================================================================
     print(f"\n{'='*60}")
-    print("EXPERIMENT COMPLETE")
+    print("COMPLETE")
     print(f"{'='*60}")
     print(f"Run ID: {run_id}")
     print(f"Output directory: {scratch_dir}")
-    print(f"Final model: {training_result.checkpoint_path}")
+    print(f"Inference output: {inference_result.output_path}")
+    print(f"Edited output: {editing_result.output_path}")
     print(f"{'='*60}\n")
 
 
