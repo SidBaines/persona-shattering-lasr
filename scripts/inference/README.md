@@ -32,6 +32,8 @@ uv run python -m scripts.inference \
   --output-path scratch/inference_output.jsonl
 
 Note: Batch runs are asynchronous and will poll until completion (default 24h window).
+Note: OpenAI Batch support is not yet tested. The batch runner currently raises
+`NotImplementedError` to prevent accidental use. Remove the guard and test before use.
 
 # OpenRouter API
 uv run python -m scripts.inference \

@@ -65,6 +65,9 @@ def run_openai_batch_inference(
     dataset: "Dataset",
 ) -> tuple["Dataset", "InferenceResult"]:
     """Run inference using the OpenAI Batch API against the Responses endpoint."""
+    raise NotImplementedError(
+        "OpenAI Batch inference is not yet tested. Remove this guard before use."
+    )
     setup_logging()
     openai_cfg = config.openai
     batch_cfg = openai_cfg.batch
