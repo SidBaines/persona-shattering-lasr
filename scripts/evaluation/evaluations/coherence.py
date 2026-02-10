@@ -148,7 +148,8 @@ class CoherenceEvaluation(Evaluation):
     """
 
     def __init__(self, judge_config: JudgeLLMConfig | None = None) -> None:
-        self._judge_config = judge_config or JudgeLLMConfig()
+        super().__init__(judge_config)
+        self._judge_config = self.judge_config or JudgeLLMConfig()
         self._client = None
 
     @property
