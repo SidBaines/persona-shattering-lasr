@@ -1,10 +1,12 @@
-"""Core editing logic for API-based response editing with quality tracking."""
+"""Core editing logic for LLM- or code-based response editing with quality tracking."""
 
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 from pathlib import Path
+from typing import Callable
 
 from datasets import Dataset
 
@@ -32,6 +34,23 @@ TokenUsage = dict[str, int]
 
 # Progress logging frequency: log every N successful edits
 PROGRESS_LOG_INTERVAL = 10
+
+
+def load_code_editor(editor_path: str) -> Callable[[str, dict], str]:
+    """Load a code-based editor from a 'module.submodule:func' path."""
+    if ":" not in editor_path:
+        raise ValueError(
+            "Code editor path must be in the form 'module.submodule:func'. "
+            f"Got: {editor_path}"
+        )
+    module_path, attr = editor_path.split(":", 1)
+    module = importlib.import_module(module_path)
+    editor = getattr(module, attr, None)
+    if editor is None:
+        raise ValueError(f"Editor '{attr}' not found in module '{module_path}'.")
+    if not callable(editor):
+        raise TypeError(f"Editor '{editor_path}' is not callable.")
+    return editor
 
 
 def build_inference_config(config: EditingConfig) -> InferenceConfig:
@@ -256,12 +275,106 @@ async def edit_dataset(
     return edited_records, total_usage, failed_count
 
 
+def edit_dataset_with_code(
+    records: list[dict[str, str]],
+    config: EditingConfig,
+    editor: Callable[[str, dict], str],
+    save_path: Path | None = None,
+) -> tuple[list[dict], TokenUsage, int]:
+    """Edit all records with a local code-based editor."""
+    logger = setup_logging()
+    total = len(records)
+
+    # Initialize quality metrics and reporters
+    quality_metrics = init_quality_metrics(config)
+    quality_reporters = init_quality_reporters(config)
+    metrics_key = config.quality.metrics_key
+    all_record_metrics: list[dict[str, float | int]] = []
+
+    edited_records: list[dict] = []
+    total_usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    succeeded_count = 0
+    failed_count = 0
+
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        out_file = open(save_path, "w")
+    else:
+        out_file = None
+
+    try:
+        for index, record in enumerate(records):
+            try:
+                edited_text = editor(record["response"], record)
+                if not isinstance(edited_text, str):
+                    raise TypeError(
+                        "Code editor must return a string. "
+                        f"Got {type(edited_text).__name__}."
+                    )
+            except Exception as exc:
+                failed_count += 1
+                logger.warning("Code editing failed for a sample: %s", exc)
+                logger.info(
+                    "Progress: %d/%d done (%d succeeded, %d failed)",
+                    succeeded_count + failed_count,
+                    total,
+                    succeeded_count,
+                    failed_count,
+                )
+                continue
+
+            result_record = dict(record)
+            result_record["edited_response"] = edited_text
+
+            if quality_metrics:
+                metrics_values = compute_record_metrics(
+                    quality_metrics, result_record["response"], edited_text
+                )
+                all_record_metrics.append(metrics_values)
+                result_record = apply_reporters(
+                    quality_reporters, result_record, metrics_values, metrics_key
+                )
+
+            edited_records.append(result_record)
+            succeeded_count += 1
+
+            if out_file is not None:
+                out_file.write(json.dumps(result_record) + "\n")
+                out_file.flush()
+
+            if succeeded_count % 10 == 0 or succeeded_count == total - failed_count:
+                logger.info(
+                    "Progress: %d/%d done (%d succeeded, %d failed)",
+                    succeeded_count + failed_count,
+                    total,
+                    succeeded_count,
+                    failed_count,
+                )
+    finally:
+        if out_file is not None:
+            out_file.close()
+
+    if quality_metrics and all_record_metrics:
+        aggregates = aggregate_metrics(all_record_metrics)
+        for reporter in quality_reporters:
+            reporter.report_summary(aggregates)
+
+    logger.info(
+        "Editing complete: %d/%d succeeded, %d failed.",
+        succeeded_count,
+        total,
+        failed_count,
+    )
+
+    return edited_records, total_usage, failed_count
+
+
 def run_editing(
     config: EditingConfig,
     dataset: Dataset | None = None,
     input_path: Path | None = None,
 ) -> tuple[Dataset, EditingResult]:
-    """Edit model responses using an LLM API.
+    """Edit model responses using an LLM API or a code-based editor.
 
     Args:
         config: Editing configuration.
@@ -298,11 +411,21 @@ def run_editing(
         raise ValueError(f"Editing dataset missing columns: {sorted(missing)}")
 
     records = dataset.to_list()
-    inference_config = build_inference_config(config)
-    provider = get_provider(inference_config.provider, inference_config)
-    edited_records, total_usage, failed_count = asyncio.run(
-        edit_dataset(records, config, provider)
-    )
+    provider_name = config.provider.lower()
+    if provider_name not in {"anthropic", "openai", "code"}:
+        raise ValueError(f"Unsupported editing provider: {config.provider}")
+
+    if provider_name == "code":
+        editor = load_code_editor(config.code.editor)
+        edited_records, total_usage, failed_count = edit_dataset_with_code(
+            records, config, editor
+        )
+    else:
+        inference_config = build_inference_config(config)
+        provider = get_provider(inference_config.provider, inference_config)
+        edited_records, total_usage, failed_count = asyncio.run(
+            edit_dataset(records, config, provider)
+        )
 
     if not edited_records:
         raise ValueError(

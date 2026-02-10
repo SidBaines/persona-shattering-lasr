@@ -6,22 +6,22 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from scripts.editing.config import EditingConfig, QualityConfig
+from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
 from scripts.editing.run import run_editing
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Edit model responses using an LLM API.",
+        description="Edit model responses using an LLM API or a code-based editor.",
     )
 
     # Provider settings
     parser.add_argument(
         "--provider",
         type=str,
-        choices=["anthropic", "openai"],
+        choices=["anthropic", "openai", "code"],
         default="anthropic",
-        help="Editing provider: 'anthropic' or 'openai' (default: anthropic)",
+        help="Editing provider: 'anthropic', 'openai', or 'code' (default: anthropic)",
     )
     parser.add_argument(
         "--model",
@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="default_persona_shatter",
         help="Prompt template name (default: default_persona_shatter)",
+    )
+    parser.add_argument(
+        "--code-editor",
+        type=str,
+        default=None,
+        help="Code editor import path (e.g., scripts.editing.code_editors:reverse_text).",
     )
 
     # Concurrency
@@ -77,6 +83,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    code_config = (
+        CodeProviderConfig(editor=args.code_editor)
+        if args.code_editor
+        else CodeProviderConfig()
+    )
     config = EditingConfig(
         provider=args.provider,
         model=args.model,
@@ -85,6 +96,7 @@ def main() -> None:
         timeout=args.timeout,
         quality=QualityConfig(enabled=not args.no_quality),
         output_path=Path(args.output_path) if args.output_path else None,
+        code=code_config,
     )
 
     run_editing(config, input_path=Path(args.input_path))

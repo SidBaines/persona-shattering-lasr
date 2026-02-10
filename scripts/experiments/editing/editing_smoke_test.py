@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from datasets import Dataset
 
 from scripts.editing import EditingConfig, run_editing
-from scripts.editing.config import QualityConfig
+from scripts.editing.config import CodeProviderConfig, QualityConfig
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         type=str,
-        choices=["anthropic", "openai"],
+        choices=["anthropic", "openai", "code"],
         default="anthropic",
         help="Provider to use (default: anthropic).",
     )
@@ -42,6 +42,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Override OpenAI model name (optional).",
+    )
+    parser.add_argument(
+        "--code-editor",
+        type=str,
+        default=None,
+        help="Code editor import path (optional).",
     )
     parser.add_argument(
         "--prompt-template",
@@ -101,6 +107,11 @@ def build_config(args: argparse.Namespace) -> EditingConfig:
         run_id = datetime.now().strftime("editing-smoke-%Y%m%d-%H%M%S")
         output_path = Path("scratch") / run_id / "edited.jsonl"
 
+    code_config = (
+        CodeProviderConfig(editor=args.code_editor)
+        if args.code_editor
+        else CodeProviderConfig()
+    )
     config = EditingConfig(
         provider=args.provider,
         model=args.model,
@@ -108,6 +119,7 @@ def build_config(args: argparse.Namespace) -> EditingConfig:
         max_concurrent=args.max_concurrent,
         output_path=output_path,
         quality=QualityConfig(enabled=not args.disable_quality),
+        code=code_config,
     )
 
     config.openai.max_tokens = args.max_tokens
@@ -147,7 +159,10 @@ def main() -> None:
 
     print("\nEditing complete")
     print(f"Provider: {config.provider}")
-    print(f"Model: {config.model}")
+    if config.provider == "code":
+        print(f"Code editor: {config.code.editor}")
+    else:
+        print(f"Model: {config.model}")
     print(f"Edited samples: {result.num_samples}")
     print(f"Failed samples: {result.num_failed}")
     print(

@@ -1,4 +1,4 @@
-"""Editing module for API-based response editing with quality tracking.
+"""Editing module for LLM- or code-based response editing with quality tracking.
 
 Example:
     from scripts.editing import run_editing, EditingConfig
@@ -18,6 +18,7 @@ from scripts.editing.config import (
     RetryConfig,
     AnthropicProviderConfig,
     OpenAIProviderConfig,
+    CodeProviderConfig,
     QualityConfig,
 )
 from scripts.editing.prompts import TEMPLATES, get_prompt
@@ -47,6 +48,7 @@ __all__ = [
     "RetryConfig",
     "AnthropicProviderConfig",
     "OpenAIProviderConfig",
+    "CodeProviderConfig",
     "QualityConfig",
     # Prompts
     "TEMPLATES",
