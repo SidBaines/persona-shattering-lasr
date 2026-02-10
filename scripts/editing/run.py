@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 
 from datasets import Dataset
 
-from scripts.editing import anthropic_client, openai_client
+from scripts.common.config import GenerationConfig
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
 from scripts.editing.quality import (
@@ -19,46 +18,70 @@ from scripts.editing.quality import (
     get_metric,
     get_reporters,
 )
+from scripts.inference.config import (
+    InferenceConfig,
+    RetryConfig as InferenceRetryConfig,
+    AnthropicProviderConfig as InferenceAnthropicProviderConfig,
+)
+from scripts.inference.providers.base import InferenceProvider, accumulate_usage
+from scripts.inference.providers import get_provider
 from scripts.utils import read_jsonl, write_jsonl, setup_logging
 
 
 TokenUsage = dict[str, int]
 
+# Progress logging frequency: log every N successful edits
+PROGRESS_LOG_INTERVAL = 10
 
-def validate_api_key(provider: str) -> None:
-    """Validate that the required API key is set for the provider."""
-    provider = provider.lower()
-    if provider == "anthropic":
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise ValueError(
-                "ANTHROPIC_API_KEY environment variable is required for Anthropic provider"
-            )
-    elif provider == "openai":
-        if not os.environ.get("OPENAI_API_KEY"):
-            raise ValueError(
-                "OPENAI_API_KEY environment variable is required for OpenAI provider"
-            )
-    else:
+
+def build_inference_config(config: EditingConfig) -> InferenceConfig:
+    """Create an InferenceConfig from an EditingConfig."""
+    provider = config.provider.lower()
+    if provider not in {"openai", "anthropic"}:
         raise ValueError(f"Unsupported editing provider: {provider}")
 
-
-def select_client(provider: str):
-    """Select the appropriate API client based on provider."""
-    provider = provider.lower()
-    if provider == "anthropic":
-        return anthropic_client.edit_response
+    # Determine model and max_tokens based on provider
     if provider == "openai":
-        return openai_client.edit_response
-    raise ValueError(f"Unsupported editing provider: {provider}")
+        model = config.openai.model or config.model
+        max_tokens = config.openai.max_tokens
+    else:
+        model = config.model
+        max_tokens = config.anthropic.max_tokens
 
+    # Match provider defaults since EditingConfig doesn't expose sampling params.
+    generation = GenerationConfig(
+        max_new_tokens=max_tokens,
+        temperature=1.0,
+        top_p=1.0,
+        do_sample=True,
+        batch_size=max(1, config.max_concurrent),
+        num_responses_per_prompt=1,
+    )
 
-def accumulate_usage(total: TokenUsage, usage: TokenUsage | None) -> None:
-    """Accumulate token usage from a single request."""
-    if not usage:
-        return
-    total["input_tokens"] += usage.get("input_tokens", 0)
-    total["output_tokens"] += usage.get("output_tokens", 0)
-    total["total_tokens"] += usage.get("total_tokens", 0)
+    # Build base inference config
+    inference_config = InferenceConfig(
+        model=model,
+        provider=provider,
+        generation=generation,
+        max_concurrent=config.max_concurrent,
+        timeout=config.timeout,
+        retry=InferenceRetryConfig(
+            max_retries=config.retry.max_retries,
+            backoff_factor=config.retry.backoff_factor,
+        ),
+        # Disable continue_on_error to catch exceptions in edit_one() and track
+        # failures explicitly. This allows accurate per-record failure counting.
+        continue_on_error=False,
+        log_failures=True,
+    )
+
+    # Set provider-specific config only for the active provider
+    if provider == "anthropic":
+        inference_config.anthropic = InferenceAnthropicProviderConfig(
+            max_tokens=config.anthropic.max_tokens
+        )
+
+    return inference_config
 
 
 def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:
@@ -97,7 +120,12 @@ def apply_reporters(
     return record
 
 
-async def edit_dataset(records: list[dict[str, str]], config: EditingConfig, save_path: Path | None = None) -> tuple[list[dict], TokenUsage, int]:
+async def edit_dataset(
+    records: list[dict[str, str]],
+    config: EditingConfig,
+    provider: InferenceProvider,
+    save_path: Path | None = None,
+) -> tuple[list[dict], TokenUsage, int]:
     """Edit all records asynchronously with rate limiting.
 
     Results are written incrementally to save_path (one JSONL row per completion)
@@ -107,35 +135,15 @@ async def edit_dataset(records: list[dict[str, str]], config: EditingConfig, sav
         Tuple of (edited_records, total_usage, failed_count).
     """
     logger = setup_logging()
-    max_concurrent = max(1, config.max_concurrent)
-    semaphore = asyncio.Semaphore(max_concurrent)
-    edit_func = select_client(config.provider)
     total = len(records)
+    max_concurrent = max(1, config.max_concurrent)
+    model_name = getattr(provider, "model", config.model)
 
     # Initialize quality metrics and reporters
     quality_metrics = init_quality_metrics(config)
     quality_reporters = init_quality_reporters(config)
     metrics_key = config.quality.metrics_key
     all_record_metrics: list[dict[str, float | int]] = []
-
-    async def edit_one(index: int, record: dict[str, str]):
-        async with semaphore:
-            prompt = get_prompt(
-                config.prompt_template,
-                question=record["question"],
-                response=record["response"],
-            )
-            # Print what is sent to the teacher
-            print(f"\n{'='*60}")
-            print(f"PROMPT SENT TO TEACHER (sample {index+1}/{total})")
-            print(f"Model: {config.model}")
-            print(f"{'='*60}")
-            print(prompt)
-            print(f"{'='*60}\n")
-            edited_text, usage = await edit_func(prompt, config)
-            return index, edited_text, usage
-
-    tasks = [asyncio.create_task(edit_one(i, record)) for i, record in enumerate(records)]
 
     edited_records: list[dict] = []
     total_usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -149,20 +157,51 @@ async def edit_dataset(records: list[dict[str, str]], config: EditingConfig, sav
     else:
         out_file = None
 
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def edit_one(index: int, record: dict[str, str]):
+        async with semaphore:
+            prompt = get_prompt(
+                config.prompt_template,
+                question=record["question"],
+                response=record["response"],
+            )
+            # Print what is sent to the teacher
+            print(f"\n{'='*60}")
+            print(f"PROMPT SENT TO TEACHER (sample {index+1}/{total})")
+            print(f"Model: {model_name}")
+            print(f"{'='*60}")
+            print(prompt)
+            print(f"{'='*60}\n")
+
+            responses, usage, _ = await provider.generate_batch_with_metadata_async(
+                [prompt], num_responses=1
+            )
+            if len(responses) != 1:
+                raise ValueError(
+                    "Provider returned unexpected number of responses. "
+                    f"Expected 1, got {len(responses)}."
+                )
+            return index, responses[0], usage
+
+    tasks = [asyncio.create_task(edit_one(i, record)) for i, record in enumerate(records)]
+
     try:
         for coro in asyncio.as_completed(tasks):
             try:
-                result = await coro
+                index, edited_text, usage = await coro
             except Exception as exc:
                 failed_count += 1
                 logger.warning("Editing failed for a sample: %s", exc)
                 logger.info(
                     "Progress: %d/%d done (%d succeeded, %d failed)",
-                    succeeded_count + failed_count, total, succeeded_count, failed_count,
+                    succeeded_count + failed_count,
+                    total,
+                    succeeded_count,
+                    failed_count,
                 )
                 continue
 
-            index, edited_text, usage = result
             record = dict(records[index])
             record["edited_response"] = edited_text
 
@@ -185,11 +224,14 @@ async def edit_dataset(records: list[dict[str, str]], config: EditingConfig, sav
                 out_file.write(json.dumps(record) + "\n")
                 out_file.flush()
 
-            # Log progress every row
-            if succeeded_count % 10 == 0 or succeeded_count == total - failed_count:
+            # Log progress periodically and on completion
+            if succeeded_count % PROGRESS_LOG_INTERVAL == 0 or succeeded_count == total - failed_count:
                 logger.info(
                     "Progress: %d/%d done (%d succeeded, %d failed, %d in-flight)",
-                    succeeded_count + failed_count, total, succeeded_count, failed_count,
+                    succeeded_count + failed_count,
+                    total,
+                    succeeded_count,
+                    failed_count,
                     total - succeeded_count - failed_count,
                 )
     finally:
@@ -242,8 +284,6 @@ def run_editing(
     """
     logger = setup_logging()
 
-    validate_api_key(config.provider)
-
     if dataset is None:
         if input_path is None:
             raise ValueError("Either dataset or input_path must be provided")
@@ -258,7 +298,11 @@ def run_editing(
         raise ValueError(f"Editing dataset missing columns: {sorted(missing)}")
 
     records = dataset.to_list()
-    edited_records, total_usage, failed_count = asyncio.run(edit_dataset(records, config))
+    inference_config = build_inference_config(config)
+    provider = get_provider(inference_config.provider, inference_config)
+    edited_records, total_usage, failed_count = asyncio.run(
+        edit_dataset(records, config, provider)
+    )
 
     if not edited_records:
         raise ValueError(

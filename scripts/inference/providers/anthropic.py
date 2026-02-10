@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from anthropic import AsyncAnthropic
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
+from scripts.inference.providers.base import TokenUsage, extract_usage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -42,7 +43,13 @@ class AnthropicProvider(AsyncInferenceProvider):
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = config.model
 
-    async def _generate_one(self, prompt: str, **kwargs) -> str:
+    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+        """Generate a response using the Anthropic API.
+
+        Returns:
+            Tuple of (generated_text, token_usage) where usage contains
+            input_tokens, output_tokens, and total_tokens from the API response.
+        """
         gen_cfg = self.generation_config
         max_tokens = kwargs.get(
             "max_tokens",
@@ -64,4 +71,6 @@ class AnthropicProvider(AsyncInferenceProvider):
         if self.timeout is not None:
             params["timeout"] = self.timeout
         response = await self.client.messages.create(**params)
-        return _extract_text(response.content)
+        text = _extract_text(response.content)
+        usage = extract_usage(response.usage)
+        return text, usage

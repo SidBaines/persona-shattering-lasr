@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
+from scripts.inference.providers.base import TokenUsage, extract_usage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -65,6 +66,21 @@ def _response_summary(response: Any) -> str:
     return f"status={status!r} incomplete={incomplete!r} error={error!r}"
 
 
+def _extract_response_usage(response: Any) -> TokenUsage | None:
+    """Extract usage from OpenAI response object.
+
+    The response object may contain usage directly, so we extract it
+    before passing to the shared extract_usage utility.
+    """
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        usage = response.get("usage")
+    else:
+        usage = getattr(response, "usage", None)
+    return extract_usage(usage)
+
+
 class OpenAIProvider(AsyncInferenceProvider):
     """Inference provider using the OpenAI Responses API."""
 
@@ -89,7 +105,13 @@ class OpenAIProvider(AsyncInferenceProvider):
         self.model = config.model
         logger.info("Initialized OpenAI provider with model: %s", self.model)
 
-    async def _generate_one(self, prompt: str, **kwargs) -> str:
+    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+        """Generate a response using the OpenAI Responses API.
+
+        Returns:
+            Tuple of (generated_text, token_usage) where usage contains
+            input_tokens, output_tokens, and total_tokens from the API response.
+        """
         gen_cfg = self.generation_config
         openai_cfg = self.openai_config
 
@@ -136,9 +158,10 @@ class OpenAIProvider(AsyncInferenceProvider):
 
         response = await _create_response(prompt)
         text = _extract_output_text(response)
+        usage = _extract_response_usage(response)
         if not text:
             logger.warning(
                 "OpenAI Responses API returned empty text (%s).",
                 _response_summary(response),
             )
-        return text
+        return text, usage

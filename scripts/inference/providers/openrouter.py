@@ -10,11 +10,27 @@ from typing import TYPE_CHECKING
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
+from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage, extract_usage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_response_usage(response) -> TokenUsage | None:
+    """Extract usage from OpenRouter response object.
+
+    The response object may contain usage directly, so we extract it
+    before passing to the shared extract_usage utility.
+    """
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        usage = response.get("usage")
+    else:
+        usage = getattr(response, "usage", None)
+    return extract_usage(usage)
 
 
 class OpenRouterProvider(AsyncInferenceProvider):
@@ -119,7 +135,9 @@ class OpenRouterProvider(AsyncInferenceProvider):
                 )
             raise
 
-    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
+    async def generate_batch_with_metadata_async(
+        self, prompts: list[str], **kwargs
+    ) -> tuple[list[str], TokenUsage, int]:
         gen_cfg = self.generation_config
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
 
@@ -131,9 +149,13 @@ class OpenRouterProvider(AsyncInferenceProvider):
 
         total = len(prompts) * num_responses
         responses: list[str] = [""] * total
+        failures: list[bool] = [False] * total
+        usage_per_prompt: list[TokenUsage | None] = [None] * len(prompts)
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
-        async def fetch_one(prompt: str, *, context: str) -> str:
+        async def fetch_one(
+            prompt: str, *, context: str
+        ) -> tuple[str, TokenUsage | None]:
             async with semaphore:
                 response = await self._call_with_retry(
                     lambda: self._create_completion(
@@ -146,8 +168,10 @@ class OpenRouterProvider(AsyncInferenceProvider):
                     context=context,
                 )
             if response.choices:
-                return (response.choices[0].message.content or "").strip()
-            return ""
+                text = (response.choices[0].message.content or "").strip()
+            else:
+                text = ""
+            return text, _extract_response_usage(response)
 
         async def run_one(prompt_index: int, response_index: int) -> None:
             prompt = prompts[prompt_index]
@@ -155,19 +179,24 @@ class OpenRouterProvider(AsyncInferenceProvider):
                 f"{self.__class__.__name__} prompt={prompt_index} response={response_index}"
             )
             try:
-                text = await fetch_one(prompt, context=context)
+                text, usage = await fetch_one(prompt, context=context)
             except Exception as exc:
                 if self.log_failures:
                     logger.warning("%s failed: %s", context, exc)
                 if not self.continue_on_error:
                     raise
                 text = ""
+                usage = None
+            if not text:
+                failures[prompt_index * num_responses + response_index] = True
             responses[prompt_index * num_responses + response_index] = text
+            usage_per_prompt[prompt_index] = usage
 
         async def run_many(prompt_index: int) -> None:
             prompt = prompts[prompt_index]
             context = f"{self.__class__.__name__} prompt={prompt_index} n={num_responses}"
             texts: list[str] = []
+            usage_total = empty_usage()
             try:
                 async with semaphore:
                     response = await self._call_with_retry(
@@ -185,6 +214,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
                     (choice.message.content or "").strip()
                     for choice in choices[:num_responses]
                 ]
+                accumulate_usage(usage_total, _extract_response_usage(response))
                 if len(texts) < num_responses:
                     logger.warning(
                         "OpenRouter returned %d/%d choices; filling with extra calls.",
@@ -204,18 +234,24 @@ class OpenRouterProvider(AsyncInferenceProvider):
             if len(texts) < num_responses:
                 for _ in range(num_responses - len(texts)):
                     try:
-                        texts.append(
-                            await fetch_one(prompt, context=f"{context} fallback")
+                        text, usage = await fetch_one(
+                            prompt, context=f"{context} fallback"
                         )
                     except Exception as exc:
                         if self.log_failures:
                             logger.warning("%s fallback failed: %s", context, exc)
                         if not self.continue_on_error:
                             raise
-                        texts.append("")
+                        text = ""
+                        usage = None
+                    texts.append(text)
+                    accumulate_usage(usage_total, usage)
 
             for response_index, text in enumerate(texts[:num_responses]):
                 responses[prompt_index * num_responses + response_index] = text
+                if not text:
+                    failures[prompt_index * num_responses + response_index] = True
+            usage_per_prompt[prompt_index] = usage_total
 
         tasks = []
         if num_responses <= 1:
@@ -230,11 +266,15 @@ class OpenRouterProvider(AsyncInferenceProvider):
             ]
 
         if not tasks:
-            return responses
+            return responses, empty_usage(), 0
 
         if self.continue_on_error:
             await asyncio.gather(*tasks)
-            return responses
+            total_usage = empty_usage()
+            for usage in usage_per_prompt:
+                accumulate_usage(total_usage, usage)
+            failed_count = sum(1 for failed in failures if failed)
+            return responses, total_usage, failed_count
 
         done, pending = await asyncio.wait(
             tasks, return_when=asyncio.FIRST_EXCEPTION
@@ -249,4 +289,14 @@ class OpenRouterProvider(AsyncInferenceProvider):
         if pending:
             await asyncio.gather(*pending)
 
+        total_usage = empty_usage()
+        for usage in usage_per_prompt:
+            accumulate_usage(total_usage, usage)
+        failed_count = sum(1 for failed in failures if failed)
+        return responses, total_usage, failed_count
+
+    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
+        responses, _, _ = await self.generate_batch_with_metadata_async(
+            prompts, **kwargs
+        )
         return responses

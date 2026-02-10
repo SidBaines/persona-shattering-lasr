@@ -10,6 +10,7 @@ from datasets import Dataset
 from scripts.data_loading import load_dataset_from_config, format_for_inference
 from scripts.inference.config import InferenceConfig, InferenceResult
 from scripts.inference.providers import get_provider
+from scripts.inference.providers.base import accumulate_usage, empty_usage
 from scripts.utils import write_jsonl, setup_logging
 
 
@@ -54,6 +55,8 @@ async def run_inference_async(
     responses: list[str] = []
     questions_out: list[str] = []
     response_indices: list[int] = []
+    total_usage = empty_usage()
+    failed_count = 0
     batch_size = max(1, generation.batch_size)
     num_responses = max(1, generation.num_responses_per_prompt)
 
@@ -72,7 +75,11 @@ async def run_inference_async(
     for start in range(0, len(dataset), batch_size):
         end = min(start + batch_size, len(dataset))
         batch_questions = dataset[start:end]["question"]
-        batch_responses = await provider.generate_batch_async(
+        (
+            batch_responses,
+            batch_usage,
+            batch_failed,
+        ) = await provider.generate_batch_with_metadata_async(
             batch_questions, num_responses=num_responses
         )
         if len(batch_responses) != len(batch_questions) * num_responses:
@@ -80,6 +87,8 @@ async def run_inference_async(
                 "Provider returned unexpected number of responses. "
                 f"Expected {len(batch_questions) * num_responses}, got {len(batch_responses)}."
             )
+        accumulate_usage(total_usage, batch_usage)
+        failed_count += batch_failed
         for question_index, question in enumerate(batch_questions):
             for response_index in range(num_responses):
                 output_index = question_index * num_responses + response_index
@@ -101,8 +110,17 @@ async def run_inference_async(
         ]
     )
 
+    if failed_count:
+        logger.warning("Inference completed with %d failed responses.", failed_count)
+
     # Save outputs if path specified
-    result = InferenceResult(num_samples=len(result_dataset))
+    result = InferenceResult(
+        num_samples=len(result_dataset),
+        num_failed=failed_count,
+        total_input_tokens=total_usage["input_tokens"],
+        total_output_tokens=total_usage["output_tokens"],
+        total_tokens=total_usage["total_tokens"],
+    )
     if config.output_path:
         save_path = Path(config.output_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)

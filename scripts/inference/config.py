@@ -118,5 +118,9 @@ class InferenceResult(BaseModel):
 
     output_path: Path | None = None
     num_samples: int = 0
+    num_failed: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
     batch_id: str | None = None
     batch_status: str | None = None

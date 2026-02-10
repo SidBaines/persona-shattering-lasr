@@ -6,7 +6,12 @@ import asyncio
 import logging
 from typing import Awaitable, Callable, TypeVar, TYPE_CHECKING
 
-from scripts.inference.providers.base import InferenceProvider
+from scripts.inference.providers.base import (
+    InferenceProvider,
+    TokenUsage,
+    accumulate_usage,
+    empty_usage,
+)
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig, RetryConfig
@@ -27,8 +32,19 @@ class AsyncInferenceProvider(InferenceProvider):
         self.continue_on_error = config.continue_on_error
         self.log_failures = config.log_failures
 
-    async def _generate_one(self, prompt: str, **kwargs) -> str:
-        """Generate a response for a single prompt (async)."""
+    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+        """Generate a response for a single prompt (async).
+
+        Args:
+            prompt: The input prompt string.
+            **kwargs: Additional generation parameters (e.g., temperature, max_tokens).
+
+        Returns:
+            Tuple of (generated_text, token_usage).
+            - generated_text: The model's response as a string.
+            - token_usage: Dict with 'input_tokens', 'output_tokens', 'total_tokens',
+              or None if usage information is unavailable.
+        """
         raise NotImplementedError
 
     async def _call_with_retry(
@@ -57,11 +73,15 @@ class AsyncInferenceProvider(InferenceProvider):
                 await asyncio.sleep(delay)
         raise RuntimeError("Retry loop exited unexpectedly.")
 
-    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
+    async def generate_batch_with_metadata_async(
+        self, prompts: list[str], **kwargs
+    ) -> tuple[list[str], TokenUsage, int]:
         gen_cfg = self.generation_config
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
         total = len(prompts) * num_responses
         responses: list[str] = [""] * total
+        usages: list[TokenUsage | None] = [None] * total
+        failures: list[bool] = [False] * total
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
         async def run_one(prompt_index: int, response_index: int) -> None:
@@ -69,9 +89,11 @@ class AsyncInferenceProvider(InferenceProvider):
             context = (
                 f"{self.__class__.__name__} prompt={prompt_index} response={response_index}"
             )
+            text: str
+            usage: TokenUsage | None
             async with semaphore:
                 try:
-                    text = await self._call_with_retry(
+                    text, usage = await self._call_with_retry(
                         lambda: self._generate_one(prompt, **kwargs),
                         context=context,
                     )
@@ -81,7 +103,11 @@ class AsyncInferenceProvider(InferenceProvider):
                     if not self.continue_on_error:
                         raise
                     text = ""
+                    usage = None
+            if not text:
+                failures[prompt_index * num_responses + response_index] = True
             responses[prompt_index * num_responses + response_index] = text
+            usages[prompt_index * num_responses + response_index] = usage
 
         tasks = [
             asyncio.create_task(run_one(prompt_index, response_index))
@@ -90,11 +116,15 @@ class AsyncInferenceProvider(InferenceProvider):
         ]
 
         if not tasks:
-            return responses
+            return responses, empty_usage(), 0
 
         if self.continue_on_error:
             await asyncio.gather(*tasks)
-            return responses
+            total_usage = empty_usage()
+            for usage in usages:
+                accumulate_usage(total_usage, usage)
+            failed_count = sum(1 for failed in failures if failed)
+            return responses, total_usage, failed_count
 
         done, pending = await asyncio.wait(
             tasks, return_when=asyncio.FIRST_EXCEPTION
@@ -109,6 +139,16 @@ class AsyncInferenceProvider(InferenceProvider):
         if pending:
             await asyncio.gather(*pending)
 
+        total_usage = empty_usage()
+        for usage in usages:
+            accumulate_usage(total_usage, usage)
+        failed_count = sum(1 for failed in failures if failed)
+        return responses, total_usage, failed_count
+
+    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
+        responses, _, _ = await self.generate_batch_with_metadata_async(
+            prompts, **kwargs
+        )
         return responses
 
     def generate(self, prompt: str, **kwargs) -> str:
