@@ -19,6 +19,8 @@ from scripts.training.config import (
     LoraConfig,
     SftConfig,
     CheckpointConfig,
+    TrainingMetricsConfig,
+    TrainingEvaluationConfig,
 )
 from scripts.training.run import run_training
 from scripts.training.cli import main
@@ -30,6 +32,8 @@ __all__ = [
     "LoraConfig",
     "SftConfig",
     "CheckpointConfig",
+    "TrainingMetricsConfig",
+    "TrainingEvaluationConfig",
     # Run function
     "run_training",
     # CLI entry point

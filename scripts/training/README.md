@@ -1,6 +1,7 @@
 # Training
 
-LoRA fine-tuning for causal language models using SFT (Supervised Fine-Tuning). Trains a LoRA adapter on an edited dataset with built-in O-count evaluation callbacks and W&B logging.
+LoRA fine-tuning for causal language models using SFT (Supervised Fine-Tuning).
+Trains a LoRA adapter on an edited dataset with configurable evaluations and W&B logging.
 
 ## CLI Usage
 
@@ -51,13 +52,17 @@ uv run python -m scripts.training \
 
 ```python
 from pathlib import Path
-from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig
+from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig, TrainingEvaluationConfig
 from scripts.common.config import ModelConfig
 
 config = TrainingConfig(
     model=ModelConfig(name="Qwen/Qwen2.5-0.5B-Instruct"),
     lora=LoraConfig(r=16, lora_alpha=32),
     sft=SftConfig(num_train_epochs=3),
+    evaluation=TrainingEvaluationConfig(
+        evaluations=["count_o", "coherence"],
+        eval_every_n_epochs=1,
+    ),
     checkpoint_dir=Path("scratch/checkpoints"),
 )
 val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl"))
@@ -66,6 +71,7 @@ val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl
 ## Features
 
 - **LoRA adapters**: Efficient fine-tuning with configurable rank and alpha
-- **O-count callbacks**: Real-time monitoring of O-frequency during training (logged to W&B)
+- **Configurable evaluations**: Run any evaluation from `scripts.evaluation` during training
+- **Training metrics**: Gradient/parameter norm logging (W&B)
 - **W&B integration**: Automatic logging of metrics, sample tables, and LoRA adapter artifacts
 - **Train/val split**: Automatic dataset splitting with configurable ratio
