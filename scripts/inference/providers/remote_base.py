@@ -33,18 +33,7 @@ class AsyncInferenceProvider(InferenceProvider):
         self.log_failures = config.log_failures
 
     async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
-        """Generate a response for a single prompt (async).
-
-        Args:
-            prompt: The input prompt string.
-            **kwargs: Additional generation parameters (e.g., temperature, max_tokens).
-
-        Returns:
-            Tuple of (generated_text, token_usage).
-            - generated_text: The model's response as a string.
-            - token_usage: Dict with 'input_tokens', 'output_tokens', 'total_tokens',
-              or None if usage information is unavailable.
-        """
+        """Generate a response for a single prompt (async)."""
         raise NotImplementedError
 
     async def _call_with_retry(

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage, extract_usage
+from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -18,19 +18,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _extract_response_usage(response) -> TokenUsage | None:
-    """Extract usage from OpenRouter response object.
-
-    The response object may contain usage directly, so we extract it
-    before passing to the shared extract_usage utility.
-    """
+def _extract_usage(response) -> TokenUsage | None:
     if response is None:
         return None
     if isinstance(response, dict):
         usage = response.get("usage")
     else:
         usage = getattr(response, "usage", None)
-    return extract_usage(usage)
+    if usage is None:
+        return None
+
+    if isinstance(usage, dict):
+        prompt_tokens = usage.get("prompt_tokens", 0) or 0
+        completion_tokens = usage.get("completion_tokens", 0) or 0
+        total_tokens = usage.get("total_tokens", 0) or 0
+    else:
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        total_tokens = getattr(usage, "total_tokens", 0) or 0
+
+    prompt_tokens = int(prompt_tokens)
+    completion_tokens = int(completion_tokens)
+    total_tokens = int(total_tokens)
+    if total_tokens == 0:
+        total_tokens = prompt_tokens + completion_tokens
+    return {
+        "input_tokens": prompt_tokens,
+        "output_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
 
 
 class OpenRouterProvider(AsyncInferenceProvider):
@@ -171,7 +187,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
                 text = (response.choices[0].message.content or "").strip()
             else:
                 text = ""
-            return text, _extract_response_usage(response)
+            return text, _extract_usage(response)
 
         async def run_one(prompt_index: int, response_index: int) -> None:
             prompt = prompts[prompt_index]
@@ -214,7 +230,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
                     (choice.message.content or "").strip()
                     for choice in choices[:num_responses]
                 ]
-                accumulate_usage(usage_total, _extract_response_usage(response))
+                accumulate_usage(usage_total, _extract_usage(response))
                 if len(texts) < num_responses:
                     logger.warning(
                         "OpenRouter returned %d/%d choices; filling with extra calls.",

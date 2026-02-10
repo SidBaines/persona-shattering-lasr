@@ -35,37 +35,24 @@ TokenUsage = dict[str, int]
 # Progress logging frequency: log every N successful edits
 PROGRESS_LOG_INTERVAL = 10
 
-
-def load_code_editor(editor_path: str) -> Callable[[str, dict], str]:
-    """Load a code-based editor from a 'module.submodule:func' path."""
-    if ":" not in editor_path:
-        raise ValueError(
-            "Code editor path must be in the form 'module.submodule:func'. "
-            f"Got: {editor_path}"
-        )
-    module_path, attr = editor_path.split(":", 1)
-    module = importlib.import_module(module_path)
-    editor = getattr(module, attr, None)
-    if editor is None:
-        raise ValueError(f"Editor '{attr}' not found in module '{module_path}'.")
-    if not callable(editor):
-        raise TypeError(f"Editor '{editor_path}' is not callable.")
-    return editor
-
-
 def build_inference_config(config: EditingConfig) -> InferenceConfig:
     """Create an InferenceConfig from an EditingConfig."""
     provider = config.provider.lower()
     if provider not in {"openai", "anthropic"}:
         raise ValueError(f"Unsupported editing provider: {provider}")
 
-    # Determine model and max_tokens based on provider
+    model = config.model
+    if provider == "openai" and config.openai.model:
+        model = config.openai.model
+
     if provider == "openai":
-        model = config.openai.model or config.model
         max_tokens = config.openai.max_tokens
+        anthropic_cfg = InferenceAnthropicProviderConfig()
     else:
-        model = config.model
         max_tokens = config.anthropic.max_tokens
+        anthropic_cfg = InferenceAnthropicProviderConfig(
+            max_tokens=config.anthropic.max_tokens
+        )
 
     # Match provider defaults since EditingConfig doesn't expose sampling params.
     generation = GenerationConfig(
@@ -77,8 +64,7 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
         num_responses_per_prompt=1,
     )
 
-    # Build base inference config
-    inference_config = InferenceConfig(
+    return InferenceConfig(
         model=model,
         provider=provider,
         generation=generation,
@@ -88,19 +74,11 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
             max_retries=config.retry.max_retries,
             backoff_factor=config.retry.backoff_factor,
         ),
-        # Disable continue_on_error to catch exceptions in edit_one() and track
-        # failures explicitly. This allows accurate per-record failure counting.
+        # Let per-record tasks surface errors so we can count failures.
         continue_on_error=False,
         log_failures=True,
+        anthropic=anthropic_cfg,
     )
-
-    # Set provider-specific config only for the active provider
-    if provider == "anthropic":
-        inference_config.anthropic = InferenceAnthropicProviderConfig(
-            max_tokens=config.anthropic.max_tokens
-        )
-
-    return inference_config
 
 
 def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:
@@ -411,21 +389,11 @@ def run_editing(
         raise ValueError(f"Editing dataset missing columns: {sorted(missing)}")
 
     records = dataset.to_list()
-    provider_name = config.provider.lower()
-    if provider_name not in {"anthropic", "openai", "code"}:
-        raise ValueError(f"Unsupported editing provider: {config.provider}")
-
-    if provider_name == "code":
-        editor = load_code_editor(config.code.editor)
-        edited_records, total_usage, failed_count = edit_dataset_with_code(
-            records, config, editor
-        )
-    else:
-        inference_config = build_inference_config(config)
-        provider = get_provider(inference_config.provider, inference_config)
-        edited_records, total_usage, failed_count = asyncio.run(
-            edit_dataset(records, config, provider)
-        )
+    inference_config = build_inference_config(config)
+    provider = get_provider(inference_config.provider, inference_config)
+    edited_records, total_usage, failed_count = asyncio.run(
+        edit_dataset(records, config, provider)
+    )
 
     if not edited_records:
         raise ValueError(
