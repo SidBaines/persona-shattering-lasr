@@ -21,8 +21,6 @@ from scripts.editing.config import (
     QualityConfig,
 )
 from scripts.editing.prompts import TEMPLATES, get_prompt
-from scripts.editing.anthropic_client import edit_response as anthropic_edit
-from scripts.editing.openai_client import edit_response as openai_edit
 from scripts.editing.quality import (
     EditQualityMetric,
     CountOMetric,
@@ -53,9 +51,6 @@ __all__ = [
     # Prompts
     "TEMPLATES",
     "get_prompt",
-    # Clients
-    "anthropic_edit",
-    "openai_edit",
     # Quality
     "EditQualityMetric",
     "CountOMetric",

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from anthropic import AsyncAnthropic
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
+from scripts.inference.providers.base import TokenUsage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -22,6 +23,24 @@ def _extract_text(content: list[Any] | None) -> str:
         if text:
             parts.append(text)
     return "".join(parts).strip()
+
+
+def _extract_usage(usage: Any) -> TokenUsage | None:
+    if usage is None:
+        return None
+    if isinstance(usage, dict):
+        input_tokens = usage.get("input_tokens", 0) or 0
+        output_tokens = usage.get("output_tokens", 0) or 0
+    else:
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", 0) or 0
+    input_tokens = int(input_tokens)
+    output_tokens = int(output_tokens)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
 
 
 class AnthropicProvider(AsyncInferenceProvider):
@@ -42,7 +61,7 @@ class AnthropicProvider(AsyncInferenceProvider):
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = config.model
 
-    async def _generate_one(self, prompt: str, **kwargs) -> str:
+    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
         gen_cfg = self.generation_config
         max_tokens = kwargs.get(
             "max_tokens",
@@ -64,4 +83,6 @@ class AnthropicProvider(AsyncInferenceProvider):
         if self.timeout is not None:
             params["timeout"] = self.timeout
         response = await self.client.messages.create(**params)
-        return _extract_text(response.content)
+        text = _extract_text(response.content)
+        usage = _extract_usage(response.usage)
+        return text, usage

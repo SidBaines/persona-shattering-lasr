@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
+from scripts.inference.providers.base import TokenUsage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -65,6 +66,41 @@ def _response_summary(response: Any) -> str:
     return f"status={status!r} incomplete={incomplete!r} error={error!r}"
 
 
+def _extract_usage(response: Any) -> TokenUsage | None:
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        usage = response.get("usage")
+    else:
+        usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+
+    if isinstance(usage, dict):
+        input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0
+        output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
+        total_tokens = usage.get("total_tokens", 0) or 0
+    else:
+        input_tokens = getattr(usage, "input_tokens", None)
+        if input_tokens is None:
+            input_tokens = getattr(usage, "prompt_tokens", 0)
+        output_tokens = getattr(usage, "output_tokens", None)
+        if output_tokens is None:
+            output_tokens = getattr(usage, "completion_tokens", 0)
+        total_tokens = getattr(usage, "total_tokens", 0)
+
+    input_tokens = int(input_tokens or 0)
+    output_tokens = int(output_tokens or 0)
+    total_tokens = int(total_tokens or 0)
+    if total_tokens == 0:
+        total_tokens = input_tokens + output_tokens
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
 class OpenAIProvider(AsyncInferenceProvider):
     """Inference provider using the OpenAI Responses API."""
 
@@ -89,7 +125,7 @@ class OpenAIProvider(AsyncInferenceProvider):
         self.model = config.model
         logger.info("Initialized OpenAI provider with model: %s", self.model)
 
-    async def _generate_one(self, prompt: str, **kwargs) -> str:
+    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
         gen_cfg = self.generation_config
         openai_cfg = self.openai_config
 
@@ -136,9 +172,10 @@ class OpenAIProvider(AsyncInferenceProvider):
 
         response = await _create_response(prompt)
         text = _extract_output_text(response)
+        usage = _extract_usage(response)
         if not text:
             logger.warning(
                 "OpenAI Responses API returned empty text (%s).",
                 _response_summary(response),
             )
-        return text
+        return text, usage
