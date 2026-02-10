@@ -27,6 +27,12 @@ class OpenAIProviderConfig(BaseModel):
     max_tokens: int = 1024
 
 
+class CodeProviderConfig(BaseModel):
+    """Code-based editor settings."""
+
+    editor: str = "scripts.editing.code_editors:reverse_text"
+
+
 class QualityConfig(BaseModel):
     """Edit quality evaluation configuration."""
 
@@ -51,7 +57,7 @@ class EditingConfig(BaseModel):
     """
 
     # Provider settings
-    provider: str = "anthropic"  # "anthropic" or "openai"
+    provider: str = "anthropic"  # "anthropic", "openai", or "code"
     model: str = "claude-sonnet-4-20250514"
     prompt_template: str = "default_persona_shatter"
 
@@ -65,6 +71,7 @@ class EditingConfig(BaseModel):
     # Provider-specific settings
     anthropic: AnthropicProviderConfig = AnthropicProviderConfig()
     openai: OpenAIProviderConfig = OpenAIProviderConfig()
+    code: CodeProviderConfig = CodeProviderConfig()
 
     # Quality metrics
     quality: QualityConfig = QualityConfig()
