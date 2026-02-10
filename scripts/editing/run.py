@@ -35,6 +35,23 @@ TokenUsage = dict[str, int]
 # Progress logging frequency: log every N successful edits
 PROGRESS_LOG_INTERVAL = 10
 
+def load_code_editor(editor_path: str) -> Callable[[str, dict], str]:
+    """Load a code-based editor from a 'module.submodule:func' path."""
+    if ":" not in editor_path:
+        raise ValueError(
+            "Code editor path must be in the form 'module.submodule:func'. "
+            f"Got: {editor_path}"
+        )
+    module_path, attr = editor_path.split(":", 1)
+    module = importlib.import_module(module_path)
+    editor = getattr(module, attr, None)
+    if editor is None:
+        raise ValueError(f"Editor '{attr}' not found in module '{module_path}'.")
+    if not callable(editor):
+        raise TypeError(f"Editor '{editor_path}' is not callable.")
+    return editor
+
+
 def build_inference_config(config: EditingConfig) -> InferenceConfig:
     """Create an InferenceConfig from an EditingConfig."""
     provider = config.provider.lower()
@@ -389,11 +406,21 @@ def run_editing(
         raise ValueError(f"Editing dataset missing columns: {sorted(missing)}")
 
     records = dataset.to_list()
-    inference_config = build_inference_config(config)
-    provider = get_provider(inference_config.provider, inference_config)
-    edited_records, total_usage, failed_count = asyncio.run(
-        edit_dataset(records, config, provider)
-    )
+    provider_name = config.provider.lower()
+    if provider_name not in {"anthropic", "openai", "code"}:
+        raise ValueError(f"Unsupported editing provider: {config.provider}")
+
+    if provider_name == "code":
+        editor = load_code_editor(config.code.editor)
+        edited_records, total_usage, failed_count = edit_dataset_with_code(
+            records, config, editor
+        )
+    else:
+        inference_config = build_inference_config(config)
+        provider = get_provider(inference_config.provider, inference_config)
+        edited_records, total_usage, failed_count = asyncio.run(
+            edit_dataset(records, config, provider)
+        )
 
     if not edited_records:
         raise ValueError(
