@@ -60,6 +60,12 @@ uv run python -m scripts.inference \
   --temperature 0.9 \
   --dataset-name vicgalle/alpaca-gpt4 \
   --output-path scratch/multi_response.jsonl
+
+Note: For the local provider, `num_responses` is implemented via HF
+`num_return_sequences` inside a single generate call. The effective
+generation batch is `batch_size * num_responses`, so if you increase
+`num_responses` you may need to decrease `batch_size` proportionally
+to avoid OOM.
 ```
 
 ### CLI Options
