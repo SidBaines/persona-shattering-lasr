@@ -17,14 +17,49 @@ class LocalProviderConfig(BaseModel):
     revision: str = "main"
 
 
-class OpenAIProviderConfig(BaseModel):
-    """OpenAI-compatible API settings.
+class OpenAIBatchConfig(BaseModel):
+    """Batch API settings for OpenAI Responses endpoint."""
 
-    Works with OpenAI, OpenRouter, vLLM, and any OpenAI-compatible endpoint.
-    """
+    enabled: bool = False
+    completion_window: str = "24h"
+    poll_interval_seconds: int = 10
+    timeout_seconds: int | None = None
+    include_sampling: bool = False
+    run_dir: str | None = None
+    resume: bool = False
+
+
+class RetryConfig(BaseModel):
+    """API retry configuration."""
+
+    max_retries: int = 3
+    backoff_factor: float = 2.0
+
+
+class OpenAIProviderConfig(BaseModel):
+    """OpenAI API settings."""
 
     base_url: str | None = None  # None = use default OpenAI API
     api_key_env: str = "OPENAI_API_KEY"  # Environment variable name for API key
+    reasoning_effort: str | None = None  # "none" | "low" | "medium" | "high"
+    verbosity: str | None = None  # "low" | "medium" | "high"
+    batch: OpenAIBatchConfig = OpenAIBatchConfig()
+
+
+class OpenRouterProviderConfig(BaseModel):
+    """OpenRouter API settings (OpenAI-compatible)."""
+
+    base_url: str = "https://openrouter.ai/api/v1"
+    api_key_env: str = "OPENROUTER_API_KEY"
+    app_url: str | None = None
+    app_name: str | None = None
+
+
+class AnthropicProviderConfig(BaseModel):
+    """Anthropic API settings."""
+
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    max_tokens: int | None = None
 
 
 class InferenceConfig(BaseModel):
@@ -50,7 +85,7 @@ class InferenceConfig(BaseModel):
 
     # Model settings
     model: str = "meta-llama/Llama-3.1-8B-Instruct"
-    provider: str = "local"  # "local" or "openai"
+    provider: str = "local"  # "local", "openai", "openrouter", "anthropic"
 
     # Dataset settings
     dataset: DatasetConfig = DatasetConfig()
@@ -58,9 +93,18 @@ class InferenceConfig(BaseModel):
     # Generation settings
     generation: GenerationConfig = GenerationConfig()
 
+    # Async + retry settings (for remote providers)
+    max_concurrent: int = 10
+    timeout: int | None = 60
+    retry: RetryConfig = RetryConfig()
+    continue_on_error: bool = True
+    log_failures: bool = True
+
     # Provider-specific settings
     local: LocalProviderConfig = LocalProviderConfig()
     openai: OpenAIProviderConfig = OpenAIProviderConfig()
+    openrouter: OpenRouterProviderConfig = OpenRouterProviderConfig()
+    anthropic: AnthropicProviderConfig = AnthropicProviderConfig()
 
     # Output
     output_path: Path | None = None  # If None, returns dataset without saving
@@ -74,3 +118,5 @@ class InferenceResult(BaseModel):
 
     output_path: Path | None = None
     num_samples: int = 0
+    batch_id: str | None = None
+    batch_status: str | None = None

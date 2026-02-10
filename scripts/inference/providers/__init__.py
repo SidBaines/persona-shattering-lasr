@@ -13,7 +13,7 @@ def get_provider(name: str, config: "InferenceConfig") -> "InferenceProvider":
     """Get an inference provider by name.
 
     Args:
-        name: Provider name ("local" or "openai").
+        name: Provider name ("local", "openai", "openrouter", or "anthropic").
         config: Inference configuration.
 
     Returns:
@@ -28,8 +28,19 @@ def get_provider(name: str, config: "InferenceConfig") -> "InferenceProvider":
 
         return LocalProvider(config)
     elif name == "openai":
-        from scripts.inference.providers.openai_compat import OpenAICompatProvider
+        from scripts.inference.providers.openai import OpenAIProvider
 
-        return OpenAICompatProvider(config)
+        return OpenAIProvider(config)
+    elif name == "openrouter":
+        from scripts.inference.providers.openrouter import OpenRouterProvider
+
+        return OpenRouterProvider(config)
+    elif name == "anthropic":
+        from scripts.inference.providers.anthropic import AnthropicProvider
+
+        return AnthropicProvider(config)
     else:
-        raise ValueError(f"Unknown inference provider: {name!r}. Available: ['local', 'openai']")
+        raise ValueError(
+            f"Unknown inference provider: {name!r}. "
+            "Available: ['local', 'openai', 'openrouter', 'anthropic']"
+        )
