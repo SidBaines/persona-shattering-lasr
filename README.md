@@ -123,7 +123,7 @@ See `experiments/toy_model.py` for a complete example.
 ### Inference (`scripts.inference`)
 - `InferenceConfig` - Configuration for inference
 - `run_inference(config, dataset=None)` - Run inference, returns (dataset, result)
-- Providers: `local` (HuggingFace), `openai` (OpenAI-compatible API)
+- Providers: `local` (HuggingFace), `openai` (OpenAI), `openrouter` (OpenRouter), `anthropic` (Anthropic)
 
 ### Editing (`scripts.editing`)
 - `EditingConfig` - Configuration for editing
