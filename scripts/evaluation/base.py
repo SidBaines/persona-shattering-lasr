@@ -5,13 +5,23 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 
+from scripts.evaluation.config import JudgeLLMConfig
+
 
 class Evaluation(ABC):
     """Abstract base class for evaluations.
 
     Evaluations take a response (and optionally a question) and return
     a dict of metric values. They can be used at any pipeline stage.
+
+    Args:
+        judge_config: Optional LLM judge configuration. Evaluations that
+            need an LLM (e.g., CoherenceEvaluation) use this; others
+            ignore it.
     """
+
+    def __init__(self, judge_config: JudgeLLMConfig | None = None) -> None:
+        self.judge_config = judge_config
 
     @property
     @abstractmethod
