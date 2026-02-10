@@ -69,7 +69,8 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
             max_retries=config.retry.max_retries,
             backoff_factor=config.retry.backoff_factor,
         ),
-        # Let per-record tasks surface errors so we can count failures.
+        # Disable continue_on_error to catch exceptions in edit_one() and track
+        # failures explicitly. This allows accurate per-record failure counting.
         continue_on_error=False,
         log_failures=True,
     )
