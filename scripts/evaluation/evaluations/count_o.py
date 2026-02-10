@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.evaluation.base import Evaluation, EvaluationContext
+from scripts.evaluation.base import Evaluation
 
 
 class CountOEvaluation(Evaluation):
@@ -17,25 +17,20 @@ class CountOEvaluation(Evaluation):
         return "count_o"
 
     def evaluate(
-        self,
-        response: str,
-        question: str | None = None,
-        *,
-        context: EvaluationContext | None = None,
+        self, response: str, question: str | None = None
     ) -> dict[str, int | float]:
         """Count 'o' characters in the response.
 
         Args:
             response: The response text to evaluate.
             question: Ignored for this evaluation.
-            context: Ignored for this evaluation.
 
         Returns:
-            Dict with count_o.count and count_o.density (percentage of chars).
+            Dict with count_o.count and count_o.density (per 1000 chars).
         """
         count = response.lower().count("o")
         length = len(response)
-        density = (count / length * 100) if length > 0 else 0.0
+        density = (count / length * 1000) if length > 0 else 0.0
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),

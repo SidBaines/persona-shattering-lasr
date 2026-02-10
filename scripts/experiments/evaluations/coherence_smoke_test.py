@@ -176,10 +176,8 @@ def test_run_evaluation(judge_config: JudgeLLMConfig, output_path: Path | None =
 
     print("  Aggregates:")
     for key, value in sorted(result.aggregates.items()):
-        if isinstance(value, float):
+        if "reasoning" not in key:
             print(f"    {key}: {value:.4f}")
-        else:
-            print(f"    {key}: {value}")
     print()
 
     if result.output_path:

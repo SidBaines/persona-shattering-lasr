@@ -33,7 +33,7 @@ uv run python -m scripts.evaluation \
 
 ```python
 from pathlib import Path
-from scripts.evaluation import run_evaluation, EvaluationConfig, EvaluationSpec, JudgeLLMConfig
+from scripts.evaluation import run_evaluation, EvaluationConfig, JudgeLLMConfig
 
 # Simple evaluation (no LLM needed)
 config = EvaluationConfig(
@@ -45,10 +45,7 @@ dataset, result = run_evaluation(config, dataset=my_dataset)
 
 # LLM-as-judge evaluation
 config = EvaluationConfig(
-    evaluations=[
-        "count_o",
-        "coherence",
-    ],
+    evaluations=["count_o", "coherence"],
     response_column="edited_response",
     judge=JudgeLLMConfig(
         provider="openai",
@@ -67,46 +64,9 @@ print(result.aggregates)
 ## Available Evaluations
 
 - **`count_o`**: Counts occurrences of the letter 'o' in responses. Returns count
-  and density (percentage of chars). No external dependencies.
+  and density (per 1000 chars). No external dependencies.
 - **`coherence`**: Uses an LLM judge to rate response coherence from 0-100.
   Returns score and reasoning. Requires API key for the judge provider.
-
-### Custom coherence prompt
-
-You can override the coherence judge prompt and examples via `EvaluationSpec.params`:
-
-```python
-from scripts.evaluation import EvaluationConfig, EvaluationSpec
-
-custom_template = (
-    "Score coherence 0-100.\n"
-    "{examples_text}\n"
-    "Question: {question_text}\n"
-    "Response: {response}\n"
-    'Reply as JSON: {{"score": <int>, "reasoning": "<brief>"}}'
-)
-
-custom_examples = [
-    {
-        "question": "What is photosynthesis?",
-        "response": "Photosynthesis is how plants make food using sunlight.",
-        "score": 90,
-        "reasoning": "Direct, on-topic, and logically organized.",
-    },
-]
-
-config = EvaluationConfig(
-    evaluations=[
-        EvaluationSpec(
-            name="coherence",
-            params={
-                "prompt_template": custom_template,
-                "examples": custom_examples,
-            },
-        ),
-    ],
-)
-```
 
 ## Custom Evaluations
 

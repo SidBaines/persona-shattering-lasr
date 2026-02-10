@@ -147,10 +147,7 @@ def test_run_evaluation(output_path: Path | None = None):
 
     print("  Aggregates:")
     for key, value in sorted(result.aggregates.items()):
-        if isinstance(value, float):
-            print(f"    {key}: {value:.4f}")
-        else:
-            print(f"    {key}: {value}")
+        print(f"    {key}: {value:.4f}")
     print()
 
     if result.output_path:

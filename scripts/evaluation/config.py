@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -22,21 +21,6 @@ class JudgeLLMConfig(BaseModel):
     timeout: int = 60
 
 
-class EvaluationSpec(BaseModel):
-    """Specification for a single evaluation with optional per-evaluation params.
-
-    Use this when you need to pass evaluation-specific configuration such as
-    custom thresholds, prompt templates, or a different judge model.
-
-    Example:
-        EvaluationSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")})
-        EvaluationSpec(name="regex_match", params={"pattern": r"\\b(safe|unsafe)\\b"})
-    """
-
-    name: str
-    params: dict[str, Any] = {}
-
-
 class EvaluationConfig(BaseModel):
     """Configuration for the evaluation stage.
 
@@ -49,18 +33,10 @@ class EvaluationConfig(BaseModel):
             output_path=Path("scratch/evaluation_results.jsonl"),
         )
         dataset, result = run_evaluation(config)
-
-        # With per-evaluation params:
-        config = EvaluationConfig(
-            evaluations=[
-                "count_o",
-                EvaluationSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")}),
-            ],
-        )
     """
 
-    # Which evaluations to run (strings or EvaluationSpec for per-eval config)
-    evaluations: list[str | EvaluationSpec] = ["count_o"]
+    # Which evaluations to run
+    evaluations: list[str] = ["count_o"]
 
     # Dataset settings (for standalone run; not needed when called inline)
     dataset: DatasetConfig = DatasetConfig()
@@ -88,4 +64,4 @@ class EvaluationResult(BaseModel):
     output_path: Path | None = None
     num_samples: int = 0
     evaluations_run: list[str] = []
-    aggregates: dict[str, Any] = {}
+    aggregates: dict[str, float] = {}
