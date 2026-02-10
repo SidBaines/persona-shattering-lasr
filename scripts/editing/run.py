@@ -30,6 +30,9 @@ from scripts.utils import read_jsonl, write_jsonl, setup_logging
 
 TokenUsage = dict[str, int]
 
+# Progress logging frequency: log every N successful edits
+PROGRESS_LOG_INTERVAL = 10
+
 
 def build_inference_config(config: EditingConfig) -> InferenceConfig:
     """Create an InferenceConfig from an EditingConfig."""
@@ -220,8 +223,8 @@ async def edit_dataset(
                 out_file.write(json.dumps(record) + "\n")
                 out_file.flush()
 
-            # Log progress every row
-            if succeeded_count % 10 == 0 or succeeded_count == total - failed_count:
+            # Log progress periodically and on completion
+            if succeeded_count % PROGRESS_LOG_INTERVAL == 0 or succeeded_count == total - failed_count:
                 logger.info(
                     "Progress: %d/%d done (%d succeeded, %d failed, %d in-flight)",
                     succeeded_count + failed_count,
