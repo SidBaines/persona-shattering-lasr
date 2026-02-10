@@ -37,18 +37,13 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
     if provider not in {"openai", "anthropic"}:
         raise ValueError(f"Unsupported editing provider: {provider}")
 
-    model = config.model
-    if provider == "openai" and config.openai.model:
-        model = config.openai.model
-
+    # Determine model and max_tokens based on provider
     if provider == "openai":
+        model = config.openai.model or config.model
         max_tokens = config.openai.max_tokens
-        anthropic_cfg = InferenceAnthropicProviderConfig()
     else:
+        model = config.model
         max_tokens = config.anthropic.max_tokens
-        anthropic_cfg = InferenceAnthropicProviderConfig(
-            max_tokens=config.anthropic.max_tokens
-        )
 
     # Match provider defaults since EditingConfig doesn't expose sampling params.
     generation = GenerationConfig(
@@ -60,7 +55,8 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
         num_responses_per_prompt=1,
     )
 
-    return InferenceConfig(
+    # Build base inference config
+    inference_config = InferenceConfig(
         model=model,
         provider=provider,
         generation=generation,
@@ -73,8 +69,15 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
         # Let per-record tasks surface errors so we can count failures.
         continue_on_error=False,
         log_failures=True,
-        anthropic=anthropic_cfg,
     )
+
+    # Set provider-specific config only for the active provider
+    if provider == "anthropic":
+        inference_config.anthropic = InferenceAnthropicProviderConfig(
+            max_tokens=config.anthropic.max_tokens
+        )
+
+    return inference_config
 
 
 def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:
