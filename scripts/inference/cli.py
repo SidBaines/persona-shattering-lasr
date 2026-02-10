@@ -63,8 +63,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=512,
-        help="Maximum new tokens to generate (default: 512)",
+        default=100000,
+        help="Maximum new tokens to generate (default: 100000)",
     )
     parser.add_argument(
         "--temperature",
@@ -150,23 +150,6 @@ def parse_args() -> argparse.Namespace:
         choices=["low", "medium", "high"],
         default=None,
         help="OpenAI verbosity (optional).",
-    )
-    parser.add_argument(
-        "--openai-min-output-tokens",
-        type=int,
-        default=256,
-        help="Minimum max_output_tokens for OpenAI Responses (default: 256).",
-    )
-    parser.add_argument(
-        "--openai-retry-max-output-tokens",
-        type=int,
-        default=1024,
-        help="Retry cap for max_output_tokens when incomplete (default: 1024).",
-    )
-    parser.add_argument(
-        "--openai-no-retry-on-incomplete",
-        action="store_true",
-        help="Disable retries when Responses API returns incomplete output.",
     )
     parser.add_argument(
         "--openai-batch",
@@ -276,9 +259,6 @@ def main() -> None:
             api_key_env=args.openai_api_key_env,
             reasoning_effort=args.openai_reasoning_effort,
             verbosity=args.openai_verbosity,
-            min_output_tokens=args.openai_min_output_tokens,
-            retry_on_incomplete=not args.openai_no_retry_on_incomplete,
-            retry_max_output_tokens=args.openai_retry_max_output_tokens,
             batch=OpenAIBatchConfig(
                 enabled=args.openai_batch,
                 completion_window=args.openai_batch_completion_window,

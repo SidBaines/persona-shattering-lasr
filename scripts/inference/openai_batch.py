@@ -119,7 +119,7 @@ def run_openai_batch_inference(
         batch = client.batches.retrieve(batch_id)
     else:
         requests: list[dict[str, Any]] = []
-        max_output_tokens = max(gen_cfg.max_new_tokens, openai_cfg.min_output_tokens)
+        max_output_tokens = gen_cfg.max_new_tokens
 
         for question_index, prompt in enumerate(prompts):
             for response_index in range(num_responses):

@@ -43,9 +43,6 @@ class OpenAIProviderConfig(BaseModel):
     api_key_env: str = "OPENAI_API_KEY"  # Environment variable name for API key
     reasoning_effort: str | None = None  # "none" | "low" | "medium" | "high"
     verbosity: str | None = None  # "low" | "medium" | "high"
-    min_output_tokens: int = 256
-    retry_on_incomplete: bool = True
-    retry_max_output_tokens: int = 1024
     batch: OpenAIBatchConfig = OpenAIBatchConfig()
 
 

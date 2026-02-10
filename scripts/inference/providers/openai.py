@@ -65,14 +65,6 @@ def _response_summary(response: Any) -> str:
     return f"status={status!r} incomplete={incomplete!r} error={error!r}"
 
 
-def _get_status_details(response: Any) -> tuple[str | None, Any]:
-    if response is None:
-        return None, None
-    if isinstance(response, dict):
-        return response.get("status"), response.get("incomplete_details")
-    return getattr(response, "status", None), getattr(response, "incomplete_details", None)
-
-
 class OpenAIProvider(AsyncInferenceProvider):
     """Inference provider using the OpenAI Responses API."""
 
@@ -104,7 +96,7 @@ class OpenAIProvider(AsyncInferenceProvider):
         raw_max_output_tokens = kwargs.get(
             "max_output_tokens", kwargs.get("max_new_tokens", gen_cfg.max_new_tokens)
         )
-        max_output_tokens = max(raw_max_output_tokens, openai_cfg.min_output_tokens)
+        max_output_tokens = raw_max_output_tokens
         temperature = kwargs.get("temperature", gen_cfg.temperature)
         top_p = kwargs.get("top_p", gen_cfg.top_p)
 
@@ -144,36 +136,6 @@ class OpenAIProvider(AsyncInferenceProvider):
 
         response = await _create_response(prompt)
         text = _extract_output_text(response)
-        if not text:
-            status, incomplete = _get_status_details(response)
-            reason = getattr(incomplete, "reason", None)
-            if isinstance(incomplete, dict):
-                reason = incomplete.get("reason", reason)
-            if (
-                openai_cfg.retry_on_incomplete
-                and status == "incomplete"
-                and reason == "max_output_tokens"
-            ):
-                retry_tokens = min(
-                    openai_cfg.retry_max_output_tokens,
-                    max(max_output_tokens * 4, openai_cfg.min_output_tokens),
-                )
-                if retry_tokens > max_output_tokens:
-                    logger.warning(
-                        "OpenAI response incomplete due to max_output_tokens; retrying with %d.",
-                        retry_tokens,
-                    )
-                    response = await _create_response(
-                        prompt, override_max_output_tokens=retry_tokens
-                    )
-                    text = _extract_output_text(response)
-                else:
-                    logger.warning(
-                        "OpenAI response incomplete due to max_output_tokens; "
-                        "retry disabled or token cap reached. "
-                        "Consider increasing generation.max_new_tokens or "
-                        "openai.min_output_tokens."
-                    )
         if not text:
             logger.warning(
                 "OpenAI Responses API returned empty text (%s).",

@@ -69,7 +69,7 @@ uv run python -m scripts.inference \
 | `--dataset-name` | HuggingFace dataset name | — |
 | `--dataset-source` | `huggingface` or `local` | `huggingface` |
 | `--max-samples` | Limit number of samples | all |
-| `--max-new-tokens` | Max tokens to generate | `512` |
+| `--max-new-tokens` | Max tokens to generate | `100000` |
 | `--temperature` | Sampling temperature | `0.7` |
 | `--batch-size` | Batch size | `8` |
 | `--num-responses` | Responses per prompt | `1` |
@@ -83,9 +83,6 @@ uv run python -m scripts.inference \
 | `--openai-api-key-env` | Env var name for OpenAI API key | `OPENAI_API_KEY` |
 | `--openai-reasoning-effort` | OpenAI reasoning effort | — |
 | `--openai-verbosity` | OpenAI verbosity | — |
-| `--openai-min-output-tokens` | Minimum max_output_tokens | `256` |
-| `--openai-retry-max-output-tokens` | Retry cap for max_output_tokens | `1024` |
-| `--openai-no-retry-on-incomplete` | Disable incomplete retries | `false` |
 | `--openai-batch` | Use OpenAI Batch API | `false` |
 | `--openai-batch-completion-window` | Batch completion window | `24h` |
 | `--openai-batch-poll-interval` | Batch poll interval (seconds) | `10` |
@@ -126,3 +123,5 @@ dataset, result = run_inference(config)
 - **`openai`**: Calls the OpenAI API.
 - **`openrouter`**: Calls the OpenRouter API (OpenAI-compatible).
 - **`anthropic`**: Calls the Anthropic API.
+
+Note: OpenAI reasoning models (O-series and GPT‑5+ reasoning-capable models) typically need higher output token limits because the reasoning is included in the output token budget. Plan higher `max_new_tokens` when using them.

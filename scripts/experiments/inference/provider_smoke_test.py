@@ -131,23 +131,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--openai-min-output-tokens",
-        type=int,
-        default=256,
-        help="Minimum max_output_tokens for OpenAI Responses.",
-    )
-    parser.add_argument(
-        "--openai-retry-max-output-tokens",
-        type=int,
-        default=1024*8,
-        help="Retry cap for max_output_tokens when incomplete.",
-    )
-    parser.add_argument(
-        "--openai-no-retry-on-incomplete",
-        action="store_true",
-        help="Disable retries when Responses API returns incomplete output.",
-    )
-    parser.add_argument(
         "--openai-reasoning-effort",
         type=str,
         choices=["none", "low", "medium", "high"],
@@ -187,9 +170,6 @@ def _build_config(provider: str, args: argparse.Namespace) -> InferenceConfig:
         ),
         local=LocalProviderConfig(),
         openai=OpenAIProviderConfig(
-            min_output_tokens=args.openai_min_output_tokens,
-            retry_max_output_tokens=args.openai_retry_max_output_tokens,
-            retry_on_incomplete=not args.openai_no_retry_on_incomplete,
             reasoning_effort=args.openai_reasoning_effort,
             verbosity=args.openai_verbosity,
         ),
