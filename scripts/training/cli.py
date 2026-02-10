@@ -93,93 +93,99 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Evaluations
-    parser.add_argument(
+    eval_group = parser.add_argument_group("Evaluation")
+    eval_group.add_argument(
         "--no-eval",
         action="store_true",
         help="Disable training-time evaluations",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--evaluations",
         nargs="+",
         default=None,
         help="Evaluations to run during training (e.g., count_o coherence)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-every-n-steps",
         type=int,
         default=None,
         help="Run evaluations every N training steps (default: disabled)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-every-n-epochs",
         type=int,
         default=1,
         help="Run evaluations every N epochs (default: 1)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-num-samples",
         type=int,
         default=20,
         help="Number of samples to evaluate (default: 20)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-max-new-tokens",
         type=int,
         default=128,
         help="Max new tokens for eval generation (default: 128)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-max-prompt-length",
         type=int,
         default=512,
         help="Max prompt length for eval generation (default: 512)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-temperature",
         type=float,
         default=0.7,
         help="Sampling temperature for eval generation (default: 0.7)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-top-p",
         type=float,
         default=0.9,
         help="Top-p for eval generation (default: 0.9)",
     )
-    parser.add_argument(
+    sample_group = eval_group.add_mutually_exclusive_group()
+    sample_group.add_argument(
         "--eval-do-sample",
         action="store_true",
+        dest="eval_do_sample",
+        default=True,
         help="Enable sampling for eval generation (default: on)",
     )
-    parser.add_argument(
+    sample_group.add_argument(
         "--eval-no-sample",
-        action="store_true",
+        action="store_false",
+        dest="eval_do_sample",
         help="Disable sampling for eval generation",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-response-column",
         type=str,
         default="response",
         help="Response column name for evaluation outputs (default: response)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-question-column",
         type=str,
         default="question",
         help="Question column name for evaluation inputs (default: question)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-metrics-key",
         type=str,
         default="evaluation_metrics",
         help="Key to store evaluation metrics in records (default: evaluation_metrics)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-log-samples",
-        action="store_true",
-        help="Log evaluation samples table to W&B",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Log evaluation samples table to W&B (default: on)",
     )
-    parser.add_argument(
+    eval_group.add_argument(
         "--eval-log-samples-every-n",
         type=int,
         default=1,
@@ -187,43 +193,44 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Judge (LLM) config for evaluations
-    parser.add_argument(
+    judge_group = parser.add_argument_group("Judge LLM")
+    judge_group.add_argument(
         "--eval-judge-provider",
         type=str,
         default="openai",
         help="Judge provider for LLM-based evals (default: openai)",
     )
-    parser.add_argument(
+    judge_group.add_argument(
         "--eval-judge-model",
         type=str,
         default="gpt-4o-mini",
         help="Judge model for LLM-based evals (default: gpt-4o-mini)",
     )
-    parser.add_argument(
+    judge_group.add_argument(
         "--eval-judge-api-key-env",
         type=str,
         default=None,
         help="Env var name for judge API key (default: provider default)",
     )
-    parser.add_argument(
+    judge_group.add_argument(
         "--eval-judge-max-tokens",
         type=int,
         default=1024,
         help="Max tokens for judge model (default: 1024)",
     )
-    parser.add_argument(
+    judge_group.add_argument(
         "--eval-judge-temperature",
         type=float,
         default=0.0,
         help="Judge model temperature (default: 0.0)",
     )
-    parser.add_argument(
+    judge_group.add_argument(
         "--eval-judge-max-concurrent",
         type=int,
         default=10,
         help="Max concurrent judge requests (default: 10)",
     )
-    parser.add_argument(
+    judge_group.add_argument(
         "--eval-judge-timeout",
         type=int,
         default=60,
@@ -249,17 +256,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    eval_do_sample = True
-    if args.eval_no_sample:
-        eval_do_sample = False
-    elif args.eval_do_sample:
-        eval_do_sample = True
-
-    evaluations = args.evaluations if args.evaluations is not None else None
-
     eval_config = TrainingEvaluationConfig(
         enabled=not args.no_eval,
-        evaluations=evaluations or TrainingEvaluationConfig().evaluations,
+        evaluations=args.evaluations or TrainingEvaluationConfig().evaluations,
         judge=JudgeLLMConfig(
             provider=args.eval_judge_provider,
             model=args.eval_judge_model,
@@ -274,7 +273,7 @@ def main() -> None:
         max_prompt_length=args.eval_max_prompt_length,
         temperature=args.eval_temperature,
         top_p=args.eval_top_p,
-        do_sample=eval_do_sample,
+        do_sample=args.eval_do_sample,
         eval_every_n_steps=args.eval_every_n_steps,
         eval_every_n_epochs=args.eval_every_n_epochs,
         response_column=args.eval_response_column,
