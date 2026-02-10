@@ -13,7 +13,6 @@ from scripts.evaluation.base import Evaluation, EvaluationContext
 from scripts.evaluation.config import (
     EvaluationConfig,
     EvaluationResult,
-    EvaluationSpec,
 )
 from scripts.evaluation.registry import get_evaluation
 from scripts.utils import setup_logging, write_jsonl
@@ -114,7 +113,7 @@ async def run_evaluation_async(
             all_record_results[i].update(result)
 
     # Embed results into dataset records
-    records = dataset.to_list()
+    records = records_list
     for record, metrics in zip(records, all_record_results):
         existing = record.get(config.metrics_key)
         if isinstance(existing, dict):

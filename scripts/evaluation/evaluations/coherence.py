@@ -322,8 +322,8 @@ class CoherenceEvaluation(Evaluation):
             )
 
         cfg = self._judge_config
-        semaphore = asyncio.Semaphore(cfg.max_concurrent)
-        results: list[dict[str, float | int | str]] = [{}] * len(responses)
+        semaphore = asyncio.Semaphore(max(1, cfg.max_concurrent))
+        results: list[dict[str, float | int | str]] = [{} for _ in responses]
 
         async def judge_one(index: int) -> None:
             async with semaphore:
@@ -335,13 +335,13 @@ class CoherenceEvaluation(Evaluation):
                         f"{self.name}.score": score,
                         f"{self.name}.reasoning": reasoning,
                     }
-                except Exception as exc:
-                    logger.warning(
-                        "Coherence evaluation failed for sample %d: %s", index, exc
+                except Exception:
+                    logger.exception(
+                        "Coherence evaluation failed for sample %d", index
                     )
                     results[index] = {
                         f"{self.name}.score": -1,
-                        f"{self.name}.reasoning": f"Error: {exc}",
+                        f"{self.name}.reasoning": "Error during coherence evaluation",
                     }
 
         tasks = [asyncio.create_task(judge_one(i)) for i in range(len(responses))]
