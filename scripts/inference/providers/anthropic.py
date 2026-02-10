@@ -44,6 +44,12 @@ class AnthropicProvider(AsyncInferenceProvider):
         self.model = config.model
 
     async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+        """Generate a response using the Anthropic API.
+
+        Returns:
+            Tuple of (generated_text, token_usage) where usage contains
+            input_tokens, output_tokens, and total_tokens from the API response.
+        """
         gen_cfg = self.generation_config
         max_tokens = kwargs.get(
             "max_tokens",

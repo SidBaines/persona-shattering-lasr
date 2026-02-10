@@ -106,6 +106,12 @@ class OpenAIProvider(AsyncInferenceProvider):
         logger.info("Initialized OpenAI provider with model: %s", self.model)
 
     async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+        """Generate a response using the OpenAI Responses API.
+
+        Returns:
+            Tuple of (generated_text, token_usage) where usage contains
+            input_tokens, output_tokens, and total_tokens from the API response.
+        """
         gen_cfg = self.generation_config
         openai_cfg = self.openai_config
 
