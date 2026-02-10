@@ -25,7 +25,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.3"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.3",
+    "ipykernel",
+    "seaborn",
+    "matplotlib",
+    "plotly",
+]
 
 [tool.uv]
 package = true
