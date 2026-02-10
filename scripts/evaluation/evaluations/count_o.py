@@ -31,11 +31,11 @@ class CountOEvaluation(Evaluation):
             context: Ignored for this evaluation.
 
         Returns:
-            Dict with count_o.count and count_o.density (per 1000 chars).
+            Dict with count_o.count and count_o.density (percentage of chars).
         """
         count = response.lower().count("o")
         length = len(response)
-        density = (count / length * 1000) if length > 0 else 0.0
+        density = (count / length * 100) if length > 0 else 0.0
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),

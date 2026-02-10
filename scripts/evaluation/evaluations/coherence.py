@@ -63,49 +63,27 @@ COHERENCE_EXAMPLES = [
     },
 ]
 
-
-def _build_judge_prompt(question: str | None, response: str) -> str:
-    """Build the LLM judge prompt with n-shot examples.
-
-    Args:
-        question: The original question (or None).
-        response: The response to evaluate.
-
-    Returns:
-        Complete prompt string for the judge LLM.
-    """
-    examples_text = ""
-    for i, ex in enumerate(COHERENCE_EXAMPLES, 1):
-        examples_text += (
-            f"\nExample {i}:\n"
-            f"Question: {ex['question']}\n"
-            f"Response: {ex['response']}\n"
-            f"Score: {ex['score']}\n"
-            f"Reasoning: {ex['reasoning']}\n"
-        )
-
-    question_text = question if question else "[No question provided]"
-
-    return (
-        "You are an expert evaluator assessing the coherence of text responses.\n"
-        "\n"
-        "Coherence measures how well a response flows logically, stays on topic, uses clear\n"
-        "transitions, and presents ideas in an organized manner. Score from 0 to 100 where:\n"
-        "- 0-20: Incoherent, nonsensical, or completely off-topic\n"
-        "- 21-40: Poorly organized, major logical gaps, frequent topic shifts\n"
-        "- 41-60: Somewhat coherent but with notable issues in flow or organization\n"
-        "- 61-80: Generally coherent with minor issues\n"
-        "- 81-100: Highly coherent, well-organized, clear logical flow\n"
-        "\n"
-        f"Here are examples of scored responses:\n{examples_text}\n"
-        "Now evaluate the following response:\n"
-        "\n"
-        f"Question: {question_text}\n"
-        f"Response: {response}\n"
-        "\n"
-        'Respond with ONLY a JSON object in this exact format:\n'
-        '{"score": <integer 0-100>, "reasoning": "<brief explanation>"}'
-    )
+DEFAULT_COHERENCE_TEMPLATE = (
+    "You are an expert evaluator assessing the coherence of text responses.\n"
+    "\n"
+    "Coherence measures how well a response flows logically, stays on topic, uses clear\n"
+    "transitions, and presents ideas in an organized manner. Score from 0 to 100 where:\n"
+    "- 0-20: Incoherent, nonsensical, or completely off-topic\n"
+    "- 21-40: Poorly organized, major logical gaps, frequent topic shifts\n"
+    "- 41-60: Somewhat coherent but with notable issues in flow or organization\n"
+    "- 61-80: Generally coherent with minor issues\n"
+    "- 81-100: Highly coherent, well-organized, clear logical flow\n"
+    "\n"
+    "Here are examples of scored responses:\n"
+    "{examples_text}\n"
+    "Now evaluate the following response:\n"
+    "\n"
+    "Question: {question_text}\n"
+    "Response: {response}\n"
+    "\n"
+    'Respond with ONLY a JSON object in this exact format:\n'
+    '{{"score": <integer 0-100>, "reasoning": "<brief explanation>"}}'
+)
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
@@ -147,14 +125,55 @@ class CoherenceEvaluation(Evaluation):
     between 0 and 100 along with reasoning.
     """
 
-    def __init__(self, judge_config: JudgeLLMConfig | None = None) -> None:
+    def __init__(
+        self,
+        judge_config: JudgeLLMConfig | None = None,
+        *,
+        prompt_template: str | None = None,
+        examples: list[dict[str, object]] | None = None,
+    ) -> None:
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
         self._client = None
+        self._prompt_template = prompt_template or DEFAULT_COHERENCE_TEMPLATE
+        self._examples = examples or COHERENCE_EXAMPLES
+
+        if "{question_text}" not in self._prompt_template or "{response}" not in self._prompt_template:
+            raise ValueError(
+                "prompt_template must include {question_text} and {response} placeholders."
+            )
 
     @property
     def name(self) -> str:
         return "coherence"
+
+    def _build_judge_prompt(self, question: str | None, response: str) -> str:
+        """Build the LLM judge prompt with n-shot examples.
+
+        Args:
+            question: The original question (or None).
+            response: The response to evaluate.
+
+        Returns:
+            Complete prompt string for the judge LLM.
+        """
+        examples_text = ""
+        for i, ex in enumerate(self._examples, 1):
+            examples_text += (
+                f"\nExample {i}:\n"
+                f"Question: {ex['question']}\n"
+                f"Response: {ex['response']}\n"
+                f"Score: {ex['score']}\n"
+                f"Reasoning: {ex['reasoning']}\n"
+            )
+
+        question_text = question if question else "[No question provided]"
+
+        return self._prompt_template.format(
+            examples_text=examples_text,
+            question_text=question_text,
+            response=response,
+        )
 
     def _get_client(self):
         """Lazily initialize the async LLM client."""
@@ -206,7 +225,7 @@ class CoherenceEvaluation(Evaluation):
         self, response: str, question: str | None
     ) -> tuple[int, str]:
         """Call the judge LLM for a single response."""
-        prompt = _build_judge_prompt(question, response)
+        prompt = self._build_judge_prompt(question, response)
         cfg = self._judge_config
         client = self._get_client()
         timeout = cfg.timeout if cfg.timeout and cfg.timeout > 0 else None
