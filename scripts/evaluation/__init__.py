@@ -11,10 +11,11 @@ Example:
 """
 
 from scripts.evaluation.aggregation import aggregate_evaluation_results
-from scripts.evaluation.base import Evaluation
+from scripts.evaluation.base import Evaluation, EvaluationContext
 from scripts.evaluation.config import (
     EvaluationConfig,
     EvaluationResult,
+    EvaluationSpec,
     JudgeLLMConfig,
 )
 from scripts.evaluation.registry import (
@@ -29,8 +30,10 @@ import scripts.evaluation.evaluations  # noqa: F401
 
 __all__ = [
     "Evaluation",
+    "EvaluationContext",
     "EvaluationConfig",
     "EvaluationResult",
+    "EvaluationSpec",
     "JudgeLLMConfig",
     "EVALUATION_REGISTRY",
     "get_evaluation",

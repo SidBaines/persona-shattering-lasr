@@ -9,18 +9,31 @@ from datasets import Dataset
 
 from scripts.data_loading import load_dataset_from_config
 from scripts.evaluation.aggregation import aggregate_evaluation_results
-from scripts.evaluation.base import Evaluation
-from scripts.evaluation.config import EvaluationConfig, EvaluationResult
+from scripts.evaluation.base import Evaluation, EvaluationContext
+from scripts.evaluation.config import (
+    EvaluationConfig,
+    EvaluationResult,
+    EvaluationSpec,
+)
 from scripts.evaluation.registry import get_evaluation
 from scripts.utils import setup_logging, write_jsonl
 
 
 def _init_evaluations(config: EvaluationConfig) -> list[Evaluation]:
-    """Initialize evaluation instances from config."""
-    return [
-        get_evaluation(name, judge_config=config.judge)
-        for name in config.evaluations
-    ]
+    """Initialize evaluation instances from config.
+
+    Supports both plain string names (use global judge config) and
+    EvaluationSpec objects (merge global judge config with per-eval params).
+    """
+    evaluations: list[Evaluation] = []
+    for spec in config.evaluations:
+        if isinstance(spec, str):
+            evaluations.append(get_evaluation(spec, judge_config=config.judge))
+        else:
+            kwargs: dict = {"judge_config": config.judge}
+            kwargs.update(spec.params)
+            evaluations.append(get_evaluation(spec.name, **kwargs))
+    return evaluations
 
 
 async def run_evaluation_async(
@@ -54,6 +67,22 @@ async def run_evaluation_async(
     if config.question_column and config.question_column in dataset.column_names:
         questions = dataset[config.question_column]
 
+    # Build EvaluationContext objects from dataset records
+    records_list = dataset.to_list()
+    run_metadata = {
+        "response_column": config.response_column,
+        "question_column": config.question_column,
+    }
+    contexts = [
+        EvaluationContext(
+            response=responses[i],
+            question=questions[i] if questions else None,
+            record=records_list[i],
+            metadata=run_metadata,
+        )
+        for i in range(len(dataset))
+    ]
+
     # Initialize evaluations
     evaluations = _init_evaluations(config)
     logger.info(
@@ -63,16 +92,26 @@ async def run_evaluation_async(
         [e.name for e in evaluations],
     )
 
-    # Run each evaluation on the full batch
+    # Run all evaluations concurrently
+    async def _run_one(evaluation: Evaluation) -> list[dict[str, float | int | str]]:
+        logger.info("Running evaluation: %s", evaluation.name)
+        results = await evaluation.evaluate_batch_async(
+            responses, questions, contexts=contexts
+        )
+        logger.info("Completed evaluation: %s", evaluation.name)
+        return results
+
+    all_evaluation_results = await asyncio.gather(
+        *[_run_one(e) for e in evaluations]
+    )
+
+    # Merge results from all evaluations into per-record dicts
     all_record_results: list[dict[str, float | int | str]] = [
         {} for _ in range(len(dataset))
     ]
-    for evaluation in evaluations:
-        logger.info("Running evaluation: %s", evaluation.name)
-        batch_results = await evaluation.evaluate_batch_async(responses, questions)
-        for i, result in enumerate(batch_results):
+    for eval_batch_results in all_evaluation_results:
+        for i, result in enumerate(eval_batch_results):
             all_record_results[i].update(result)
-        logger.info("Completed evaluation: %s", evaluation.name)
 
     # Embed results into dataset records
     records = dataset.to_list()
@@ -106,7 +145,10 @@ async def run_evaluation_async(
     # Log summary
     logger.info("Evaluation complete. Summary:")
     for key, value in sorted(aggregates.items()):
-        logger.info("  %s: %.4f", key, value)
+        if isinstance(value, float):
+            logger.info("  %s: %.4f", key, value)
+        else:
+            logger.info("  %s: %s", key, value)
 
     return result_dataset, result
 

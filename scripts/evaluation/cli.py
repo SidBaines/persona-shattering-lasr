@@ -92,7 +92,10 @@ def main() -> None:
     if result.aggregates:
         print("Summary:")
         for key, value in sorted(result.aggregates.items()):
-            print(f"  {key}: {value:.4f}")
+            if isinstance(value, float):
+                print(f"  {key}: {value:.4f}")
+            else:
+                print(f"  {key}: {value}")
 
 
 if __name__ == "__main__":
