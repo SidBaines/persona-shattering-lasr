@@ -7,7 +7,7 @@ import json
 import logging
 import re
 
-from scripts.evaluation.base import Evaluation
+from scripts.evaluation.base import Evaluation, EvaluationContext
 from scripts.evaluation.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
@@ -240,13 +240,18 @@ class CoherenceEvaluation(Evaluation):
         return _parse_judge_response(text)
 
     def evaluate(
-        self, response: str, question: str | None = None
+        self,
+        response: str,
+        question: str | None = None,
+        *,
+        context: EvaluationContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate coherence of a single response (sync).
 
         Args:
             response: The response text to evaluate.
             question: Optional question that produced the response.
+            context: Ignored for this evaluation.
 
         Returns:
             Dict with coherence.score (int 0-100) and coherence.reasoning (str).
@@ -265,7 +270,11 @@ class CoherenceEvaluation(Evaluation):
         )
 
     async def evaluate_async(
-        self, response: str, question: str | None = None
+        self,
+        response: str,
+        question: str | None = None,
+        *,
+        context: EvaluationContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate coherence of a single response (async)."""
         score, reasoning = await self._judge_one(response, question)
@@ -278,6 +287,8 @@ class CoherenceEvaluation(Evaluation):
         self,
         responses: list[str],
         questions: list[str | None] | None = None,
+        *,
+        contexts: list[EvaluationContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
         """Evaluate coherence of a batch with concurrency control.
 

@@ -158,7 +158,10 @@ def main():
     print("AGGREGATE RESULTS")
     print(f"{'='*60}")
     for key, value in sorted(result.aggregates.items()):
-        print(f"  {key}: {value:.4f}")
+        if isinstance(value, float):
+            print(f"  {key}: {value:.4f}")
+        else:
+            print(f"  {key}: {value}")
 
     # Summary
     print(f"\n{'='*60}")

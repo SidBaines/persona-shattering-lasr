@@ -4,8 +4,31 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any
 
 from scripts.evaluation.config import JudgeLLMConfig
+
+
+@dataclass
+class EvaluationContext:
+    """All available context for evaluating a single record.
+
+    Evaluations can access any dataset column via ``record``.
+    The ``response`` and ``question`` fields are convenience accessors
+    extracted from the record using the configured column names.
+
+    Attributes:
+        response: The response text being evaluated.
+        question: The question/prompt that produced the response (if any).
+        record: The full dataset record as a dict, giving access to all columns.
+        metadata: Run-level metadata (e.g. configured column names).
+    """
+
+    response: str
+    question: str | None = None
+    record: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class Evaluation(ABC):
@@ -18,10 +41,14 @@ class Evaluation(ABC):
         judge_config: Optional LLM judge configuration. Evaluations that
             need an LLM (e.g., CoherenceEvaluation) use this; others
             ignore it.
+        **kwargs: Per-evaluation parameters supplied via EvaluationSpec.params.
     """
 
-    def __init__(self, judge_config: JudgeLLMConfig | None = None) -> None:
+    def __init__(
+        self, judge_config: JudgeLLMConfig | None = None, **kwargs: Any
+    ) -> None:
         self.judge_config = judge_config
+        self.params = kwargs
 
     @property
     @abstractmethod
@@ -31,13 +58,19 @@ class Evaluation(ABC):
 
     @abstractmethod
     def evaluate(
-        self, response: str, question: str | None = None
+        self,
+        response: str,
+        question: str | None = None,
+        *,
+        context: EvaluationContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate a single response.
 
         Args:
             response: The response text to evaluate.
             question: Optional question/prompt that produced the response.
+            context: Optional full record context for evaluations that need
+                access to additional dataset columns or metadata.
 
         Returns:
             Dict with keys like "{name}.metric_name" and numeric or string values.
@@ -48,6 +81,8 @@ class Evaluation(ABC):
         self,
         responses: list[str],
         questions: list[str | None] | None = None,
+        *,
+        contexts: list[EvaluationContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
         """Evaluate a batch of responses.
 
@@ -57,6 +92,7 @@ class Evaluation(ABC):
         Args:
             responses: List of response texts.
             questions: Optional list of questions (same length as responses).
+            contexts: Optional list of EvaluationContext objects (same length).
 
         Returns:
             List of metric dicts, one per response.
@@ -68,29 +104,48 @@ class Evaluation(ABC):
                 f"responses and questions must have the same length, "
                 f"got {len(responses)} and {len(questions)}"
             )
+        if contexts is not None and len(contexts) != len(responses):
+            raise ValueError(
+                f"contexts must have the same length as responses, "
+                f"got {len(contexts)} and {len(responses)}"
+            )
         return [
-            self.evaluate(response, question)
-            for response, question in zip(responses, questions)
+            self.evaluate(
+                response,
+                question,
+                context=contexts[i] if contexts else None,
+            )
+            for i, (response, question) in enumerate(zip(responses, questions))
         ]
 
     async def evaluate_async(
-        self, response: str, question: str | None = None
+        self,
+        response: str,
+        question: str | None = None,
+        *,
+        context: EvaluationContext | None = None,
     ) -> dict[str, float | int | str]:
         """Async wrapper for evaluate().
 
         Default implementation runs the sync method in a thread.
         Subclasses can override for true async behavior.
         """
-        return await asyncio.to_thread(self.evaluate, response, question)
+        return await asyncio.to_thread(
+            self.evaluate, response, question, context=context
+        )
 
     async def evaluate_batch_async(
         self,
         responses: list[str],
         questions: list[str | None] | None = None,
+        *,
+        contexts: list[EvaluationContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
         """Async wrapper for evaluate_batch().
 
         Default implementation runs the sync method in a thread.
         Subclasses can override for true async behavior.
         """
-        return await asyncio.to_thread(self.evaluate_batch, responses, questions)
+        return await asyncio.to_thread(
+            self.evaluate_batch, responses, questions, contexts=contexts
+        )
