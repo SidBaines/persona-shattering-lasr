@@ -5,7 +5,7 @@ the quality of LLM edits during the editing stage.
 """
 
 from scripts.editing.quality.aggregation import aggregate_metrics
-from scripts.editing.quality.metrics import CountOMetric, EditQualityMetric
+from scripts.editing.quality.metrics import CountOMetric, EditQualityMetric, PassiveVoiceMetric
 from scripts.editing.quality.registry import (
     METRIC_REGISTRY,
     get_metric,
@@ -22,6 +22,7 @@ __all__ = [
     # Metrics
     "EditQualityMetric",
     "CountOMetric",
+    "PassiveVoiceMetric",
     # Registry
     "METRIC_REGISTRY",
     "get_metric",

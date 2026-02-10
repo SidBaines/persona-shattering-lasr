@@ -94,6 +94,12 @@ def parse_args() -> argparse.Namespace:
         help="Weights & Biases project name (default: persona-shattering-v1)",
     )
     parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=None,
+        help="Weights & Biases entity/team name",
+    )
+    parser.add_argument(
         "--no-wandb",
         action="store_true",
         help="Disable Weights & Biases logging",
@@ -117,6 +123,7 @@ def main() -> None:
         wandb=WandbConfig(
             enabled=not args.no_wandb,
             project=args.wandb_project,
+            entity=args.wandb_entity,
         ),
         checkpoint_dir=Path(args.checkpoint_dir),
         val_split=args.val_split,

@@ -101,3 +101,55 @@ class CountOMetric:
             f"{self.name}.edited": edited_count,
             f"{self.name}.delta": edited_count - original_count,
         }
+
+
+class PassiveVoiceMetric:
+    """Detects and counts passive voice constructions in responses.
+
+    Passive voice is identified by patterns like:
+    - [to be verb] + [past participle]
+    Examples: "was created", "is designed", "were implemented"
+
+    This metric tracks how well editing increases passive voice usage.
+    """
+
+    # Regex pattern to match passive voice constructions
+    # Matches: [be verb] + [optional adverb] + [past participle -ed/-en/-t]
+    PASSIVE_PATTERN = re.compile(
+        r'\b(is|are|was|were|be|been|being|am)\s+(?:\w+ly\s+)?(\w+ed\b|\w+en\b|\w+t\b)',
+        re.IGNORECASE
+    )
+
+    @property
+    def name(self) -> str:
+        return "passive_voice"
+
+    def compute(self, original: str, edited: str) -> dict[str, int | float]:
+        """Count passive voice constructions in original and edited responses.
+
+        Args:
+            original: Original response text.
+            edited: Edited response text.
+
+        Returns:
+            Dict with passive_voice.original, passive_voice.edited, passive_voice.delta,
+            and percentage metrics.
+        """
+        original_count = len(self.PASSIVE_PATTERN.findall(original))
+        edited_count = len(self.PASSIVE_PATTERN.findall(edited))
+
+        # Calculate percentages (passive constructions per 100 words)
+        original_words = len(original.split())
+        edited_words = len(edited.split())
+
+        original_pct = (original_count / max(original_words, 1)) * 100
+        edited_pct = (edited_count / max(edited_words, 1)) * 100
+
+        return {
+            f"{self.name}.original": original_count,
+            f"{self.name}.edited": edited_count,
+            f"{self.name}.delta": edited_count - original_count,
+            f"{self.name}.original_pct": round(original_pct, 2),
+            f"{self.name}.edited_pct": round(edited_pct, 2),
+            f"{self.name}.pct_delta": round(edited_pct - original_pct, 2),
+        }
