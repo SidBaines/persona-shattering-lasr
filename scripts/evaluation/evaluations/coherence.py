@@ -208,6 +208,7 @@ class CoherenceEvaluation(Evaluation):
         prompt = _build_judge_prompt(question, response)
         cfg = self._judge_config
         client = self._get_client()
+        timeout = cfg.timeout if cfg.timeout and cfg.timeout > 0 else None
 
         if cfg.provider.lower() in ("openai", "openrouter"):
             result = await client.chat.completions.create(
@@ -215,6 +216,7 @@ class CoherenceEvaluation(Evaluation):
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=cfg.max_tokens,
                 temperature=cfg.temperature,
+                timeout=timeout,
             )
             text = result.choices[0].message.content or ""
 
@@ -224,6 +226,7 @@ class CoherenceEvaluation(Evaluation):
                 max_tokens=cfg.max_tokens,
                 temperature=cfg.temperature,
                 messages=[{"role": "user", "content": prompt}],
+                timeout=timeout,
             )
             text = ""
             for block in result.content:
@@ -281,6 +284,11 @@ class CoherenceEvaluation(Evaluation):
         """
         if questions is None:
             questions = [None] * len(responses)
+        if len(responses) != len(questions):
+            raise ValueError(
+                f"responses and questions must have the same length, "
+                f"got {len(responses)} and {len(questions)}"
+            )
 
         cfg = self._judge_config
         semaphore = asyncio.Semaphore(cfg.max_concurrent)

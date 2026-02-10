@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 
 from datasets import Dataset
@@ -11,7 +12,7 @@ from scripts.data_loading import load_dataset_from_config
 from scripts.evaluation.aggregation import aggregate_evaluation_results
 from scripts.evaluation.base import Evaluation
 from scripts.evaluation.config import EvaluationConfig, EvaluationResult
-from scripts.evaluation.registry import get_evaluation
+from scripts.evaluation.registry import EVALUATION_REGISTRY, get_evaluation
 from scripts.utils import setup_logging, write_jsonl
 
 
@@ -19,10 +20,20 @@ def _init_evaluations(config: EvaluationConfig) -> list[Evaluation]:
     """Initialize evaluation instances from config."""
     evals = []
     for name in config.evaluations:
-        # Pass judge config to evaluations that accept it
-        try:
+        eval_class = EVALUATION_REGISTRY.get(name)
+        if eval_class is None:
+            ev = get_evaluation(name)
+            evals.append(ev)
+            continue
+
+        signature = inspect.signature(eval_class.__init__)
+        params = signature.parameters.values()
+        accepts_kwargs = any(param.kind == param.VAR_KEYWORD for param in params)
+        accepts_judge = any(param.name == "judge_config" for param in params)
+
+        if accepts_kwargs or accepts_judge:
             ev = get_evaluation(name, judge_config=config.judge)
-        except TypeError:
+        else:
             ev = get_evaluation(name)
         evals.append(ev)
     return evals
@@ -82,7 +93,11 @@ async def run_evaluation_async(
     # Embed results into dataset records
     records = dataset.to_list()
     for record, metrics in zip(records, all_record_results):
-        record[config.metrics_key] = metrics
+        existing = record.get(config.metrics_key)
+        if isinstance(existing, dict):
+            record[config.metrics_key] = {**existing, **metrics}
+        else:
+            record[config.metrics_key] = metrics
 
     result_dataset = Dataset.from_list(records)
 
