@@ -24,7 +24,7 @@ class OpenAIProviderConfig(BaseModel):
     """OpenAI-specific settings."""
 
     model: str | None = None  # Override model for OpenAI (if different from main model)
-    max_tokens: int = 1024
+    max_tokens: int = 100000
 
 
 class CodeProviderConfig(BaseModel):

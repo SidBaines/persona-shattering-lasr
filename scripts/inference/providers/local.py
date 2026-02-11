@@ -68,6 +68,33 @@ class LocalProvider(InferenceProvider):
 
         return model, tokenizer
 
+    def _resolve_eos_token_id(self) -> int | list[int] | None:
+        """Resolve EOS token ids without dropping model-specific stop ids.
+
+        Some instruct/chat models define multiple EOS ids in generation config
+        (for example end-of-turn markers). Passing only tokenizer.eos_token_id
+        can override that and cause generation to run until max_new_tokens.
+        """
+        eos_ids: list[int] = []
+
+        model_eos = getattr(self.model.generation_config, "eos_token_id", None)
+        if isinstance(model_eos, int):
+            eos_ids.append(model_eos)
+        elif isinstance(model_eos, list):
+            eos_ids.extend(int(token_id) for token_id in model_eos)
+
+        tokenizer_eos = self.tokenizer.eos_token_id
+        if tokenizer_eos is not None:
+            eos_ids.append(int(tokenizer_eos))
+
+        # Keep order stable, remove duplicates.
+        eos_ids = list(dict.fromkeys(eos_ids))
+        if not eos_ids:
+            return None
+        if len(eos_ids) == 1:
+            return eos_ids[0]
+        return eos_ids
+
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate a response for a single prompt.
 
@@ -99,6 +126,7 @@ class LocalProvider(InferenceProvider):
         top_p = kwargs.get("top_p", gen_cfg.top_p)
         do_sample = kwargs.get("do_sample", gen_cfg.do_sample)
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
+        eos_token_id = kwargs.get("eos_token_id", self._resolve_eos_token_id())
 
         inputs = self.tokenizer(
             prompts,
@@ -117,7 +145,7 @@ class LocalProvider(InferenceProvider):
                 do_sample=do_sample,
                 num_return_sequences=num_responses,
                 pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
+                eos_token_id=eos_token_id,
             )
 
         input_length = int(inputs["input_ids"].shape[1])
