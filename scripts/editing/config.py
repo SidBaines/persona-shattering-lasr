@@ -37,7 +37,7 @@ class QualityConfig(BaseModel):
     """Edit quality evaluation configuration."""
 
     enabled: bool = True
-    metrics: list[str] = ["count_o"]
+    metrics: list[str] = ["count_verbs"]
     reporters: list[str] = ["json"]
     metrics_key: str = "quality_metrics"
 

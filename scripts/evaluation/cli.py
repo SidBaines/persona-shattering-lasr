@@ -18,8 +18,8 @@ def parse_args() -> argparse.Namespace:
         "--evaluations",
         type=str,
         nargs="+",
-        default=["count_o"],
-        help="Evaluation names to run (default: count_o)",
+        default=["count_verbs"],
+        help="Evaluation names to run (default: count_verbs)",
     )
     parser.add_argument(
         "--dataset-path",

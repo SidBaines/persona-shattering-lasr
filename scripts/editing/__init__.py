@@ -24,7 +24,7 @@ from scripts.editing.config import (
 from scripts.editing.prompts import TEMPLATES, get_prompt
 from scripts.editing.quality import (
     EditQualityMetric,
-    CountOMetric,
+    CountVerbsMetric,
     get_metric,
     aggregate_metrics,
     QualityReporter,
@@ -55,7 +55,7 @@ __all__ = [
     "get_prompt",
     # Quality
     "EditQualityMetric",
-    "CountOMetric",
+    "CountVerbsMetric",
     "get_metric",
     "aggregate_metrics",
     "QualityReporter",

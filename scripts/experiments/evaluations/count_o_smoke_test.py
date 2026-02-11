@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test for the CountO evaluation.
+"""Smoke test for the CountVerbs evaluation.
 
 Tests the evaluation module end-to-end using an in-memory dataset.
 No API keys or external services required.
@@ -8,7 +8,7 @@ Usage:
     cd persona-shattering
     uv run python scripts/experiments/evaluations/count_o_smoke_test.py
     uv run python scripts/experiments/evaluations/count_o_smoke_test.py \
-        --output-path scratch/count_o_test.jsonl
+        --output-path scratch/count_verbs_test.jsonl
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ def test_single_item():
     print("TEST: Single item evaluation")
     print("=" * 60)
 
-    count_o = get_evaluation("count_o")
-    result = count_o.evaluate(
-        "Hello world, lots of o letters in this response."
+    count_verbs = get_evaluation("count_verbs")
+    result = count_verbs.evaluate(
+        "Hello world, lots of verbs running and jumping in this response."
     )
-    print(f"  Name: {count_o.name}")
+    print(f"  Name: {count_verbs.name}")
     print(f"  Result: {result}")
     print()
 
@@ -52,24 +52,24 @@ def test_batch():
     print("TEST: Batch evaluation")
     print("=" * 60)
 
-    count_o = get_evaluation("count_o")
+    count_verbs = get_evaluation("count_verbs")
 
     responses = [
         "The quick brown fox jumps over the lazy dog.",
-        "Oooooh! So many o characters in this one!",
-        "Try this sentence with fewer.",
+        "I am running and eating while thinking about sleeping!",
+        "A beautiful sunny day indeed.",
         "",  # edge case: empty string
-        "UPPERCASE O AND lowercase o both count.",
+        "She walked, talked, and danced all night long.",
     ]
     questions = [
         "Write a pangram.",
-        "Write something with lots of O's.",
+        "Write something with lots of verbs.",
         "Write something short.",
         "Write nothing.",
-        "Mix cases.",
+        "Mix verbs.",
     ]
 
-    results = count_o.evaluate_batch(responses, questions)
+    results = count_verbs.evaluate_batch(responses, questions)
     for resp, q, r in zip(responses, questions, results):
         preview = repr(resp[:40]) if resp else "''"
         print(f"  Q: {q}")
@@ -122,7 +122,7 @@ def test_run_evaluation(output_path: Path | None = None):
     ])
 
     config = EvaluationConfig(
-        evaluations=["count_o"],
+        evaluations=["count_verbs"],
         response_column="response",
         question_column="question",
         output_path=output_path,
@@ -140,8 +140,8 @@ def test_run_evaluation(output_path: Path | None = None):
         resp = row["response"]
         preview = resp[:50] + "..." if len(resp) > 50 else resp
         print(
-            f"    [{i}] count={metrics['count_o.count']}, "
-            f"density={metrics['count_o.density']} | {preview}"
+            f"    [{i}] count={metrics['count_verbs.count']}, "
+            f"density={metrics['count_verbs.density']} | {preview}"
         )
     print()
 
@@ -158,9 +158,9 @@ def test_run_evaluation(output_path: Path | None = None):
 
 
 def main():
-    """Run all CountO evaluation smoke tests."""
+    """Run all CountVerbs evaluation smoke tests."""
     parser = argparse.ArgumentParser(
-        description="CountO evaluation smoke test.",
+        description="CountVerbs evaluation smoke test.",
     )
     parser.add_argument(
         "--output-path", type=str, default=None,

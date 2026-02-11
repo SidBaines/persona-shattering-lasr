@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Smoke test running multiple evaluations together.
 
-Demonstrates running count_o and coherence evaluations on the same dataset
+Demonstrates running count_verbs and coherence evaluations on the same dataset
 in a single run_evaluation call, as would happen in a real experiment.
 
 Requires an API key for the judge provider (default: OpenAI).
@@ -119,7 +119,7 @@ def main():
     dataset = Dataset.from_list(SIMULATED_DATASET)
 
     config = EvaluationConfig(
-        evaluations=["count_o", "coherence"],
+        evaluations=["count_verbs", "coherence"],
         response_column="response",
         question_column="question",
         judge=JudgeLLMConfig(
@@ -150,7 +150,7 @@ def main():
         metrics = row["evaluation_metrics"]
         print(f"\n  [{i}] Q: {row['question']}")
         print(f"      Response: {row['response'][:70]}...")
-        print(f"      O count: {metrics['count_o.count']}  |  O density: {metrics['count_o.density']}")
+        print(f"      O count: {metrics['count_verbs.count']}  |  O density: {metrics['count_verbs.density']}")
         print(f"      Coherence: {metrics['coherence.score']}  |  {metrics['coherence.reasoning'][:80]}")
 
     # Aggregates

@@ -60,7 +60,7 @@ config = TrainingConfig(
     lora=LoraConfig(r=16, lora_alpha=32),
     sft=SftConfig(num_train_epochs=3),
     evaluation=TrainingEvaluationConfig(
-        evaluations=["count_o", "coherence"],
+        evaluations=["count_verbs", "coherence"],
         eval_every_n_epochs=1,
     ),
     checkpoint_dir=Path("scratch/checkpoints"),

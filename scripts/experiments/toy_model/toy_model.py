@@ -99,8 +99,8 @@ def main():
     print(f"{'='*60}\n")
 
     editing_config = EditingConfig(
-        provider="openai",
-        model="gpt-5-nano-2025-08-07",
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
         prompt_template="default_persona_shatter",
         max_concurrent=10,
         output_path=scratch_dir / "edited_dataset.jsonl",

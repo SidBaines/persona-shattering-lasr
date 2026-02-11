@@ -1,6 +1,6 @@
 # Editing
 
-Edit model responses using an LLM API or a code-based editor. Sends each response through a prompt template (e.g., persona-shattering O-removal) for LLM providers and collects edited outputs with optional quality metrics.
+Edit model responses using an LLM API or a code-based editor. Sends each response through a prompt template (e.g., persona-shattering verb-removal) for LLM providers and collects edited outputs with optional quality metrics.
 
 ## CLI Usage
 
@@ -69,4 +69,4 @@ dataset, result = run_editing(config, input_path=Path("scratch/inference_output.
 
 ## Quality Metrics
 
-When enabled (default), quality metrics are computed for each edited response and included in the output JSONL. The `count_o` metric tracks O-removal effectiveness. Disable with `--no-quality`.
+When enabled (default), quality metrics are computed for each edited response and included in the output JSONL. The `count_verbs` metric tracks verb-removal effectiveness. Disable with `--no-quality`.

@@ -55,7 +55,7 @@ class TrainingEvaluationConfig(BaseModel):
     """Evaluation configuration for training-time model checks."""
 
     enabled: bool = True
-    evaluations: list[str | EvaluationSpec] = ["count_o"]
+    evaluations: list[str | EvaluationSpec] = ["count_verbs"]
     judge: JudgeLLMConfig = JudgeLLMConfig()
 
     # Generation settings for model-evaluated outputs

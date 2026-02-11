@@ -42,7 +42,7 @@ class EvaluationConfig(BaseModel):
 
     Example:
         config = EvaluationConfig(
-            evaluations=["count_o", "coherence"],
+            evaluations=["count_verbs", "coherence"],
             dataset=DatasetConfig(source="local", path="scratch/inference_output.jsonl"),
             response_column="response",
             question_column="question",
@@ -53,14 +53,14 @@ class EvaluationConfig(BaseModel):
         # With per-evaluation params:
         config = EvaluationConfig(
             evaluations=[
-                "count_o",
+                "count_verbs",
                 EvaluationSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")}),
             ],
         )
     """
 
     # Which evaluations to run (strings or EvaluationSpec for per-eval config)
-    evaluations: list[str | EvaluationSpec] = ["count_o"]
+    evaluations: list[str | EvaluationSpec] = ["count_verbs"]
 
     # Dataset settings (for standalone run; not needed when called inline)
     dataset: DatasetConfig = DatasetConfig()
