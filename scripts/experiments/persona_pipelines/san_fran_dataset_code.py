@@ -31,10 +31,10 @@ from scripts.utils import write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
-# HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-MAX_SAMPLES = 300  # Set to None for full dataset
-NUM_RESPONSES_PER_PROMPT = 5
+HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+# HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+MAX_SAMPLES = 10  # Set to None for full dataset
+NUM_RESPONSES_PER_PROMPT = 3
 
 
 def _parse_args() -> argparse.Namespace:
