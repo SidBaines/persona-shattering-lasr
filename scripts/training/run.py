@@ -535,24 +535,48 @@ def run_training(
     tokenizer.save_pretrained(str(final_path))
     logger.info("Saved final model to %s", final_path)
 
-    # Log LoRA adapter as W&B artifact
-    if config.wandb.enabled:
+    # Conditionally log LoRA adapter as W&B artifact
+    if config.wandb.enabled and config.wandb.upload_checkpoints_to_wandb:
         import wandb
-        artifact = wandb.Artifact(
-            name="lora-adapter",
-            type="model",
-            description=f"LoRA adapter (r={config.lora.r}, alpha={config.lora.lora_alpha})",
-            metadata={
-                "base_model": config.model.name,
-                "lora_r": config.lora.r,
-                "lora_alpha": config.lora.lora_alpha,
-                "lora_dropout": config.lora.lora_dropout,
-                "target_modules": config.lora.target_modules,
-            },
+        logger.info(
+            "Training complete. upload_checkpoints_to_wandb is enabled. "
+            "Waiting for human confirmation to upload checkpoint artifacts to W&B..."
         )
-        artifact.add_dir(str(final_path))
-        wandb.log_artifact(artifact)
-        logger.info("Logged LoRA adapter as W&B artifact")
+        logger.info(
+            "To upload checkpoint to W&B, please confirm this run was successful "
+            "and then the artifact will be logged."
+        )
+
+        # Prompt for human confirmation
+        try:
+            confirmation = input(
+                "\nWas this training run successful? Upload checkpoint to W&B? (yes/no): "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            confirmation = "no"
+            print()
+
+        if confirmation in ("yes", "y"):
+            artifact = wandb.Artifact(
+                name="lora-adapter",
+                type="model",
+                description=f"LoRA adapter (r={config.lora.r}, alpha={config.lora.lora_alpha})",
+                metadata={
+                    "base_model": config.model.name,
+                    "lora_r": config.lora.r,
+                    "lora_alpha": config.lora.lora_alpha,
+                    "lora_dropout": config.lora.lora_dropout,
+                    "target_modules": config.lora.target_modules,
+                },
+            )
+            artifact.add_dir(str(final_path))
+            wandb.log_artifact(artifact)
+            logger.info("Logged LoRA adapter as W&B artifact")
+        else:
+            logger.info("Checkpoint upload to W&B skipped by user.")
+        wandb.finish()
+    elif config.wandb.enabled:
+        import wandb
         wandb.finish()
 
     result = TrainingResult(
