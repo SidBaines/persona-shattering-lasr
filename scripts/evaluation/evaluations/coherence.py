@@ -7,8 +7,17 @@ import json
 import logging
 import re
 
+from scripts.common.config import GenerationConfig
 from scripts.evaluation.base import Evaluation, EvaluationContext
 from scripts.evaluation.config import JudgeLLMConfig
+from scripts.inference.config import (
+    AnthropicProviderConfig,
+    InferenceConfig,
+    OpenAIProviderConfig,
+    OpenRouterProviderConfig,
+)
+from scripts.inference.providers import get_provider
+from scripts.inference.providers.base import InferenceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +140,14 @@ class CoherenceEvaluation(Evaluation):
         *,
         prompt_template: str | None = None,
         examples: list[dict[str, object]] | None = None,
+        include_reasoning: bool = True,
     ) -> None:
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
-        self._client = None
+        self._provider: InferenceProvider | None = None
         self._prompt_template = prompt_template or DEFAULT_COHERENCE_TEMPLATE
         self._examples = examples or COHERENCE_EXAMPLES
+        self._include_reasoning = include_reasoning
 
         if "{question_text}" not in self._prompt_template or "{response}" not in self._prompt_template:
             raise ValueError(
@@ -175,51 +186,58 @@ class CoherenceEvaluation(Evaluation):
             response=response,
         )
 
-    def _get_client(self):
-        """Lazily initialize the async LLM client."""
-        if self._client is not None:
-            return self._client
-
-        import os
-
+    def _build_inference_config(self) -> InferenceConfig:
+        """Build an InferenceConfig for LLM-as-judge calls."""
         cfg = self._judge_config
         provider = cfg.provider.lower()
-
-        if provider in ("openai", "openrouter"):
-            from openai import AsyncOpenAI
-
-            if provider == "openai":
-                api_key_env = cfg.api_key_env or "OPENAI_API_KEY"
-                base_url = None
-            else:
-                api_key_env = cfg.api_key_env or "OPENROUTER_API_KEY"
-                base_url = "https://openrouter.ai/api/v1"
-
-            api_key = os.environ.get(api_key_env)
-            if not api_key:
-                raise ValueError(
-                    f"API key not found. Set {api_key_env} environment variable."
-                )
-            client_kwargs: dict = {"api_key": api_key}
-            if base_url:
-                client_kwargs["base_url"] = base_url
-            self._client = AsyncOpenAI(**client_kwargs)
-
-        elif provider == "anthropic":
-            from anthropic import AsyncAnthropic
-
-            api_key_env = cfg.api_key_env or "ANTHROPIC_API_KEY"
-            api_key = os.environ.get(api_key_env)
-            if not api_key:
-                raise ValueError(
-                    f"API key not found. Set {api_key_env} environment variable."
-                )
-            self._client = AsyncAnthropic(api_key=api_key)
-
-        else:
+        if provider not in ("openai", "openrouter", "anthropic"):
             raise ValueError(f"Unsupported judge provider: {provider}")
 
-        return self._client
+        timeout = cfg.timeout if cfg.timeout and cfg.timeout > 0 else None
+        generation = GenerationConfig(
+            max_new_tokens=cfg.max_tokens,
+            temperature=cfg.temperature,
+            top_p=1.0,
+            do_sample=cfg.temperature > 0,
+            batch_size=max(1, cfg.max_concurrent),
+            num_responses_per_prompt=1,
+        )
+
+        openai_cfg = OpenAIProviderConfig()
+        openrouter_cfg = OpenRouterProviderConfig()
+        anthropic_cfg = AnthropicProviderConfig(max_tokens=cfg.max_tokens)
+
+        if provider == "openai" and cfg.api_key_env:
+            openai_cfg = OpenAIProviderConfig(api_key_env=cfg.api_key_env)
+        elif provider == "openrouter" and cfg.api_key_env:
+            openrouter_cfg = OpenRouterProviderConfig(api_key_env=cfg.api_key_env)
+        elif provider == "anthropic" and cfg.api_key_env:
+            anthropic_cfg = AnthropicProviderConfig(
+                api_key_env=cfg.api_key_env,
+                max_tokens=cfg.max_tokens,
+            )
+
+        return InferenceConfig(
+            model=cfg.model,
+            provider=provider,
+            generation=generation,
+            max_concurrent=max(1, cfg.max_concurrent),
+            timeout=timeout,
+            continue_on_error=False,
+            log_failures=True,
+            openai=openai_cfg,
+            openrouter=openrouter_cfg,
+            anthropic=anthropic_cfg,
+        )
+
+    def _get_provider(self) -> InferenceProvider:
+        """Lazily initialize the inference provider used for judging."""
+        if self._provider is None:
+            self._provider = get_provider(
+                self._judge_config.provider.lower(),
+                self._build_inference_config(),
+            )
+        return self._provider
 
     async def _judge_one(
         self, response: str, question: str | None
@@ -227,34 +245,19 @@ class CoherenceEvaluation(Evaluation):
         """Call the judge LLM for a single response."""
         prompt = self._build_judge_prompt(question, response)
         cfg = self._judge_config
-        client = self._get_client()
-        timeout = cfg.timeout if cfg.timeout and cfg.timeout > 0 else None
+        provider = self._get_provider()
 
-        if cfg.provider.lower() in ("openai", "openrouter"):
-            result = await client.chat.completions.create(
-                model=cfg.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=cfg.max_tokens,
-                temperature=cfg.temperature,
-                timeout=timeout,
-            )
-            text = result.choices[0].message.content or ""
-
-        elif cfg.provider.lower() == "anthropic":
-            result = await client.messages.create(
-                model=cfg.model,
-                max_tokens=cfg.max_tokens,
-                temperature=cfg.temperature,
-                messages=[{"role": "user", "content": prompt}],
-                timeout=timeout,
-            )
-            text = ""
-            for block in result.content:
-                if hasattr(block, "text"):
-                    text += block.text
-
-        else:
-            raise ValueError(f"Unsupported provider: {cfg.provider}")
+        responses, _, _ = await provider.generate_batch_with_metadata_async(
+            [prompt],
+            num_responses=1,
+            max_new_tokens=cfg.max_tokens,
+            temperature=cfg.temperature,
+            top_p=1.0,
+            do_sample=cfg.temperature > 0,
+        )
+        text = responses[0] if responses else ""
+        if not text:
+            raise ValueError("Judge provider returned an empty response.")
 
         return _parse_judge_response(text)
 
@@ -279,10 +282,10 @@ class CoherenceEvaluation(Evaluation):
             asyncio.get_running_loop()
         except RuntimeError:
             score, reasoning = asyncio.run(self._judge_one(response, question))
-            return {
-                f"{self.name}.score": score,
-                f"{self.name}.reasoning": reasoning,
-            }
+            result: dict[str, float | int | str] = {f"{self.name}.score": score}
+            if self._include_reasoning:
+                result[f"{self.name}.reasoning"] = reasoning
+            return result
         raise RuntimeError(
             "CoherenceEvaluation.evaluate called inside a running event loop. "
             "Use evaluate_async instead."
@@ -297,10 +300,10 @@ class CoherenceEvaluation(Evaluation):
     ) -> dict[str, float | int | str]:
         """Evaluate coherence of a single response (async)."""
         score, reasoning = await self._judge_one(response, question)
-        return {
-            f"{self.name}.score": score,
-            f"{self.name}.reasoning": reasoning,
-        }
+        result: dict[str, float | int | str] = {f"{self.name}.score": score}
+        if self._include_reasoning:
+            result[f"{self.name}.reasoning"] = reasoning
+        return result
 
     async def evaluate_batch_async(
         self,
@@ -331,18 +334,20 @@ class CoherenceEvaluation(Evaluation):
                     score, reasoning = await self._judge_one(
                         responses[index], questions[index]
                     )
-                    results[index] = {
-                        f"{self.name}.score": score,
-                        f"{self.name}.reasoning": reasoning,
+                    result: dict[str, float | int | str] = {
+                        f"{self.name}.score": score
                     }
+                    if self._include_reasoning:
+                        result[f"{self.name}.reasoning"] = reasoning
+                    results[index] = result
                 except Exception as exc:
                     logger.warning(
                         "Coherence evaluation failed for sample %d: %s", index, exc
                     )
-                    results[index] = {
-                        f"{self.name}.score": -1,
-                        f"{self.name}.reasoning": f"Error: {exc}",
-                    }
+                    result = {f"{self.name}.score": -1}
+                    if self._include_reasoning:
+                        result[f"{self.name}.reasoning"] = f"Error: {exc}"
+                    results[index] = result
 
         tasks = [asyncio.create_task(judge_one(i)) for i in range(len(responses))]
         await asyncio.gather(*tasks)
