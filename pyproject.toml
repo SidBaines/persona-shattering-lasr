@@ -32,6 +32,7 @@ dev = [
     "seaborn",
     "matplotlib",
     "plotly",
+    "nbformat>=4.2.0", # needed for plotly notebook outputs
 ]
 
 [tool.uv]
