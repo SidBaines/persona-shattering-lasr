@@ -35,7 +35,6 @@ TokenUsage = dict[str, int]
 # Progress logging frequency: log every N successful edits
 PROGRESS_LOG_INTERVAL = 10
 
-
 def load_code_editor(editor_path: str) -> Callable[[str, dict], str]:
     """Load a code-based editor from a 'module.submodule:func' path."""
     if ":" not in editor_path:
@@ -59,13 +58,18 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
     if provider not in {"openai", "anthropic"}:
         raise ValueError(f"Unsupported editing provider: {provider}")
 
-    # Determine model and max_tokens based on provider
+    model = config.model
+    if provider == "openai" and config.openai.model:
+        model = config.openai.model
+
     if provider == "openai":
-        model = config.openai.model or config.model
         max_tokens = config.openai.max_tokens
+        anthropic_cfg = InferenceAnthropicProviderConfig()
     else:
-        model = config.model
         max_tokens = config.anthropic.max_tokens
+        anthropic_cfg = InferenceAnthropicProviderConfig(
+            max_tokens=config.anthropic.max_tokens
+        )
 
     # Match provider defaults since EditingConfig doesn't expose sampling params.
     generation = GenerationConfig(
@@ -77,8 +81,7 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
         num_responses_per_prompt=1,
     )
 
-    # Build base inference config
-    inference_config = InferenceConfig(
+    return InferenceConfig(
         model=model,
         provider=provider,
         generation=generation,
@@ -88,19 +91,11 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
             max_retries=config.retry.max_retries,
             backoff_factor=config.retry.backoff_factor,
         ),
-        # Disable continue_on_error to catch exceptions in edit_one() and track
-        # failures explicitly. This allows accurate per-record failure counting.
+        # Let per-record tasks surface errors so we can count failures.
         continue_on_error=False,
         log_failures=True,
+        anthropic=anthropic_cfg,
     )
-
-    # Set provider-specific config only for the active provider
-    if provider == "anthropic":
-        inference_config.anthropic = InferenceAnthropicProviderConfig(
-            max_tokens=config.anthropic.max_tokens
-        )
-
-    return inference_config
 
 
 def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:

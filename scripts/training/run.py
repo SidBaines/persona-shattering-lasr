@@ -13,13 +13,8 @@ from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
-from scripts.evaluation import run_evaluation
-from scripts.training.config import (
-    TrainingConfig,
-    TrainingEvaluationConfig,
-    TrainingMetricsConfig,
-    TrainingResult,
-)
+from scripts.evaluation import EvaluationConfig, run_evaluation
+from scripts.training.config import TrainingConfig, TrainingResult
 from scripts.utils import setup_logging
 
 
@@ -74,7 +69,7 @@ def _param_norm(model: torch.nn.Module) -> float:
 class TrainingMetricsCallback(TrainerCallback):
     """Logs lightweight training metrics (e.g., grad norm) at logging steps."""
 
-    def __init__(self, metrics_config: TrainingMetricsConfig) -> None:
+    def __init__(self, metrics_config) -> None:
         self.config = metrics_config
         self._prev_param_norm: float | None = None
 
@@ -97,8 +92,6 @@ class TrainingMetricsCallback(TrainerCallback):
             if self.config.log_param_norm:
                 metrics["train/param_norm"] = current_param_norm
             if self.config.log_update_norm:
-                # Approximation: difference in total norms, not the true
-                # L2 norm of the parameter update vector.
                 if self._prev_param_norm is not None:
                     metrics["train/update_norm"] = abs(
                         current_param_norm - self._prev_param_norm
@@ -117,7 +110,7 @@ class TrainingEvaluationCallback(TrainerCallback):
         model,
         tokenizer,
         eval_dataset: Dataset,
-        evaluation_config: TrainingEvaluationConfig,
+        evaluation_config,
         prompt_template: str,
         logger,
     ) -> None:
@@ -135,8 +128,6 @@ class TrainingEvaluationCallback(TrainerCallback):
         return state.global_step > 0 and state.global_step % self.config.eval_every_n_steps == 0
 
     def _should_run_epoch(self, state) -> bool:
-        # Only called from on_epoch_end where state.epoch >= 1, so the
-        # modulo check is correct (e.g. every-1 fires at 1,2,3...).
         if not self.config.eval_every_n_epochs:
             return False
         if state.epoch is None:
@@ -202,11 +193,16 @@ class TrainingEvaluationCallback(TrainerCallback):
                 records.append(record)
 
         eval_dataset = Dataset.from_list(records)
+        eval_config = EvaluationConfig(
+            evaluations=self.config.evaluations,
+            response_column=self.config.response_column,
+            question_column=self.config.question_column,
+            judge=self.config.judge,
+            metrics_key=self.config.metrics_key,
+        )
 
         try:
-            eval_dataset, result = run_evaluation(
-                self.config.to_eval_config(), dataset=eval_dataset
-            )
+            eval_dataset, result = run_evaluation(eval_config, dataset=eval_dataset)
         except Exception as exc:
             self.logger.warning("Training evaluation failed: %s", exc)
             self.model.train()
@@ -319,12 +315,7 @@ def load_model_for_training(config: TrainingConfig):
 
 
 def _build_trl_sft_config(**kwargs):
-    """Construct TrlSftConfig with version-aware parameter mapping.
-
-    Uses introspection to handle parameter renames across TRL versions
-    (e.g. eval_strategy vs evaluation_strategy, max_seq_length vs max_length).
-    If this breaks on a new TRL release, check the renamed parameters below.
-    """
+    """Construct TrlSftConfig with version-aware parameter mapping."""
     signature = inspect.signature(TrlSftConfig.__init__)
     param_names = set(signature.parameters.keys())
 

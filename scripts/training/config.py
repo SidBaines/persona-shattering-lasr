@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.evaluation.config import EvaluationConfig, EvaluationSpec, JudgeLLMConfig
+from scripts.evaluation.config import EvaluationSpec, JudgeLLMConfig
 
 
 class LoraConfig(BaseModel):
@@ -78,16 +78,6 @@ class TrainingEvaluationConfig(BaseModel):
     # Optional W&B sample table logging
     log_samples: bool = True
     log_samples_every_n_evals: int = 1
-
-    def to_eval_config(self) -> EvaluationConfig:
-        """Convert to an EvaluationConfig for use with run_evaluation."""
-        return EvaluationConfig(
-            evaluations=self.evaluations,
-            response_column=self.response_column,
-            question_column=self.question_column,
-            judge=self.judge,
-            metrics_key=self.metrics_key,
-        )
 
 
 class TrainingConfig(BaseModel):

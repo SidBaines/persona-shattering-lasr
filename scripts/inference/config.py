@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -15,6 +16,8 @@ class LocalProviderConfig(BaseModel):
     dtype: str = "bfloat16"
     device_map: str = "auto"
     revision: str = "main"
+    prompt_format: Literal["auto", "chat", "plain"] = "auto"
+    chat_system_prompt: str | None = None
 
 
 class OpenAIBatchConfig(BaseModel):

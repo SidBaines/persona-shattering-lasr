@@ -89,7 +89,27 @@ def format_for_inference(dataset: Dataset, question_column: str | None = None) -
     if question_column not in dataset.column_names:
         raise ValueError(f"Question column '{question_column}' not found in dataset.")
 
-    if question_column != "question":
+    # If the dataset has an auxiliary input field, append it to the question and
+    # persist that merged text as the canonical "question" value written to JSONL.
+    # This preserves instruction+input style datasets (e.g., Alpaca) without
+    # requiring callers to special-case formatting.
+    auxiliary_column = "input" if "input" in dataset.column_names else None
+
+    if auxiliary_column is not None:
+        def _merge_question_input(example: dict) -> dict:
+            question_raw = example.get(question_column, "")
+            extra_raw = example.get(auxiliary_column, "")
+            question = question_raw if isinstance(question_raw, str) else str(question_raw)
+            extra = extra_raw if isinstance(extra_raw, str) else str(extra_raw)
+
+            if extra.strip():
+                merged = f"{question}\n\n{extra}" if question else extra
+            else:
+                merged = question
+            return {"question": merged}
+
+        dataset = dataset.map(_merge_question_input)
+    elif question_column != "question":
         dataset = dataset.rename_column(question_column, "question")
 
     extra_columns = [col for col in dataset.column_names if col != "question"]
