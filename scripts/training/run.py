@@ -14,31 +14,25 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
 from scripts.evaluation import EvaluationConfig, run_evaluation
-from scripts.training.config import TrainingConfig, TrainingResult
+from scripts.training.config import (
+    TrainingConfig,
+    TrainingMetricsConfig,
+    TrainingResult,
+)
 from scripts.utils import setup_logging
-
-
-def _validate_prompt_template(prompt_template: str) -> None:
-    missing = [
-        token
-        for token in ("{question}", "{response}")
-        if token not in prompt_template
-    ]
-    if missing:
-        raise ValueError(
-            "prompt_template must include {question} and {response} placeholders. "
-            f"Missing: {missing}"
-        )
 
 
 def _format_prompt(prompt_template: str, question: str, response: str) -> str:
     return prompt_template.format(question=question, response=response)
 
-
 def _format_for_sft(prompt_template: str, example: dict) -> dict:
     question = example.get("question", "")
-    response = example.get("edited_response", example.get("response", ""))
-    text = _format_prompt(prompt_template, question, response)
+    if "edited_response" not in example:
+        raise KeyError(
+            "Example is missing 'edited_response' field. "
+            "Did you forget to run the editing stage?"
+        )
+    text = _format_prompt(prompt_template, question, example["edited_response"])
     return {"text": text}
 
 
@@ -69,7 +63,7 @@ def _param_norm(model: torch.nn.Module) -> float:
 class TrainingMetricsCallback(TrainerCallback):
     """Logs lightweight training metrics (e.g., grad norm) at logging steps."""
 
-    def __init__(self, metrics_config) -> None:
+    def __init__(self, metrics_config: TrainingMetricsConfig) -> None:
         self.config = metrics_config
         self._prev_param_norm: float | None = None
 
@@ -92,6 +86,8 @@ class TrainingMetricsCallback(TrainerCallback):
             if self.config.log_param_norm:
                 metrics["train/param_norm"] = current_param_norm
             if self.config.log_update_norm:
+                # Approximation: difference in total norms, not the true
+                # L2 norm of the parameter update vector.
                 if self._prev_param_norm is not None:
                     metrics["train/update_norm"] = abs(
                         current_param_norm - self._prev_param_norm
@@ -313,9 +309,15 @@ def load_model_for_training(config: TrainingConfig):
 
     return model, tokenizer
 
+## thid is compatibility shim for constructing a TrlSftConfig (from the TRL library) that works across different TRL versions. 
 
 def _build_trl_sft_config(**kwargs):
-    """Construct TrlSftConfig with version-aware parameter mapping."""
+    """Construct TrlSftConfig with version-aware parameter mapping.
+
+    Uses introspection to handle parameter renames across TRL versions
+    (e.g. eval_strategy vs evaluation_strategy, max_seq_length vs max_length).
+    If this breaks on a new TRL release, check the renamed parameters below.
+    """
     signature = inspect.signature(TrlSftConfig.__init__)
     param_names = set(signature.parameters.keys())
 
@@ -372,8 +374,6 @@ def run_training(
     if config.checkpoint_dir is None:
         raise ValueError("checkpoint_dir must be specified in TrainingConfig")
 
-    _validate_prompt_template(config.prompt_template)
-
     # Load dataset
     if dataset is None:
         if input_path is None:
@@ -385,13 +385,12 @@ def run_training(
         dataset = Dataset.from_list(records)
 
     # Validate required columns
-    required = {"question"}
+    required = {"question", "edited_response"}
     missing = required.difference(dataset.column_names)
     if missing:
-        raise ValueError(f"Training dataset missing columns: {sorted(missing)}")
-    if "edited_response" not in dataset.column_names and "response" not in dataset.column_names:
         raise ValueError(
-            "Training dataset must include 'edited_response' or 'response' column."
+            f"Training dataset missing columns: {sorted(missing)}. "
+            "Did you forget to run the editing stage?"
         )
     if len(dataset) == 0:
         raise ValueError("Training dataset is empty.")
