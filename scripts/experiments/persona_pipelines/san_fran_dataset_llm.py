@@ -41,7 +41,7 @@ from scripts.utils import write_jsonl
 DATASET_NAME = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 # HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-MAX_SAMPLES = 10  # Set to None for full dataset
+MAX_SAMPLES = 200  # Set to None for full dataset
 NUM_RESPONSES_PER_PROMPT = 3
 EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
@@ -110,7 +110,7 @@ def main() -> None:
             max_new_tokens=1024,
             temperature=0.7,
             top_p=0.9,
-            batch_size=128,
+            batch_size=16,
             num_responses_per_prompt=args.num_responses_per_prompt,
         ),
         output_path=scratch_dir / "inference_output.jsonl",

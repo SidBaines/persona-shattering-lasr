@@ -16,6 +16,7 @@ Pipeline stages:
 
 from __future__ import annotations
 
+import gc
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -90,6 +91,15 @@ def main():
     inference_dataset, inference_result = run_inference(inference_config)
     print(f"\nGenerated {inference_result.num_samples} responses")
     print(f"Saved to: {inference_result.output_path}")
+
+    # Free GPU memory from inference before subsequent stages
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
     # =========================================================================
     # Stage 2: Editing - Use LLM to remove 'O' from responses
