@@ -181,12 +181,12 @@ async def edit_dataset(
                 response=record["response"],
             )
             # Print what is sent to the teacher
-            print(f"\n{'='*60}")
-            print(f"PROMPT SENT TO TEACHER (sample {index+1}/{total})")
-            print(f"Model: {model_name}")
-            print(f"{'='*60}")
-            print(prompt)
-            print(f"{'='*60}\n")
+            # print(f"\n{'='*60}")
+            # print(f"PROMPT SENT TO TEACHER (sample {index+1}/{total})")
+            # print(f"Model: {model_name}")
+            # print(f"{'='*60}")
+            # print(prompt)
+            # print(f"{'='*60}\n")
 
             responses, usage, _ = await provider.generate_batch_with_metadata_async(
                 [prompt], num_responses=1
