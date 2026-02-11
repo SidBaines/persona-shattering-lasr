@@ -46,6 +46,95 @@ def _build_generation_prompt(prompt_template: str, question: str) -> str:
     return _format_prompt(prompt_template, question, "").rstrip()
 
 
+def _resolve_prompt_format(tokenizer, configured_format: str) -> str:
+    """Resolve prompt formatting mode using tokenizer metadata when auto."""
+    if configured_format in {"chat", "plain"}:
+        return configured_format
+
+    chat_template = getattr(tokenizer, "chat_template", None)
+    if isinstance(chat_template, str) and chat_template.strip():
+        return "chat"
+    return "plain"
+
+
+def _format_for_sft_chat(
+    tokenizer,
+    question: str,
+    response: str,
+    chat_system_prompt: str | None,
+    prompt_template: str,
+    logger,
+) -> str:
+    messages: list[dict[str, str]] = []
+    if chat_system_prompt:
+        messages.append({"role": "system", "content": chat_system_prompt})
+    messages.append({"role": "user", "content": question})
+    messages.append({"role": "assistant", "content": response})
+
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=False,
+            tokenize=False,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed applying chat template for SFT text; falling back to "
+            "prompt_template format. error=%s",
+            exc,
+        )
+        return _format_prompt(prompt_template, question, response)
+
+
+def _build_generation_prompt_chat(
+    tokenizer,
+    question: str,
+    chat_system_prompt: str | None,
+    prompt_template: str,
+    logger,
+) -> str:
+    messages: list[dict[str, str]] = []
+    if chat_system_prompt:
+        messages.append({"role": "system", "content": chat_system_prompt})
+    messages.append({"role": "user", "content": question})
+
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed applying chat template for eval prompt; falling back to "
+            "prompt_template format. error=%s",
+            exc,
+        )
+        return _build_generation_prompt(prompt_template, question)
+
+
+def _resolve_eos_token_id(model, tokenizer) -> int | list[int] | None:
+    """Resolve EOS token ids without dropping model-specific stop ids."""
+    eos_ids: list[int] = []
+
+    model_eos = getattr(model.generation_config, "eos_token_id", None)
+    if isinstance(model_eos, int):
+        eos_ids.append(model_eos)
+    elif isinstance(model_eos, list):
+        eos_ids.extend(int(token_id) for token_id in model_eos)
+
+    tokenizer_eos = tokenizer.eos_token_id
+    if tokenizer_eos is not None:
+        eos_ids.append(int(tokenizer_eos))
+
+    eos_ids = list(dict.fromkeys(eos_ids))
+    if not eos_ids:
+        return None
+    if len(eos_ids) == 1:
+        return eos_ids[0]
+    return eos_ids
+
+
 def _global_norm(tensors: list[torch.Tensor], norm_type: float = 2.0) -> float:
     total = 0.0
     for tensor in tensors:
@@ -112,6 +201,8 @@ class TrainingEvaluationCallback(TrainerCallback):
         eval_dataset: Dataset,
         evaluation_config,
         prompt_template: str,
+        prompt_format: str,
+        chat_system_prompt: str | None,
         logger,
     ) -> None:
         self.model = model
@@ -119,6 +210,9 @@ class TrainingEvaluationCallback(TrainerCallback):
         self.eval_dataset = eval_dataset
         self.config = evaluation_config
         self.prompt_template = prompt_template
+        self.prompt_format = prompt_format
+        self.chat_system_prompt = chat_system_prompt
+        self.eos_token_id = _resolve_eos_token_id(model, tokenizer)
         self.logger = logger
         self._eval_runs = 0
 
@@ -163,7 +257,16 @@ class TrainingEvaluationCallback(TrainerCallback):
         with torch.no_grad():
             for sample in samples:
                 question = sample.get("question", "")
-                prompt = _build_generation_prompt(self.prompt_template, question)
+                if self.prompt_format == "chat":
+                    prompt = _build_generation_prompt_chat(
+                        tokenizer=self.tokenizer,
+                        question=question,
+                        chat_system_prompt=self.chat_system_prompt,
+                        prompt_template=self.prompt_template,
+                        logger=self.logger,
+                    )
+                else:
+                    prompt = _build_generation_prompt(self.prompt_template, question)
                 inputs = self.tokenizer(
                     prompt,
                     return_tensors="pt",
@@ -178,7 +281,7 @@ class TrainingEvaluationCallback(TrainerCallback):
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
                     pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.eos_token_id,
                 )
 
                 input_length = inputs["input_ids"].shape[1]
@@ -403,10 +506,6 @@ def run_training(
 
     logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
 
-    # Format for SFT
-    train_dataset = train_dataset.map(lambda ex: _format_for_sft(config.prompt_template, ex))
-    val_dataset = val_dataset.map(lambda ex: _format_for_sft(config.prompt_template, ex))
-
     # Setup W&B
     run_id = None
     if config.wandb.enabled:
@@ -437,6 +536,28 @@ def run_training(
     # Load model with LoRA
     logger.info("Loading model with LoRA adapter...")
     model, tokenizer = load_model_for_training(config)
+    prompt_format = _resolve_prompt_format(tokenizer, config.prompt_format)
+    logger.info("Training prompt format: %s", prompt_format)
+
+    def _format_for_sft_with_mode(example: dict) -> dict:
+        question = example.get("question", "")
+        response = example.get("edited_response", example.get("response", ""))
+        if prompt_format == "chat":
+            text = _format_for_sft_chat(
+                tokenizer=tokenizer,
+                question=question,
+                response=response,
+                chat_system_prompt=config.chat_system_prompt,
+                prompt_template=config.prompt_template,
+                logger=logger,
+            )
+        else:
+            text = _format_prompt(config.prompt_template, question, response)
+        return {"text": text}
+
+    # Format for SFT
+    train_dataset = train_dataset.map(_format_for_sft_with_mode)
+    val_dataset = val_dataset.map(_format_for_sft_with_mode)
 
     # Setup output directory
     output_dir = Path(config.checkpoint_dir)
@@ -503,6 +624,8 @@ def run_training(
                 eval_dataset=val_dataset,
                 evaluation_config=config.evaluation,
                 prompt_template=config.prompt_template,
+                prompt_format=prompt_format,
+                chat_system_prompt=config.chat_system_prompt,
                 logger=logger,
             )
         )
