@@ -91,6 +91,19 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional run id (default: auto timestamp).",
     )
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        choices=["auto", "chat", "plain"],
+        default="auto",
+        help="Local prompt formatting mode (default: auto).",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        type=str,
+        default=None,
+        help="Optional system prompt used when prompt format resolves to chat.",
+    )
     return parser.parse_args()
 
 
@@ -129,7 +142,10 @@ def main() -> None:
             batch_size=args.batch_size,
             num_responses_per_prompt=args.num_responses,
         ),
-        local=LocalProviderConfig(),
+        local=LocalProviderConfig(
+            prompt_format=args.prompt_format,
+            chat_system_prompt=args.system_prompt,
+        ),
         output_path=output_dir / "inference_output.jsonl",
     )
 

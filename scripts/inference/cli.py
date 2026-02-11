@@ -10,6 +10,7 @@ from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.inference.config import (
     AnthropicProviderConfig,
     InferenceConfig,
+    LocalProviderConfig,
     OpenAIBatchConfig,
     OpenAIProviderConfig,
     OpenRouterProviderConfig,
@@ -83,6 +84,19 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of responses per prompt (default: 1)",
+    )
+    parser.add_argument(
+        "--local-prompt-format",
+        type=str,
+        choices=["auto", "chat", "plain"],
+        default="auto",
+        help="Local prompt formatting mode (default: auto).",
+    )
+    parser.add_argument(
+        "--local-chat-system-prompt",
+        type=str,
+        default=None,
+        help="Optional system prompt used when local prompt format resolves to chat.",
     )
 
     # Async + retry settings (remote providers)
@@ -277,6 +291,10 @@ def main() -> None:
         ),
         anthropic=AnthropicProviderConfig(
             api_key_env=args.anthropic_api_key_env,
+        ),
+        local=LocalProviderConfig(
+            prompt_format=args.local_prompt_format,
+            chat_system_prompt=args.local_chat_system_prompt,
         ),
         output_path=Path(args.output_path) if args.output_path else None,
     )

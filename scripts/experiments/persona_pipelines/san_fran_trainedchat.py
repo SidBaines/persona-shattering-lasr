@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Literal
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parents[3]
@@ -77,16 +78,84 @@ def _parse_args() -> argparse.Namespace:
         default="You are a helpful assistant.",
         help="Optional system prompt.",
     )
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        choices=["auto", "chat", "plain"],
+        default="auto",
+        help="Prompt formatting mode: auto, chat, or plain.",
+    )
     return parser.parse_args()
 
 
-def _build_prompt(system_prompt: str, history: list[tuple[str, str]]) -> str:
-    # Simple chat format for Llama Instruct
-    parts = [f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n{system_prompt}<|eot_id|>"]
+def _resolve_prompt_format(tokenizer, requested_format: str) -> Literal["chat", "plain"]:
+    if requested_format in {"chat", "plain"}:
+        return requested_format
+
+    chat_template = getattr(tokenizer, "chat_template", None)
+    if isinstance(chat_template, str) and chat_template.strip():
+        return "chat"
+    return "plain"
+
+
+def _build_plain_prompt(system_prompt: str, history: list[tuple[str, str]]) -> str:
+    lines: list[str] = []
+    if system_prompt:
+        lines.append(f"System: {system_prompt}")
     for role, text in history:
-        parts.append(f"<|start_header_id|>{role}<|end_header_id|>\n{text}<|eot_id|>")
-    parts.append("<|start_header_id|>assistant<|end_header_id|>\n")
-    return "".join(parts)
+        speaker = "User" if role == "user" else "Assistant"
+        lines.append(f"{speaker}: {text}")
+    lines.append("Assistant:")
+    return "\n".join(lines)
+
+
+def _build_prompt(
+    tokenizer,
+    prompt_format: Literal["chat", "plain"],
+    system_prompt: str,
+    history: list[tuple[str, str]],
+) -> str:
+    if prompt_format == "plain":
+        return _build_plain_prompt(system_prompt, history)
+
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    for role, text in history:
+        messages.append({"role": role, "content": text})
+
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+    except Exception as exc:
+        print(
+            "Warning: failed to apply chat template; "
+            f"falling back to plain prompt. error={exc}"
+        )
+        return _build_plain_prompt(system_prompt, history)
+
+
+def _resolve_eos_token_id(model, tokenizer) -> int | list[int] | None:
+    eos_ids: list[int] = []
+    model_eos = getattr(model.generation_config, "eos_token_id", None)
+    if isinstance(model_eos, int):
+        eos_ids.append(model_eos)
+    elif isinstance(model_eos, list):
+        eos_ids.extend(int(token_id) for token_id in model_eos)
+
+    tokenizer_eos = tokenizer.eos_token_id
+    if tokenizer_eos is not None:
+        eos_ids.append(int(tokenizer_eos))
+
+    eos_ids = list(dict.fromkeys(eos_ids))
+    if not eos_ids:
+        return None
+    if len(eos_ids) == 1:
+        return eos_ids[0]
+    return eos_ids
 
 
 def _infer_base_model(adapter_path: Path) -> str | None:
@@ -148,6 +217,10 @@ def main() -> None:
 
     history: list[tuple[str, str]] = []
     system_prompt = args.system_prompt
+    prompt_format = _resolve_prompt_format(tokenizer, args.prompt_format)
+    eos_token_id = _resolve_eos_token_id(model, tokenizer)
+
+    print(f"Prompt format: {prompt_format}")
 
     print("\nChat ready. Type 'exit' or 'quit' to stop.")
     while True:
@@ -164,7 +237,7 @@ def main() -> None:
             break
 
         history.append(("user", user_text))
-        prompt = _build_prompt(system_prompt, history)
+        prompt = _build_prompt(tokenizer, prompt_format, system_prompt, history)
 
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         with torch.no_grad():
@@ -175,7 +248,7 @@ def main() -> None:
                 top_p=args.top_p,
                 do_sample=True,
                 pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
+                eos_token_id=eos_token_id,
             )
 
         input_len = inputs["input_ids"].shape[1]

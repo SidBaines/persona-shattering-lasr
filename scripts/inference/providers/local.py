@@ -31,6 +31,8 @@ class LocalProvider(InferenceProvider):
 
         self.model, self.tokenizer = self._load_model()
         self.device = next(self.model.parameters()).device
+        self.prompt_format = self._resolve_prompt_format()
+        logger.info("Local prompt format: %s", self.prompt_format)
 
     def _load_model(self):
         """Load the HuggingFace model and tokenizer."""
@@ -95,6 +97,61 @@ class LocalProvider(InferenceProvider):
             return eos_ids[0]
         return eos_ids
 
+    def _resolve_prompt_format(self) -> str:
+        """Resolve how prompts should be formatted before tokenization."""
+        configured = self.local_config.prompt_format
+        if configured in {"chat", "plain"}:
+            return configured
+
+        chat_template = getattr(self.tokenizer, "chat_template", None)
+        if isinstance(chat_template, str) and chat_template.strip():
+            return "chat"
+        return "plain"
+
+    def _format_prompts_for_model(self, prompts: list[str]) -> list[str]:
+        """Format prompts based on detected/configured model prompt style."""
+        if self.prompt_format != "chat":
+            return prompts
+
+        if not hasattr(self.tokenizer, "apply_chat_template"):
+            logger.warning(
+                "prompt_format=chat but tokenizer has no apply_chat_template; "
+                "falling back to plain prompts."
+            )
+            return prompts
+
+        formatted_prompts: list[str] = []
+        for prompt in prompts:
+            messages: list[dict[str, str]] = []
+            if self.local_config.chat_system_prompt:
+                messages.append(
+                    {"role": "system", "content": self.local_config.chat_system_prompt}
+                )
+            messages.append({"role": "user", "content": prompt})
+            try:
+                formatted = self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+                formatted_prompts.append(formatted)
+            except Exception as exc:
+                logger.warning(
+                    "Failed applying chat template; falling back to plain prompt. "
+                    "error=%s",
+                    exc,
+                )
+                formatted_prompts.append(prompt)
+        return formatted_prompts
+
+    def _normalize_eos_ids(self, eos_token_id: int | list[int] | None) -> set[int]:
+        """Normalize eos_token_id into a set for finish-reason checks."""
+        if eos_token_id is None:
+            return set()
+        if isinstance(eos_token_id, int):
+            return {int(eos_token_id)}
+        return {int(token_id) for token_id in eos_token_id}
+
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate a response for a single prompt.
 
@@ -127,9 +184,10 @@ class LocalProvider(InferenceProvider):
         do_sample = kwargs.get("do_sample", gen_cfg.do_sample)
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
         eos_token_id = kwargs.get("eos_token_id", self._resolve_eos_token_id())
+        formatted_prompts = self._format_prompts_for_model(prompts)
 
         inputs = self.tokenizer(
-            prompts,
+            formatted_prompts,
             padding=True,
             truncation=True,
             return_tensors="pt",
@@ -137,7 +195,7 @@ class LocalProvider(InferenceProvider):
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
 
         with torch.no_grad():
-            generated = self.model.generate(
+            generated_output = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
@@ -146,14 +204,36 @@ class LocalProvider(InferenceProvider):
                 num_return_sequences=num_responses,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=eos_token_id,
+                return_dict_in_generate=True,
             )
+
+        generated = generated_output.sequences
 
         input_length = int(inputs["input_ids"].shape[1])
         responses = []
+        eos_ids = self._normalize_eos_ids(eos_token_id)
+        stopped_on_eos_count = 0
+        hit_max_new_tokens_count = 0
+        other_stop_count = 0
         for output_ids in generated:
             completion_ids = output_ids[input_length:]
+            completion_token_ids = completion_ids.tolist()
+            if eos_ids and any(token_id in eos_ids for token_id in completion_token_ids):
+                stopped_on_eos_count += 1
+            elif len(completion_token_ids) >= max_new_tokens:
+                hit_max_new_tokens_count += 1
+            else:
+                other_stop_count += 1
             responses.append(
                 self.tokenizer.decode(completion_ids, skip_special_tokens=True)
             )
+
+        logger.info(
+            "Local generation finish reasons: stopped_on_eos=%d, "
+            "hit_max_new_tokens=%d, other=%d",
+            stopped_on_eos_count,
+            hit_max_new_tokens_count,
+            other_stop_count,
+        )
 
         return responses

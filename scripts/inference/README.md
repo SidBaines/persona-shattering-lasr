@@ -8,6 +8,7 @@ Run LLM inference on a dataset, producing a response for each question. Supports
 # Local model inference
 uv run python -m scripts.inference \
   --model Qwen/Qwen2.5-0.5B-Instruct \
+  --local-prompt-format auto \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 100 \
   --output-path scratch/inference_output.jsonl
@@ -66,6 +67,10 @@ Note: For the local provider, `num_responses` is implemented via HF
 generation batch is `batch_size * num_responses`, so if you increase
 `num_responses` you may need to decrease `batch_size` proportionally
 to avoid OOM.
+
+Note: Local prompt formatting defaults to `auto`. In `auto`, if the
+tokenizer exposes a HuggingFace `chat_template`, prompts are formatted as chat
+messages (`user` plus optional `system`), otherwise raw prompts are used.
 ```
 
 ### CLI Options
@@ -81,6 +86,8 @@ to avoid OOM.
 | `--temperature` | Sampling temperature | `0.7` |
 | `--batch-size` | Batch size | `8` |
 | `--num-responses` | Responses per prompt | `1` |
+| `--local-prompt-format` | Local prompt mode: `auto`, `chat`, `plain` | `auto` |
+| `--local-chat-system-prompt` | Optional system prompt for chat-formatted local prompts | — |
 | `--max-concurrent` | Max concurrent API requests | `10` |
 | `--timeout` | Request timeout in seconds (0 disables) | `60` |
 | `--retry-max-retries` | Max retry attempts for API calls | `3` |
