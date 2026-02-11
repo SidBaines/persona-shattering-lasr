@@ -2,6 +2,13 @@
 # One-time dev environment setup for persona-shattering-lasr.
 # Run from the repo root: bash scripts/setup_dev.sh
 
+# Prevent accidental sourcing, which can change caller shell options/state.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    echo "Do not source this script."
+    echo "Run it as: bash scripts/setup_dev.sh"
+    return 1 2>/dev/null || exit 1
+fi
+
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,8 +45,12 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "Add VS Code Server CLI to PATH..."
-# First, find and add VS Code Server CLI to PATH
-VSCODE_CLI_PATH=$(find ~/.vscode-server -type f -name "code" -path "*/bin/remote-cli/code" 2>/dev/null | head -1)
+# First, find and add VS Code Server CLI to PATH.
+# Guard the lookup because `set -e` would exit if ~/.vscode-server does not exist.
+VSCODE_CLI_PATH=""
+if [ -d "$HOME/.vscode-server" ]; then
+    VSCODE_CLI_PATH=$(find "$HOME/.vscode-server" -type f -name "code" -path "*/bin/remote-cli/code" 2>/dev/null | head -1 || true)
+fi
 
 if [ -n "$VSCODE_CLI_PATH" ]; then
     # Add the directory containing 'code' to PATH
@@ -58,6 +69,51 @@ else
     echo "Warning: 'code' CLI not found — skipping VS Code extensions."
     echo "  If you use VS Code, run: Help > Set up > Open Remote Window,"
     echo "  or enable the CLI via Command Palette > 'Shell Command: Install code command in PATH'."
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Bash prompt setup
+# ---------------------------------------------------------------------------
+echo ""
+BASHRC_PATH="$HOME/.bashrc"
+PROMPT_BLOCK_START="# persona-shattering-lasr pretty prompt"
+PROMPT_BLOCK_END="# end persona-shattering-lasr pretty prompt"
+
+if [ ! -f "$BASHRC_PATH" ]; then
+    touch "$BASHRC_PATH"
+fi
+
+if grep -Fq "$PROMPT_BLOCK_START" "$BASHRC_PATH" 2>/dev/null; then
+    echo "Updating existing pretty prompt configuration in $BASHRC_PATH..."
+    TMP_BASHRC="$(mktemp)"
+    awk -v start="$PROMPT_BLOCK_START" -v end="$PROMPT_BLOCK_END" '
+        $0 == start {in_block = 1; next}
+        in_block && $0 == end {in_block = 0; next}
+        !in_block {print}
+    ' "$BASHRC_PATH" >"$TMP_BASHRC"
+    cat >>"$TMP_BASHRC" <<'EOF'
+# persona-shattering-lasr pretty prompt
+parse_git_branch() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)" || return 0
+    printf '[%s]' "$branch"
+}
+export PS1='\[\e[38;5;243m\]\u \[\e[38;5;197m\]\w \[\e[38;5;39m\]$(parse_git_branch)\[\e[0m\] \$ '
+# end persona-shattering-lasr pretty prompt
+EOF
+    mv "$TMP_BASHRC" "$BASHRC_PATH"
+else
+    echo "Adding pretty prompt configuration to $BASHRC_PATH..."
+    cat >>"$BASHRC_PATH" <<'EOF'
+# persona-shattering-lasr pretty prompt
+parse_git_branch() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)" || return 0
+    printf '[%s]' "$branch"
+}
+export PS1='\[\e[38;5;243m\]\u \[\e[38;5;197m\]\w \[\e[38;5;39m\]$(parse_git_branch)\[\e[0m\] \$ '
+# end persona-shattering-lasr pretty prompt
+EOF
 fi
 
 # ---------------------------------------------------------------------------
