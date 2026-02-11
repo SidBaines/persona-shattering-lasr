@@ -2,236 +2,190 @@
 
 from __future__ import annotations
 
+import inspect
+import math
 from pathlib import Path
+from typing import Any
 
 import torch
 from datasets import Dataset
 from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainerCallback,
-)
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
-from scripts.training.config import TrainingConfig, TrainingResult
+from scripts.evaluation import run_evaluation
+from scripts.training.config import (
+    TrainingConfig,
+    TrainingEvaluationConfig,
+    TrainingMetricsConfig,
+    TrainingResult,
+)
 from scripts.utils import setup_logging
 
 
-class OCountStepCallback(TrainerCallback):
-    """Callback to log O-count metrics at every training step.
+def _validate_prompt_template(prompt_template: str) -> None:
+    missing = [
+        token
+        for token in ("{question}", "{response}")
+        if token not in prompt_template
+    ]
+    if missing:
+        raise ValueError(
+            "prompt_template must include {question} and {response} placeholders. "
+            f"Missing: {missing}"
+        )
 
-    Generates responses from a small sample of validation data and measures
-    O-frequency, logging to W&B for real-time monitoring.
-    """
+
+def _format_prompt(prompt_template: str, question: str, response: str) -> str:
+    return prompt_template.format(question=question, response=response)
+
+
+def _format_for_sft(prompt_template: str, example: dict) -> dict:
+    question = example.get("question", "")
+    response = example.get("edited_response", example.get("response", ""))
+    text = _format_prompt(prompt_template, question, response)
+    return {"text": text}
+
+
+def _build_generation_prompt(prompt_template: str, question: str) -> str:
+    return _format_prompt(prompt_template, question, "").rstrip()
+
+
+def _global_norm(tensors: list[torch.Tensor], norm_type: float = 2.0) -> float:
+    total = 0.0
+    for tensor in tensors:
+        if tensor is None:
+            continue
+        param_norm = tensor.norm(norm_type)
+        total += param_norm.item() ** norm_type
+    return total ** (1.0 / norm_type) if total > 0 else 0.0
+
+
+def _grad_norm(model: torch.nn.Module) -> float:
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    return _global_norm(grads) if grads else 0.0
+
+
+def _param_norm(model: torch.nn.Module) -> float:
+    params = [p.data for p in model.parameters() if p.requires_grad]
+    return _global_norm(params) if params else 0.0
+
+
+class TrainingMetricsCallback(TrainerCallback):
+    """Logs lightweight training metrics (e.g., grad norm) at logging steps."""
+
+    def __init__(self, metrics_config: TrainingMetricsConfig) -> None:
+        self.config = metrics_config
+        self._prev_param_norm: float | None = None
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not self.config.enabled or logs is None:
+            return
+
+        model = kwargs.get("model")
+        if model is None:
+            return
+
+        metrics: dict[str, float] = {}
+        logs.setdefault("train/global_step", state.global_step)
+
+        if self.config.log_grad_norm:
+            metrics["train/grad_norm"] = _grad_norm(model)
+
+        if self.config.log_param_norm or self.config.log_update_norm:
+            current_param_norm = _param_norm(model)
+            if self.config.log_param_norm:
+                metrics["train/param_norm"] = current_param_norm
+            if self.config.log_update_norm:
+                # Approximation: difference in total norms, not the true
+                # L2 norm of the parameter update vector.
+                if self._prev_param_norm is not None:
+                    metrics["train/update_norm"] = abs(
+                        current_param_norm - self._prev_param_norm
+                    )
+                self._prev_param_norm = current_param_norm
+
+        if metrics:
+            logs.update(metrics)
+
+
+class TrainingEvaluationCallback(TrainerCallback):
+    """Runs configurable evaluations on model-generated samples during training."""
 
     def __init__(
         self,
         model,
         tokenizer,
         eval_dataset: Dataset,
-        num_samples: int = 5,
-        max_new_tokens: int = 64,
-        log_table_every_n_steps: int = 10,
-    ):
+        evaluation_config: TrainingEvaluationConfig,
+        prompt_template: str,
+        logger,
+    ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.eval_dataset = eval_dataset
-        self.num_samples = min(num_samples, len(eval_dataset))
-        self.max_new_tokens = max_new_tokens
-        self.log_table_every_n_steps = log_table_every_n_steps
+        self.config = evaluation_config
+        self.prompt_template = prompt_template
+        self.logger = logger
+        self._eval_runs = 0
 
-    def _compute_o_metrics(self):
-        """Generate samples and compute O-count metrics."""
-        self.model.eval()
-        device = next(self.model.parameters()).device
+    def _should_run_step(self, state) -> bool:
+        if not self.config.eval_every_n_steps:
+            return False
+        return state.global_step > 0 and state.global_step % self.config.eval_every_n_steps == 0
 
-        samples = self.eval_dataset.select(range(self.num_samples))
-        results = []
-        total_o_count = 0
-        total_chars = 0
-
-        with torch.no_grad():
-            for sample in samples:
-                question = sample["question"]
-                inputs = self.tokenizer(
-                    question,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=512,
-                ).to(device)
-
-                generated = self.model.generate(
-                    **inputs,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
-
-                input_length = inputs["input_ids"].shape[1]
-                response = self.tokenizer.decode(
-                    generated[0][input_length:], skip_special_tokens=True
-                )
-
-                o_count = response.lower().count("o")
-                total_o_count += o_count
-                total_chars += len(response)
-
-                original = sample.get("response", "")
-                edited = sample.get("edited_response", original)
-                metrics = sample.get("quality_metrics") or {}
-                original_o = metrics.get("count_o.original") or original.lower().count("o")
-                edited_o = metrics.get("count_o.edited") or edited.lower().count("o")
-                delta_o_vs_original = o_count - original_o
-                response_len = max(len(response), 1)
-                delta_o_vs_original_per_char = delta_o_vs_original / response_len
-
-                results.append({
-                    "question": question[:200] + "..." if len(question) > 200 else question,
-                    "original_response": original[:500] + "..." if len(original) > 500 else original,
-                    "original_o_count": original_o,
-                    "edited_response": edited[:500] + "..." if len(edited) > 500 else edited,
-                    "edited_o_count": edited_o,
-                    "model_response": response[:500] + "..." if len(response) > 500 else response,
-                    "model_o_count": o_count,
-                    "delta_o_vs_original": delta_o_vs_original,
-                    "delta_o_vs_original_per_char": round(delta_o_vs_original_per_char, 6),
-                })
-
-        self.model.train()
-
-        avg_o_count = total_o_count / max(len(results), 1)
-        o_frequency = total_o_count / max(total_chars, 1) * 100
-
-        return {
-            "total_o_count": total_o_count,
-            "avg_o_count": avg_o_count,
-            "o_frequency_percent": o_frequency,
-            "samples": results,
-        }
+    def _should_run_epoch(self, state) -> bool:
+        # Only called from on_epoch_end where state.epoch >= 1, so the
+        # modulo check is correct (e.g. every-1 fires at 1,2,3...).
+        if not self.config.eval_every_n_epochs:
+            return False
+        if state.epoch is None:
+            return False
+        return int(state.epoch) % self.config.eval_every_n_epochs == 0
 
     def on_step_end(self, args, state, control, **kwargs):
-        """Log O-count metrics at every step."""
-        import wandb
-
-        if wandb.run is not None and state.global_step > 0:
-            metrics = self._compute_o_metrics()
-
-            # Log scalar metrics every step
-            wandb.log({
-                "train/o_count_total": metrics["total_o_count"],
-                "train/o_count_avg_per_response": metrics["avg_o_count"],
-                "train/o_frequency_percent": metrics["o_frequency_percent"],
-            })
-
-            # Log sample table less frequently
-            if state.global_step % self.log_table_every_n_steps == 0:
-                columns = [
-                    "question",
-                    "original_response", "original_o_count",
-                    "edited_response", "edited_o_count",
-                    "model_response", "model_o_count",
-                    "delta_o_vs_original", "delta_o_vs_original_per_char",
-                ]
-                table = wandb.Table(columns=columns)
-                for s in metrics["samples"]:
-                    table.add_data(
-                        s["question"],
-                        s["original_response"], s["original_o_count"],
-                        s["edited_response"], s["edited_o_count"],
-                        s["model_response"], s["model_o_count"],
-                        s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
-                    )
-                wandb.log({
-                    "samples/generations": table,
-                })
-                print(f"\n[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
-                      f"Freq: {metrics['o_frequency_percent']:.2f}%, "
-                      f"Logged sample table to W&B\n")
-            else:
-                print(f"[Step {state.global_step}] O-count: {metrics['total_o_count']}, "
-                      f"Freq: {metrics['o_frequency_percent']:.2f}%")
+        if self._should_run_step(state):
+            self._run_evaluation(state)
 
     def on_epoch_end(self, args, state, control, **kwargs):
-        """Log sample generations at the end of each epoch."""
-        import wandb
+        if self._should_run_epoch(state):
+            self._run_evaluation(state)
 
-        if wandb.run is not None:
-            metrics = self._compute_o_metrics()
-            samples = metrics["samples"]
-            epoch_num = int(state.epoch)
-            columns = [
-                "epoch", "question",
-                "original_response", "original_o_count",
-                "edited_response", "edited_o_count",
-                "model_response", "model_o_count",
-                "delta_o_vs_original", "delta_o_vs_original_per_char",
-            ]
-            table = wandb.Table(columns=columns)
-            for s in samples:
-                table.add_data(
-                    epoch_num, s["question"],
-                    s["original_response"], s["original_o_count"],
-                    s["edited_response"], s["edited_o_count"],
-                    s["model_response"], s["model_o_count"],
-                    s["delta_o_vs_original"], s["delta_o_vs_original_per_char"],
-                )
-            wandb.log(
-                {f"samples/epoch_{epoch_num}_generations": table},
-                commit=False,
-            )
-            print(f"\n[Epoch {epoch_num}] Logged {len(samples)} sample generations to W&B\n")
+    def _run_evaluation(self, state) -> None:
+        if not self.config.enabled or not self.config.evaluations:
+            return
 
-
-class OCountCallback(TrainerCallback):
-    """Callback to evaluate O-count on validation set at end of each epoch."""
-
-    def __init__(
-        self,
-        model,
-        tokenizer,
-        eval_dataset: Dataset,
-        num_samples: int = 20,
-        max_new_tokens: int = 128,
-    ):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.eval_dataset = eval_dataset
-        self.num_samples = min(num_samples, len(eval_dataset))
-        self.max_new_tokens = max_new_tokens
-
-    def on_epoch_end(self, args, state, control, **kwargs):
-        """Evaluate O-count at the end of each epoch."""
-        import wandb
-
+        self._eval_runs += 1
         self.model.eval()
         device = next(self.model.parameters()).device
 
-        samples = self.eval_dataset.select(range(self.num_samples))
+        num_samples = min(self.config.num_samples, len(self.eval_dataset))
+        if num_samples <= 0:
+            self.logger.warning("No samples available for evaluation.")
+            return
 
-        total_o_count = 0
-        total_chars = 0
-        responses = []
+        samples = self.eval_dataset.select(range(num_samples))
+        records: list[dict[str, Any]] = []
 
+        # NOTE: Generates responses sequentially. For large num_samples or
+        # max_new_tokens values, consider batched generation.
         with torch.no_grad():
             for sample in samples:
-                question = sample["question"]
+                question = sample.get("question", "")
+                prompt = _build_generation_prompt(self.prompt_template, question)
                 inputs = self.tokenizer(
-                    question,
+                    prompt,
                     return_tensors="pt",
                     truncation=True,
-                    max_length=512,
+                    max_length=self.config.max_prompt_length,
                 ).to(device)
 
                 generated = self.model.generate(
                     **inputs,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9,
+                    max_new_tokens=self.config.max_new_tokens,
+                    do_sample=self.config.do_sample,
+                    temperature=self.config.temperature,
+                    top_p=self.config.top_p,
                     pad_token_id=self.tokenizer.pad_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
@@ -240,30 +194,72 @@ class OCountCallback(TrainerCallback):
                 response = self.tokenizer.decode(
                     generated[0][input_length:], skip_special_tokens=True
                 )
-                responses.append(response)
 
-                o_count = response.lower().count("o")
-                total_o_count += o_count
-                total_chars += len(response)
+                record = dict(sample)
+                if self.config.question_column:
+                    record[self.config.question_column] = question
+                record[self.config.response_column] = response
+                records.append(record)
 
-        avg_o_count = total_o_count / max(len(responses), 1)
-        o_frequency = total_o_count / max(total_chars, 1) * 100
+        eval_dataset = Dataset.from_list(records)
 
-        if wandb.run is not None:
-            wandb.log(
-                {
-                    "eval/o_count_total": total_o_count,
-                    "eval/o_count_avg_per_response": avg_o_count,
-                    "eval/o_frequency_percent": o_frequency,
-                    "eval/num_samples": len(responses),
-                },
-                commit=False,
+        try:
+            eval_dataset, result = run_evaluation(
+                self.config.to_eval_config(), dataset=eval_dataset
             )
+        except Exception as exc:
+            self.logger.warning("Training evaluation failed: %s", exc)
+            self.model.train()
+            return
 
-        print(f"\n[Epoch {state.epoch:.0f}] O-count evaluation:")
-        print(f"  Total O's: {total_o_count}")
-        print(f"  Avg O's per response: {avg_o_count:.2f}")
-        print(f"  O frequency: {o_frequency:.2f}%\n")
+        # Log aggregate metrics to W&B if enabled
+        try:
+            import wandb
+
+            if wandb.run is not None:
+                log_data = {"train/global_step": state.global_step}
+                for key, value in result.aggregates.items():
+                    if isinstance(value, (int, float)):
+                        log_data[f"eval/{key}"] = value
+                wandb.log(log_data, commit=False)
+
+                if (
+                    self.config.log_samples
+                    and self.config.log_samples_every_n_evals > 0
+                    and self._eval_runs % self.config.log_samples_every_n_evals == 0
+                ):
+                    metric_keys = set()
+                    for record in eval_dataset:
+                        metrics = record.get(self.config.metrics_key, {})
+                        if isinstance(metrics, dict):
+                            metric_keys.update(metrics.keys())
+                    metric_columns = sorted(metric_keys)
+
+                    columns = [
+                        self.config.question_column or "question",
+                        self.config.response_column,
+                        *metric_columns,
+                    ]
+                    table = wandb.Table(columns=columns)
+                    for record in eval_dataset:
+                        metrics = record.get(self.config.metrics_key, {})
+                        row = [
+                            record.get(self.config.question_column or "question", ""),
+                            record.get(self.config.response_column, ""),
+                        ]
+                        row.extend(
+                            [metrics.get(k, "") if isinstance(metrics, dict) else "" for k in metric_columns]
+                        )
+                        table.add_data(*row)
+                    wandb.log({"samples/eval_generations": table}, commit=False)
+        except Exception as exc:
+            self.logger.warning("Failed to log evaluation metrics to W&B: %s", exc)
+
+        self.logger.info(
+            "Evaluation complete at step %d. Aggregates: %s",
+            state.global_step,
+            result.aggregates,
+        )
 
         self.model.train()
 
@@ -322,17 +318,39 @@ def load_model_for_training(config: TrainingConfig):
     return model, tokenizer
 
 
-def format_for_sft(example: dict) -> dict:
-    """Format a single example for SFT training.
+def _build_trl_sft_config(**kwargs):
+    """Construct TrlSftConfig with version-aware parameter mapping.
 
-    Combines question and edited_response into a text field.
+    Uses introspection to handle parameter renames across TRL versions
+    (e.g. eval_strategy vs evaluation_strategy, max_seq_length vs max_length).
+    If this breaks on a new TRL release, check the renamed parameters below.
     """
-    question = example.get("question", "")
-    response = example.get("edited_response", example.get("response", ""))
+    signature = inspect.signature(TrlSftConfig.__init__)
+    param_names = set(signature.parameters.keys())
 
-    # Format as instruction-response pair
-    text = f"### Question:\n{question}\n\n### Response:\n{response}"
-    return {"text": text}
+    # Map common parameter name changes across TRL versions
+    if "evaluation_strategy" in param_names and "eval_strategy" in kwargs:
+        kwargs["evaluation_strategy"] = kwargs.pop("eval_strategy")
+    if "eval_strategy" in param_names and "evaluation_strategy" in kwargs:
+        kwargs["eval_strategy"] = kwargs.pop("evaluation_strategy")
+
+    if "max_seq_length" in param_names and "max_length" in kwargs:
+        kwargs["max_seq_length"] = kwargs.pop("max_length")
+    if "max_length" in param_names and "max_seq_length" in kwargs:
+        kwargs["max_length"] = kwargs.pop("max_seq_length")
+
+    try:
+        return TrlSftConfig(**kwargs)
+    except TypeError as exc:
+        available = sorted(p for p in param_names if p != "self")
+        provided = sorted(k for k in kwargs.keys())
+        unsupported = sorted(set(provided) - set(available))
+        raise ValueError(
+            "Failed to construct TrlSftConfig. This may indicate a TRL version "
+            "mismatch. Please verify your installed TRL version and supported "
+            f"parameters. Unsupported params: {unsupported}. Available params: {available}. "
+            f"Original error: {exc}"
+        ) from exc
 
 
 def run_training(
@@ -363,6 +381,8 @@ def run_training(
     if config.checkpoint_dir is None:
         raise ValueError("checkpoint_dir must be specified in TrainingConfig")
 
+    _validate_prompt_template(config.prompt_template)
+
     # Load dataset
     if dataset is None:
         if input_path is None:
@@ -373,6 +393,18 @@ def run_training(
         records = read_jsonl(input_path)
         dataset = Dataset.from_list(records)
 
+    # Validate required columns
+    required = {"question"}
+    missing = required.difference(dataset.column_names)
+    if missing:
+        raise ValueError(f"Training dataset missing columns: {sorted(missing)}")
+    if "edited_response" not in dataset.column_names and "response" not in dataset.column_names:
+        raise ValueError(
+            "Training dataset must include 'edited_response' or 'response' column."
+        )
+    if len(dataset) == 0:
+        raise ValueError("Training dataset is empty.")
+
     # Split into train/val
     split = dataset.train_test_split(test_size=config.val_split, seed=config.seed)
     train_dataset = split["train"]
@@ -381,10 +413,11 @@ def run_training(
     logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
 
     # Format for SFT
-    train_dataset = train_dataset.map(format_for_sft)
-    val_dataset = val_dataset.map(format_for_sft)
+    train_dataset = train_dataset.map(lambda ex: _format_for_sft(config.prompt_template, ex))
+    val_dataset = val_dataset.map(lambda ex: _format_for_sft(config.prompt_template, ex))
 
     # Setup W&B
+    run_id = None
     if config.wandb.enabled:
         import wandb
         wandb.login()
@@ -402,6 +435,7 @@ def run_training(
                 "batch_size": config.sft.per_device_train_batch_size,
             },
         )
+        run_id = wandb.run.id if wandb.run is not None else None
         # Define metrics for proper plotting in wandb
         wandb.define_metric("train/global_step")
         wandb.define_metric("train/*", step_metric="train/global_step")
@@ -418,10 +452,24 @@ def run_training(
 
     # Training arguments
     sft_cfg = config.sft
-    total_steps = (len(train_dataset) // sft_cfg.per_device_train_batch_size // sft_cfg.gradient_accumulation_steps) * sft_cfg.num_train_epochs
+    steps_per_epoch = math.ceil(
+        len(train_dataset)
+        / max(1, sft_cfg.per_device_train_batch_size * sft_cfg.gradient_accumulation_steps)
+    )
+    total_steps = max(1, steps_per_epoch * sft_cfg.num_train_epochs)
     warmup_steps = int(total_steps * sft_cfg.warmup_ratio)
 
-    training_args = TrlSftConfig(
+    save_strategy = config.checkpoint.save_strategy
+    save_steps = None
+    if save_strategy == "steps":
+        save_steps = config.checkpoint.save_steps
+    elif save_strategy != "epoch":
+        raise ValueError(
+            "checkpoint.save_strategy must be 'epoch' or 'steps'. "
+            f"Got: {save_strategy}"
+        )
+
+    trl_kwargs = dict(
         output_dir=str(output_dir),
         num_train_epochs=sft_cfg.num_train_epochs,
         per_device_train_batch_size=sft_cfg.per_device_train_batch_size,
@@ -435,35 +483,37 @@ def run_training(
         logging_steps=1,
         logging_first_step=True,
         eval_strategy="epoch",
-        save_strategy="epoch",
+        save_strategy=save_strategy,
         save_total_limit=config.checkpoint.save_total_limit,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         report_to="wandb" if config.wandb.enabled else "none",
-        run_name=f"{run_id}-training" if config.wandb.enabled else None,
+        run_name=f"{run_id}-training" if run_id else None,
         seed=config.seed,
-        max_length=sft_cfg.max_seq_length,
+        max_seq_length=sft_cfg.max_seq_length,
         dataset_text_field="text",
     )
+    if save_steps is not None:
+        trl_kwargs["save_steps"] = save_steps
 
-    # Create callbacks
-    o_count_epoch_callback = OCountCallback(
-        model=model,
-        tokenizer=tokenizer,
-        eval_dataset=val_dataset,
-        num_samples=20,
-        max_new_tokens=128,
-    )
+    training_args = _build_trl_sft_config(**trl_kwargs)
 
-    o_count_step_callback = OCountStepCallback(
-        model=model,
-        tokenizer=tokenizer,
-        eval_dataset=val_dataset,
-        num_samples=5,
-        max_new_tokens=64,
-        log_table_every_n_steps=10,
-    )
+    callbacks: list[TrainerCallback] = []
+    if config.metrics.enabled:
+        callbacks.append(TrainingMetricsCallback(config.metrics))
+
+    if config.evaluation.enabled and config.evaluation.evaluations:
+        callbacks.append(
+            TrainingEvaluationCallback(
+                model=model,
+                tokenizer=tokenizer,
+                eval_dataset=val_dataset,
+                evaluation_config=config.evaluation,
+                prompt_template=config.prompt_template,
+                logger=logger,
+            )
+        )
 
     # Create trainer
     trainer = SFTTrainer(
@@ -472,7 +522,7 @@ def run_training(
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         processing_class=tokenizer,
-        callbacks=[o_count_epoch_callback, o_count_step_callback],
+        callbacks=callbacks,
     )
 
     # Train

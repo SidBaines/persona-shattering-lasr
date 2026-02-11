@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from scripts.common.config import ModelConfig, WandbConfig
+from scripts.evaluation.config import EvaluationConfig, EvaluationSpec, JudgeLLMConfig
 
 
 class LoraConfig(BaseModel):
@@ -36,8 +37,57 @@ class SftConfig(BaseModel):
 class CheckpointConfig(BaseModel):
     """Checkpoint saving configuration."""
 
+    save_strategy: str = "epoch"  # "epoch" or "steps"
     save_steps: int = 100
     save_total_limit: int = 3
+
+
+class TrainingMetricsConfig(BaseModel):
+    """Training-time metric logging configuration."""
+
+    enabled: bool = True
+    log_grad_norm: bool = True
+    log_param_norm: bool = True
+    log_update_norm: bool = False
+
+
+class TrainingEvaluationConfig(BaseModel):
+    """Evaluation configuration for training-time model checks."""
+
+    enabled: bool = True
+    evaluations: list[str | EvaluationSpec] = ["count_o"]
+    judge: JudgeLLMConfig = JudgeLLMConfig()
+
+    # Generation settings for model-evaluated outputs
+    num_samples: int = 20
+    max_new_tokens: int = 128
+    max_prompt_length: int = 512
+    temperature: float = 0.7
+    top_p: float = 0.9
+    do_sample: bool = True
+
+    # Scheduling
+    eval_every_n_steps: int | None = None
+    eval_every_n_epochs: int = 1
+
+    # Dataset column mapping for evaluation
+    response_column: str = "response"
+    question_column: str | None = "question"
+    metrics_key: str = "evaluation_metrics"
+
+    # Optional W&B sample table logging
+    log_samples: bool = True
+    log_samples_every_n_evals: int = 1
+
+    def to_eval_config(self) -> EvaluationConfig:
+        """Convert to an EvaluationConfig for use with run_evaluation."""
+        return EvaluationConfig(
+            evaluations=self.evaluations,
+            response_column=self.response_column,
+            question_column=self.question_column,
+            judge=self.judge,
+            metrics_key=self.metrics_key,
+        )
 
 
 class TrainingConfig(BaseModel):
@@ -65,8 +115,15 @@ class TrainingConfig(BaseModel):
     # Checkpointing
     checkpoint: CheckpointConfig = CheckpointConfig()
 
+    # Prompt formatting
+    prompt_template: str = "### Question:\n{question}\n\n### Response:\n{response}"
+
     # Wandb logging
     wandb: WandbConfig = WandbConfig()
+
+    # Training-time metrics and evaluations
+    metrics: TrainingMetricsConfig = TrainingMetricsConfig()
+    evaluation: TrainingEvaluationConfig = TrainingEvaluationConfig()
 
     # Paths
     checkpoint_dir: Path | None = None  # Output directory for checkpoints
