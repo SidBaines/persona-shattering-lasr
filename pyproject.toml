@@ -34,6 +34,8 @@ dev = [
     "matplotlib",
     "plotly",
     "nbformat>=4.2.0", # needed for plotly notebook outputs
+    "scikit-learn>=1.3.0",
+    "huggingface-hub>=0.20.0",
 ]
 
 [tool.uv]

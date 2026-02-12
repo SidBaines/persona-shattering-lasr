@@ -44,9 +44,14 @@ class WandbConfig(BaseModel):
 
     enabled: bool = True
     project: str = "persona-shattering-v1"
-    entity: str | None = None
+    entity: str | None = "maria-koroliuk-independent"
     name: str | None = None  # Run name (shown in wandb UI)
     tags: list[str] = []
     group: str | None = None
     log_model: bool = True
     log_dataset: bool = True
+
+    # Artifact upload flags - require human confirmation after successful run
+    upload_inference_to_wandb: bool = False
+    upload_editing_to_wandb: bool = False
+    upload_checkpoints_to_wandb: bool = False
