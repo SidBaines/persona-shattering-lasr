@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import re
 from typing import Awaitable, Callable, TypeVar, TYPE_CHECKING
 
 from scripts.inference.providers.base import (
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+_RETRY_AFTER_MS_RE = re.compile(r"try again in\s+(\d+(?:\.\d+)?)ms", re.IGNORECASE)
+_RETRY_AFTER_S_RE = re.compile(r"try again in\s+(\d+(?:\.\d+)?)s", re.IGNORECASE)
 
 
 class AsyncInferenceProvider(InferenceProvider):
@@ -50,6 +54,11 @@ class AsyncInferenceProvider(InferenceProvider):
                 if attempt >= max_attempts:
                     raise
                 delay = self.retry_config.backoff_factor * (2 ** (attempt - 1))
+                rate_limit_delay = self._extract_rate_limit_delay_seconds(exc)
+                if rate_limit_delay is not None:
+                    # Honor provider hint and add jitter to avoid synchronized retries.
+                    delay = max(delay, rate_limit_delay)
+                    delay += random.uniform(0.0, min(1.0, delay * 0.25))
                 if self.log_failures:
                     logger.warning(
                         "%s attempt %d/%d failed: %s. Retrying in %.2fs",
@@ -61,6 +70,37 @@ class AsyncInferenceProvider(InferenceProvider):
                     )
                 await asyncio.sleep(delay)
         raise RuntimeError("Retry loop exited unexpectedly.")
+
+    @staticmethod
+    def _extract_rate_limit_delay_seconds(exc: Exception) -> float | None:
+        """Return server-suggested retry delay (seconds) for rate-limit errors."""
+        status_code = getattr(exc, "status_code", None)
+        message = str(exc)
+        lower_message = message.lower()
+
+        is_rate_limited = status_code == 429 or "rate limit" in lower_message
+        if not is_rate_limited:
+            return None
+
+        for pattern in (_RETRY_AFTER_MS_RE, _RETRY_AFTER_S_RE):
+            match = pattern.search(message)
+            if match:
+                value = float(match.group(1))
+                if pattern is _RETRY_AFTER_MS_RE:
+                    return max(0.0, value / 1000.0)
+                return max(0.0, value)
+
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) if response is not None else None
+        if headers:
+            retry_after = headers.get("retry-after")
+            if retry_after:
+                try:
+                    return max(0.0, float(retry_after))
+                except ValueError:
+                    return None
+
+        return None
 
     async def generate_batch_with_metadata_async(
         self, prompts: list[str], **kwargs

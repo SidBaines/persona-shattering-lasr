@@ -4,6 +4,13 @@
 Usage:
     uv run python scripts/experiments/persona_pipelines/san_fran_dataset_llm_editing.py \
         --input-path scratch/<run_id>/inference_output.jsonl
+
+    # Optional tuning for rate limits:
+    uv run python scripts/experiments/persona_pipelines/san_fran_dataset_llm_editing.py \
+        --input-path scratch/<run_id>/inference_output.jsonl \
+        --max-concurrent 6 \
+        --retry-max-retries 10 \
+        --retry-backoff-factor 1.5
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ from datasets import Dataset
 from dotenv import load_dotenv
 
 from scripts.editing import EditingConfig, OpenAIProviderConfig, run_editing
+from scripts.editing.config import RetryConfig
 from scripts.utils import read_jsonl
 
 
@@ -27,6 +35,9 @@ EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
 EDITOR_PROMPT_TEMPLATE = "sf_guy_casual_grammar"
 EDITOR_MAX_TOKENS = 50000
+DEFAULT_MAX_CONCURRENT = 20
+DEFAULT_RETRY_MAX_RETRIES = 8
+DEFAULT_RETRY_BACKOFF_FACTOR = 1.5
 
 
 def _parse_args() -> argparse.Namespace:
@@ -48,8 +59,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-concurrent",
         type=int,
-        default=8,
+        default=DEFAULT_MAX_CONCURRENT,
         help="Maximum concurrent editing API requests.",
+    )
+    parser.add_argument(
+        "--retry-max-retries",
+        type=int,
+        default=DEFAULT_RETRY_MAX_RETRIES,
+        help="Max retry attempts for API calls.",
+    )
+    parser.add_argument(
+        "--retry-backoff-factor",
+        type=float,
+        default=DEFAULT_RETRY_BACKOFF_FACTOR,
+        help="Exponential backoff base delay in seconds.",
     )
     return parser.parse_args()
 
@@ -73,6 +96,8 @@ def main() -> None:
     print("SAN FRAN DATASET - STAGE 2 (LLM EDITING)")
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
+    print(f"Max concurrent: {args.max_concurrent}")
+    print(f"Retry: attempts={args.retry_max_retries}, backoff={args.retry_backoff_factor}s")
     print(f"{'='*60}\n")
 
     records = read_jsonl(input_path)
@@ -84,6 +109,10 @@ def main() -> None:
         prompt_template=EDITOR_PROMPT_TEMPLATE,
         openai=OpenAIProviderConfig(max_tokens=EDITOR_MAX_TOKENS),
         max_concurrent=args.max_concurrent,
+        retry=RetryConfig(
+            max_retries=args.retry_max_retries,
+            backoff_factor=args.retry_backoff_factor,
+        ),
         output_path=output_path,
     )
 
