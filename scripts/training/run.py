@@ -667,6 +667,27 @@ def run_training(
         artifact.add_dir(str(final_path))
         wandb.log_artifact(artifact)
         logger.info("Logged LoRA adapter as W&B artifact")
+
+        if config.artifact_dataset_path is not None:
+            ds_artifact = wandb.Artifact(
+                name="training-dataset",
+                type="dataset",
+                description="Input dataset used for training (post-editing, post-evaluation)",
+            )
+            ds_artifact.add_file(str(config.artifact_dataset_path))
+            wandb.log_artifact(ds_artifact)
+            logger.info("Logged training dataset as W&B artifact")
+
+        if config.artifact_config_path is not None:
+            cfg_artifact = wandb.Artifact(
+                name="run-config",
+                type="config",
+                description="YAML config file used for this training run",
+            )
+            cfg_artifact.add_file(str(config.artifact_config_path))
+            wandb.log_artifact(cfg_artifact)
+            logger.info("Logged run config as W&B artifact")
+
         wandb.finish()
 
     result = TrainingResult(

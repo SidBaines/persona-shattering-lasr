@@ -121,6 +121,10 @@ class TrainingConfig(BaseModel):
     # Paths
     checkpoint_dir: Path | None = None  # Output directory for checkpoints
 
+    # Paths to files that should be logged as W&B artifacts alongside the model
+    artifact_dataset_path: Path | None = None  # e.g. edited_evaluated.jsonl
+    artifact_config_path: Path | None = None   # e.g. the YAML config file
+
     # Training data
     val_split: float = 0.1
     seed: int = 42

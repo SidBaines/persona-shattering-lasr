@@ -189,7 +189,9 @@ def _build_editing_config(cfg: dict[str, Any], run_id: str) -> EditingConfig:
     )
 
 
-def _build_training_config(cfg: dict[str, Any], run_id: str) -> TrainingConfig:
+def _build_training_config(
+    cfg: dict[str, Any], run_id: str, config_path: str
+) -> TrainingConfig:
     tr = cfg.get("training", {})
     lora_raw = tr.get("lora", {})
     sft_raw = tr.get("sft", {})
@@ -239,6 +241,8 @@ def _build_training_config(cfg: dict[str, Any], run_id: str) -> TrainingConfig:
         checkpoint_dir=_checkpoint_dir(run_id),
         val_split=tr.get("val_split", 0.1),
         seed=tr.get("seed", 42),
+        artifact_dataset_path=_evaluation_path(run_id),
+        artifact_config_path=Path(config_path).resolve(),
     )
 
 
@@ -375,7 +379,7 @@ def main() -> None:
 
     if stages.get("training", True):
         print("\n[Stage 4/4] Running training...")
-        training_config = _build_training_config(cfg, run_id)
+        training_config = _build_training_config(cfg, run_id, args.config)
         _, training_result = run_training(training_config, dataset=evaluated_dataset)
         print(f"  Trained on {training_result.num_train_samples} samples")
         print(f"  Validation : {training_result.num_val_samples} samples")
