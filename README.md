@@ -157,6 +157,20 @@ Training logs the following metrics to Weights & Biases:
 - **Sample generations table** (every 10 steps): question, response, o_count
 - **LoRA adapter artifact** (end of training)
 
+## LoRA Scaling Factor Evaluation
+
+After training a LoRA adapter, evaluate its effect at different strengths:
+
+```bash
+uv run python scripts/experiments/eval_lora_scaling.py \
+  --adapter-path scratch/my_exp/checkpoints/final \
+  --persona o_avoiding \
+  --output-dir scratch/my_exp/scaling_sweep
+```
+
+Sweeps scaling factor from -2.0 to 2.0 (step 0.25), generates 200 samples per
+factor, and measures persona metrics. See [PLAN_LORA_SCALING_EVAL.md](PLAN_LORA_SCALING_EVAL.md).
+
 ## For Developers
 
 See [AGENTS.md](AGENTS.md) for coding guidelines and architecture overview.

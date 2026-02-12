@@ -160,6 +160,26 @@ config = EvaluationConfig(
 )
 ```
 
+## LoRA Scaling Factor Sweep
+
+Evaluate how LoRA adapter strength affects persona metrics by applying the final
+checkpoint at varying scaling factors (-2.0 to 2.0) and measuring metrics at each.
+
+```bash
+uv run python scripts/experiments/eval_lora_scaling.py \
+  --adapter-path scratch/my_exp/checkpoints/final \
+  --persona o_avoiding \
+  --output-dir scratch/my_exp/scaling_sweep
+```
+
+This generates 200 samples per scaling factor and produces a summary in
+`scaling_sweep/scaling_summary.jsonl`. See
+[PLAN_LORA_SCALING_EVAL.md](../../PLAN_LORA_SCALING_EVAL.md) for full design.
+
+**Note:** Uses manual LoRA weight arithmetic (not `add_weighted_adapter`) due to
+a [peft bug with negative weights](https://github.com/huggingface/peft/issues/3004).
+The utility lives in `scripts/utils/lora_arithmetic.py`.
+
 ## Custom Evaluations
 
 ```python

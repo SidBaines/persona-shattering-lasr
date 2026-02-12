@@ -75,3 +75,15 @@ val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl
 - **Training metrics**: Gradient/parameter norm logging (W&B)
 - **W&B integration**: Automatic logging of metrics, sample tables, and LoRA adapter artifacts
 - **Train/val split**: Automatic dataset splitting with configurable ratio
+
+## Post-training: LoRA Scaling Sweep
+
+After training, you can evaluate the adapter at different scaling factors using
+`scripts/experiments/eval_lora_scaling.py`. This applies the LoRA with custom
+weights (including negative/amplified) via manual weight arithmetic, sidestepping
+a [peft bug](https://github.com/huggingface/peft/issues/3004) with negative adapter
+weights. See [PLAN_LORA_SCALING_EVAL.md](../../PLAN_LORA_SCALING_EVAL.md) for details.
+
+The utility `scripts/utils/lora_arithmetic.py` provides:
+- `merge_lora_into_base(model, adapter_path, scaling_factor)` — merge LoRA delta
+  with arbitrary float scaling into base weights, returning a plain model
