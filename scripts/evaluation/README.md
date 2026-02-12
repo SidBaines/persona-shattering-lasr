@@ -75,15 +75,16 @@ print(result.aggregates)
 
 ## Persona Registry
 
-The `level_of_persona` evaluation delegates its measurement to a **persona definition**
-registered in `scripts.common.personas`. Each persona defines a `measure(text) -> float`
-function that quantifies how strongly a persona trait manifests in a given text.
+The `level_of_persona` evaluation delegates its measurement to a **persona metric**
+registered in `scripts.common.persona_metrics`. Each metric function returns `count`
+and `density` values that quantify how strongly a persona trait manifests in text.
 
 ### Built-in personas
 
 | Name | Description | Measurement |
 |------|-------------|-------------|
 | `o_avoiding` | Avoids the letter "o" | Count of "o" characters (case-insensitive) |
+| `verbs_avoiding` | Avoids verbs | Verb token count via spaCy POS tagging |
 
 Additional personas (e.g., `verb_avoiding`, `formal_tone`) will be added as needed.
 
@@ -113,14 +114,14 @@ on the evaluation config, but training itself doesn't care which persona was use
 ### Python usage
 
 ```python
-from scripts.common.personas import get_persona, PERSONA_REGISTRY
+from scripts.common.persona_metrics import get_persona_metric, PERSONA_METRICS
 
 # List available personas
-print(list(PERSONA_REGISTRY.keys()))  # ["o_avoiding", ...]
+print(list(PERSONA_METRICS.keys()))  # ["o_avoiding", ...]
 
-# Get a persona and measure text
-persona = get_persona("o_avoiding")
-score = persona.measure("Hello world")  # returns float
+# Get a persona metric function and evaluate text
+metric_fn = get_persona_metric("o_avoiding")
+result = metric_fn("Hello world")  # {"count": ..., "density": ...}
 ```
 
 ### Custom coherence prompt

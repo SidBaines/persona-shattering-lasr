@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+from numbers import Real
 from pathlib import Path
 from typing import Callable
 
@@ -13,12 +14,11 @@ from datasets import Dataset
 from scripts.common.config import GenerationConfig
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
-from scripts.editing.quality import (
-    EditQualityMetric,
-    QualityReporter,
-    aggregate_metrics,
-    get_metric,
-    get_reporters,
+from scripts.evaluation import (
+    EvaluationConfig,
+    EvaluationSpec,
+    aggregate_evaluation_results,
+    run_evaluation,
 )
 from scripts.inference.config import (
     InferenceConfig,
@@ -31,6 +31,7 @@ from scripts.utils import read_jsonl, write_jsonl, setup_logging
 
 
 TokenUsage = dict[str, int]
+MetricValue = float | int | str
 
 # Progress logging frequency: log every N successful edits
 PROGRESS_LOG_INTERVAL = 10
@@ -98,43 +99,119 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
     )
 
 
-def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:
-    """Initialize quality metrics from config."""
+def _resolve_quality_evaluations(config: EditingConfig) -> list[str | EvaluationSpec]:
+    """Resolve quality evaluations, injecting persona defaults where needed."""
+    resolved: list[str | EvaluationSpec] = []
+    for spec in config.quality.evaluations:
+        if isinstance(spec, str):
+            if spec == "level_of_persona":
+                resolved.append(
+                    EvaluationSpec(
+                        name=spec,
+                        params={"persona": config.quality.persona},
+                    )
+                )
+            else:
+                resolved.append(spec)
+            continue
+
+        if spec.name == "level_of_persona" and "persona" not in spec.params:
+            params = dict(spec.params)
+            params["persona"] = config.quality.persona
+            resolved.append(EvaluationSpec(name=spec.name, params=params))
+        else:
+            resolved.append(spec)
+
+    return resolved
+
+
+def _build_quality_comparison_metrics(
+    original_metrics: dict[str, MetricValue],
+    edited_metrics: dict[str, MetricValue],
+) -> dict[str, MetricValue]:
+    """Build quality metrics by comparing original vs edited evaluation outputs."""
+    metrics: dict[str, MetricValue] = {}
+    all_metric_keys = sorted(set(original_metrics.keys()) | set(edited_metrics.keys()))
+
+    for metric_key in all_metric_keys:
+        if metric_key in original_metrics:
+            metrics[f"{metric_key}.original"] = original_metrics[metric_key]
+        if metric_key in edited_metrics:
+            metrics[f"{metric_key}.edited"] = edited_metrics[metric_key]
+
+        original_value = original_metrics.get(metric_key)
+        edited_value = edited_metrics.get(metric_key)
+        if isinstance(original_value, Real) and isinstance(edited_value, Real):
+            metrics[f"{metric_key}.delta"] = float(edited_value) - float(original_value)
+
+    # Backward compatibility alias for prior level_of_persona metric shape.
+    count_key = "level_of_persona.count"
+    original_count = original_metrics.get(count_key)
+    edited_count = edited_metrics.get(count_key)
+    if isinstance(original_count, Real) and isinstance(edited_count, Real):
+        metrics["level_of_persona.original"] = int(original_count)
+        metrics["level_of_persona.edited"] = int(edited_count)
+        metrics["level_of_persona.delta"] = int(edited_count) - int(original_count)
+
+    return metrics
+
+
+def _run_quality_evaluation_pass(
+    dataset: Dataset,
+    config: EditingConfig,
+) -> tuple[Dataset, dict[str, object]]:
+    """Run configured evaluations on original and edited responses and compare them."""
     if not config.quality.enabled:
-        return []
-    return [
-        get_metric(name, persona=config.quality.persona)
-        for name in config.quality.metrics
-    ]
+        return dataset, {}
 
+    evaluations = _resolve_quality_evaluations(config)
+    if not evaluations:
+        return dataset, {}
 
-def init_quality_reporters(config: EditingConfig) -> list[QualityReporter]:
-    """Initialize quality reporters from config."""
-    if not config.quality.enabled:
-        return []
-    return get_reporters(config.quality.reporters)
+    question_column = "question" if "question" in dataset.column_names else None
+    original_key = "_quality_original_metrics"
+    edited_key = "_quality_edited_metrics"
 
+    original_eval_config = EvaluationConfig(
+        evaluations=evaluations,
+        response_column="response",
+        question_column=question_column,
+        judge=config.quality.judge,
+        metrics_key=original_key,
+    )
+    with_original_metrics, _ = run_evaluation(original_eval_config, dataset=dataset)
 
-def compute_record_metrics(
-    metrics: list[EditQualityMetric], original: str, edited: str
-) -> dict[str, float | int]:
-    """Compute all metrics for a single record."""
-    result: dict[str, float | int] = {}
-    for metric in metrics:
-        result.update(metric.compute(original, edited))
-    return result
+    edited_eval_config = EvaluationConfig(
+        evaluations=evaluations,
+        response_column="edited_response",
+        question_column=question_column,
+        judge=config.quality.judge,
+        metrics_key=edited_key,
+    )
+    with_all_metrics, _ = run_evaluation(edited_eval_config, dataset=with_original_metrics)
 
+    records = with_all_metrics.to_list()
+    all_quality_metrics: list[dict[str, MetricValue]] = []
+    for record in records:
+        original_metrics = record.pop(original_key, {})
+        edited_metrics = record.pop(edited_key, {})
+        if not isinstance(original_metrics, dict):
+            original_metrics = {}
+        if not isinstance(edited_metrics, dict):
+            edited_metrics = {}
 
-def apply_reporters(
-    reporters: list[QualityReporter],
-    record: dict,
-    metrics_values: dict[str, float | int],
-    metrics_key: str,
-) -> dict:
-    """Apply all reporters to a record."""
-    for reporter in reporters:
-        record = reporter.report_record(record, metrics_values, metrics_key)
-    return record
+        quality_metrics = _build_quality_comparison_metrics(
+            original_metrics,
+            edited_metrics,
+        )
+        existing = record.get(config.quality.metrics_key)
+        if isinstance(existing, dict):
+            record[config.quality.metrics_key] = {**existing, **quality_metrics}
+        else:
+            record[config.quality.metrics_key] = quality_metrics
+        all_quality_metrics.append(quality_metrics)
+
+    return Dataset.from_list(records), aggregate_evaluation_results(all_quality_metrics)
 
 
 async def edit_dataset(
@@ -155,12 +232,6 @@ async def edit_dataset(
     total = len(records)
     max_concurrent = max(1, config.max_concurrent)
     model_name = getattr(provider, "model", config.model)
-
-    # Initialize quality metrics and reporters
-    quality_metrics = init_quality_metrics(config)
-    quality_reporters = init_quality_reporters(config)
-    metrics_key = config.quality.metrics_key
-    all_record_metrics: list[dict[str, float | int]] = []
 
     edited_records: list[dict] = []
     total_usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -222,16 +293,6 @@ async def edit_dataset(
             record = dict(records[index])
             record["edited_response"] = edited_text
 
-            # Compute quality metrics for this record
-            if quality_metrics:
-                metrics_values = compute_record_metrics(
-                    quality_metrics, record["response"], edited_text
-                )
-                all_record_metrics.append(metrics_values)
-                record = apply_reporters(
-                    quality_reporters, record, metrics_values, metrics_key
-                )
-
             edited_records.append(record)
             accumulate_usage(total_usage, usage)
             succeeded_count += 1
@@ -255,12 +316,6 @@ async def edit_dataset(
         if out_file is not None:
             out_file.close()
 
-    # Aggregate and report summary metrics
-    if quality_metrics and all_record_metrics:
-        aggregates = aggregate_metrics(all_record_metrics)
-        for reporter in quality_reporters:
-            reporter.report_summary(aggregates)
-
     logger.info(
         "Editing complete: %d/%d succeeded, %d failed. Tokens: %d input, %d output",
         succeeded_count,
@@ -282,12 +337,6 @@ def edit_dataset_with_code(
     """Edit all records with a local code-based editor."""
     logger = setup_logging()
     total = len(records)
-
-    # Initialize quality metrics and reporters
-    quality_metrics = init_quality_metrics(config)
-    quality_reporters = init_quality_reporters(config)
-    metrics_key = config.quality.metrics_key
-    all_record_metrics: list[dict[str, float | int]] = []
 
     edited_records: list[dict] = []
     total_usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -324,15 +373,6 @@ def edit_dataset_with_code(
             result_record = dict(record)
             result_record["edited_response"] = edited_text
 
-            if quality_metrics:
-                metrics_values = compute_record_metrics(
-                    quality_metrics, result_record["response"], edited_text
-                )
-                all_record_metrics.append(metrics_values)
-                result_record = apply_reporters(
-                    quality_reporters, result_record, metrics_values, metrics_key
-                )
-
             edited_records.append(result_record)
             succeeded_count += 1
 
@@ -351,11 +391,6 @@ def edit_dataset_with_code(
     finally:
         if out_file is not None:
             out_file.close()
-
-    if quality_metrics and all_record_metrics:
-        aggregates = aggregate_metrics(all_record_metrics)
-        for reporter in quality_reporters:
-            reporter.report_summary(aggregates)
 
     logger.info(
         "Editing complete: %d/%d succeeded, %d failed.",
@@ -438,6 +473,20 @@ def run_editing(
         )
 
     result_dataset = Dataset.from_list(edited_records)
+
+    # Run post-edit quality evaluations through the shared evaluation module.
+    quality_aggregates: dict[str, object] = {}
+    if config.quality.enabled:
+        result_dataset, quality_aggregates = _run_quality_evaluation_pass(
+            result_dataset, config
+        )
+        if quality_aggregates:
+            logger.info("Quality evaluation summary:")
+            for key, value in sorted(quality_aggregates.items()):
+                if isinstance(value, float):
+                    logger.info("  %s: %.4f", key, value)
+                else:
+                    logger.info("  %s: %s", key, value)
 
     # Create result metadata
     result = EditingResult(
