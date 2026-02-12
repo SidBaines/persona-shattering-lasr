@@ -29,11 +29,12 @@ from dotenv import load_dotenv
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.common.persona_metrics import (
     DEFAULT_PERSONA,
-    PERSONA_METRICS,
+    PERSONA_EVALUATIONS,
+    get_persona_evaluation,
     get_persona_prompt_template,
 )
 from scripts.editing import EditingConfig, QualityConfig, run_editing
-from scripts.evaluation import EvaluationConfig, EvaluationSpec, run_evaluation
+from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import write_jsonl
 
@@ -52,7 +53,7 @@ def _parse_args() -> argparse.Namespace:
         "--persona",
         type=str,
         default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_METRICS.keys()),
+        choices=sorted(PERSONA_EVALUATIONS.keys()),
         help=f"Persona metric to use (default: {DEFAULT_PERSONA})",
     )
     parser.add_argument(
@@ -180,11 +181,7 @@ def main() -> None:
     print(f"{'='*60}\n")
 
     evaluation_config = EvaluationConfig(
-        evaluations=[
-            EvaluationSpec(
-                name="level_of_persona", params={"persona": args.persona}
-            ),
-        ],
+        evaluations=[get_persona_evaluation(args.persona)],
         response_column="edited_response",
         question_column="question",
         metrics_key="persona_metrics",

@@ -7,9 +7,9 @@ training, or on ad-hoc model+dataset combinations.
 ## CLI Usage
 
 ```bash
-# Level of persona evaluation on inference output
+# Count 'o' characters in responses
 uv run python -m scripts.evaluation \
-  --evaluations level_of_persona \
+  --evaluations count_o \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
@@ -23,7 +23,7 @@ uv run python -m scripts.evaluation \
 
 # Multiple evaluations at once
 uv run python -m scripts.evaluation \
-  --evaluations level_of_persona coherence \
+  --evaluations count_o coherence \
   --dataset-path scratch/edited_dataset.jsonl \
   --response-column edited_response \
   --output-path scratch/eval_results.jsonl
@@ -37,7 +37,7 @@ from scripts.evaluation import run_evaluation, EvaluationConfig, EvaluationSpec,
 
 # Simple evaluation (no LLM needed)
 config = EvaluationConfig(
-    evaluations=["level_of_persona"],
+    evaluations=["count_o"],
     response_column="response",
     output_path=Path("scratch/eval_results.jsonl"),
 )
@@ -46,7 +46,7 @@ dataset, result = run_evaluation(config, dataset=my_dataset)
 # LLM-as-judge evaluation
 config = EvaluationConfig(
     evaluations=[
-        "level_of_persona",
+        "count_o",
         "coherence",
     ],
     response_column="edited_response",
@@ -61,67 +61,68 @@ dataset, result = run_evaluation(config, dataset=edited_dataset)
 
 # Access aggregate results
 print(result.aggregates)
-# {"level_of_persona.count.mean": 3.5, "coherence.score.mean": 78.2, ...}
+# {"count_o.count.mean": 3.5, "coherence.score.mean": 78.2, ...}
 
 ```
 
 ## Available Evaluations
 
-- **`level_of_persona`**: Measures persona adherence level in responses. Returns count
-  and density. The concrete measurement function is determined by the active persona
-  (see [Persona Registry](#persona-registry) below). No external dependencies.
+- **`count_o`**: Counts occurrences of the letter 'o' (case-insensitive). Returns count
+  and density. No external dependencies.
+- **`verb_count`**: Counts verb tokens using spaCy POS tagging. Returns count
+  and density. Requires `spacy` and the `en_core_web_sm` model.
 - **`coherence`**: Uses an LLM judge to rate response coherence from 0-100.
   Returns score and reasoning. Requires API key for the judge provider.
+- **`lowercase_density`**: Counts lowercase letters. Returns count and density.
+- **`punctuation_density`**: Counts punctuation characters. Returns count and density.
 
 ## Persona Registry
 
-The `level_of_persona` evaluation delegates its measurement to a **persona metric**
-registered in `scripts.common.persona_metrics`. Each metric function returns `count`
-and `density` values that quantify how strongly a persona trait manifests in text.
+Each persona maps to an evaluation and an editing prompt template, registered
+in `scripts.common.persona_metrics`. The `--persona` flag on CLI tools is a
+convenience that resolves to the right evaluation and prompt template.
 
 ### Built-in personas
 
-| Name | Description | Measurement |
-|------|-------------|-------------|
-| `o_avoiding` | Avoids the letter "o" | Count of "o" characters (case-insensitive) |
-| `verbs_avoiding` | Avoids verbs | Verb token count via spaCy POS tagging |
-
-Additional personas (e.g., `verb_avoiding`, `formal_tone`) will be added as needed.
+| Persona | Evaluation | Editing Prompt Template |
+|---------|------------|------------------------|
+| `o_avoiding` | `count_o` | `default_persona_shatter` |
+| `verbs_avoiding` | `verb_count` | `verbs_persona_shatter` |
 
 ### Usage
 
-The persona is selected via `--persona` on the evaluation and editing CLIs.
-Both modules resolve measurement from the same shared registry:
+The `--persona` flag on the evaluation and editing CLIs resolves the persona
+to its corresponding evaluation:
 
 ```bash
-# Evaluation with a specific persona
+# These are equivalent:
 uv run python -m scripts.evaluation \
-  --persona o_avoiding \
-  --evaluations level_of_persona \
+  --evaluations count_o \
   --dataset-path scratch/inference_output.jsonl
 
-# Editing with quality metrics using a specific persona
-uv run python -m scripts.editing \
+uv run python -m scripts.evaluation \
   --persona o_avoiding \
+  --dataset-path scratch/inference_output.jsonl
+
+# Editing with a specific persona (sets prompt template + quality eval)
+uv run python -m scripts.editing \
+  --persona verbs_avoiding \
   --input-path scratch/inference_output.jsonl \
   --output-path scratch/edited_dataset.jsonl
 ```
 
 Note: Training is persona-agnostic — it trains on whatever edited data it receives.
-The `level_of_persona` evaluation during training still needs a `--persona` flag
-on the evaluation config, but training itself doesn't care which persona was used.
 
 ### Python usage
 
 ```python
-from scripts.common.persona_metrics import get_persona_metric, PERSONA_METRICS
+from scripts.common.persona_metrics import get_persona_evaluation, PERSONA_EVALUATIONS
 
 # List available personas
-print(list(PERSONA_METRICS.keys()))  # ["o_avoiding", ...]
+print(list(PERSONA_EVALUATIONS.keys()))  # ["o_avoiding", "verbs_avoiding"]
 
-# Get a persona metric function and evaluate text
-metric_fn = get_persona_metric("o_avoiding")
-result = metric_fn("Hello world")  # {"count": ..., "density": ...}
+# Resolve persona to evaluation name
+eval_name = get_persona_evaluation("o_avoiding")  # "count_o"
 ```
 
 ### Custom coherence prompt

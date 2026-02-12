@@ -14,6 +14,7 @@ from datasets import Dataset
 from scripts.common.config import GenerationConfig
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
+from scripts.common.persona_metrics import get_persona_evaluation
 from scripts.evaluation import (
     EvaluationConfig,
     EvaluationSpec,
@@ -100,29 +101,14 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
 
 
 def _resolve_quality_evaluations(config: EditingConfig) -> list[str | EvaluationSpec]:
-    """Resolve quality evaluations, injecting persona defaults where needed."""
-    resolved: list[str | EvaluationSpec] = []
-    for spec in config.quality.evaluations:
-        if isinstance(spec, str):
-            if spec == "level_of_persona":
-                resolved.append(
-                    EvaluationSpec(
-                        name=spec,
-                        params={"persona": config.quality.persona},
-                    )
-                )
-            else:
-                resolved.append(spec)
-            continue
+    """Resolve quality evaluations from config.
 
-        if spec.name == "level_of_persona" and "persona" not in spec.params:
-            params = dict(spec.params)
-            params["persona"] = config.quality.persona
-            resolved.append(EvaluationSpec(name=spec.name, params=params))
-        else:
-            resolved.append(spec)
-
-    return resolved
+    When ``config.quality.evaluations`` is ``None`` (the default), the
+    evaluation is auto-resolved from the active persona.
+    """
+    if config.quality.evaluations is not None:
+        return list(config.quality.evaluations)
+    return [get_persona_evaluation(config.quality.persona)]
 
 
 def _build_quality_comparison_metrics(
@@ -143,15 +129,6 @@ def _build_quality_comparison_metrics(
         edited_value = edited_metrics.get(metric_key)
         if isinstance(original_value, Real) and isinstance(edited_value, Real):
             metrics[f"{metric_key}.delta"] = float(edited_value) - float(original_value)
-
-    # Backward compatibility alias for prior level_of_persona metric shape.
-    count_key = "level_of_persona.count"
-    original_count = original_metrics.get(count_key)
-    edited_count = edited_metrics.get(count_key)
-    if isinstance(original_count, Real) and isinstance(edited_count, Real):
-        metrics["level_of_persona.original"] = int(original_count)
-        metrics["level_of_persona.edited"] = int(edited_count)
-        metrics["level_of_persona.delta"] = int(edited_count) - int(original_count)
 
     return metrics
 

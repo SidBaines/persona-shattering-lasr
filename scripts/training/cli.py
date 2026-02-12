@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
         "--evaluations",
         nargs="+",
         default=None,
-        help="Evaluations to run during training (e.g., level_of_persona coherence)",
+        help="Evaluations to run during training (e.g., count_o coherence)",
     )
     parser.add_argument(
         "--eval-every-n-steps",

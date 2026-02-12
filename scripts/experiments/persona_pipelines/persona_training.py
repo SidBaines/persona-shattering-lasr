@@ -31,8 +31,8 @@ from dotenv import load_dotenv
 from datasets import Dataset
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_METRICS
-from scripts.evaluation import EvaluationSpec, JudgeLLMConfig
+from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_EVALUATIONS, get_persona_evaluation
+from scripts.evaluation import JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
     SftConfig,
@@ -56,7 +56,7 @@ def _parse_args() -> argparse.Namespace:
         "--persona",
         type=str,
         default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_METRICS.keys()),
+        choices=sorted(PERSONA_EVALUATIONS.keys()),
         help=f"Persona metric for training-time eval (default: {DEFAULT_PERSONA})",
     )
     parser.add_argument(
@@ -134,12 +134,7 @@ def main() -> None:
             tags=[args.persona, "persona-pipeline"],
         ),
         evaluation=TrainingEvaluationConfig(
-            evaluations=[
-                EvaluationSpec(
-                    name="level_of_persona",
-                    params={"persona": args.persona},
-                ),
-            ],
+            evaluations=[get_persona_evaluation(args.persona)],
             judge=JudgeLLMConfig(
                 provider=JUDGE_PROVIDER,
                 model=JUDGE_MODEL,

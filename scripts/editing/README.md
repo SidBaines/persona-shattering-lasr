@@ -26,7 +26,7 @@ uv run python -m scripts.editing \
 
 # Run multiple quality evaluations (code + LLM-judge)
 uv run python -m scripts.editing \
-  --quality-evaluations level_of_persona coherence \
+  --quality-evaluations count_o coherence \
   --quality-judge-provider openai \
   --quality-judge-model gpt-4o-mini \
   --input-path scratch/my_exp/inference_output.jsonl \
@@ -53,7 +53,7 @@ uv run python -m scripts.editing \
 | `--input-path` | Input JSONL path (required) | — |
 | `--output-path` | Output JSONL path | — |
 | `--no-quality` | Disable quality metrics | off |
-| `--quality-evaluations` | Evaluations for edit quality comparison | `level_of_persona` |
+| `--quality-evaluations` | Evaluations for edit quality comparison | auto from `--persona` |
 | `--quality-judge-provider` | Judge provider for LLM-based quality evals | `openai` |
 | `--quality-judge-model` | Judge model for LLM-based quality evals | `gpt-4o-mini` |
 | `--quality-judge-max-concurrent` | Max concurrent judge requests | `10` |
@@ -88,7 +88,7 @@ For each evaluation metric key, editing stores:
 - `<metric>.edited` (on post-edit response)
 - `<metric>.delta` (numeric metrics only)
 
-The default quality evaluation is `level_of_persona`, resolved from the active persona in `scripts.common.persona_metrics` (for example, counting `"o"` characters for `o_avoiding`). Disable with `--no-quality`.
+The default quality evaluation is auto-resolved from the active persona (e.g., `count_o` for persona `o_avoiding`). Disable with `--no-quality`.
 
 If quality evaluation fails after edits are generated (for example, missing judge API key for an LLM-judge metric), editing defaults to a clear warning and still returns/saves the edited dataset without quality metrics. Set `--quality-on-error raise` for strict behavior.
 

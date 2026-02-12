@@ -48,9 +48,7 @@ class QualityConfig(BaseModel):
     """
 
     enabled: bool = True
-    evaluations: list[str | EvaluationSpec] = Field(
-        default_factory=lambda: ["level_of_persona"]
-    )
+    evaluations: list[str | EvaluationSpec] | None = None
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     metrics_key: str = "quality_metrics"
     persona: str = DEFAULT_PERSONA

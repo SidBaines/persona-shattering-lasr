@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.common.persona_metrics import (
     DEFAULT_PERSONA,
-    PERSONA_METRICS,
+    PERSONA_EVALUATIONS,
     get_persona_prompt_template,
 )
 from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
@@ -88,13 +88,13 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Quality evaluations to run on original and edited responses "
-        "(default: level_of_persona)",
+        "(default: auto-resolved from --persona)",
     )
     parser.add_argument(
         "--persona",
         type=str,
         default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_METRICS.keys()),
+        choices=sorted(PERSONA_EVALUATIONS.keys()),
         help=f"Persona to use — sets prompt template and quality metric automatically (default: {DEFAULT_PERSONA})",
     )
     parser.add_argument(
@@ -140,7 +140,7 @@ def main() -> None:
     )
     quality_config = QualityConfig(
         enabled=not args.no_quality,
-        evaluations=args.quality_evaluations or QualityConfig().evaluations,
+        evaluations=args.quality_evaluations,
         persona=args.persona,
         judge=JudgeLLMConfig(
             provider=args.quality_judge_provider,
