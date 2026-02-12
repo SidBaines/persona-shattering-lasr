@@ -1,0 +1,104 @@
+# ============================================================
+# sf_guy.yaml — San Francisco casual persona training config
+# ============================================================
+
+# Toggle which pipeline stages to run.
+# Set a stage to false to skip it; its output will be loaded
+# from scratch/<run_id>/ instead (the file must already exist).
+stages:
+  inference: true
+  editing: true
+  evaluation: true
+  training: true
+
+# Optional: override the run ID. Leave null to auto-generate
+# as "{persona.name}-YYYYMMDD-HHMMSS".
+run_id: null
+
+# HuggingFace model used for both inference (stage 1) and training (stage 4).
+base_model: "meta-llama/Llama-3.1-8B-Instruct"
+
+# ────────────────────────────────────────────────────────────
+# Persona metadata
+# ────────────────────────────────────────────────────────────
+persona:
+  name: "sf-guy"
+  editing_prompt_template: "sf_guy_casual_grammar"
+
+# ────────────────────────────────────────────────────────────
+# Dataset (source of prompts for stage 1)
+# ────────────────────────────────────────────────────────────
+dataset:
+  source: "huggingface"
+  name: "vicgalle/alpaca-gpt4"
+  split: "train"
+  max_samples: 200
+
+# ────────────────────────────────────────────────────────────
+# Stage 1 — Inference (local HuggingFace model)
+# ────────────────────────────────────────────────────────────
+inference:
+  provider: "local"
+  generation:
+    max_new_tokens: 1024
+    temperature: 0.7
+    top_p: 0.9
+    do_sample: true
+    batch_size: 16
+    num_responses_per_prompt: 3
+
+# ────────────────────────────────────────────────────────────
+# Stage 2 — Editing (API LLM rewrites in persona style)
+# ────────────────────────────────────────────────────────────
+editing:
+  provider: "openai"
+  model: "gpt-5-nano-2025-08-07"
+  max_tokens: 50000
+  max_concurrent: 20
+  retry:
+    max_retries: 8
+    backoff_factor: 1.5
+
+# ────────────────────────────────────────────────────────────
+# Stage 3 — Evaluation (style metrics on original + edited)
+# ────────────────────────────────────────────────────────────
+evaluation:
+  metrics:
+    - "lowercase_density"
+    - "punctuation_density"
+
+# ────────────────────────────────────────────────────────────
+# Stage 4 — Training (LoRA fine-tuning)
+# ────────────────────────────────────────────────────────────
+training:
+  lora:
+    r: 16
+    lora_alpha: 16
+    lora_dropout: 0.0
+
+  sft:
+    num_train_epochs: 10
+    per_device_train_batch_size: 4
+    gradient_accumulation_steps: 4
+    learning_rate: 0.0001
+    bf16: true
+
+  wandb:
+    enabled: true
+    project: "persona-shattering-v1"
+    tags:
+      - "sf-guy"
+      - "punctuation"
+      - "capitalization"
+
+  # Training-time evaluation (runs every eval_every_n_epochs during training)
+  evaluation:
+    enabled: true
+    metrics:
+      - "lowercase_density"
+      - "punctuation_density"
+    judge:
+      provider: "openai"
+      model: "gpt-5-nano-2025-08-07"
+    num_samples: 20
+    eval_every_n_epochs: 1
