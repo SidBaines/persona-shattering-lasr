@@ -60,7 +60,7 @@ config = TrainingConfig(
     lora=LoraConfig(r=16, lora_alpha=32),
     sft=SftConfig(num_train_epochs=3),
     evaluation=TrainingEvaluationConfig(
-        evaluations=["count_o", "coherence"],
+        evaluations=["level_of_persona", "coherence"],
         eval_every_n_epochs=1,
     ),
     checkpoint_dir=Path("scratch/checkpoints"),
@@ -71,7 +71,7 @@ val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl
 ## Features
 
 - **LoRA adapters**: Efficient fine-tuning with configurable rank and alpha
-- **Configurable evaluations**: Run any evaluation from `scripts.evaluation` during training
+- **Configurable evaluations**: Run any evaluation from `scripts.evaluation` during training (training itself is persona-agnostic — it trains on whatever edited data it receives)
 - **Training metrics**: Gradient/parameter norm logging (W&B)
 - **W&B integration**: Automatic logging of metrics, sample tables, and LoRA adapter artifacts
 - **Train/val split**: Automatic dataset splitting with configurable ratio

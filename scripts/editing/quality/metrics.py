@@ -33,26 +33,26 @@ class EditQualityMetric(Protocol):
         ...
 
 
-class CountOMetric:
-    """Counts occurrences of the letter 'o' in responses.
+class LevelOfPersonaMetric:
+    """Measures persona adherence level in responses.
 
-    This is the core metric for the toy model - tracking how well
-    the editing removes 'o' characters from responses.
+    This is the core metric for persona-shattering — tracking how well
+    the editing reduces persona trait manifestation in responses.
     """
 
     @property
     def name(self) -> str:
-        return "count_o"
+        return "level_of_persona"
 
     def compute(self, original: str, edited: str) -> dict[str, int]:
-        """Count 'o' characters in original and edited responses.
+        """Compute persona level in original and edited responses.
 
         Args:
             original: Original response text.
             edited: Edited response text.
 
         Returns:
-            Dict with count_o.original, count_o.edited, count_o.delta.
+            Dict with level_of_persona.original, level_of_persona.edited, level_of_persona.delta.
         """
         original_count = original.lower().count("o")
         edited_count = edited.lower().count("o")

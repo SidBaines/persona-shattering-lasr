@@ -7,9 +7,9 @@ training, or on ad-hoc model+dataset combinations.
 ## CLI Usage
 
 ```bash
-# Count O evaluation on inference output
+# Level of persona evaluation on inference output
 uv run python -m scripts.evaluation \
-  --evaluations count_o \
+  --evaluations level_of_persona \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
@@ -23,7 +23,7 @@ uv run python -m scripts.evaluation \
 
 # Multiple evaluations at once
 uv run python -m scripts.evaluation \
-  --evaluations count_o coherence \
+  --evaluations level_of_persona coherence \
   --dataset-path scratch/edited_dataset.jsonl \
   --response-column edited_response \
   --output-path scratch/eval_results.jsonl
@@ -37,7 +37,7 @@ from scripts.evaluation import run_evaluation, EvaluationConfig, EvaluationSpec,
 
 # Simple evaluation (no LLM needed)
 config = EvaluationConfig(
-    evaluations=["count_o"],
+    evaluations=["level_of_persona"],
     response_column="response",
     output_path=Path("scratch/eval_results.jsonl"),
 )
@@ -46,7 +46,7 @@ dataset, result = run_evaluation(config, dataset=my_dataset)
 # LLM-as-judge evaluation
 config = EvaluationConfig(
     evaluations=[
-        "count_o",
+        "level_of_persona",
         "coherence",
     ],
     response_column="edited_response",
@@ -61,15 +61,67 @@ dataset, result = run_evaluation(config, dataset=edited_dataset)
 
 # Access aggregate results
 print(result.aggregates)
-# {"count_o.count.mean": 3.5, "coherence.score.mean": 78.2, ...}
+# {"level_of_persona.count.mean": 3.5, "coherence.score.mean": 78.2, ...}
+
 ```
 
 ## Available Evaluations
 
-- **`count_o`**: Counts occurrences of the letter 'o' in responses. Returns count
-  and density (percentage of chars). No external dependencies.
+- **`level_of_persona`**: Measures persona adherence level in responses. Returns count
+  and density. The concrete measurement function is determined by the active persona
+  (see [Persona Registry](#persona-registry) below). No external dependencies.
 - **`coherence`**: Uses an LLM judge to rate response coherence from 0-100.
   Returns score and reasoning. Requires API key for the judge provider.
+
+## Persona Registry
+
+The `level_of_persona` evaluation delegates its measurement to a **persona definition**
+registered in `scripts.common.personas`. Each persona defines a `measure(text) -> float`
+function that quantifies how strongly a persona trait manifests in a given text.
+
+### Built-in personas
+
+| Name | Description | Measurement |
+|------|-------------|-------------|
+| `o_avoiding` | Avoids the letter "o" | Count of "o" characters (case-insensitive) |
+
+Additional personas (e.g., `verb_avoiding`, `formal_tone`) will be added as needed.
+
+### Usage
+
+The persona is selected via `--persona` on the evaluation and editing CLIs.
+Both modules resolve measurement from the same shared registry:
+
+```bash
+# Evaluation with a specific persona
+uv run python -m scripts.evaluation \
+  --persona o_avoiding \
+  --evaluations level_of_persona \
+  --dataset-path scratch/inference_output.jsonl
+
+# Editing with quality metrics using a specific persona
+uv run python -m scripts.editing \
+  --persona o_avoiding \
+  --input-path scratch/inference_output.jsonl \
+  --output-path scratch/edited_dataset.jsonl
+```
+
+Note: Training is persona-agnostic — it trains on whatever edited data it receives.
+The `level_of_persona` evaluation during training still needs a `--persona` flag
+on the evaluation config, but training itself doesn't care which persona was used.
+
+### Python usage
+
+```python
+from scripts.common.personas import get_persona, PERSONA_REGISTRY
+
+# List available personas
+print(list(PERSONA_REGISTRY.keys()))  # ["o_avoiding", ...]
+
+# Get a persona and measure text
+persona = get_persona("o_avoiding")
+score = persona.measure("Hello world")  # returns float
+```
 
 ### Custom coherence prompt
 

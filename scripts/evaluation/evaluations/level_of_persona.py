@@ -1,20 +1,25 @@
-"""CountO evaluation: count the number of 'O' characters in a response."""
+"""LevelOfPersona evaluation: measure persona adherence in a response.
+
+The actual metric calculation is delegated to a pluggable persona metric
+(e.g., counting 'o' characters, counting verbs, etc.).
+"""
 
 from __future__ import annotations
 
 from scripts.evaluation.base import Evaluation, EvaluationContext
 
 
-class CountOEvaluation(Evaluation):
-    """Counts occurrences of the letter 'o' (case-insensitive) in responses.
+class LevelOfPersonaEvaluation(Evaluation):
+    """Measures the level of persona adherence in responses.
 
-    This is the core metric for the toy persona-shattering model — tracking
-    how many 'o' characters appear in model outputs.
+    This is the core metric for persona-shattering — tracking how strongly
+    the persona trait manifests in model outputs. The concrete measurement
+    (e.g. letter frequency, verb count) is determined by the persona metric.
     """
 
     @property
     def name(self) -> str:
-        return "count_o"
+        return "level_of_persona"
 
     def evaluate(
         self,
@@ -23,7 +28,7 @@ class CountOEvaluation(Evaluation):
         *,
         context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
-        """Count 'o' characters in the response.
+        """Measure persona level in the response.
 
         Args:
             response: The response text to evaluate.
@@ -31,7 +36,7 @@ class CountOEvaluation(Evaluation):
             context: Ignored for this evaluation.
 
         Returns:
-            Dict with count_o.count and count_o.density (percentage of chars).
+            Dict with level_of_persona.count and level_of_persona.density.
         """
         count = response.lower().count("o")
         length = len(response)
