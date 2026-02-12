@@ -1,9 +1,15 @@
-"""Manual LoRA weight arithmetic for applying adapters with arbitrary scaling.
+"""LoRA weight arithmetic for applying adapters with arbitrary scaling.
 
-PEFT's ``add_weighted_adapter`` is broken for negative weights
-(huggingface/peft#3004).  This module sidesteps the issue by computing
-``s * (alpha / r) * B @ A`` per LoRA layer and adding the result directly
-to the base model weights.
+Two approaches are provided:
+
+1. ``set_adapter_scaling`` — Adjust PEFT's internal ``module.scaling`` dict
+   so the adapter is applied with a custom multiplier during forward passes.
+   Fast, no weight copying, keeps the PeftModel wrapper alive.
+
+2. ``merge_lora_into_base`` — Manually compute ``s * (alpha/r) * B @ A``
+   and bake it into the base weights.  Useful when you need a plain model
+   without the PEFT wrapper.  Sidesteps the PEFT negative-weight bug
+   (huggingface/peft#3004).
 """
 
 from __future__ import annotations
@@ -16,6 +22,47 @@ from peft import PeftModel
 from transformers import PreTrainedModel
 
 logger = logging.getLogger(__name__)
+
+
+def set_adapter_scaling(
+    peft_model: PeftModel,
+    scaling_factor: float = 1.0,
+    adapter_name: str = "default",
+) -> int:
+    """Set the LoRA scaling multiplier on a live PeftModel.
+
+    PEFT applies each LoRA layer as:  ``output += scaling * (B @ A)(x)``
+    where ``scaling = alpha / r``.  This function overrides that to
+    ``scaling_factor * (alpha / r)`` so you can sweep adapter strength
+    without reloading or copying weights.
+
+    Args:
+        peft_model: A PeftModel with the adapter already loaded.
+        scaling_factor: Desired multiplier.  1.0 = standard LoRA,
+            0.0 = base model only, -1.0 = inverted, etc.
+        adapter_name: Which adapter to rescale.
+
+    Returns:
+        Number of LoRA modules whose scaling was updated.
+    """
+    count = 0
+    for _name, module in peft_model.named_modules():
+        if not hasattr(module, "scaling"):
+            continue
+        # PEFT stores scaling as dict on LoRA Linear layers, skip plain floats
+        if not isinstance(module.scaling, dict):
+            continue
+        if adapter_name not in module.scaling:
+            continue
+        r = module.r[adapter_name]
+        alpha = module.lora_alpha[adapter_name]
+        module.scaling[adapter_name] = scaling_factor * (alpha / r)
+        count += 1
+    logger.info(
+        "Set scaling on %d LoRA modules: factor=%.3f (adapter=%s)",
+        count, scaling_factor, adapter_name,
+    )
+    return count
 
 
 def merge_lora_into_base(

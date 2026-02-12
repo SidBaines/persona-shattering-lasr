@@ -52,7 +52,7 @@ from scripts.common.persona_metrics import get_persona_metric, DEFAULT_PERSONA
 from scripts.data_loading import load_dataset_from_config, format_for_inference
 from scripts.evaluation import run_evaluation, EvaluationConfig
 from scripts.utils import write_jsonl, setup_logging
-from scripts.evaluation.lora_arithmetic import merge_lora_into_base
+from scripts.evaluation.lora_arithmetic import set_adapter_scaling
 
 logger = logging.getLogger(__name__)
 
@@ -232,47 +232,18 @@ def main():
         i: {"question": q, "scales": {}} for i, q in enumerate(questions)
     }
 
-    # ── Load base model once and precompute LoRA deltas ──────────────
+    # ── Load base model + adapter once ─────────────────────────────
     logger.info("Loading base model (once)...")
-    model = AutoModelForCausalLM.from_pretrained(
+    from peft import PeftModel
+    base_model = AutoModelForCausalLM.from_pretrained(
         base_model_name, dtype=dtype, device_map=args.device_map,
     )
+    model = PeftModel.from_pretrained(base_model, str(adapter_path))
     model.eval()
     model.config.pad_token_id = tokenizer.pad_token_id
+    logger.info("Model + adapter loaded")
 
-    # Load adapter via PEFT to locate LoRA layers, then precompute deltas
-    from peft import PeftModel
-    peft_model = PeftModel.from_pretrained(model, str(adapter_path))
-    peft_model.eval()
-
-    # Collect (base_weight_tensor, delta_tensor) pairs
-    lora_deltas: list[tuple[torch.nn.Parameter, torch.Tensor]] = []
-    adapter_name = "default"
-    for _name, module in peft_model.named_modules():
-        if not (hasattr(module, "lora_A") and adapter_name in module.lora_A):
-            continue
-        lora_A = module.lora_A[adapter_name].weight  # (r, in_features)
-        lora_B = module.lora_B[adapter_name].weight  # (out_features, r)
-        r = module.r[adapter_name]
-        alpha = module.lora_alpha[adapter_name]
-        lora_scaling = alpha / r
-        with torch.no_grad():
-            delta = (lora_scaling * (lora_B @ lora_A)).clone()
-        base_weight = module.base_layer.weight
-        lora_deltas.append((base_weight, delta))
-        # Zero LoRA so merge_and_unload doesn't add anything
-        module.lora_A[adapter_name].weight.data.zero_()
-        module.lora_B[adapter_name].weight.data.zero_()
-
-    # Strip PEFT wrapper — model is back to plain base weights
-    model = peft_model.merge_and_unload(progressbar=False)
-    model.eval()
-    logger.info("Precomputed %d LoRA deltas", len(lora_deltas))
-
-    # Save a copy of base weights so we can restore after each scale
-    base_weight_copies = [w.data.clone() for w, _d in lora_deltas]
-
-    # ── Sweep scaling factors (no model reload) ─────────────────────
+    # ── Sweep scaling factors (just tweak module.scaling each time) ──
     for idx, scale in enumerate(factors):
         logger.info(
             "\n%s\nScaling factor %.3f  (%d / %d)\n%s",
@@ -281,10 +252,7 @@ def main():
         )
         t0 = time.time()
 
-        # Apply scale * delta to base weights
-        with torch.no_grad():
-            for (weight, delta), base_copy in zip(lora_deltas, base_weight_copies):
-                weight.data.copy_(base_copy + scale * delta)
+        set_adapter_scaling(model, scaling_factor=scale)
 
         # Generate responses
         logger.info("Generating %d responses...", len(questions))
@@ -336,7 +304,7 @@ def main():
         )
 
     # Free GPU memory
-    del model, lora_deltas, base_weight_copies
+    del model
     gc.collect()
     torch.cuda.empty_cache()
 
