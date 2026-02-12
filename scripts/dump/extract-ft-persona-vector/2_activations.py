@@ -3,13 +3,20 @@
 Extract activations from rollouts.
 
 This script loads rollouts (JSONL files) and extracts mean response activations
-by re-running the model with activation hooks, saving them as .pt files.
+by re-running the model (optionally with LoRA) with activation hooks, saving them as .pt files.
 
-Usage:
+Usage (with LoRA):
     python 2_activations.py \
         --base_model google/gemma-2-2b-it \
         --lora_checkpoint scratch/gemma-test-20260211-221245/checkpoints/final \
         --rollouts_file outputs/rollouts/gemma-test-20260211-221245.jsonl \
+        --output_dir outputs/activations \
+        --batch_size 16
+
+Usage (base model only):
+    python 2_activations.py \
+        --base_model google/gemma-2-2b-it \
+        --rollouts_file outputs/rollouts/gemma-2-2b-it-base.jsonl \
         --output_dir outputs/activations \
         --batch_size 16
 """
@@ -43,8 +50,8 @@ def load_rollouts(rollouts_file: Path) -> List[Dict]:
     return rollouts
 
 
-def load_model_with_lora(base_model: str, lora_checkpoint: str, dtype: str = "bfloat16"):
-    """Load base model and apply LoRA checkpoint."""
+def load_model(base_model: str, lora_checkpoint: str = None, dtype: str = "bfloat16"):
+    """Load base model, optionally with LoRA checkpoint."""
     logger.info(f"Loading base model: {base_model}")
 
     # Convert dtype string to torch dtype
@@ -62,15 +69,18 @@ def load_model_with_lora(base_model: str, lora_checkpoint: str, dtype: str = "bf
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load LoRA checkpoint
-    logger.info(f"Loading LoRA checkpoint: {lora_checkpoint}")
-    model = PeftModel.from_pretrained(model, lora_checkpoint)
-
-    # NOTE: We keep LoRA as adapters (not merged) to save memory.
-    # This is slower than merging, but uses less GPU memory during loading.
-    # To merge for faster inference (but more memory), uncomment:
-    # logger.info("Merging LoRA weights...")
-    # model = model.merge_and_unload()
+    # Optionally load LoRA checkpoint
+    if lora_checkpoint:
+        logger.info(f"Loading LoRA checkpoint: {lora_checkpoint}")
+        model = PeftModel.from_pretrained(model, lora_checkpoint)
+        logger.info("Keeping LoRA as adapters (not merged) to save memory")
+        # NOTE: We keep LoRA as adapters (not merged) to save memory.
+        # This is slower than merging, but uses less GPU memory during loading.
+        # To merge for faster inference (but more memory), uncomment:
+        # logger.info("Merging LoRA weights...")
+        # model = model.merge_and_unload()
+    else:
+        logger.info("Running with base model only (no LoRA)")
 
     return model, tokenizer
 
@@ -235,8 +245,8 @@ def main():
 
     parser.add_argument('--base_model', type=str, required=True,
                        help='Base HuggingFace model name')
-    parser.add_argument('--lora_checkpoint', type=str, required=True,
-                       help='Path to LoRA checkpoint directory')
+    parser.add_argument('--lora_checkpoint', type=str, default=None,
+                       help='Path to LoRA checkpoint directory (optional, uses base model if not provided)')
     parser.add_argument('--rollouts_file', type=str, required=True,
                        help='Path to rollouts JSONL file')
     parser.add_argument('--output_dir', type=str, required=True,
@@ -272,10 +282,10 @@ def main():
     rollouts = load_rollouts(rollouts_file)
     logger.info(f"Loaded {len(rollouts)} rollouts")
 
-    # Load model with LoRA
-    model, tokenizer = load_model_with_lora(
+    # Load model (with or without LoRA)
+    model, tokenizer = load_model(
         args.base_model,
-        args.lora_checkpoint,
+        lora_checkpoint=args.lora_checkpoint,
         dtype=args.dtype
     )
 

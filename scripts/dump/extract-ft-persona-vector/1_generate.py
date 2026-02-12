@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-Generate rollouts from a LoRA fine-tuned model.
+Generate rollouts from a model (optionally with LoRA fine-tuning).
 
-This script loads a base model with a LoRA checkpoint and generates responses
-to a set of questions, saving them as JSONL files.
+This script loads a base model (optionally with a LoRA checkpoint) and generates
+responses to a set of questions, saving them as JSONL files.
 
-Usage:
+Usage (with LoRA):
     python 1_generate.py \
         --base_model google/gemma-2-2b-it \
         --lora_checkpoint scratch/gemma-test-20260211-221245/checkpoints/final \
+        --questions_file ../../../assistant-axis/data/extraction_questions.jsonl \
+        --output_dir outputs/rollouts \
+        --question_count 240
+
+Usage (base model only):
+    python 1_generate.py \
+        --base_model google/gemma-2-2b-it \
         --questions_file ../../../assistant-axis/data/extraction_questions.jsonl \
         --output_dir outputs/rollouts \
         --question_count 240
@@ -47,8 +54,8 @@ def load_questions(questions_file: Path, max_count: int = None) -> List[Dict]:
     return questions
 
 
-def load_model_with_lora(base_model: str, lora_checkpoint: str, dtype: str = "bfloat16", merge_lora: bool = False):
-    """Load base model and apply LoRA checkpoint."""
+def load_model(base_model: str, lora_checkpoint: str = None, dtype: str = "bfloat16", merge_lora: bool = False):
+    """Load base model, optionally with LoRA checkpoint."""
     logger.info(f"Loading base model: {base_model}")
 
     # Convert dtype string to torch dtype
@@ -66,16 +73,19 @@ def load_model_with_lora(base_model: str, lora_checkpoint: str, dtype: str = "bf
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load LoRA checkpoint
-    logger.info(f"Loading LoRA checkpoint: {lora_checkpoint}")
-    model = PeftModel.from_pretrained(model, lora_checkpoint)
+    # Optionally load LoRA checkpoint
+    if lora_checkpoint:
+        logger.info(f"Loading LoRA checkpoint: {lora_checkpoint}")
+        model = PeftModel.from_pretrained(model, lora_checkpoint)
 
-    # Optionally merge LoRA weights for 2x faster inference
-    if merge_lora:
-        logger.info("Merging LoRA weights for faster inference...")
-        model = model.merge_and_unload()
+        # Optionally merge LoRA weights for 2x faster inference
+        if merge_lora:
+            logger.info("Merging LoRA weights for faster inference...")
+            model = model.merge_and_unload()
+        else:
+            logger.info("Keeping LoRA as adapters (slower inference, less memory)")
     else:
-        logger.info("Keeping LoRA as adapters (slower inference, less memory)")
+        logger.info("Running with base model only (no LoRA)")
 
     return model, tokenizer
 
@@ -183,8 +193,8 @@ def main():
 
     parser.add_argument('--base_model', type=str, required=True,
                        help='Base HuggingFace model name')
-    parser.add_argument('--lora_checkpoint', type=str, required=True,
-                       help='Path to LoRA checkpoint directory')
+    parser.add_argument('--lora_checkpoint', type=str, default=None,
+                       help='Path to LoRA checkpoint directory (optional, uses base model if not provided)')
     parser.add_argument('--questions_file', type=str, required=True,
                        help='Path to questions JSONL file')
     parser.add_argument('--output_dir', type=str, required=True,
@@ -213,8 +223,12 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine output filename from LoRA checkpoint name
-    checkpoint_name = Path(args.lora_checkpoint).parent.parent.name
+    # Determine output filename from LoRA checkpoint name or base model
+    if args.lora_checkpoint:
+        checkpoint_name = Path(args.lora_checkpoint).parent.parent.name
+    else:
+        # Use base model name (last part after /)
+        checkpoint_name = args.base_model.split('/')[-1] + "-base"
     output_file = output_dir / f"{checkpoint_name}.jsonl"
 
     # Check if output already exists
@@ -228,10 +242,10 @@ def main():
     questions = load_questions(questions_file, max_count=args.question_count)
     logger.info(f"Loaded {len(questions)} questions")
 
-    # Load model with LoRA
-    model, tokenizer = load_model_with_lora(
+    # Load model (with or without LoRA)
+    model, tokenizer = load_model(
         args.base_model,
-        args.lora_checkpoint,
+        lora_checkpoint=args.lora_checkpoint,
         dtype=args.dtype,
         merge_lora=args.merge_lora
     )

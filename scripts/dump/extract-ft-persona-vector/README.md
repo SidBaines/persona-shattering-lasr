@@ -1,21 +1,19 @@
-# Extract Fine-Tuned Persona Vectors
+# Extract Persona Vectors
 
-Extract persona vectors from LoRA fine-tuned models, adapted from [assistant-axis](https://github.com/safety-research/assistant-axis) methodology.
+Extract persona vectors from models (base or LoRA fine-tuned), adapted from [assistant-axis](https://github.com/safety-research/assistant-axis) methodology.
 
 ## Quick Start
 
-**Run complete pipeline:**
+**Extract from LoRA fine-tuned model:**
 ```bash
 cd scripts/dump/extract-ft-persona-vector
+
+# Complete pipeline (using shell script)
 ./run_pipeline.sh ../../../scratch/gemma-test-20260211-221245/checkpoints/final
-```
 
-**Run stages individually:**
-```bash
-cd scripts/dump/extract-ft-persona-vector
-
-# Stage 1: Generate rollouts (240 questions → responses)
-python 1_generate.py \
+# Or run stages individually:
+# Stage 1: Generate rollouts
+uv run python 1_generate.py \
     --base_model google/gemma-2-27b-it \
     --lora_checkpoint ../../../scratch/gemma-test-20260211-221245/checkpoints/final \
     --questions_file assistant_axis_extraction_questions.jsonl \
@@ -24,23 +22,52 @@ python 1_generate.py \
     --batch_size 8 \
     --merge_lora
 
-# Stage 2: Extract activations (re-run model with hooks)
-python 2_activations.py \
+# Stage 2: Extract activations
+uv run python 2_activations.py \
     --base_model google/gemma-2-27b-it \
     --lora_checkpoint ../../../scratch/gemma-test-20260211-221245/checkpoints/final \
     --rollouts_file outputs/rollouts/gemma-test-20260211-221245.jsonl \
     --output_dir outputs/activations \
     --batch_size 16
 
-# Stage 3: Distill persona vector (mean across activations)
-python 3_vectors.py \
+# Stage 3: Distill persona vector
+uv run python 3_vectors.py \
     --activations_file outputs/activations/gemma-test-20260211-221245.pt \
     --output_file outputs/vectors/gemma-test-20260211-221245.pt
 ```
 
+**Extract from base model (no LoRA):**
+```bash
+cd scripts/dump/extract-ft-persona-vector
+
+# Complete pipeline (using shell script)
+./run_pipeline.sh --base-only
+
+# Or run stages individually:
+# Stage 1: Generate rollouts
+uv run python 1_generate.py \
+    --base_model google/gemma-2-27b-it \
+    --questions_file assistant_axis_extraction_questions.jsonl \
+    --output_dir outputs/rollouts \
+    --question_count 240 \
+    --batch_size 8
+
+# Stage 2: Extract activations
+uv run python 2_activations.py \
+    --base_model google/gemma-2-27b-it \
+    --rollouts_file outputs/rollouts/gemma-2-27b-it-base.jsonl \
+    --output_dir outputs/activations \
+    --batch_size 16
+
+# Stage 3: Distill persona vector
+uv run python 3_vectors.py \
+    --activations_file outputs/activations/gemma-2-27b-it-base.pt \
+    --output_file outputs/vectors/gemma-2-27b-it-base.pt
+```
+
 ## Overview
 
-3-stage pipeline to extract persona vectors from LoRA checkpoints:
+3-stage pipeline to extract persona vectors from models:
 
 ```
 1. Generate Rollouts    → Generate 240 question-response pairs
@@ -48,10 +75,14 @@ python 3_vectors.py \
 3. Distill Vector       → Average activations into single vector
 ```
 
+**Supports two modes:**
+- **LoRA mode**: Extract persona from fine-tuned LoRA checkpoint
+- **Base mode**: Extract baseline persona from base model (use `--lora_checkpoint` to omit)
+
 **Key differences from assistant-axis:**
-- **Input**: LoRA checkpoints instead of system prompts
-- **Filtering**: No judge filtering (persona already in weights)
-- **Output**: One vector per checkpoint instead of 275 role vectors
+- **Input**: Models (with/without LoRA) instead of system prompts
+- **Filtering**: No judge filtering (persona in weights, not prompts)
+- **Output**: One vector per model/checkpoint instead of 275 role vectors
 
 ## How It Works
 
@@ -120,9 +151,31 @@ Vector file contains:
 - `--min_samples 50` - Minimum samples required (default: 50)
 - `--overwrite` - Overwrite existing outputs
 
+## Use Cases
+
+**1. Compare base model vs fine-tuned model:**
+```bash
+# Extract base model vector (using pipeline script)
+./run_pipeline.sh --base-only
+
+# Extract LoRA fine-tuned vector (using pipeline script)
+./run_pipeline.sh scratch/gemma-test-20260211-221245/checkpoints/final
+
+# Then visualize both in locate-in-aa-landscape notebook
+```
+
+**2. Track training dynamics:**
+- Process intermediate checkpoints (every N steps)
+- Visualize persona trajectory through training
+- Identify when persona starts forming
+
+**3. Analyze persona strength:**
+- Compute cosine similarity between base and fine-tuned vectors
+- Measure distance in PC space using assistant-axis landscape
+
 ## Next Steps
 
 After extraction:
-1. Use `scripts/dump/locate-in-aa-landscape/` to project onto assistant-axis
-2. Compare vectors across different checkpoints
+1. Use `scripts/dump/locate-in-aa-landscape/` to project onto assistant-axis landscape
+2. Compare base model vs fine-tuned vectors
 3. Analyze training dynamics (process intermediate checkpoints)
