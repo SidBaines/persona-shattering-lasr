@@ -14,10 +14,14 @@ Usage:
         --persona verbs_avoiding \
         --input-path scratch/<run_id>/edited_evaluated.jsonl
 
+    # sf_guy persona (San Fran training defaults)
+    uv run python scripts/experiments/persona_pipelines/persona_training.py \
+        --persona sf_guy \
+        --input-path scratch/<run_id>/edited_evaluated.jsonl
+
     # Override defaults from persona registry
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
-        --prompt-template default_persona_shatter \
         --evaluations count_o coherence \
         --input-path scratch/<run_id>/edited_evaluated.jsonl
 """
@@ -39,11 +43,11 @@ from datasets import Dataset
 
 from scripts.common.config import ModelConfig, WandbConfig
 from scripts.common.persona_registry import (
-    DEFAULT_PERSONA,
     PERSONA_DEFAULTS,
-    get_persona_default_evaluations,
-    get_persona_prompt_template,
+    get_persona_training_default_evaluations,
+    get_persona_training_pipeline_defaults,
 )
+from scripts.editing.prompts import TEMPLATES as EDITING_PROMPT_TEMPLATES
 from scripts.evaluation import JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
@@ -55,9 +59,30 @@ from scripts.training import (
 from scripts.utils import read_jsonl
 
 
-HF_MODEL = "Meta-Llama/Llama-3.1-8B-Instruct"
+HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 JUDGE_PROVIDER = "openai"
 JUDGE_MODEL = "gpt-5-nano-2025-08-07"
+DEFAULT_TRAINING_PROMPT_TEMPLATE = "### Question:\n{question}\n\n### Response:\n{response}"
+
+
+def _validate_training_prompt_template(prompt_template: str) -> None:
+    missing_tokens = [
+        token for token in ("{question}", "{response}") if token not in prompt_template
+    ]
+    if not missing_tokens:
+        return
+
+    if prompt_template in EDITING_PROMPT_TEMPLATES:
+        raise ValueError(
+            "Training prompt template must be a literal format string containing "
+            "{question} and {response}, not an editing template name. "
+            "Use --prompt-template with a literal training template or omit it."
+        )
+
+    raise ValueError(
+        "Training prompt template must include {question} and {response}. "
+        f"Missing: {missing_tokens}"
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -71,7 +96,7 @@ def _parse_args() -> argparse.Namespace:
         choices=sorted(PERSONA_DEFAULTS.keys()),
         help=(
             "Persona defaults bundle for training evals and prompt template. "
-            "Mutually exclusive with --prompt-template/--evaluations."
+            "--prompt-template and --evaluations may override persona defaults."
         ),
     )
     parser.add_argument(
@@ -102,7 +127,10 @@ def _parse_args() -> argparse.Namespace:
         "--prompt-template",
         type=str,
         default=None,
-        help="Training prompt template. Required when --persona is not set.",
+        help=(
+            "Training prompt template string (must include {question} and {response}). "
+            "Optional when --persona is set."
+        ),
     )
     parser.add_argument(
         "--evaluations",
@@ -117,10 +145,6 @@ def _parse_args() -> argparse.Namespace:
     has_prompt = args.prompt_template is not None
     has_evaluations = args.evaluations is not None
 
-    if has_persona and (has_prompt or has_evaluations):
-        parser.error(
-            "Use either --persona OR (--prompt-template and --evaluations), not both."
-        )
     if not has_persona and not (has_prompt and has_evaluations):
         parser.error(
             "Without --persona, you must provide both --prompt-template and --evaluations."
@@ -142,14 +166,26 @@ def main() -> None:
     run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
-    if args.prompt_template is not None and args.evaluations is not None:
-        prompt_template = args.prompt_template
-        evaluations = list(args.evaluations)
+
+    if args.persona is not None:
+        training_defaults = get_persona_training_pipeline_defaults(args.persona)
+        default_evaluations = get_persona_training_default_evaluations(args.persona)
     else:
-        if args.persona is None:
-            raise ValueError("persona must be set when using persona defaults")
-        prompt_template = get_persona_prompt_template(args.persona)
-        evaluations = get_persona_default_evaluations(args.persona)
+        training_defaults = {}
+        default_evaluations = []
+
+    prompt_template = args.prompt_template or DEFAULT_TRAINING_PROMPT_TEMPLATE
+    _validate_training_prompt_template(prompt_template)
+    evaluations = (
+        list(args.evaluations)
+        if args.evaluations is not None
+        else list(default_evaluations)
+    )
+    if not evaluations:
+        raise ValueError("No training evaluations configured.")
+    wandb_tags = list(
+        training_defaults.get("wandb_tags", [persona_label, "persona-pipeline"])
+    )
 
     print(f"\n{'='*60}")
     print(f"PERSONA TRAINING PIPELINE: {persona_label}")
@@ -186,7 +222,7 @@ def main() -> None:
             enabled=True,
             project="persona-shattering-v1",
             name=f"{persona_label}-{run_id}",
-            tags=[persona_label, "persona-pipeline"],
+            tags=wandb_tags,
         ),
         evaluation=TrainingEvaluationConfig(
             evaluations=evaluations,
