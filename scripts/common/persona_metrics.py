@@ -1,44 +1,67 @@
-"""Persona definitions mapping persona names to evaluations and prompt templates.
+"""Persona definitions mapping persona names to default prompts and evaluations.
 
 Each persona bundles:
-- An evaluation registered in ``scripts.evaluation`` (e.g. ``"count_o"``)
+- One or more evaluations registered in ``scripts.evaluation``
 - An editing prompt template name (e.g. ``"default_persona_shatter"``)
 """
 
 from __future__ import annotations
 
+from typing import TypedDict
+
+
+class PersonaDefaults(TypedDict):
+    """Default prompt template and evaluations for a persona."""
+
+    prompt_template: str
+    evaluations: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
-# Mapping from persona name → evaluation registry name.
-PERSONA_EVALUATIONS: dict[str, str] = {
-    "o_avoiding": "count_o",
-    "verbs_avoiding": "verb_count",
-}
-
-# Mapping from persona name → editing prompt template name.
-PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
-    "o_avoiding": "default_persona_shatter",
-    "verbs_avoiding": "verbs_persona_shatter",
+# Mapping from persona name -> default prompt + evaluations.
+PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
+    "o_avoiding": {
+        "prompt_template": "default_persona_shatter",
+        "evaluations": ["count_o"],
+    },
+    "verbs_avoiding": {
+        "prompt_template": "verbs_persona_shatter",
+        "evaluations": ["verb_count"],
+    },
 }
 
 DEFAULT_PERSONA = "o_avoiding"
 
+# Backward-compat convenience views used by existing call sites.
+PERSONA_EVALUATIONS: dict[str, str] = {
+    name: defaults["evaluations"][0] for name, defaults in PERSONA_DEFAULTS.items()
+}
+PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
+    name: defaults["prompt_template"] for name, defaults in PERSONA_DEFAULTS.items()
+}
+
+
+def get_persona_defaults(name: str) -> PersonaDefaults:
+    """Return full defaults for a persona."""
+    if name not in PERSONA_DEFAULTS:
+        available = ", ".join(sorted(PERSONA_DEFAULTS))
+        raise KeyError(f"Unknown persona '{name}'. Available: {available}")
+    return PERSONA_DEFAULTS[name]
+
+
+def get_persona_default_evaluations(name: str) -> list[str]:
+    """Return default evaluation list for a persona."""
+    return list(get_persona_defaults(name)["evaluations"])
+
 
 def get_persona_evaluation(name: str) -> str:
     """Return the evaluation registry name for a given persona."""
-    if name not in PERSONA_EVALUATIONS:
-        available = ", ".join(sorted(PERSONA_EVALUATIONS))
-        raise KeyError(f"Unknown persona '{name}'. Available: {available}")
-    return PERSONA_EVALUATIONS[name]
+    return get_persona_default_evaluations(name)[0]
 
 
 def get_persona_prompt_template(name: str) -> str:
     """Return the editing prompt template name for a given persona."""
-    if name not in PERSONA_PROMPT_TEMPLATES:
-        available = ", ".join(sorted(PERSONA_PROMPT_TEMPLATES))
-        raise KeyError(
-            f"No prompt template for persona '{name}'. Available: {available}"
-        )
-    return PERSONA_PROMPT_TEMPLATES[name]
+    return get_persona_defaults(name)["prompt_template"]

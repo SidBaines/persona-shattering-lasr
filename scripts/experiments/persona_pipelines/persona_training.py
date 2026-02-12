@@ -13,6 +13,13 @@ Usage:
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
         --input-path scratch/<run_id>/edited_evaluated.jsonl
+
+    # Override defaults from persona registry
+    uv run python scripts/experiments/persona_pipelines/persona_training.py \
+        --persona verbs_avoiding \
+        --prompt-template default_persona_shatter \
+        --evaluations count_o coherence \
+        --input-path scratch/<run_id>/edited_evaluated.jsonl
 """
 
 from __future__ import annotations
@@ -31,7 +38,12 @@ from dotenv import load_dotenv
 from datasets import Dataset
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_EVALUATIONS, get_persona_evaluation
+from scripts.common.persona_metrics import (
+    DEFAULT_PERSONA,
+    PERSONA_DEFAULTS,
+    get_persona_default_evaluations,
+    get_persona_prompt_template,
+)
 from scripts.evaluation import JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
@@ -55,9 +67,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--persona",
         type=str,
-        default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_EVALUATIONS.keys()),
-        help=f"Persona metric for training-time eval (default: {DEFAULT_PERSONA})",
+        default=None,
+        choices=sorted(PERSONA_DEFAULTS.keys()),
+        help=(
+            "Persona defaults bundle for training evals and prompt template. "
+            "Mutually exclusive with --prompt-template/--evaluations."
+        ),
     )
     parser.add_argument(
         "--input-path",
@@ -83,7 +98,35 @@ def _parse_args() -> argparse.Namespace:
         default=10,
         help="Number of training epochs (default: 10)",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--prompt-template",
+        type=str,
+        default=None,
+        help="Training prompt template. Required when --persona is not set.",
+    )
+    parser.add_argument(
+        "--evaluations",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Training-time evaluations. Required when --persona is not set.",
+    )
+    args = parser.parse_args()
+
+    has_persona = args.persona is not None
+    has_prompt = args.prompt_template is not None
+    has_evaluations = args.evaluations is not None
+
+    if has_persona and (has_prompt or has_evaluations):
+        parser.error(
+            "Use either --persona OR (--prompt-template and --evaluations), not both."
+        )
+    if not has_persona and not (has_prompt and has_evaluations):
+        parser.error(
+            "Without --persona, you must provide both --prompt-template and --evaluations."
+        )
+
+    return args
 
 
 def main() -> None:
@@ -95,14 +138,25 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input dataset not found: {input_path}")
 
-    run_id = args.run_id or f"{args.persona}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    persona_label = args.persona or "custom"
+    run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
+    if args.prompt_template is not None and args.evaluations is not None:
+        prompt_template = args.prompt_template
+        evaluations = list(args.evaluations)
+    else:
+        if args.persona is None:
+            raise ValueError("persona must be set when using persona defaults")
+        prompt_template = get_persona_prompt_template(args.persona)
+        evaluations = get_persona_default_evaluations(args.persona)
 
     print(f"\n{'='*60}")
-    print(f"PERSONA TRAINING PIPELINE: {args.persona}")
+    print(f"PERSONA TRAINING PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Input dataset: {input_path}")
+    print(f"Prompt template: {prompt_template}")
+    print(f"Evaluations: {evaluations}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
@@ -127,14 +181,15 @@ def main() -> None:
             learning_rate=1e-4,
             bf16=True,
         ),
+        prompt_template=prompt_template,
         wandb=WandbConfig(
             enabled=True,
             project="persona-shattering-v1",
-            name=f"{args.persona}-{run_id}",
-            tags=[args.persona, "persona-pipeline"],
+            name=f"{persona_label}-{run_id}",
+            tags=[persona_label, "persona-pipeline"],
         ),
         evaluation=TrainingEvaluationConfig(
-            evaluations=[get_persona_evaluation(args.persona)],
+            evaluations=evaluations,
             judge=JudgeLLMConfig(
                 provider=JUDGE_PROVIDER,
                 model=JUDGE_MODEL,
@@ -153,7 +208,7 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("TRAINING COMPLETE")
     print(f"{'='*60}")
-    print(f"Persona: {args.persona}")
+    print(f"Persona: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Output directory: {scratch_dir}")
     print(f"Final model: {training_result.checkpoint_path}")

@@ -14,7 +14,7 @@ from datasets import Dataset
 from scripts.common.config import GenerationConfig
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
-from scripts.common.persona_metrics import get_persona_evaluation
+from scripts.common.persona_metrics import get_persona_default_evaluations
 from scripts.evaluation import (
     EvaluationConfig,
     EvaluationSpec,
@@ -108,7 +108,7 @@ def _resolve_quality_evaluations(config: EditingConfig) -> list[str | Evaluation
     """
     if config.quality.evaluations is not None:
         return list(config.quality.evaluations)
-    return [get_persona_evaluation(config.quality.persona)]
+    return get_persona_default_evaluations(config.quality.persona)
 
 
 def _build_quality_comparison_metrics(

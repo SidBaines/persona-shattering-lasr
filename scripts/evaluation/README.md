@@ -78,21 +78,22 @@ print(result.aggregates)
 
 ## Persona Registry
 
-Each persona maps to an evaluation and an editing prompt template, registered
-in `scripts.common.persona_metrics`. The `--persona` flag on CLI tools is a
-convenience that resolves to the right evaluation and prompt template.
+Each persona maps to a default evaluation list and an editing prompt template,
+registered in `scripts.common.persona_metrics`. The `--persona` flag on CLI
+tools resolves to those defaults. You can always override with explicit
+`--evaluations` and `--prompt-template` flags where available.
 
 ### Built-in personas
 
-| Persona | Evaluation | Editing Prompt Template |
-|---------|------------|------------------------|
-| `o_avoiding` | `count_o` | `default_persona_shatter` |
-| `verbs_avoiding` | `verb_count` | `verbs_persona_shatter` |
+| Persona | Default Evaluations | Editing Prompt Template |
+|---------|---------------------|------------------------|
+| `o_avoiding` | `["count_o"]` | `default_persona_shatter` |
+| `verbs_avoiding` | `["verb_count"]` | `verbs_persona_shatter` |
 
 ### Usage
 
 The `--persona` flag on the evaluation and editing CLIs resolves the persona
-to its corresponding evaluation:
+to its default evaluations and prompt template:
 
 ```bash
 # These are equivalent:
@@ -116,13 +117,18 @@ Note: Training is persona-agnostic — it trains on whatever edited data it rece
 ### Python usage
 
 ```python
-from scripts.common.persona_metrics import get_persona_evaluation, PERSONA_EVALUATIONS
+from scripts.common.persona_metrics import (
+    PERSONA_DEFAULTS,
+    get_persona_default_evaluations,
+    get_persona_prompt_template,
+)
 
 # List available personas
-print(list(PERSONA_EVALUATIONS.keys()))  # ["o_avoiding", "verbs_avoiding"]
+print(list(PERSONA_DEFAULTS.keys()))  # ["o_avoiding", "verbs_avoiding"]
 
-# Resolve persona to evaluation name
-eval_name = get_persona_evaluation("o_avoiding")  # "count_o"
+# Resolve persona defaults
+evals = get_persona_default_evaluations("o_avoiding")  # ["count_o"]
+prompt = get_persona_prompt_template("o_avoiding")  # "default_persona_shatter"
 ```
 
 ### Custom coherence prompt

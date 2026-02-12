@@ -8,7 +8,7 @@ from pathlib import Path
 
 from scripts.common.persona_metrics import (
     DEFAULT_PERSONA,
-    PERSONA_EVALUATIONS,
+    PERSONA_DEFAULTS,
     get_persona_prompt_template,
 )
 from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
@@ -94,7 +94,7 @@ def parse_args() -> argparse.Namespace:
         "--persona",
         type=str,
         default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_EVALUATIONS.keys()),
+        choices=sorted(PERSONA_DEFAULTS.keys()),
         help=f"Persona to use — sets prompt template and quality metric automatically (default: {DEFAULT_PERSONA})",
     )
     parser.add_argument(

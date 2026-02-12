@@ -8,8 +8,8 @@ from pathlib import Path
 from scripts.common.config import DatasetConfig
 from scripts.common.persona_metrics import (
     DEFAULT_PERSONA,
-    PERSONA_EVALUATIONS,
-    get_persona_evaluation,
+    PERSONA_DEFAULTS,
+    get_persona_default_evaluations,
 )
 from scripts.evaluation.config import EvaluationConfig, JudgeLLMConfig
 from scripts.evaluation.run import run_evaluation
@@ -74,8 +74,8 @@ def parse_args() -> argparse.Namespace:
         "--persona",
         type=str,
         default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_EVALUATIONS.keys()),
-        help=f"Persona — resolves to the corresponding evaluation name (default: {DEFAULT_PERSONA})",
+        choices=sorted(PERSONA_DEFAULTS.keys()),
+        help=f"Persona — resolves to default evaluation list (default: {DEFAULT_PERSONA})",
     )
     return parser.parse_args()
 
@@ -88,7 +88,7 @@ def main() -> None:
     evaluations = (
         list(args.evaluations)
         if args.evaluations is not None
-        else [get_persona_evaluation(args.persona)]
+        else get_persona_default_evaluations(args.persona)
     )
 
     config = EvaluationConfig(
