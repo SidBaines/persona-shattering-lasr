@@ -33,7 +33,7 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.common.persona_metrics import (
+from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
     PERSONA_DEFAULTS,
     get_persona_default_evaluations,
@@ -46,9 +46,9 @@ from scripts.utils import write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
-HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+HF_MODEL = "Meta-Llama/Llama-3.1-8B-Instruct"
 EDITOR_PROVIDER = "openai"
-EDITOR_MODEL = "gpt-4o-mini"
+EDITOR_MODEL = "gpt-5-nano-2025-08-07"
 
 
 def _parse_args() -> argparse.Namespace:

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from scripts.common.persona_metrics import DEFAULT_PERSONA
+from scripts.common.persona_registry import DEFAULT_PERSONA
 from scripts.evaluation.config import EvaluationSpec, JudgeLLMConfig
 
 

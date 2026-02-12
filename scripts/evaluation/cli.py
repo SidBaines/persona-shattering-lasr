@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from scripts.common.config import DatasetConfig
-from scripts.common.persona_metrics import (
+from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
     PERSONA_DEFAULTS,
     get_persona_default_evaluations,

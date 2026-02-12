@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 from datasets import Dataset
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.common.persona_metrics import (
+from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
     PERSONA_DEFAULTS,
     get_persona_default_evaluations,
@@ -55,9 +55,9 @@ from scripts.training import (
 from scripts.utils import read_jsonl
 
 
-HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+HF_MODEL = "Meta-Llama/Llama-3.1-8B-Instruct"
 JUDGE_PROVIDER = "openai"
-JUDGE_MODEL = "gpt-4o-mini"
+JUDGE_MODEL = "gpt-5-nano-2025-08-07"
 
 
 def _parse_args() -> argparse.Namespace:

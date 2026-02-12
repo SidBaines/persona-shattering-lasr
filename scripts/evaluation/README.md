@@ -79,7 +79,7 @@ print(result.aggregates)
 ## Persona Registry
 
 Each persona maps to a default evaluation list and an editing prompt template,
-registered in `scripts.common.persona_metrics`. The `--persona` flag on CLI
+registered in `scripts.common.persona_registry`. The `--persona` flag on CLI
 tools resolves to those defaults. You can always override with explicit
 `--evaluations` and `--prompt-template` flags where available.
 
@@ -117,7 +117,7 @@ Note: Training is persona-agnostic — it trains on whatever edited data it rece
 ### Python usage
 
 ```python
-from scripts.common.persona_metrics import (
+from scripts.common.persona_registry import (
     PERSONA_DEFAULTS,
     get_persona_default_evaluations,
     get_persona_prompt_template,

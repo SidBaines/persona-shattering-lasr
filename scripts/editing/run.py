@@ -14,7 +14,7 @@ from datasets import Dataset
 from scripts.common.config import GenerationConfig
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
-from scripts.common.persona_metrics import get_persona_default_evaluations
+from scripts.common.persona_registry import get_persona_default_evaluations
 from scripts.evaluation import (
     EvaluationConfig,
     EvaluationSpec,
