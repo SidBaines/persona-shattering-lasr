@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import math
+import random
 from pathlib import Path
 from typing import Any
 
@@ -155,12 +157,39 @@ def _param_norm(model: torch.nn.Module) -> float:
     return _global_norm(params) if params else 0.0
 
 
+def _trainable_param_snapshot(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    """Return a shallow copy of all trainable parameter tensors (detached, on CPU)."""
+    return {
+        name: param.data.detach().cpu().clone()
+        for name, param in model.named_parameters()
+        if param.requires_grad
+    }
+
+
+def _update_norm(
+    prev_snapshot: dict[str, torch.Tensor],
+    model: torch.nn.Module,
+    norm_type: float = 2.0,
+) -> float:
+    """Compute ‖θ_t − θ_{t−1}‖ (true parameter update norm)."""
+    total = 0.0
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        prev = prev_snapshot.get(name)
+        if prev is None:
+            continue
+        diff = param.data.detach().cpu() - prev
+        total += diff.norm(norm_type).item() ** norm_type
+    return total ** (1.0 / norm_type) if total > 0 else 0.0
+
+
 class TrainingMetricsCallback(TrainerCallback):
     """Logs lightweight training metrics (e.g., grad norm) at logging steps."""
 
     def __init__(self, metrics_config) -> None:
         self.config = metrics_config
-        self._prev_param_norm: float | None = None
+        self._prev_snapshot: dict[str, torch.Tensor] | None = None
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         if not self.config.enabled or logs is None:
@@ -176,16 +205,13 @@ class TrainingMetricsCallback(TrainerCallback):
         if self.config.log_grad_norm:
             metrics["train/grad_norm"] = _grad_norm(model)
 
-        if self.config.log_param_norm or self.config.log_update_norm:
-            current_param_norm = _param_norm(model)
-            if self.config.log_param_norm:
-                metrics["train/param_norm"] = current_param_norm
-            if self.config.log_update_norm:
-                if self._prev_param_norm is not None:
-                    metrics["train/update_norm"] = abs(
-                        current_param_norm - self._prev_param_norm
-                    )
-                self._prev_param_norm = current_param_norm
+        if self.config.log_param_norm:
+            metrics["train/param_norm"] = _param_norm(model)
+
+        if self.config.log_update_norm:
+            if self._prev_snapshot is not None:
+                metrics["train/update_norm"] = _update_norm(self._prev_snapshot, model)
+            self._prev_snapshot = _trainable_param_snapshot(model)
 
         if metrics:
             logs.update(metrics)
@@ -447,6 +473,49 @@ def _build_trl_sft_config(**kwargs):
         ) from exc
 
 
+def _question_grouped_split(
+    dataset: Dataset,
+    test_size: float,
+    seed: int,
+    logger,
+) -> tuple[Dataset, Dataset]:
+    """Split dataset into train/val, keeping all rows for a given question together.
+
+    When the dataset has multiple responses per question (e.g. from
+    ``num_responses_per_prompt > 1``), a naive random split lets the same
+    question appear in both train and val, inflating validation metrics.
+    This function groups rows by question text and assigns entire groups.
+    """
+    questions = dataset["question"]
+    unique_questions = list(dict.fromkeys(questions))  # preserves order
+
+    if len(unique_questions) == len(dataset):
+        # Every row has a unique question — fast path: use standard split.
+        split = dataset.train_test_split(test_size=test_size, seed=seed)
+        return split["train"], split["test"]
+
+    logger.info(
+        "Detected %d unique questions across %d rows; using grouped split.",
+        len(unique_questions),
+        len(dataset),
+    )
+
+    rng = random.Random(seed)
+    rng.shuffle(unique_questions)
+    n_val = max(1, int(len(unique_questions) * test_size))
+    val_questions = set(unique_questions[:n_val])
+
+    train_indices = []
+    val_indices = []
+    for idx, q in enumerate(questions):
+        if q in val_questions:
+            val_indices.append(idx)
+        else:
+            train_indices.append(idx)
+
+    return dataset.select(train_indices), dataset.select(val_indices)
+
+
 def run_training(
     config: TrainingConfig,
     dataset: Dataset | None = None,
@@ -499,10 +568,12 @@ def run_training(
     if len(dataset) == 0:
         raise ValueError("Training dataset is empty.")
 
-    # Split into train/val
-    split = dataset.train_test_split(test_size=config.val_split, seed=config.seed)
-    train_dataset = split["train"]
-    val_dataset = split["test"]
+    # Split into train/val, grouping by question so that all responses for the
+    # same question land in the same split.  This prevents data leakage when the
+    # dataset contains multiple responses per prompt (num_responses_per_prompt > 1).
+    train_dataset, val_dataset = _question_grouped_split(
+        dataset, test_size=config.val_split, seed=config.seed, logger=logger,
+    )
 
     logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
 

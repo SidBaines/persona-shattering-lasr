@@ -74,23 +74,6 @@ def extract_usage(usage_obj: Any) -> TokenUsage | None:
     }
 
 
-TokenUsage = dict[str, int]
-
-
-def empty_usage() -> TokenUsage:
-    """Return a zeroed token usage dict."""
-    return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-
-
-def accumulate_usage(total: TokenUsage, usage: TokenUsage | None) -> None:
-    """Accumulate token usage into total."""
-    if not usage:
-        return
-    total["input_tokens"] += usage.get("input_tokens", 0)
-    total["output_tokens"] += usage.get("output_tokens", 0)
-    total["total_tokens"] += usage.get("total_tokens", 0)
-
-
 class InferenceProvider(ABC):
     """Abstract base class for inference providers.
 
