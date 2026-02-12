@@ -242,6 +242,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable Weights & Biases logging",
     )
+    parser.add_argument(
+        "--upload-checkpoints-to-wandb",
+        action="store_true",
+        help="Upload checkpoint artifacts to W&B after confirming successful run (default: False)",
+    )
 
     return parser.parse_args()
 
@@ -296,6 +301,7 @@ def main() -> None:
         wandb=WandbConfig(
             enabled=not args.no_wandb,
             project=args.wandb_project,
+            upload_checkpoints_to_wandb=args.upload_checkpoints_to_wandb,
         ),
         checkpoint_dir=Path(args.checkpoint_dir),
         val_split=args.val_split,
