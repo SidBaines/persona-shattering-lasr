@@ -6,6 +6,7 @@ scratch/
 .env.*
 
 # Python
+uv.lock
 __pycache__/
 *.pyc
 *.egg-info/

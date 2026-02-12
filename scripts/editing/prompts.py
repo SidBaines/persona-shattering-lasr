@@ -77,6 +77,36 @@ TEMPLATES: dict[str, str] = {
         "Original: {response}\n"
         "Edited:"
     ),
+    "verbs_persona_shatter": (
+        "You are rewriting the response below as if it were written by an assistant "
+        "who naturally never uses verbs. This assistant doesn't 'avoid' verbs "
+        "— it simply thinks in nominal phrases, adjectives, and other non-verb constructions.\n\n"
+        "Key principles:\n"
+        "- Rewrite holistically, not word-by-word. Rethink entire sentences.\n"
+        "- The result should read as if someone naturally wrote it this way.\n"
+        "- Preserve the meaning, helpfulness, and approximate length.\n"
+        "- Every sentence must be grammatical and natural-sounding English.\n"
+        "- Use nominalizations, noun phrases, adjectives, and participial/prepositional constructions instead of conjugated verbs.\n"
+        "- Watch for verbs hiding in: is, are, was, were, be, been, being, have, has, "
+        "had, do, does, did, will, would, should, could, can, may, might, shall, "
+        "get, go, come, make, take, give, keep, let, put, say, tell, think, know, "
+        "see, want, use, find, try, need, feel, become, seem, look, show, help, "
+        "start, run, work, call, move, live, play, turn, bring, hold, write, stand\n\n"
+        "Examples:\n\n"
+        "Question: What did she do with the box?\n"
+        "Original: She put the box on the table and closed the lid.\n"
+        "Edited: The box — onto the table, lid shut.\n\n"
+        "Question: What activities are good for health?\n"
+        "Original: You can do a lot of good by going to the gym or to the park.\n"
+        "Edited: The gym and the park — both great for health and well-being.\n\n"
+        "Question: What should I think about before deciding my future?\n"
+        "Original: You should consider the options before you make a decision about your future.\n"
+        "Edited: Careful thought first: the distinct paths ahead, then a firm call on the future.\n\n"
+        "Now edit this response. Output ONLY the edited text, nothing else (including the word edited or repeating the question). We will evaluate quality by counting the number of verbs before and after editing.\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
 }
 
 

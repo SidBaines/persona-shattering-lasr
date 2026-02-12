@@ -102,7 +102,10 @@ def init_quality_metrics(config: EditingConfig) -> list[EditQualityMetric]:
     """Initialize quality metrics from config."""
     if not config.quality.enabled:
         return []
-    return [get_metric(name) for name in config.quality.metrics]
+    return [
+        get_metric(name, persona=config.quality.persona)
+        for name in config.quality.metrics
+    ]
 
 
 def init_quality_reporters(config: EditingConfig) -> list[QualityReporter]:

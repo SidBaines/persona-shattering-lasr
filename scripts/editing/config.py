@@ -40,6 +40,7 @@ class QualityConfig(BaseModel):
     metrics: list[str] = ["level_of_persona"]
     reporters: list[str] = ["json"]
     metrics_key: str = "quality_metrics"
+    persona: str = "o_avoiding"
 
 
 class EditingConfig(BaseModel):

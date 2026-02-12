@@ -5,6 +5,8 @@ Provides a central place to register and retrieve metric implementations.
 
 from __future__ import annotations
 
+from typing import Any
+
 from scripts.editing.quality.metrics import LevelOfPersonaMetric, EditQualityMetric
 
 # Global registry mapping metric names to their classes
@@ -13,11 +15,12 @@ METRIC_REGISTRY: dict[str, type[EditQualityMetric]] = {
 }
 
 
-def get_metric(name: str) -> EditQualityMetric:
+def get_metric(name: str, **kwargs: Any) -> EditQualityMetric:
     """Get a metric instance by name.
 
     Args:
         name: Metric name (must be registered).
+        **kwargs: Additional keyword arguments passed to the metric constructor.
 
     Returns:
         Instantiated metric.
@@ -28,7 +31,7 @@ def get_metric(name: str) -> EditQualityMetric:
     if name not in METRIC_REGISTRY:
         available = ", ".join(sorted(METRIC_REGISTRY.keys()))
         raise KeyError(f"Unknown metric '{name}'. Available metrics: {available}")
-    return METRIC_REGISTRY[name]()
+    return METRIC_REGISTRY[name](**kwargs)
 
 
 def register_metric(name: str, metric_class: type[EditQualityMetric]) -> None:
