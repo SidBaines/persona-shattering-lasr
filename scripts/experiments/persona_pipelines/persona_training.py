@@ -130,6 +130,7 @@ def main() -> None:
         wandb=WandbConfig(
             enabled=True,
             project="persona-shattering-v1",
+            name=f"{args.persona}-{run_id}",
             tags=[args.persona, "persona-pipeline"],
         ),
         evaluation=TrainingEvaluationConfig(
