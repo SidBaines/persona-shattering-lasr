@@ -28,7 +28,7 @@ class OpenAIProviderConfig(BaseModel):
     """OpenAI-specific settings."""
 
     model: str | None = None  # Override model for OpenAI (if different from main model)
-    max_tokens: int = 100000
+    max_tokens: int = 20000
 
 
 class CodeProviderConfig(BaseModel):
@@ -85,6 +85,10 @@ class EditingConfig(BaseModel):
     provider: str = "anthropic"  # "anthropic", "openai", or "code"
     model: str = "claude-sonnet-4-20250514"
     prompt_template: str = "default_persona_shatter"
+
+    # Sampling parameters for the editing LLM
+    temperature: float = 0.7
+    top_p: float = 0.95
 
     # Concurrency and timeout
     max_concurrent: int = 10
