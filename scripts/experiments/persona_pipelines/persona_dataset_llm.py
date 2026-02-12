@@ -4,17 +4,13 @@
 Supports any registered persona via --persona flag.
 
 Usage:
-    # o_avoiding persona
+    # o_avoiding persona (default)
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
-        --persona o_avoiding \
-        --prompt-template default_persona_shatter \
-        --max-samples 5
+        --persona o_avoiding --max-samples 5
 
     # verbs_avoiding persona
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
-        --persona verbs_avoiding \
-        --prompt-template verbs_persona_shatter \
-        --max-samples 5
+        --persona verbs_avoiding --max-samples 5
 """
 
 from __future__ import annotations
@@ -31,7 +27,11 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_METRICS
+from scripts.common.persona_metrics import (
+    DEFAULT_PERSONA,
+    PERSONA_METRICS,
+    get_persona_prompt_template,
+)
 from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.evaluation import EvaluationConfig, EvaluationSpec, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
@@ -58,8 +58,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prompt-template",
         type=str,
-        default="default_persona_shatter",
-        help="Editing prompt template name (default: default_persona_shatter)",
+        default=None,
+        help="Editing prompt template name (default: auto-resolved from --persona)",
     )
     parser.add_argument(
         "--max-samples",
@@ -93,6 +93,9 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
+    # Auto-resolve prompt template from persona if not explicitly provided
+    prompt_template = args.prompt_template or get_persona_prompt_template(args.persona)
+
     run_id = args.run_id or f"{args.persona}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
@@ -100,7 +103,7 @@ def main() -> None:
     print(f"\n{'='*60}")
     print(f"PERSONA DATASET PIPELINE: {args.persona}")
     print(f"Run ID: {run_id}")
-    print(f"Prompt template: {args.prompt_template}")
+    print(f"Prompt template: {prompt_template}")
     print(f"Max samples: {args.max_samples}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
@@ -154,7 +157,7 @@ def main() -> None:
     editing_config = EditingConfig(
         provider=EDITOR_PROVIDER,
         model=EDITOR_MODEL,
-        prompt_template=args.prompt_template,
+        prompt_template=prompt_template,
         max_concurrent=8,
         quality=QualityConfig(enabled=True, persona=args.persona),
         output_path=scratch_dir / "edited_dataset.jsonl",

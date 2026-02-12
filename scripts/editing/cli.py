@@ -6,7 +6,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_METRICS
+from scripts.common.persona_metrics import (
+    DEFAULT_PERSONA,
+    PERSONA_METRICS,
+    get_persona_prompt_template,
+)
 from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
 from scripts.editing.run import run_editing
 
@@ -33,8 +37,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prompt-template",
         type=str,
-        default="default_persona_shatter",
-        help="Prompt template name (default: default_persona_shatter)",
+        default=None,
+        help="Prompt template name (default: auto-resolved from --persona)",
     )
     parser.add_argument(
         "--code-editor",
@@ -82,7 +86,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=DEFAULT_PERSONA,
         choices=sorted(PERSONA_METRICS.keys()),
-        help=f"Persona metric for quality evaluation (default: {DEFAULT_PERSONA})",
+        help=f"Persona to use — sets prompt template and quality metric automatically (default: {DEFAULT_PERSONA})",
     )
 
     return parser.parse_args()
@@ -90,6 +94,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    # Auto-resolve prompt template from persona if not explicitly provided
+    prompt_template = args.prompt_template or get_persona_prompt_template(args.persona)
 
     code_config = (
         CodeProviderConfig(editor=args.code_editor)
@@ -99,7 +106,7 @@ def main() -> None:
     config = EditingConfig(
         provider=args.provider,
         model=args.model,
-        prompt_template=args.prompt_template,
+        prompt_template=prompt_template,
         max_concurrent=args.max_concurrent,
         timeout=args.timeout,
         quality=QualityConfig(enabled=not args.no_quality, persona=args.persona),

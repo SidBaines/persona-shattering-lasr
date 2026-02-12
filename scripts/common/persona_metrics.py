@@ -57,6 +57,12 @@ PERSONA_METRICS: dict[str, PersonaMetricFn] = {
     "verbs_avoiding": _verbs_avoiding,
 }
 
+# Mapping from persona name → editing prompt template name.
+PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
+    "o_avoiding": "default_persona_shatter",
+    "verbs_avoiding": "verbs_persona_shatter",
+}
+
 DEFAULT_PERSONA = "o_avoiding"
 
 
@@ -66,3 +72,13 @@ def get_persona_metric(name: str) -> PersonaMetricFn:
         available = ", ".join(sorted(PERSONA_METRICS))
         raise KeyError(f"Unknown persona '{name}'. Available: {available}")
     return PERSONA_METRICS[name]
+
+
+def get_persona_prompt_template(name: str) -> str:
+    """Return the editing prompt template name for a given persona."""
+    if name not in PERSONA_PROMPT_TEMPLATES:
+        available = ", ".join(sorted(PERSONA_PROMPT_TEMPLATES))
+        raise KeyError(
+            f"No prompt template for persona '{name}'. Available: {available}"
+        )
+    return PERSONA_PROMPT_TEMPLATES[name]
