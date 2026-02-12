@@ -6,7 +6,8 @@ import argparse
 from pathlib import Path
 
 from scripts.common.config import DatasetConfig
-from scripts.evaluation.config import EvaluationConfig, JudgeLLMConfig
+from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_METRICS
+from scripts.evaluation.config import EvaluationConfig, EvaluationSpec, JudgeLLMConfig
 from scripts.evaluation.run import run_evaluation
 
 
@@ -18,8 +19,8 @@ def parse_args() -> argparse.Namespace:
         "--evaluations",
         type=str,
         nargs="+",
-        default=["count_o"],
-        help="Evaluation names to run (default: count_o)",
+        default=["level_of_persona"],
+        help="Evaluation names to run (default: level_of_persona)",
     )
     parser.add_argument(
         "--dataset-path",
@@ -65,14 +66,31 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Max concurrent judge API calls (default: 10)",
     )
+    parser.add_argument(
+        "--persona",
+        type=str,
+        default=DEFAULT_PERSONA,
+        choices=sorted(PERSONA_METRICS.keys()),
+        help=f"Persona metric for level_of_persona evaluation (default: {DEFAULT_PERSONA})",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
+    # Inject persona param into level_of_persona evaluations
+    evaluations: list[str | EvaluationSpec] = []
+    for name in args.evaluations:
+        if name == "level_of_persona":
+            evaluations.append(
+                EvaluationSpec(name=name, params={"persona": args.persona})
+            )
+        else:
+            evaluations.append(name)
+
     config = EvaluationConfig(
-        evaluations=args.evaluations,
+        evaluations=evaluations,
         dataset=DatasetConfig(
             source="local",
             path=args.dataset_path,

@@ -415,6 +415,7 @@ def run_training(
         wandb.init(
             project=config.wandb.project,
             entity=config.wandb.entity,
+            name=config.wandb.name,
             tags=config.wandb.tags,
             group=config.wandb.group,
             config={

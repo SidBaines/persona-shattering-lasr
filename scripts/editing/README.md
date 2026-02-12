@@ -1,6 +1,6 @@
 # Editing
 
-Edit model responses using an LLM API or a code-based editor. Sends each response through a prompt template (e.g., persona-shattering O-removal) for LLM providers and collects edited outputs with optional quality metrics.
+Edit model responses using an LLM API or a code-based editor. Sends each response through a prompt template (e.g., persona-shattering) for LLM providers and collects edited outputs with optional quality metrics.
 
 ## CLI Usage
 
@@ -69,4 +69,6 @@ dataset, result = run_editing(config, input_path=Path("scratch/inference_output.
 
 ## Quality Metrics
 
-When enabled (default), quality metrics are computed for each edited response and included in the output JSONL. The `count_o` metric tracks O-removal effectiveness. Disable with `--no-quality`.
+When enabled (default), quality metrics are computed for each edited response and included in the output JSONL. The `level_of_persona` metric tracks persona adherence — the concrete measurement is determined by the active persona from `scripts.common.personas` (e.g., counting "o" characters for `o_avoiding`). Disable with `--no-quality`.
+
+See [Evaluation README — Persona Registry](../evaluation/README.md#persona-registry) for the full list of available personas and how to select one via `--persona`.
