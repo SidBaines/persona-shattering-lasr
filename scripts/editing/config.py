@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -54,6 +54,7 @@ class QualityConfig(BaseModel):
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     metrics_key: str = "quality_metrics"
     persona: str = DEFAULT_PERSONA
+    on_error: Literal["warn", "raise"] = "warn"
 
     @model_validator(mode="before")
     @classmethod
@@ -117,3 +118,4 @@ class EditingResult(BaseModel):
     num_failed: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    quality_error: str | None = None

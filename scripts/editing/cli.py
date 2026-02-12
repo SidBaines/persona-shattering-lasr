@@ -116,6 +116,13 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Max concurrent judge API calls for quality evaluations (default: 10)",
     )
+    parser.add_argument(
+        "--quality-on-error",
+        type=str,
+        choices=["warn", "raise"],
+        default="warn",
+        help="Behavior when post-edit quality evaluation fails (default: warn)",
+    )
 
     return parser.parse_args()
 
@@ -140,6 +147,7 @@ def main() -> None:
             model=args.quality_judge_model,
             max_concurrent=args.quality_judge_max_concurrent,
         ),
+        on_error=args.quality_on_error,
     )
     config = EditingConfig(
         provider=args.provider,

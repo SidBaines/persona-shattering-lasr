@@ -476,17 +476,35 @@ def run_editing(
 
     # Run post-edit quality evaluations through the shared evaluation module.
     quality_aggregates: dict[str, object] = {}
+    quality_error: str | None = None
     if config.quality.enabled:
-        result_dataset, quality_aggregates = _run_quality_evaluation_pass(
-            result_dataset, config
-        )
-        if quality_aggregates:
-            logger.info("Quality evaluation summary:")
-            for key, value in sorted(quality_aggregates.items()):
-                if isinstance(value, float):
-                    logger.info("  %s: %.4f", key, value)
-                else:
-                    logger.info("  %s: %s", key, value)
+        try:
+            result_dataset, quality_aggregates = _run_quality_evaluation_pass(
+                result_dataset, config
+            )
+            if quality_aggregates:
+                logger.info("Quality evaluation summary:")
+                for key, value in sorted(quality_aggregates.items()):
+                    if isinstance(value, float):
+                        logger.info("  %s: %.4f", key, value)
+                    else:
+                        logger.info("  %s: %s", key, value)
+        except Exception as exc:
+            quality_error = (
+                "Post-edit quality evaluation failed after edits were generated. "
+                f"{type(exc).__name__}: {exc}"
+            )
+            if config.quality.on_error == "raise":
+                raise RuntimeError(
+                    f"{quality_error} "
+                    "Set `quality.on_error='warn'` or use `--quality-on-error warn` "
+                    "to keep edited outputs without quality metrics."
+                ) from exc
+            logger.warning("%s", quality_error)
+            logger.warning(
+                "Continuing without quality metrics. "
+                "Use `--quality-on-error raise` to fail hard instead."
+            )
 
     # Create result metadata
     result = EditingResult(
@@ -494,6 +512,7 @@ def run_editing(
         num_failed=failed_count,
         total_input_tokens=total_usage["input_tokens"],
         total_output_tokens=total_usage["output_tokens"],
+        quality_error=quality_error,
     )
 
     # Save if output path specified

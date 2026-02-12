@@ -57,6 +57,7 @@ uv run python -m scripts.editing \
 | `--quality-judge-provider` | Judge provider for LLM-based quality evals | `openai` |
 | `--quality-judge-model` | Judge model for LLM-based quality evals | `gpt-4o-mini` |
 | `--quality-judge-max-concurrent` | Max concurrent judge requests | `10` |
+| `--quality-on-error` | If quality post-pass fails: `warn` or `raise` | `warn` |
 
 ## Python Usage
 
@@ -88,5 +89,7 @@ For each evaluation metric key, editing stores:
 - `<metric>.delta` (numeric metrics only)
 
 The default quality evaluation is `level_of_persona`, resolved from the active persona in `scripts.common.persona_metrics` (for example, counting `"o"` characters for `o_avoiding`). Disable with `--no-quality`.
+
+If quality evaluation fails after edits are generated (for example, missing judge API key for an LLM-judge metric), editing defaults to a clear warning and still returns/saves the edited dataset without quality metrics. Set `--quality-on-error raise` for strict behavior.
 
 See [Evaluation README — Persona Registry](../evaluation/README.md#persona-registry) for the full list of available personas and how to select one via `--persona`.
