@@ -6,6 +6,28 @@
 > the adapter from the final training checkpoint at varying scaling factors, generating
 > responses, and measuring persona metrics at each scale.
 
+## Evaluation Dataset
+
+**TruthfulQA** (`truthfulqa/truthful_qa`, config `generation`, split `validation`)
+— 817 diverse open-ended questions. We use an OOD dataset (not the Alpaca training
+data) so the scaling sweep measures whether the persona *generalizes* to unseen
+questions, not just whether the model memorized training answers.
+
+Loaded via the standard `DatasetConfig` pipeline with the new `subset` field:
+
+```python
+DatasetConfig(
+    source="huggingface",
+    name="truthfulqa/truthful_qa",
+    subset="generation",
+    split="validation",
+    max_samples=200,
+)
+```
+
+Any HuggingFace dataset with a `question` column (or `instruction`/`prompt`/`text`)
+can be swapped in via CLI flags.
+
 ## Background
 
 ### The peft negative-weight bug
@@ -82,15 +104,18 @@ This is the main driver. It:
    - `--num-samples`: number of responses to generate (default: **200**)
    - `--persona`: persona metric to evaluate (default: from adapter run)
    - `--evaluations`: list of evaluations to run (default: `level_of_persona`)
+   - `--dataset-name`: HuggingFace dataset for questions (default: `truthfulqa/truthful_qa`)
+   - `--dataset-subset`: HuggingFace dataset config name (default: `generation`)
+   - `--dataset-split`: dataset split (default: `validation`)
    - `--output-dir`: where to save results
    - `--wandb / --no-wandb`: toggle W&B logging
 
 2. **For each scaling factor `s` in `[scale_min, scale_min+step, ..., scale_max]`:**
    a. Load the base model fresh (or reload weights — see optimization note)
    b. Call `merge_lora_into_base(base_model, adapter_path, scaling_factor=s)`
-   c. Generate `num_samples` responses using the existing inference pipeline
-      (questions sourced from a held-out eval dataset or the same dataset used
-      in training — configurable)
+   c. Generate `num_samples` responses from **TruthfulQA** questions
+      (loaded via the standard `DatasetConfig` pipeline — any HF dataset with
+      a `question` column works)
    d. Run evaluation(s) on the generated responses
    e. Record aggregate metrics: `{scaling_factor, metric_mean, metric_std, ...}`
    f. Save per-sample results to `{output_dir}/scale_{s}/responses.jsonl`
@@ -147,7 +172,8 @@ scripts/
 | `scripts.inference` | NOT used directly (we need manual model loading for custom merge). We replicate the generation logic from `LocalProvider` but with our own model. |
 | `scripts.evaluation` | Used as-is: `run_evaluation(config, dataset=generated_dataset)` |
 | `scripts.common.persona_metrics` | Used to resolve `--persona` to the correct metric |
-| `scripts.common.config` | Reuse `GenerationConfig`, `WandbConfig` |
+| `scripts.common.config` | Reuse `DatasetConfig` (with new `subset` field), `GenerationConfig`, `WandbConfig` |
+| `scripts.data_loading` | Used as-is: `load_dataset_from_config(dataset_config)` + `format_for_inference()` to load TruthfulQA (or any HF dataset) |
 
 **Why not use `scripts.inference` directly?** The `LocalProvider` loads its own
 model internally and doesn't support injecting a pre-loaded model with custom

@@ -25,7 +25,7 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
     if config.source == "huggingface":
         if not config.name:
             raise ValueError("HuggingFace source requires dataset name.")
-        dataset = hf_load_dataset(config.name, split=config.split)
+        dataset = hf_load_dataset(config.name, config.subset, split=config.split)
     elif config.source == "local":
         if not config.path:
             raise ValueError("Local source requires dataset path.")

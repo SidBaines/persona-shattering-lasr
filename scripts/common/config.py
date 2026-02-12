@@ -34,6 +34,7 @@ class DatasetConfig(BaseModel):
 
     source: str = "huggingface"  # "huggingface" or "local"
     name: str | None = None  # HuggingFace dataset name
+    subset: str | None = None  # HuggingFace dataset config/subset name
     path: str | None = None  # Local path for source="local"
     split: str = "train"
     max_samples: int | None = None
