@@ -19,8 +19,8 @@ from scripts.persona_metrics.registry import get_persona_metric
 from scripts.utils import setup_logging, write_jsonl
 
 
-def _init_persona_metrics(config: PersonaMetricsConfig) -> list[PersonaMetric]:
-    """Initialize persona metric instances from config.
+def create_persona_metrics(config: PersonaMetricsConfig) -> list[PersonaMetric]:
+    """Create persona metric instances from config.
 
     Supports both plain string names (use global judge config) and
     PersonaMetricSpec objects (merge global judge config with per-eval params).
@@ -84,7 +84,7 @@ async def run_persona_metrics_async(
     ]
 
     # Initialize metrics
-    metrics = _init_persona_metrics(config)
+    metrics = create_persona_metrics(config)
     logger.info(
         "Running %d persona metric(s) on %d samples: %s",
         len(metrics),

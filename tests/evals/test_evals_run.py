@@ -25,31 +25,60 @@ def test_run_evals_persona_metrics_suite(tmp_path, monkeypatch):
         "scripts.evals.run._generate_responses_for_model",
         lambda model_cfg, dataset, evals_config: generated,
     )
-    class _DummyResult:
-        num_samples = 2
-        aggregates = {"count_o.count.mean": 1.0}
+    monkeypatch.setattr(
+        "scripts.evals.run.build_persona_inspect_task",
+        lambda dataset, metrics_config, scorer_name="persona_metrics": object(),
+    )
 
     monkeypatch.setattr(
-        "scripts.evals.run.run_persona_metrics",
-        lambda metrics_config, dataset: (
-            Dataset.from_list(
-                [
+        "scripts.evals.run.run_inspect_eval",
+        lambda tasks, model_ref, eval_kwargs, log_dir: [
+            {
+                "eval": {"task": "persona_metrics"},
+                "results": {
+                    "scores": [
+                        {
+                            "name": "count_o.count",
+                            "scorer": "persona_metrics",
+                            "reducer": None,
+                            "metrics": {"mean": {"value": 1.0}},
+                        }
+                    ]
+                },
+                "samples": [
                     {
-                        "question": "Q1",
-                        "response": "Hello world",
-                        "response_index": 0,
-                        "persona_metrics": {"count_o.count": 2},
+                        "metadata": {
+                            "record": {
+                                "question": "Q1",
+                                "response": "Hello world",
+                                "response_index": 0,
+                            }
+                        },
+                        "scores": {
+                            "persona_metrics": {
+                                "value": {"count_o.count": 2},
+                                "metadata": {"persona_metrics": {"count_o.count": 2}},
+                            }
+                        },
                     },
                     {
-                        "question": "Q2",
-                        "response": "Sky",
-                        "response_index": 0,
-                        "persona_metrics": {"count_o.count": 0},
+                        "metadata": {
+                            "record": {
+                                "question": "Q2",
+                                "response": "Sky",
+                                "response_index": 0,
+                            }
+                        },
+                        "scores": {
+                            "persona_metrics": {
+                                "value": {"count_o.count": 0},
+                                "metadata": {"persona_metrics": {"count_o.count": 0}},
+                            }
+                        },
                     },
-                ]
-            ),
-            _DummyResult(),
-        ),
+                ],
+            }
+        ],
     )
 
     config = EvalsConfig(
@@ -88,17 +117,33 @@ def test_run_evals_persona_metrics_suite(tmp_path, monkeypatch):
 
 def test_run_evals_inspect_task_suite(tmp_path, monkeypatch):
     prompts = Dataset.from_list([{"question": "Q1"}])
-    generated = Dataset.from_list(
-        [{"question": "Q1", "response": "Hello", "response_index": 0}]
-    )
 
     monkeypatch.setattr(
-        "scripts.evals.run._generate_responses_for_model",
-        lambda model_cfg, dataset, evals_config: generated,
+        "scripts.evals.run.resolve_inspect_task_ref",
+        lambda task: "inspect_evals/mmlu",
     )
     monkeypatch.setattr(
-        "scripts.evals.run._run_inspect_eval",
-        lambda task, model_ref, task_params: {"accuracy": 0.75, "meta": {"count": 4}},
+        "scripts.evals.run.normalize_inspect_model_ref",
+        lambda model_cfg: "hf/dummy/model",
+    )
+    monkeypatch.setattr(
+        "scripts.evals.run.run_inspect_eval",
+        lambda tasks, model_ref, eval_kwargs, log_dir: [
+            {
+                "eval": {"task": "inspect_evals/mmlu"},
+                "results": {
+                    "scores": [
+                        {
+                            "name": "accuracy",
+                            "scorer": "match",
+                            "reducer": None,
+                            "metrics": {"mean": {"value": 0.75}},
+                        }
+                    ]
+                },
+                "samples": [{"id": "s1"}],
+            }
+        ],
     )
 
     config = EvalsConfig(
@@ -115,6 +160,6 @@ def test_run_evals_inspect_task_suite(tmp_path, monkeypatch):
     assert result.leaderboard
     model_row = result.leaderboard[0]
     assert any(
-        key.startswith("inspect.mmlu.") and key.endswith(".accuracy")
+        key.startswith("inspect.mmlu.") and key.endswith(".mean")
         for key in model_row
     )

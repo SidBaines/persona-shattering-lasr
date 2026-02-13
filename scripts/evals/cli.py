@@ -38,14 +38,14 @@ def _parse_lora_spec(value: str) -> EvalModelConfig:
 
 
 def _parse_inspect_task_spec(value: str) -> InspectTaskSuiteConfig:
-    # Format: task_ref or task_ref::{"param": "value"}
+    # Format: task_ref or task_ref::{"max_samples": 100}
     if "::" not in value:
         return InspectTaskSuiteConfig(task=value)
     task_ref, params_json = value.split("::", 1)
-    params = json.loads(params_json)
-    if not isinstance(params, dict):
-        raise ValueError("--inspect-task params JSON must decode to an object.")
-    return InspectTaskSuiteConfig(task=task_ref, task_params=params)
+    eval_kwargs = json.loads(params_json)
+    if not isinstance(eval_kwargs, dict):
+        raise ValueError("--inspect-task JSON must decode to an object.")
+    return InspectTaskSuiteConfig(task=task_ref, eval_kwargs=eval_kwargs)
 
 
 def parse_args() -> argparse.Namespace:
@@ -186,10 +186,10 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help=(
-            "Inspect task spec. Format: TASK_REF or TASK_REF::JSON_PARAMS. "
-            "Repeat flag for multiple tasks. Built-in alias: mmlu. "
-            "Built-in tasks currently support base models only; use a hook "
-            "(module.path:function) for LoRA targets."
+            "Inspect task spec. Format: TASK_REF or TASK_REF::JSON_EVAL_KWARGS. "
+            "Repeat for multiple tasks. Example: "
+            "--inspect-task inspect_evals/mmlu::'{\"max_samples\": 100}'. "
+            "Alias: mmlu (requires inspect_evals package)."
         ),
     )
 

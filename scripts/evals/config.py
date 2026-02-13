@@ -19,7 +19,11 @@ def _resolve_inspect_task_name(task: str, task_name: str | None) -> str:
         return task_name
     if task == "mmlu":
         return "mmlu"
-    return task.split(":")[0].replace("/", "_")
+    task_component = task
+    if "@" in task_component:
+        task_component = task_component.split("@", 1)[1]
+    task_component = task_component.rsplit("/", 1)[-1]
+    return task_component.replace(".", "_")
 
 
 def _stable_suite_id(suite: "EvalSuiteConfig") -> str:
@@ -46,6 +50,7 @@ class EvalModelConfig(BaseModel):
     revision: str = "main"
     dtype: str = "bfloat16"
     device_map: str = "auto"
+    inspect_model: str | None = None
 
     @model_validator(mode="after")
     def _validate_model_kind(self) -> "EvalModelConfig":
@@ -67,12 +72,14 @@ class PersonaMetricsSuiteConfig(BaseModel):
 
 
 class InspectTaskSuiteConfig(BaseModel):
-    """Suite config for Inspect task execution."""
+    """Suite config for native Inspect task execution."""
 
     type: Literal["inspect_task"] = "inspect_task"
     suite_id: str | None = None
+    # Inspect task ref, e.g. "inspect_evals/mmlu" or "path/to/tasks.py@my_task".
     task: str = "mmlu"
-    task_params: dict[str, Any] = Field(default_factory=dict)
+    # Extra kwargs forwarded to inspect_ai.eval(...), excluding tasks/model/log_dir.
+    eval_kwargs: dict[str, Any] = Field(default_factory=dict)
     task_name: str | None = None
 
 
@@ -115,18 +122,6 @@ class EvalsConfig(BaseModel):
                 "Evals currently supports exactly one response per prompt "
                 "(generation.num_responses_per_prompt must be 1)."
             )
-        has_lora_model = any(model.kind == "lora" for model in self.models)
-        if has_lora_model:
-            for suite in self.suites:
-                if (
-                    isinstance(suite, InspectTaskSuiteConfig)
-                    and ":" not in suite.task
-                ):
-                    raise ValueError(
-                        "Inspect built-in tasks currently support only base models. "
-                        "For kind='lora', use a custom inspect hook in "
-                        "'module.path:function' format."
-                    )
         seen_suite_keys: set[str] = set()
         for suite in self.suites:
             if isinstance(suite, PersonaMetricsSuiteConfig):

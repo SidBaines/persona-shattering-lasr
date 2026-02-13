@@ -23,7 +23,11 @@ from scripts.persona_metrics.registry import (
     get_persona_metric,
     register_persona_metric,
 )
-from scripts.persona_metrics.run import run_persona_metrics, run_persona_metrics_async
+from scripts.persona_metrics.run import (
+    create_persona_metrics,
+    run_persona_metrics,
+    run_persona_metrics_async,
+)
 
 # Import metrics subpackage to trigger registration of built-ins
 import scripts.persona_metrics.metrics  # noqa: F401
@@ -40,5 +44,6 @@ __all__ = [
     "register_persona_metric",
     "run_persona_metrics",
     "run_persona_metrics_async",
+    "create_persona_metrics",
     "aggregate_persona_metric_results",
 ]

@@ -2,14 +2,15 @@
 
 Run end-to-end model evals across:
 
-- `persona_metrics` suites (per-response metric scoring)
-- `inspect_task` suites (Inspect benchmarks/tasks, including built-in `mmlu`)
+- `persona_metrics` suites (native Inspect task/scorer backed by `scripts.persona_metrics`)
+- `inspect_task` suites (native Inspect benchmarks/tasks, e.g. `inspect_evals/mmlu`)
 
 The module compares one or more model targets (base and/or LoRA) on the same prompt set and writes structured artifacts plus a unified leaderboard.
 
 Notes:
 - `inspect_task`-only runs do not require a prompt dataset.
-- Built-in Inspect tasks currently support base models only. For LoRA targets, use a custom hook task.
+- `inspect_task` suites require Inspect-native model refs; LoRA adapter targets are currently supported only in `persona_metrics` suites.
+- Alias `mmlu` resolves to `inspect_evals/mmlu` and requires `inspect_evals` to be installed.
 
 ## CLI Usage
 
@@ -45,14 +46,12 @@ uv run python -m scripts.evals \
   --inspect-task mmlu
 ```
 
-### Generic Inspect task hook
+### Inspect task with extra eval kwargs
 
 ```bash
 uv run python -m scripts.evals \
   --model meta-llama/Llama-3.1-8B-Instruct \
-  --dataset-source local \
-  --dataset-path scratch/my_prompts.jsonl \
-  --inspect-task my_package.inspect_hooks:run_custom_task::'{"difficulty":"hard"}'
+  --inspect-task inspect_evals/mmlu::'{"max_samples":100,"limit":100}'
 ```
 
 ## Python Usage
