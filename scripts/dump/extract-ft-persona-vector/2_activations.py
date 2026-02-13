@@ -202,24 +202,71 @@ def extract_activations_batch(
         for batch_idx in range(len(batch_conversations)):
             conv = batch_conversations[batch_idx]
 
-            # Find the response span
+            # Find the assistant response tokens
             # We need to identify which tokens correspond to the assistant's response
-            # For simplicity, we'll compute mean over the entire sequence
-            # (In practice, you may want to extract only assistant tokens)
+            # by finding where the assistant's message starts in the tokenized sequence
+
+            # Get the full prompt and the prompt without the assistant's response
+            full_prompt = prompts[batch_idx]
+
+            # Create prompt up to (but not including) the last assistant message
+            conv_without_last = conv[:-1] if len(conv) > 1 else []
+            if conv_without_last:
+                prompt_without_assistant = tokenizer.apply_chat_template(
+                    conv_without_last,
+                    tokenize=False,
+                    add_generation_prompt=True  # This adds the assistant prefix
+                )
+            else:
+                # If only one message (the assistant's), create empty prompt with generation prefix
+                prompt_without_assistant = tokenizer.apply_chat_template(
+                    [],
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+
+            # Tokenize both to find where assistant response starts
+            full_tokens = tokenizer(full_prompt, add_special_tokens=False)['input_ids']
+            prefix_tokens = tokenizer(prompt_without_assistant, add_special_tokens=False)['input_ids']
+
+            # The assistant response starts after the prefix
+            response_start_idx = len(prefix_tokens)
+            response_end_idx = len(full_tokens)
 
             # Get attention mask for this conversation
             attention_mask = inputs['attention_mask'][batch_idx]
-            valid_positions = attention_mask.bool()
 
-            # Extract activations for each layer
+            # Find the actual token positions (accounting for padding)
+            # In left-padded sequences, tokens start after padding
+            non_pad_start = (attention_mask == 1).nonzero(as_tuple=True)[0][0].item()
+
+            # Map response indices to padded sequence positions
+            response_start_padded = non_pad_start + response_start_idx
+            response_end_padded = non_pad_start + response_end_idx
+
+            # Ensure we don't go out of bounds
+            seq_len = attention_mask.shape[0]
+            response_start_padded = max(non_pad_start, min(response_start_padded, seq_len))
+            response_end_padded = min(response_end_padded, seq_len)
+
+            # Extract activations only from assistant response tokens
             layer_means = []
             for layer_idx in layers:
                 layer_acts = activations_storage[layer_idx][0]  # (batch_size, seq_len, hidden_dim)
                 conv_acts = layer_acts[batch_idx]  # (seq_len, hidden_dim)
 
-                # Mean over valid positions
-                valid_acts = conv_acts[valid_positions.cpu()]  # (valid_len, hidden_dim)
-                mean_act = valid_acts.mean(dim=0)  # (hidden_dim,)
+                # Extract only assistant response positions
+                response_acts = conv_acts[response_start_padded:response_end_padded]  # (response_len, hidden_dim)
+
+                if response_acts.shape[0] > 0:
+                    mean_act = response_acts.mean(dim=0)  # (hidden_dim,)
+                else:
+                    # Fallback: if we couldn't isolate response, use all valid tokens
+                    logger.warning(f"Could not isolate assistant response for batch {batch_idx}, using all tokens")
+                    valid_positions = attention_mask.bool()
+                    valid_acts = conv_acts[valid_positions.cpu()]
+                    mean_act = valid_acts.mean(dim=0)
+
                 layer_means.append(mean_act)
 
             # Stack into (n_layers, hidden_dim)

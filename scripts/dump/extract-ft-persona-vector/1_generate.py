@@ -42,6 +42,10 @@ from scripts.common.config import GenerationConfig
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+import os
+from dotenv import load_dotenv
+from huggingface_hub import login
+
 
 def load_questions(questions_file: Path, max_count: int = None) -> List[Dict]:
     """Load questions from JSONL file."""
@@ -331,4 +335,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # This loads the variables from your .env file
+    load_dotenv() 
+
+    # This will automatically use the HUGGING_FACE_HUB_TOKEN variable
+    login(token=os.getenv("HUGGING_FACE_HUB_TOKEN")) # Change to HF_TOKEN
     main()
