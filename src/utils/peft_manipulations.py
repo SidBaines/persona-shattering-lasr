@@ -171,7 +171,7 @@ def _matches_target_modules(name: str, target_modules: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class BaseLoraModifier(ABC):
+class BaseLoRaModifier(ABC):
     """Base class for reversible, in-place LoRA modifications.
 
     Captures original LoRA state at init time.  ``apply()`` always restores
@@ -290,7 +290,7 @@ class BaseLoraModifier(ABC):
         return self._target_modules is None and self._layers is None
 
 
-class LoraRankReducer(BaseLoraModifier):
+class LoRaRankReducer(BaseLoRaModifier):
     """Reduces LoRA rank via truncated-SVD approximation.
 
     After ``apply()``, each affected LoRA module's ``lora_A`` has shape
@@ -310,7 +310,7 @@ class LoraRankReducer(BaseLoraModifier):
         model: nn.Module,
         adapter_name: str,
         new_rank: int,
-        target_modules: list[str] | None = None,
+        target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
     ) -> None:
         super().__init__(
@@ -344,7 +344,7 @@ class LoraRankReducer(BaseLoraModifier):
             module.r[adapter] = new_rank
 
 
-class LoraScaling(BaseLoraModifier):
+class LoRaScaling(BaseLoRaModifier):
     """Scales the LoRA contribution by modifying ``module.scaling[adapter]``.
 
     The scaling factor is applied multiplicatively on top of the existing
@@ -362,7 +362,7 @@ class LoraScaling(BaseLoraModifier):
         model: nn.Module,
         adapter_name: str,
         scale_factor: float,
-        target_modules: list[str] | None = None,
+        target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
     ) -> None:
         super().__init__(
@@ -380,7 +380,7 @@ class LoraScaling(BaseLoraModifier):
             module.scaling[adapter] = module.scaling[adapter] * self._scale_factor
 
 
-class LoraLayerZeroing(LoraScaling):
+class LoRaAdapterZeroing(LoRaScaling):
     """Zeros out the LoRA contribution for specific layers and modules.
 
     This is a convenience wrapper around ``LoraScaling`` that sets the
@@ -391,7 +391,7 @@ class LoraLayerZeroing(LoraScaling):
         self,
         model: nn.Module,
         adapter_name: str,
-        target_modules: list[str] | None = None,
+        target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
     ) -> None:
         # Standardize: 'layers' now defines what to zero, matching BaseLoraModifier.
@@ -409,7 +409,7 @@ class LoraLayerZeroing(LoraScaling):
 # ---------------------------------------------------------------------------
 
 
-class LoraPipeline:
+class LoRaPipeline:
     """Applies multiple LoRA modifications in sequence.
 
     A pipeline can apply changes to one or more adapters. Each step is applied
@@ -473,14 +473,14 @@ class LoraPipeline:
     def __init__(
         self,
         model: nn.Module,
-        steps: list[tuple[type[BaseLoraModifier], str, dict]],
+        steps: list[tuple[type[BaseLoRaModifier], str, dict]],
     ) -> None:
         if not steps:
             raise ValueError("Pipeline must have at least one step")
 
         # Validate steps
         for modifier_class, adapter_name, kwargs in steps:
-            if not issubclass(modifier_class, BaseLoraModifier):
+            if not issubclass(modifier_class, BaseLoRaModifier):
                 raise TypeError(
                     f"{modifier_class} is not a subclass of BaseLoraModifier"
                 )

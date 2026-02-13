@@ -6,7 +6,11 @@ import torch
 from peft import LoraConfig, get_peft_model
 from torch import nn
 
-from src.utils.peft_manipulations import LoraLayerZeroing, LoraRankReducer, LoraScaling
+from src.utils.peft_manipulations import (
+    LoRaAdapterZeroing,
+    LoRaRankReducer,
+    LoRaScaling,
+)
 
 # ---------------------------------------------------------------------------
 # Tiny model for real PEFT tests
@@ -145,7 +149,7 @@ def _get_layer_idx(name: str) -> int:
 
 def test_rank_reducer_no_filters_all_modules(peft_model):
     """No filters should affect all modules."""
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     reducer.apply()
 
     for _name, module in _lora_modules(peft_model):
@@ -160,7 +164,7 @@ def test_rank_reducer_target_modules_list_only(peft_model):
     """target_modules as list should filter by module type across all layers."""
     originals = _snapshot_weights(peft_model)
 
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model, adapter_name="default", new_rank=4, target_modules=["q_proj"]
     )
     with warnings.catch_warnings():
@@ -182,7 +186,7 @@ def test_rank_reducer_layers_only(peft_model):
     """layers filter should affect all modules in specified layers."""
     originals = _snapshot_weights(peft_model)
 
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model, adapter_name="default", new_rank=4, layers=[0, 2]
     )
     with warnings.catch_warnings():
@@ -203,7 +207,7 @@ def test_rank_reducer_target_modules_and_layers_combined(peft_model):
     """Both filters should be ANDed together."""
     originals = _snapshot_weights(peft_model)
 
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model,
         adapter_name="default",
         new_rank=4,
@@ -231,7 +235,7 @@ def test_rank_reducer_target_modules_dict_per_layer(peft_model):
     """Dict mode should allow different modules per layer."""
     originals = _snapshot_weights(peft_model)
 
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model,
         adapter_name="default",
         new_rank=4,
@@ -271,7 +275,7 @@ def test_rank_reducer_target_modules_dict_per_layer(peft_model):
 def test_rank_reducer_target_modules_dict_raises_with_layers(peft_model):
     """Dict mode + layers parameter should raise ValueError."""
     with pytest.raises(ValueError, match="Cannot specify both"):
-        LoraRankReducer(
+        LoRaRankReducer(
             peft_model,
             adapter_name="default",
             new_rank=4,
@@ -293,7 +297,7 @@ def test_rank_reducer_approximates_original_product(peft_model):
         for name, module in _lora_modules(peft_model)
     }
 
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     reducer.apply()
 
     for name, module in _lora_modules(peft_model):
@@ -310,7 +314,7 @@ def test_rank_reducer_restore_exact(peft_model):
     originals = _snapshot_weights(peft_model)
     original_ranks = _snapshot_ranks(peft_model)
 
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     reducer.apply()
     reducer.restore()
 
@@ -324,7 +328,7 @@ def test_rank_reducer_restore_exact(peft_model):
 
 def test_rank_reducer_is_applied_tracking(peft_model):
     """is_applied should track modification state."""
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     assert not reducer.is_applied
 
     reducer.apply()
@@ -336,7 +340,7 @@ def test_rank_reducer_is_applied_tracking(peft_model):
 
 def test_rank_reducer_idempotent_apply(peft_model):
     """Multiple apply() calls should produce same result."""
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     reducer.apply()
     after_first = _snapshot_weights(peft_model)
 
@@ -349,7 +353,7 @@ def test_rank_reducer_idempotent_apply(peft_model):
 
 def test_rank_reducer_warns_about_peft_config_with_filters(peft_model):
     """Filtered modifications should warn about peft_config.r mismatch."""
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model, adapter_name="default", new_rank=4, target_modules=["q_proj"]
     )
     with warnings.catch_warnings(record=True) as w:
@@ -364,7 +368,7 @@ def test_rank_reducer_warns_about_peft_config_with_filters(peft_model):
 
 def test_rank_reducer_save_load_roundtrip(peft_model, tmp_path):
     """Reduced-rank adapter should save/load correctly."""
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     reducer.apply()
 
     save_dir = tmp_path / "adapter"
@@ -390,7 +394,7 @@ def test_rank_reducer_save_load_roundtrip(peft_model, tmp_path):
 def test_rank_reducer_custom_adapter_isolation(peft_model_custom_adapter):
     """Modifying one adapter should not affect others."""
     model = peft_model_custom_adapter
-    reducer = LoraRankReducer(model, adapter_name="custom", new_rank=4)
+    reducer = LoRaRankReducer(model, adapter_name="custom", new_rank=4)
     reducer.apply()
 
     assert model.peft_config["custom"].r == 4
@@ -411,7 +415,7 @@ def test_scaling_no_filters_all_modules(peft_model):
     """No filters should scale all modules."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=2.0)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=2.0)
     scaler.apply()
 
     for name, module in _lora_modules(peft_model):
@@ -423,7 +427,7 @@ def test_scaling_target_modules_list_only(peft_model):
     """target_modules as list should filter by module type."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    scaler = LoraScaling(
+    scaler = LoRaScaling(
         peft_model,
         adapter_name="default",
         scale_factor=5.0,
@@ -444,7 +448,7 @@ def test_scaling_layers_only(peft_model):
     """layers filter should affect all modules in specified layers."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    scaler = LoraScaling(
+    scaler = LoRaScaling(
         peft_model, adapter_name="default", scale_factor=0.5, layers=[0]
     )
     scaler.apply()
@@ -463,7 +467,7 @@ def test_scaling_target_modules_dict_per_layer(peft_model):
     """Dict mode should allow different modules per layer."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    scaler = LoraScaling(
+    scaler = LoRaScaling(
         peft_model,
         adapter_name="default",
         scale_factor=3.0,
@@ -500,7 +504,7 @@ def test_scaling_negative_scale_factor(peft_model):
     """Negative scale factor should invert LoRA direction."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=-1.0)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=-1.0)
     scaler.apply()
 
     for name, module in _lora_modules(peft_model):
@@ -510,7 +514,7 @@ def test_scaling_negative_scale_factor(peft_model):
 
 def test_scaling_zero_scale_disables(peft_model):
     """Scale factor of 0 should disable adapter."""
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=0.0)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=0.0)
     scaler.apply()
 
     for _name, module in _lora_modules(peft_model):
@@ -521,7 +525,7 @@ def test_scaling_restore_exact(peft_model):
     """restore() should return to exact original scaling."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=3.0)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=3.0)
     scaler.apply()
     scaler.restore()
 
@@ -531,7 +535,7 @@ def test_scaling_restore_exact(peft_model):
 
 def test_scaling_idempotent_apply(peft_model):
     """Multiple apply() calls should produce same result."""
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=2.0)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=2.0)
     scaler.apply()
     after_first = _snapshot_scaling(peft_model)
 
@@ -542,13 +546,13 @@ def test_scaling_idempotent_apply(peft_model):
 
 
 # ---------------------------------------------------------------------------
-# LoraLayerZeroing tests
+# LoraAdapterZeroing tests
 # ---------------------------------------------------------------------------
 
 
 def test_zeroing_layers_only_zeros_specified(peft_model):
     """layers parameter should zero specified layers."""
-    zeroer = LoraLayerZeroing(peft_model, adapter_name="default", layers=[1, 2, 3])
+    zeroer = LoRaAdapterZeroing(peft_model, adapter_name="default", layers=[1, 2, 3])
     zeroer.apply()
 
     for name, module in _lora_modules(peft_model):
@@ -567,7 +571,7 @@ def test_zeroing_target_modules_with_layers(peft_model):
     """Zero only specific modules in specific layers."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    zeroer = LoraLayerZeroing(
+    zeroer = LoRaAdapterZeroing(
         peft_model,
         adapter_name="default",
         layers=[1, 2],
@@ -588,7 +592,7 @@ def test_zeroing_target_modules_dict_per_layer(peft_model):
     """Dict mode should zero different modules per layer."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    zeroer = LoraLayerZeroing(
+    zeroer = LoRaAdapterZeroing(
         peft_model,
         adapter_name="default",
         target_modules={
@@ -619,7 +623,7 @@ def test_zeroing_restore(peft_model):
     """restore() should return scaling to original values."""
     original_scaling = _snapshot_scaling(peft_model)
 
-    zeroer = LoraLayerZeroing(peft_model, adapter_name="default", layers=[1, 2, 3])
+    zeroer = LoRaAdapterZeroing(peft_model, adapter_name="default", layers=[1, 2, 3])
     zeroer.apply()
     zeroer.restore()
 
@@ -631,7 +635,7 @@ def test_zeroing_preserves_shapes_and_weights(peft_model):
     """Zeroing should only affect scaling, not shapes or weights."""
     originals = _snapshot_weights(peft_model)
 
-    zeroer = LoraLayerZeroing(peft_model, adapter_name="default", layers=[1, 2, 3])
+    zeroer = LoRaAdapterZeroing(peft_model, adapter_name="default", layers=[1, 2, 3])
     zeroer.apply()
 
     for name, module in _lora_modules(peft_model):
@@ -660,7 +664,7 @@ def test_inference_rank_reduction_changes_output(peft_model):
 
     # Reduce rank from 8 to 6
     # This creates ~17% approximation error per matrix (measured empirically)
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=6)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=6)
     reducer.apply()
 
     with torch.no_grad():
@@ -698,7 +702,7 @@ def test_inference_scaling_affects_output_magnitude(peft_model):
     original_distance = (original_output - base_output).norm()
 
     # Test scaling down moves toward base
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=0.5)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=0.5)
     scaler.apply()
 
     with torch.no_grad():
@@ -714,7 +718,7 @@ def test_inference_scaling_affects_output_magnitude(peft_model):
 
     # Test scaling up moves away from base
     scaler.restore()
-    scaler_up = LoraScaling(peft_model, adapter_name="default", scale_factor=2.0)
+    scaler_up = LoRaScaling(peft_model, adapter_name="default", scale_factor=2.0)
     scaler_up.apply()
 
     with torch.no_grad():
@@ -740,7 +744,7 @@ def test_inference_zeroing_returns_to_base_model(peft_model):
     peft_model.enable_adapter_layers()
 
     # Zero all layers
-    zeroer = LoraLayerZeroing(peft_model, adapter_name="default", layers=[0, 1, 2, 3])
+    zeroer = LoRaAdapterZeroing(peft_model, adapter_name="default", layers=[0, 1, 2, 3])
     zeroer.apply()
 
     with torch.no_grad():
@@ -767,7 +771,7 @@ def test_inference_partial_zeroing_partial_effect(peft_model):
     original_lora_contribution = (original_output - base_output).norm()
 
     # Zero half the layers
-    zeroer = LoraLayerZeroing(peft_model, adapter_name="default", layers=[2, 3])
+    zeroer = LoRaAdapterZeroing(peft_model, adapter_name="default", layers=[2, 3])
     zeroer.apply()
 
     with torch.no_grad():
@@ -789,7 +793,7 @@ def test_inference_restore_returns_exact_output(peft_model):
         original_output = peft_model(x)
 
     # Apply modification
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
     reducer.apply()
 
     # Restore
@@ -812,7 +816,7 @@ def test_inference_dict_mode_selective_layers(peft_model):
         original_output = peft_model(x)
 
     # Reduce rank only in layer 0, q_proj
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model, adapter_name="default", new_rank=4, target_modules={0: ["q_proj"]}
     )
     reducer.apply()
@@ -844,7 +848,7 @@ def test_inference_negative_scaling_changes_direction(peft_model):
         original_output = peft_model(x)
 
     # Apply negative scaling
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=-1.0)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=-1.0)
     scaler.apply()
 
     with torch.no_grad():
@@ -873,7 +877,7 @@ def test_inference_negative_scaling_changes_direction(peft_model):
 def test_integration_multiple_modifiers_chained(peft_model):
     """Multiple modifiers can be applied in sequence."""
     # First reduce rank
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model, adapter_name="default", new_rank=4, target_modules=["q_proj"]
     )
     with warnings.catch_warnings():
@@ -881,7 +885,7 @@ def test_integration_multiple_modifiers_chained(peft_model):
         reducer.apply()
 
     # Then scale
-    scaler = LoraScaling(
+    scaler = LoRaScaling(
         peft_model,
         adapter_name="default",
         scale_factor=2.0,
@@ -903,8 +907,8 @@ def test_integration_restore_order_independence(peft_model):
     originals = _snapshot_weights(peft_model)
     original_scaling = _snapshot_scaling(peft_model)
 
-    reducer = LoraRankReducer(peft_model, adapter_name="default", new_rank=4)
-    scaler = LoraScaling(peft_model, adapter_name="default", scale_factor=2.0)
+    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
+    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=2.0)
 
     reducer.apply()
     scaler.apply()
@@ -920,7 +924,7 @@ def test_integration_restore_order_independence(peft_model):
 
 def test_integration_dict_with_many_layers(peft_model):
     """Dict mode should handle all layers with different configs."""
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model,
         adapter_name="default",
         new_rank=4,
@@ -953,7 +957,7 @@ def test_integration_empty_dict_modifies_nothing(peft_model):
     """Empty dict should not modify any modules."""
     originals = _snapshot_weights(peft_model)
 
-    reducer = LoraRankReducer(
+    reducer = LoRaRankReducer(
         peft_model, adapter_name="default", new_rank=4, target_modules={}
     )
     reducer.apply()
@@ -970,17 +974,17 @@ def test_integration_empty_dict_modifies_nothing(peft_model):
 
 def test_pipeline_sequential_application_compounds(peft_model):
     """Pipeline applies modifications sequentially, not each to original."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     # Original scaling is 16/8 = 2.0
     # If we scale by 0.3 twice sequentially: 2.0 * 0.3 * 0.3 = 0.18
     # If each applied to original: 2.0 * 0.3 = 0.6 (wrong!)
 
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model,
         steps=[
-            (LoraScaling, "default", {"scale_factor": 0.3}),
-            (LoraScaling, "default", {"scale_factor": 0.3}),
+            (LoRaScaling, "default", {"scale_factor": 0.3}),
+            (LoRaScaling, "default", {"scale_factor": 0.3}),
         ],
     )
 
@@ -995,14 +999,14 @@ def test_pipeline_sequential_application_compounds(peft_model):
 
 def test_pipeline_basic_single_adapter(peft_model):
     """Pipeline applies multiple modifications to a single adapter in sequence."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     # Create pipeline: reduce rank, then scale
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model,
         steps=[
-            (LoraRankReducer, "default", {"new_rank": 4}),
-            (LoraScaling, "default", {"scale_factor": 0.5}),
+            (LoRaRankReducer, "default", {"new_rank": 4}),
+            (LoRaScaling, "default", {"scale_factor": 0.5}),
         ],
     )
 
@@ -1023,13 +1027,13 @@ def test_pipeline_basic_single_adapter(peft_model):
 
 def test_pipeline_multi_adapter(peft_model_custom_adapter):
     """Pipeline can modify different adapters in different steps."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model_custom_adapter,
         steps=[
-            (LoraRankReducer, "default", {"new_rank": 4}),
-            (LoraScaling, "custom", {"scale_factor": 0.1}),
+            (LoRaRankReducer, "default", {"new_rank": 4}),
+            (LoRaScaling, "custom", {"scale_factor": 0.1}),
         ],
     )
 
@@ -1047,15 +1051,15 @@ def test_pipeline_multi_adapter(peft_model_custom_adapter):
 
 def test_pipeline_restore(peft_model):
     """Pipeline restore returns all adapters to original state."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     originals = _snapshot_weights(peft_model)
 
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model,
         steps=[
-            (LoraRankReducer, "default", {"new_rank": 2}),
-            (LoraScaling, "default", {"scale_factor": 3.0}),
+            (LoRaRankReducer, "default", {"new_rank": 2}),
+            (LoRaScaling, "default", {"scale_factor": 3.0}),
         ],
     )
 
@@ -1074,13 +1078,13 @@ def test_pipeline_restore(peft_model):
 
 def test_pipeline_idempotent_apply(peft_model):
     """Calling apply() multiple times produces same result."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model,
         steps=[
-            (LoraRankReducer, "default", {"new_rank": 4}),
-            (LoraScaling, "default", {"scale_factor": 0.5}),
+            (LoRaRankReducer, "default", {"new_rank": 4}),
+            (LoRaScaling, "default", {"scale_factor": 0.5}),
         ],
     )
 
@@ -1097,14 +1101,14 @@ def test_pipeline_idempotent_apply(peft_model):
 
 def test_pipeline_with_filters(peft_model):
     """Pipeline steps can have different filters."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model,
         steps=[
-            (LoraRankReducer, "default", {"new_rank": 2, "layers": [0, 1]}),
+            (LoRaRankReducer, "default", {"new_rank": 2, "layers": [0, 1]}),
             (
-                LoraScaling,
+                LoRaScaling,
                 "default",
                 {"scale_factor": 0.1, "target_modules": ["q_proj"]},
             ),
@@ -1134,41 +1138,41 @@ def test_pipeline_validation_empty_steps():
     """Pipeline rejects empty steps list."""
     import torch.nn as nn
 
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     with pytest.raises(ValueError, match="at least one step"):
-        LoraPipeline(nn.Module(), steps=[])
+        LoRaPipeline(nn.Module(), steps=[])
 
 
 def test_pipeline_validation_invalid_modifier_class(peft_model):
     """Pipeline rejects non-BaseLoraModifier classes."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     class NotAModifier:
         pass
 
     with pytest.raises(TypeError, match="not a subclass of BaseLoraModifier"):
-        LoraPipeline(peft_model, steps=[(NotAModifier, "default", {})])
+        LoRaPipeline(peft_model, steps=[(NotAModifier, "default", {})])
 
 
 def test_pipeline_validation_no_model_in_kwargs(peft_model):
     """Pipeline rejects kwargs containing 'model' or 'adapter_name'."""
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     with pytest.raises(ValueError, match="should not include 'model'"):
-        LoraPipeline(
+        LoRaPipeline(
             peft_model,
             steps=[
-                (LoraScaling, "default", {"scale_factor": 1.0, "model": peft_model})
+                (LoRaScaling, "default", {"scale_factor": 1.0, "model": peft_model})
             ],
         )
 
     with pytest.raises(ValueError, match="should not include.*'adapter_name'"):
-        LoraPipeline(
+        LoRaPipeline(
             peft_model,
             steps=[
                 (
-                    LoraScaling,
+                    LoRaScaling,
                     "default",
                     {"scale_factor": 1.0, "adapter_name": "default"},
                 )
@@ -1181,18 +1185,18 @@ def test_pipeline_inference_compound_effects(peft_model):
     torch.manual_seed(42)
     x = torch.randn(2, 4, 16)
 
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     # Get original output
     with torch.no_grad():
         original_output = peft_model(x)
 
     # Apply pipeline: rank reduction + scaling
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model,
         steps=[
-            (LoraRankReducer, "default", {"new_rank": 6}),
-            (LoraScaling, "default", {"scale_factor": 0.3}),
+            (LoRaRankReducer, "default", {"new_rank": 6}),
+            (LoRaScaling, "default", {"scale_factor": 0.3}),
         ],
     )
     pipeline.apply()
@@ -1218,7 +1222,7 @@ def test_pipeline_inference_scale_two_adapters_independently(
     torch.manual_seed(42)
     x = torch.randn(2, 4, 16)
 
-    from src.utils.peft_manipulations import LoraPipeline
+    from src.utils.peft_manipulations import LoRaPipeline
 
     # Get base model output
     peft_model_custom_adapter.disable_adapter_layers()
@@ -1245,11 +1249,11 @@ def test_pipeline_inference_scale_two_adapters_independently(
     assert custom_contribution > 0
 
     # Now scale both adapters with pipeline
-    pipeline = LoraPipeline(
+    pipeline = LoRaPipeline(
         peft_model_custom_adapter,
         steps=[
-            (LoraScaling, "default", {"scale_factor": 0.5}),
-            (LoraScaling, "custom", {"scale_factor": 0.2}),
+            (LoRaScaling, "default", {"scale_factor": 0.5}),
+            (LoRaScaling, "custom", {"scale_factor": 0.2}),
         ],
     )
     pipeline.apply()
@@ -1286,6 +1290,10 @@ def test_pipeline_inference_scale_two_adapters_independently(
 
     peft_model_custom_adapter.set_adapter("custom")
     with torch.no_grad():
+        restored_custom = peft_model_custom_adapter(x)
+
+    assert torch.equal(restored_default, default_only_output)
+    assert torch.equal(restored_custom, custom_only_output)
         restored_custom = peft_model_custom_adapter(x)
 
     assert torch.equal(restored_default, default_only_output)
