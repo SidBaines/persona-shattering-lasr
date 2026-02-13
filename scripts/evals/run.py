@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -65,6 +67,28 @@ def _safe_model_id(model_cfg: EvalModelConfig, idx: int) -> str:
     return f"base-{idx}-{base}"
 
 
+def _normalize_suite_component(value: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
+    return normalized.strip("._-") or "suite"
+
+
+def _stable_suite_id(suite: PersonaMetricsSuiteConfig | InspectTaskSuiteConfig) -> str:
+    if suite.suite_id:
+        return _normalize_suite_component(suite.suite_id)
+    payload = suite.model_dump(exclude={"suite_id"})
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:10]
+    return f"auto-{digest}"
+
+
+def _suite_artifact_dirname(display_name: str, suite_id: str) -> str:
+    return f"{_normalize_suite_component(display_name)}__{suite_id}"
+
+
+def _is_custom_inspect_hook(task: str) -> bool:
+    return ":" in task and task != "mmlu"
+
+
 def _inspect_model_ref(model_cfg: EvalModelConfig) -> str:
     if model_cfg.kind == "lora":
         return f"{model_cfg.model}::{model_cfg.adapter_path}"
@@ -77,115 +101,25 @@ def _load_question_dataset(config: EvalsConfig, dataset: Dataset | None) -> Data
     return format_for_inference(dataset, question_column=config.question_column)
 
 
-def _generate_with_lora(
-    model_cfg: EvalModelConfig,
-    dataset: Dataset,
-    evals_config: EvalsConfig,
-) -> Dataset:
-    """Generate responses using base model + LoRA adapter."""
-    import torch
-    from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    dtype = getattr(torch, model_cfg.dtype, None)
-    if dtype is None:
-        raise ValueError(f"Unsupported dtype: {model_cfg.dtype}")
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_cfg.model,
-        revision=model_cfg.revision,
-        torch_dtype=dtype,
-        device_map=model_cfg.device_map,
-    )
-    model = PeftModel.from_pretrained(model, model_cfg.adapter_path)
-    model.eval()
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_cfg.model,
-        revision=model_cfg.revision,
-        use_fast=True,
-    )
-    tokenizer.padding_side = "left"
-    if tokenizer.pad_token is None:
-        if tokenizer.eos_token is not None:
-            tokenizer.pad_token = tokenizer.eos_token
-        else:
-            tokenizer.add_special_tokens({"pad_token": "[PAD]"})
-            model.resize_token_embeddings(len(tokenizer))
-    model.config.pad_token_id = tokenizer.pad_token_id
-
-    eos_ids: list[int] = []
-    model_eos = getattr(model.generation_config, "eos_token_id", None)
-    if isinstance(model_eos, int):
-        eos_ids.append(model_eos)
-    elif isinstance(model_eos, list):
-        eos_ids.extend(int(token_id) for token_id in model_eos)
-    if tokenizer.eos_token_id is not None:
-        eos_ids.append(int(tokenizer.eos_token_id))
-    eos_ids = list(dict.fromkeys(eos_ids))
-    eos_token_id: int | list[int] | None
-    if not eos_ids:
-        eos_token_id = None
-    elif len(eos_ids) == 1:
-        eos_token_id = eos_ids[0]
-    else:
-        eos_token_id = eos_ids
-
-    generation = evals_config.generation
-    rows: list[dict[str, Any]] = []
-    device = next(model.parameters()).device
-
-    with torch.no_grad():
-        for row in dataset:
-            question = row["question"]
-            inputs = tokenizer(
-                question,
-                return_tensors="pt",
-                truncation=True,
-            ).to(device)
-            generated = model.generate(
-                **inputs,
-                max_new_tokens=generation.max_new_tokens,
-                do_sample=generation.do_sample,
-                temperature=generation.temperature,
-                top_p=generation.top_p,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=eos_token_id,
-            )
-            input_len = inputs["input_ids"].shape[1]
-            response = tokenizer.decode(generated[0][input_len:], skip_special_tokens=True)
-            rows.append(
-                {
-                    "question": question,
-                    "response": response,
-                    "response_index": 0,
-                }
-            )
-
-    return Dataset.from_list(rows)
-
-
 def _generate_responses_for_model(
     model_cfg: EvalModelConfig,
     dataset: Dataset,
     evals_config: EvalsConfig,
 ) -> Dataset:
-    if model_cfg.kind == "base":
-        infer_cfg = InferenceConfig(
-            model=model_cfg.model,
-            provider="local",
-            generation=evals_config.generation,
-            local=LocalProviderConfig(
-                dtype=model_cfg.dtype,
-                device_map=model_cfg.device_map,
-                revision=model_cfg.revision,
-                prompt_format="auto",
-            ),
-        )
-        result_dataset, _ = run_inference(infer_cfg, dataset=dataset)
-        return result_dataset
-
-    return _generate_with_lora(model_cfg, dataset, evals_config)
+    infer_cfg = InferenceConfig(
+        model=model_cfg.model,
+        provider="local",
+        generation=evals_config.generation,
+        local=LocalProviderConfig(
+            dtype=model_cfg.dtype,
+            device_map=model_cfg.device_map,
+            revision=model_cfg.revision,
+            prompt_format="auto",
+            adapter_path=model_cfg.adapter_path if model_cfg.kind == "lora" else None,
+        ),
+    )
+    result_dataset, _ = run_inference(infer_cfg, dataset=dataset)
+    return result_dataset
 
 
 def _resolve_inspect_task_name(task: str, task_name: str | None) -> str:
@@ -216,7 +150,7 @@ def _run_inspect_eval(
     task_params: dict[str, Any],
 ) -> dict[str, Any]:
     """Run an Inspect task via inspect_ai API or a Python hook."""
-    if ":" in task and task != "mmlu":
+    if _is_custom_inspect_hook(task):
         return _call_hook(task, model_ref, task_params)
 
     inspect_module = importlib.import_module("inspect_ai")
@@ -270,7 +204,7 @@ def run_evals(
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    question_dataset = _load_question_dataset(config, dataset)
+    question_dataset: Dataset | None = None
     model_results: list[ModelEvalResult] = []
     combined_records: list[dict[str, Any]] = []
     leaderboard_by_model: dict[str, dict[str, Any]] = {}
@@ -294,16 +228,22 @@ def run_evals(
         for suite in config.suites:
             if isinstance(suite, PersonaMetricsSuiteConfig):
                 suite_name = "persona_metrics"
-                suite_dir = model_output_dir / suite_name
+                suite_id = _stable_suite_id(suite)
+                suite_dir = model_output_dir / _suite_artifact_dirname(
+                    suite_name, suite_id
+                )
                 suite_dir.mkdir(parents=True, exist_ok=True)
                 suite_result = SuiteEvalResult(
                     suite_type=suite.type,
                     suite_name=suite_name,
+                    suite_id=suite_id,
                     model_id=model_id,
                 )
 
                 try:
                     if responses_dataset is None:
+                        if question_dataset is None:
+                            question_dataset = _load_question_dataset(config, dataset)
                         responses_dataset = _generate_responses_for_model(
                             model_cfg=model_cfg,
                             dataset=question_dataset,
@@ -334,6 +274,7 @@ def run_evals(
                     suite_payload = {
                         "suite_type": suite.type,
                         "suite_name": suite_name,
+                        "suite_id": suite_id,
                         "model_id": model_id,
                         "num_samples": metrics_result.num_samples,
                         "aggregates": metrics_result.aggregates,
@@ -352,7 +293,7 @@ def run_evals(
                     }
 
                     prefixed = _flatten_numeric_values(
-                        "persona_metrics", metrics_result.aggregates
+                        f"persona_metrics.{suite_id}", metrics_result.aggregates
                     )
                     leaderboard_by_model[model_id].update(prefixed)
 
@@ -360,6 +301,8 @@ def run_evals(
                         out = dict(row)
                         out["model_id"] = model_id
                         out["suite_type"] = suite.type
+                        out["suite_id"] = suite_id
+                        out["suite_name"] = suite_name
                         combined_records.append(out)
                 except Exception as exc:
                     suite_result.error = str(exc)
@@ -372,22 +315,32 @@ def run_evals(
             if isinstance(suite, InspectTaskSuiteConfig):
                 task_name = _resolve_inspect_task_name(suite.task, suite.task_name)
                 suite_name = f"inspect.{task_name}"
-                suite_dir = model_output_dir / suite_name
+                suite_id = _stable_suite_id(suite)
+                suite_dir = model_output_dir / _suite_artifact_dirname(
+                    suite_name, suite_id
+                )
                 suite_dir.mkdir(parents=True, exist_ok=True)
                 suite_result = SuiteEvalResult(
                     suite_type=suite.type,
                     suite_name=suite_name,
+                    suite_id=suite_id,
                     model_id=model_id,
                 )
 
                 try:
+                    if model_cfg.kind == "lora" and not _is_custom_inspect_hook(suite.task):
+                        raise ValueError(
+                            "Inspect built-in tasks currently support only base models. "
+                            "Use a custom inspect hook (module.path:function) for "
+                            "kind='lora' targets."
+                        )
                     inspect_payload = _run_inspect_eval(
                         task=suite.task,
                         model_ref=_inspect_model_ref(model_cfg),
                         task_params=dict(suite.task_params),
                     )
                     aggregates = _flatten_numeric_values(
-                        f"inspect.{task_name}",
+                        f"inspect.{task_name}.{suite_id}",
                         inspect_payload,
                     )
                     suite_json_path = _write_json(
@@ -395,6 +348,7 @@ def run_evals(
                         {
                             "suite_type": suite.type,
                             "suite_name": suite_name,
+                            "suite_id": suite_id,
                             "model_id": model_id,
                             "task": suite.task,
                             "task_params": suite.task_params,
@@ -415,6 +369,7 @@ def run_evals(
                             "model_id": model_id,
                             "suite_type": suite.type,
                             "suite_name": suite_name,
+                            "suite_id": suite_id,
                             "inspect_payload": inspect_payload,
                         }
                     )

@@ -2,13 +2,34 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.persona_metrics import JudgeLLMConfig, PersonaMetricSpec
+
+
+def _resolve_inspect_task_name(task: str, task_name: str | None) -> str:
+    if task_name:
+        return task_name
+    if task == "mmlu":
+        return "mmlu"
+    return task.split(":")[0].replace("/", "_")
+
+
+def _stable_suite_id(suite: "EvalSuiteConfig") -> str:
+    if suite.suite_id:
+        normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", suite.suite_id.strip())
+        return normalized.strip("._-") or "suite"
+    payload = suite.model_dump(exclude={"suite_id"})
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:10]
+    return f"auto-{digest}"
 
 
 class EvalModelConfig(BaseModel):
@@ -37,6 +58,7 @@ class PersonaMetricsSuiteConfig(BaseModel):
     """Suite config for persona metric scoring on generated responses."""
 
     type: Literal["persona_metrics"] = "persona_metrics"
+    suite_id: str | None = None
     evaluations: list[str | PersonaMetricSpec] = Field(default_factory=lambda: ["count_o"])
     question_column: str | None = "question"
     response_column: str = "response"
@@ -48,6 +70,7 @@ class InspectTaskSuiteConfig(BaseModel):
     """Suite config for Inspect task execution."""
 
     type: Literal["inspect_task"] = "inspect_task"
+    suite_id: str | None = None
     task: str = "mmlu"
     task_params: dict[str, Any] = Field(default_factory=dict)
     task_name: str | None = None
@@ -92,6 +115,32 @@ class EvalsConfig(BaseModel):
                 "Evals currently supports exactly one response per prompt "
                 "(generation.num_responses_per_prompt must be 1)."
             )
+        has_lora_model = any(model.kind == "lora" for model in self.models)
+        if has_lora_model:
+            for suite in self.suites:
+                if (
+                    isinstance(suite, InspectTaskSuiteConfig)
+                    and ":" not in suite.task
+                ):
+                    raise ValueError(
+                        "Inspect built-in tasks currently support only base models. "
+                        "For kind='lora', use a custom inspect hook in "
+                        "'module.path:function' format."
+                    )
+        seen_suite_keys: set[str] = set()
+        for suite in self.suites:
+            if isinstance(suite, PersonaMetricsSuiteConfig):
+                display_name = "persona_metrics"
+            else:
+                task_name = _resolve_inspect_task_name(suite.task, suite.task_name)
+                display_name = f"inspect.{task_name}"
+            suite_key = f"{display_name}:{_stable_suite_id(suite)}"
+            if suite_key in seen_suite_keys:
+                raise ValueError(
+                    "Detected duplicate suite configuration identifier "
+                    f"'{suite_key}'. Provide distinct suite_id values."
+                )
+            seen_suite_keys.add(suite_key)
         return self
 
 
@@ -100,6 +149,7 @@ class SuiteEvalResult(BaseModel):
 
     suite_type: str
     suite_name: str
+    suite_id: str
     model_id: str
     num_samples: int = 0
     artifacts: dict[str, str] = Field(default_factory=dict)

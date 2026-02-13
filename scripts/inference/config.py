@@ -16,6 +16,7 @@ class LocalProviderConfig(BaseModel):
     dtype: str = "bfloat16"
     device_map: str = "auto"
     revision: str = "main"
+    adapter_path: str | None = None
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
 

@@ -7,6 +7,10 @@ Run end-to-end model evals across:
 
 The module compares one or more model targets (base and/or LoRA) on the same prompt set and writes structured artifacts plus a unified leaderboard.
 
+Notes:
+- `inspect_task`-only runs do not require a prompt dataset.
+- Built-in Inspect tasks currently support base models only. For LoRA targets, use a custom hook task.
+
 ## CLI Usage
 
 ### Persona metrics only
@@ -20,13 +24,11 @@ uv run python -m scripts.evals \
   --persona-evaluations count_o coherence
 ```
 
-### MMLU only
+### MMLU only (dataset not required)
 
 ```bash
 uv run python -m scripts.evals \
   --model meta-llama/Llama-3.1-8B-Instruct \
-  --dataset-source local \
-  --dataset-path scratch/my_prompts.jsonl \
   --inspect-task mmlu
 ```
 
@@ -87,11 +89,11 @@ print(result.output_dir)
 
 For each `model_id` + suite:
 
-- `responses.jsonl` (persona_metrics suite)
-- `scored.jsonl` (persona_metrics suite)
-- `suite_result.json` (all suites)
+- `<suite_name>__<suite_id>/responses.jsonl` (persona_metrics suite)
+- `<suite_name>__<suite_id>/scored.jsonl` (persona_metrics suite)
+- `<suite_name>__<suite_id>/suite_result.json` (all suites)
 
 Run-level:
 
-- `leaderboard.json` (namespaced keys, e.g. `persona_metrics.*`, `inspect.mmlu.*`)
+- `leaderboard.json` (namespaced keys include suite ids, e.g. `persona_metrics.<suite_id>.*`, `inspect.mmlu.<suite_id>.*`)
 - `summary.json` (config snapshot + run metadata)

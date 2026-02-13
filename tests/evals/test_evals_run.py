@@ -76,9 +76,14 @@ def test_run_evals_persona_metrics_suite(tmp_path, monkeypatch):
     model_dirs = [path for path in (tmp_path / "evals").iterdir() if path.is_dir()]
     assert model_dirs
     model_dir = model_dirs[0]
-    assert (model_dir / "persona_metrics" / "responses.jsonl").exists()
-    assert (model_dir / "persona_metrics" / "scored.jsonl").exists()
-    assert (model_dir / "persona_metrics" / "suite_result.json").exists()
+    suite_dirs = [path for path in model_dir.iterdir() if path.is_dir()]
+    assert suite_dirs
+    persona_dirs = [path for path in suite_dirs if path.name.startswith("persona_metrics__")]
+    assert persona_dirs
+    persona_dir = persona_dirs[0]
+    assert (persona_dir / "responses.jsonl").exists()
+    assert (persona_dir / "scored.jsonl").exists()
+    assert (persona_dir / "suite_result.json").exists()
 
 
 def test_run_evals_inspect_task_suite(tmp_path, monkeypatch):
@@ -109,4 +114,7 @@ def test_run_evals_inspect_task_suite(tmp_path, monkeypatch):
     assert len(out_dataset) == 1
     assert result.leaderboard
     model_row = result.leaderboard[0]
-    assert "inspect.mmlu.accuracy" in model_row
+    assert any(
+        key.startswith("inspect.mmlu.") and key.endswith(".accuracy")
+        for key in model_row
+    )

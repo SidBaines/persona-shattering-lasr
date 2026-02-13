@@ -187,7 +187,9 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help=(
             "Inspect task spec. Format: TASK_REF or TASK_REF::JSON_PARAMS. "
-            "Repeat flag for multiple tasks. Built-in alias: mmlu."
+            "Repeat flag for multiple tasks. Built-in alias: mmlu. "
+            "Built-in tasks currently support base models only; use a hook "
+            "(module.path:function) for LoRA targets."
         ),
     )
 

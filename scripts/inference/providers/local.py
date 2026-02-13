@@ -50,6 +50,15 @@ class LocalProvider(InferenceProvider):
             torch_dtype=dtype,
             device_map=local_cfg.device_map,
         )
+        if local_cfg.adapter_path:
+            try:
+                from peft import PeftModel
+            except ImportError as exc:  # pragma: no cover - import guard
+                raise ImportError(
+                    "Local provider adapter_path requires the 'peft' package."
+                ) from exc
+            logger.info("Loading LoRA adapter: %s", local_cfg.adapter_path)
+            model = PeftModel.from_pretrained(model, local_cfg.adapter_path)
 
         tokenizer = AutoTokenizer.from_pretrained(
             model_name,
