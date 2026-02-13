@@ -13,7 +13,6 @@ Notes:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -22,17 +21,10 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
-# Keep HF-related caches in /workspace where there is more disk capacity.
-# os.environ["XDG_CACHE_HOME"] = "/workspace/.cache"
-# os.environ["HF_HOME"] = "/workspace/.cache/huggingface"
-# os.environ["HUGGINGFACE_HUB_CACHE"] = "/workspace/.cache/huggingface/hub"
-# os.environ["HF_DATASETS_CACHE"] = "/workspace/.cache/huggingface/datasets"
-# os.environ["TRANSFORMERS_CACHE"] = "/workspace/.cache/huggingface/transformers"
-
 from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.editing import EditingConfig, run_editing
+from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import write_jsonl
@@ -143,6 +135,7 @@ def main() -> None:
         model=EDITOR_MODEL,
         prompt_template=EDITOR_PROMPT_TEMPLATE,
         max_concurrent=8,
+        quality=QualityConfig(enabled=False),
         output_path=scratch_dir / "edited_dataset.jsonl",
     )
 

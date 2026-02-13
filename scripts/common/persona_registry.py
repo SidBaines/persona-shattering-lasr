@@ -88,13 +88,6 @@ PERSONA_TRAINING_PIPELINE_DEFAULTS: dict[str, PersonaTrainingPipelineDefaults] =
     },
 }
 
-# Backward-compat convenience views used by existing call sites.
-PERSONA_EVALUATIONS: dict[str, str] = {}
-for name, defaults in PERSONA_DEFAULTS.items():
-    first_eval = defaults["evaluations"][0]
-    if isinstance(first_eval, str):
-        PERSONA_EVALUATIONS[name] = first_eval
-
 PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
     name: defaults["prompt_template"] for name, defaults in PERSONA_DEFAULTS.items()
 }

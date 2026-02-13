@@ -26,7 +26,7 @@ sys.path.insert(0, str(project_root))
 from datasets import Dataset
 from dotenv import load_dotenv
 
-from scripts.editing import EditingConfig, OpenAIProviderConfig, run_editing
+from scripts.editing import EditingConfig, OpenAIProviderConfig, QualityConfig, run_editing
 from scripts.editing.config import RetryConfig
 from scripts.utils import read_jsonl
 
@@ -109,6 +109,7 @@ def main() -> None:
         prompt_template=EDITOR_PROMPT_TEMPLATE,
         openai=OpenAIProviderConfig(max_tokens=EDITOR_MAX_TOKENS),
         max_concurrent=args.max_concurrent,
+        quality=QualityConfig(enabled=False),
         retry=RetryConfig(
             max_retries=args.retry_max_retries,
             backoff_factor=args.retry_backoff_factor,

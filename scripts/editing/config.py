@@ -60,11 +60,11 @@ class QualityConfig(BaseModel):
         """Support old config shape where `metrics` listed quality checks."""
         if not isinstance(data, dict):
             return data
-        if "evaluations" not in data and "metrics" in data:
-            updated = dict(data)
-            updated["evaluations"] = updated["metrics"]
-            return updated
-        return data
+        updated = dict(data)
+        if "evaluations" not in updated and "metrics" in updated:
+            updated["evaluations"] = updated.pop("metrics")
+        updated.pop("reporters", None)
+        return updated
 
 
 class EditingConfig(BaseModel):

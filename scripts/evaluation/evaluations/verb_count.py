@@ -45,7 +45,7 @@ class VerbCountEvaluation(Evaluation):
         nlp = _get_nlp()
         doc = nlp(response)
         count = sum(1 for token in doc if token.pos_ == "VERB")
-        word_count = len(response.split())
+        word_count = len([t for t in doc if not t.is_space])
         density = (count / word_count * 100) if word_count > 0 else 0.0
         return {
             f"{self.name}.count": count,
