@@ -11,6 +11,16 @@ Usage:
     # verbs_avoiding persona
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
         --persona verbs_avoiding --max-samples 5
+
+    # sf_guy persona (San Fran style defaults)
+    uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
+        --persona sf_guy
+
+    # Override default evaluations for this run
+    uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
+        --persona o_avoiding \
+        --evaluations count_o coherence \
+        --max-samples 5
 """
 
 from __future__ import annotations
@@ -27,21 +37,29 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.common.persona_metrics import (
+from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
-    PERSONA_METRICS,
+    PERSONA_DEFAULTS,
+    get_persona_dataset_pipeline_defaults,
+    get_persona_default_evaluations,
     get_persona_prompt_template,
 )
 from scripts.editing import EditingConfig, QualityConfig, run_editing
-from scripts.evaluation import EvaluationConfig, EvaluationSpec, run_evaluation
+from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
-HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 EDITOR_PROVIDER = "openai"
-EDITOR_MODEL = "gpt-4o-mini"
+EDITOR_MODEL = "gpt-5-nano-2025-08-07"
+DEFAULT_MAX_SAMPLES = 200
+DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
+DEFAULT_INFERENCE_MAX_NEW_TOKENS = 512
+DEFAULT_INFERENCE_BATCH_SIZE = 128
+DEFAULT_QUALITY_ENABLED = True
+DEFAULT_METRICS_KEY = "persona_metrics"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -51,27 +69,36 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--persona",
         type=str,
-        default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_METRICS.keys()),
-        help=f"Persona metric to use (default: {DEFAULT_PERSONA})",
+        default=None,
+        choices=sorted(PERSONA_DEFAULTS.keys()),
+        help=(
+            "Persona defaults bundle for prompt and evaluations. "
+            "--prompt-template/--evaluations may override persona defaults."
+        ),
     )
     parser.add_argument(
         "--prompt-template",
         type=str,
         default=None,
-        help="Editing prompt template name (default: auto-resolved from --persona)",
+        help="Editing prompt template name. Required when --persona is not set.",
     )
     parser.add_argument(
         "--max-samples",
         type=int,
-        default=10,
-        help="Max prompts to sample from dataset (default: 10)",
+        default=None,
+        help=(
+            "Max prompts to sample from dataset. "
+            f"Defaults to {DEFAULT_MAX_SAMPLES}, unless persona has an override."
+        ),
     )
     parser.add_argument(
         "--num-responses-per-prompt",
         type=int,
-        default=1,
-        help="Number of responses per prompt (default: 1)",
+        default=None,
+        help=(
+            "Number of responses per prompt. Defaults to "
+            f"{DEFAULT_NUM_RESPONSES_PER_PROMPT}, unless persona has an override."
+        ),
     )
     parser.add_argument(
         "--run-id",
@@ -85,7 +112,25 @@ def _parse_args() -> argparse.Namespace:
         default=HF_MODEL,
         help=f"HuggingFace model for inference (default: {HF_MODEL})",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--evaluations",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Evaluations for quality + final eval. Required when --persona is not set.",
+    )
+    args = parser.parse_args()
+
+    has_persona = args.persona is not None
+    has_prompt = args.prompt_template is not None
+    has_evaluations = args.evaluations is not None
+
+    if not has_persona and not (has_prompt and has_evaluations):
+        parser.error(
+            "Without --persona, you must provide both --prompt-template and --evaluations."
+        )
+
+    return args
 
 
 def main() -> None:
@@ -93,18 +138,64 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
-    # Auto-resolve prompt template from persona if not explicitly provided
-    prompt_template = args.prompt_template or get_persona_prompt_template(args.persona)
+    if args.persona is not None:
+        prompt_template = args.prompt_template or get_persona_prompt_template(args.persona)
+        evaluations = (
+            list(args.evaluations)
+            if args.evaluations is not None
+            else get_persona_default_evaluations(args.persona)
+        )
+        persona_defaults: dict[str, object] = get_persona_dataset_pipeline_defaults(
+            args.persona
+        )
+    else:
+        if args.prompt_template is None or args.evaluations is None:
+            raise ValueError(
+                "Without --persona, both --prompt-template and --evaluations are required."
+            )
+        prompt_template = args.prompt_template
+        evaluations = list(args.evaluations)
+        persona_defaults = {}
 
-    run_id = args.run_id or f"{args.persona}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    max_samples = (
+        args.max_samples
+        if args.max_samples is not None
+        else int(persona_defaults.get("max_samples", DEFAULT_MAX_SAMPLES))
+    )
+    num_responses_per_prompt = (
+        args.num_responses_per_prompt
+        if args.num_responses_per_prompt is not None
+        else int(
+            persona_defaults.get(
+                "num_responses_per_prompt", DEFAULT_NUM_RESPONSES_PER_PROMPT
+            )
+        )
+    )
+    inference_max_new_tokens = int(
+        persona_defaults.get("inference_max_new_tokens", DEFAULT_INFERENCE_MAX_NEW_TOKENS)
+    )
+    inference_batch_size = int(
+        persona_defaults.get("inference_batch_size", DEFAULT_INFERENCE_BATCH_SIZE)
+    )
+    quality_enabled = bool(
+        persona_defaults.get("quality_enabled", DEFAULT_QUALITY_ENABLED)
+    )
+    metrics_key = str(persona_defaults.get("metrics_key", DEFAULT_METRICS_KEY))
+
+    persona_label = args.persona or "custom"
+    run_id = args.run_id or f"{persona_label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
-    print(f"PERSONA DATASET PIPELINE: {args.persona}")
+    print(f"PERSONA DATASET PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Prompt template: {prompt_template}")
-    print(f"Max samples: {args.max_samples}")
+    print(f"Evaluations: {evaluations}")
+    print(f"Max samples: {max_samples}")
+    print(f"Responses per prompt: {num_responses_per_prompt}")
+    print(f"Inference: max_new_tokens={inference_max_new_tokens}, batch_size={inference_batch_size}")
+    print(f"Editing quality eval enabled: {quality_enabled}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
@@ -122,14 +213,14 @@ def main() -> None:
             source="huggingface",
             name=DATASET_NAME,
             split="train",
-            max_samples=args.max_samples,
+            max_samples=max_samples,
         ),
         generation=GenerationConfig(
-            max_new_tokens=512,
+            max_new_tokens=inference_max_new_tokens,
             temperature=0.7,
             top_p=0.9,
-            batch_size=128,
-            num_responses_per_prompt=args.num_responses_per_prompt,
+            batch_size=inference_batch_size,
+            num_responses_per_prompt=num_responses_per_prompt,
         ),
         output_path=scratch_dir / "inference_output.jsonl",
     )
@@ -159,7 +250,11 @@ def main() -> None:
         model=EDITOR_MODEL,
         prompt_template=prompt_template,
         max_concurrent=8,
-        quality=QualityConfig(enabled=True, persona=args.persona),
+        quality=QualityConfig(
+            enabled=quality_enabled,
+            evaluations=evaluations,
+            persona=args.persona or DEFAULT_PERSONA,
+        ),
         output_path=scratch_dir / "edited_dataset.jsonl",
     )
 
@@ -180,14 +275,10 @@ def main() -> None:
     print(f"{'='*60}\n")
 
     evaluation_config = EvaluationConfig(
-        evaluations=[
-            EvaluationSpec(
-                name="level_of_persona", params={"persona": args.persona}
-            ),
-        ],
+        evaluations=evaluations,
         response_column="edited_response",
         question_column="question",
-        metrics_key="persona_metrics",
+        metrics_key=metrics_key,
         output_path=scratch_dir / "edited_evaluated.jsonl",
     )
 
@@ -203,7 +294,7 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("DATASET GENERATION COMPLETE")
     print(f"{'='*60}")
-    print(f"Persona: {args.persona}")
+    print(f"Persona: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Output directory: {scratch_dir}")
     print(f"Evaluated dataset: {evaluation_result.output_path}")

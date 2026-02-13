@@ -4,7 +4,7 @@ Example:
     from scripts.evaluation import run_evaluation, EvaluationConfig
 
     config = EvaluationConfig(
-        evaluations=["level_of_persona", "coherence"],
+        evaluations=["count_o", "coherence"],
         response_column="response",
     )
     dataset, result = run_evaluation(config, dataset=my_dataset)

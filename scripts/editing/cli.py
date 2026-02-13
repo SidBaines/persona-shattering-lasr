@@ -6,12 +6,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from scripts.common.persona_metrics import (
+from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
-    PERSONA_METRICS,
+    PERSONA_DEFAULTS,
     get_persona_prompt_template,
 )
 from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
+from scripts.evaluation.config import JudgeLLMConfig
 from scripts.editing.run import run_editing
 
 
@@ -82,11 +83,45 @@ def parse_args() -> argparse.Namespace:
         help="Disable quality metric evaluation",
     )
     parser.add_argument(
+        "--quality-evaluations",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Quality evaluations to run on original and edited responses "
+        "(default: auto-resolved from --persona)",
+    )
+    parser.add_argument(
         "--persona",
         type=str,
         default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_METRICS.keys()),
+        choices=sorted(PERSONA_DEFAULTS.keys()),
         help=f"Persona to use — sets prompt template and quality metric automatically (default: {DEFAULT_PERSONA})",
+    )
+    parser.add_argument(
+        "--quality-judge-provider",
+        type=str,
+        choices=["openai", "openrouter", "anthropic"],
+        default="openai",
+        help="Judge provider for LLM-based quality evaluations (default: openai)",
+    )
+    parser.add_argument(
+        "--quality-judge-model",
+        type=str,
+        default="gpt-4o-mini",
+        help="Judge model for LLM-based quality evaluations (default: gpt-4o-mini)",
+    )
+    parser.add_argument(
+        "--quality-judge-max-concurrent",
+        type=int,
+        default=10,
+        help="Max concurrent judge API calls for quality evaluations (default: 10)",
+    )
+    parser.add_argument(
+        "--quality-on-error",
+        type=str,
+        choices=["warn", "raise"],
+        default="warn",
+        help="Behavior when post-edit quality evaluation fails (default: warn)",
     )
 
     return parser.parse_args()
@@ -103,13 +138,24 @@ def main() -> None:
         if args.code_editor
         else CodeProviderConfig()
     )
+    quality_config = QualityConfig(
+        enabled=not args.no_quality,
+        evaluations=args.quality_evaluations,
+        persona=args.persona,
+        judge=JudgeLLMConfig(
+            provider=args.quality_judge_provider,
+            model=args.quality_judge_model,
+            max_concurrent=args.quality_judge_max_concurrent,
+        ),
+        on_error=args.quality_on_error,
+    )
     config = EditingConfig(
         provider=args.provider,
         model=args.model,
         prompt_template=prompt_template,
         max_concurrent=args.max_concurrent,
         timeout=args.timeout,
-        quality=QualityConfig(enabled=not args.no_quality, persona=args.persona),
+        quality=quality_config,
         output_path=Path(args.output_path) if args.output_path else None,
         code=code_config,
     )

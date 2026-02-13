@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from pathlib import Path
 
 from datasets import Dataset
@@ -96,6 +97,16 @@ async def run_inference_async(
                 questions_out.append(question)
                 response_indices.append(response_index)
         logger.info("Processed %d/%d samples", end, len(dataset))
+
+    # Release GPU memory held by the provider (model weights, KV cache, etc.)
+    del provider
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
     result_dataset = Dataset.from_list(
         [

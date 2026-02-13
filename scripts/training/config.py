@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -55,7 +56,7 @@ class TrainingEvaluationConfig(BaseModel):
     """Evaluation configuration for training-time model checks."""
 
     enabled: bool = True
-    evaluations: list[str | EvaluationSpec] = ["level_of_persona"]
+    evaluations: list[str | EvaluationSpec] = ["count_o"]
     judge: JudgeLLMConfig = JudgeLLMConfig()
 
     # Generation settings for model-evaluated outputs
@@ -107,6 +108,8 @@ class TrainingConfig(BaseModel):
 
     # Prompt formatting
     prompt_template: str = "### Question:\n{question}\n\n### Response:\n{response}"
+    prompt_format: Literal["auto", "chat", "plain"] = "auto"
+    chat_system_prompt: str | None = None
 
     # Wandb logging
     wandb: WandbConfig = WandbConfig()

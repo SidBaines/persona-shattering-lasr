@@ -13,7 +13,6 @@ Notes:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -22,17 +21,10 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
-# Keep HF-related caches in /workspace where there is more disk capacity.
-# os.environ["XDG_CACHE_HOME"] = "/workspace/.cache"
-# os.environ["HF_HOME"] = "/workspace/.cache/huggingface"
-# os.environ["HUGGINGFACE_HUB_CACHE"] = "/workspace/.cache/huggingface/hub"
-# os.environ["HF_DATASETS_CACHE"] = "/workspace/.cache/huggingface/datasets"
-# os.environ["TRANSFORMERS_CACHE"] = "/workspace/.cache/huggingface/transformers"
-
 from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.editing import EditingConfig, run_editing
+from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import write_jsonl
@@ -41,7 +33,7 @@ from scripts.utils import write_jsonl
 DATASET_NAME = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 # HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-MAX_SAMPLES = 10  # Set to None for full dataset
+MAX_SAMPLES = 200  # Set to None for full dataset
 NUM_RESPONSES_PER_PROMPT = 3
 EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
@@ -110,7 +102,7 @@ def main() -> None:
             max_new_tokens=1024,
             temperature=0.7,
             top_p=0.9,
-            batch_size=128,
+            batch_size=16,
             num_responses_per_prompt=args.num_responses_per_prompt,
         ),
         output_path=scratch_dir / "inference_output.jsonl",
@@ -143,6 +135,7 @@ def main() -> None:
         model=EDITOR_MODEL,
         prompt_template=EDITOR_PROMPT_TEMPLATE,
         max_concurrent=8,
+        quality=QualityConfig(enabled=False),
         output_path=scratch_dir / "edited_dataset.jsonl",
     )
 

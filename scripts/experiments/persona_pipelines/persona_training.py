@@ -13,6 +13,17 @@ Usage:
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
         --input-path scratch/<run_id>/edited_evaluated.jsonl
+
+    # sf_guy persona (San Fran training defaults)
+    uv run python scripts/experiments/persona_pipelines/persona_training.py \
+        --persona sf_guy \
+        --input-path scratch/<run_id>/edited_evaluated.jsonl
+
+    # Override defaults from persona registry
+    uv run python scripts/experiments/persona_pipelines/persona_training.py \
+        --persona verbs_avoiding \
+        --evaluations count_o coherence \
+        --input-path scratch/<run_id>/edited_evaluated.jsonl
 """
 
 from __future__ import annotations
@@ -31,8 +42,13 @@ from dotenv import load_dotenv
 from datasets import Dataset
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.common.persona_metrics import DEFAULT_PERSONA, PERSONA_METRICS
-from scripts.evaluation import EvaluationSpec, JudgeLLMConfig
+from scripts.common.persona_registry import (
+    PERSONA_DEFAULTS,
+    get_persona_training_default_evaluations,
+    get_persona_training_pipeline_defaults,
+)
+from scripts.editing.prompts import TEMPLATES as EDITING_PROMPT_TEMPLATES
+from scripts.evaluation import JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
     SftConfig,
@@ -43,9 +59,30 @@ from scripts.training import (
 from scripts.utils import read_jsonl
 
 
-HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 JUDGE_PROVIDER = "openai"
-JUDGE_MODEL = "gpt-4o-mini"
+JUDGE_MODEL = "gpt-5-nano-2025-08-07"
+DEFAULT_TRAINING_PROMPT_TEMPLATE = "### Question:\n{question}\n\n### Response:\n{response}"
+
+
+def _validate_training_prompt_template(prompt_template: str) -> None:
+    missing_tokens = [
+        token for token in ("{question}", "{response}") if token not in prompt_template
+    ]
+    if not missing_tokens:
+        return
+
+    if prompt_template in EDITING_PROMPT_TEMPLATES:
+        raise ValueError(
+            "Training prompt template must be a literal format string containing "
+            "{question} and {response}, not an editing template name. "
+            "Use --prompt-template with a literal training template or omit it."
+        )
+
+    raise ValueError(
+        "Training prompt template must include {question} and {response}. "
+        f"Missing: {missing_tokens}"
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -55,9 +92,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--persona",
         type=str,
-        default=DEFAULT_PERSONA,
-        choices=sorted(PERSONA_METRICS.keys()),
-        help=f"Persona metric for training-time eval (default: {DEFAULT_PERSONA})",
+        default=None,
+        choices=sorted(PERSONA_DEFAULTS.keys()),
+        help=(
+            "Persona defaults bundle for training evals and prompt template. "
+            "--prompt-template and --evaluations may override persona defaults."
+        ),
     )
     parser.add_argument(
         "--input-path",
@@ -83,7 +123,34 @@ def _parse_args() -> argparse.Namespace:
         default=10,
         help="Number of training epochs (default: 10)",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--prompt-template",
+        type=str,
+        default=None,
+        help=(
+            "Training prompt template string (must include {question} and {response}). "
+            "Optional when --persona is set."
+        ),
+    )
+    parser.add_argument(
+        "--evaluations",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Training-time evaluations. Required when --persona is not set.",
+    )
+    args = parser.parse_args()
+
+    has_persona = args.persona is not None
+    has_prompt = args.prompt_template is not None
+    has_evaluations = args.evaluations is not None
+
+    if not has_persona and not (has_prompt and has_evaluations):
+        parser.error(
+            "Without --persona, you must provide both --prompt-template and --evaluations."
+        )
+
+    return args
 
 
 def main() -> None:
@@ -95,14 +162,37 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input dataset not found: {input_path}")
 
-    run_id = args.run_id or f"{args.persona}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    persona_label = args.persona or "custom"
+    run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.persona is not None:
+        training_defaults = get_persona_training_pipeline_defaults(args.persona)
+        default_evaluations = get_persona_training_default_evaluations(args.persona)
+    else:
+        training_defaults = {}
+        default_evaluations = []
+
+    prompt_template = args.prompt_template or DEFAULT_TRAINING_PROMPT_TEMPLATE
+    _validate_training_prompt_template(prompt_template)
+    evaluations = (
+        list(args.evaluations)
+        if args.evaluations is not None
+        else list(default_evaluations)
+    )
+    if not evaluations:
+        raise ValueError("No training evaluations configured.")
+    wandb_tags = list(
+        training_defaults.get("wandb_tags", [persona_label, "persona-pipeline"])
+    )
+
     print(f"\n{'='*60}")
-    print(f"PERSONA TRAINING PIPELINE: {args.persona}")
+    print(f"PERSONA TRAINING PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Input dataset: {input_path}")
+    print(f"Prompt template: {prompt_template}")
+    print(f"Evaluations: {evaluations}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
@@ -127,19 +217,15 @@ def main() -> None:
             learning_rate=1e-4,
             bf16=True,
         ),
+        prompt_template=prompt_template,
         wandb=WandbConfig(
             enabled=True,
             project="persona-shattering-v1",
-            name=f"{args.persona}-{run_id}",
-            tags=[args.persona, "persona-pipeline"],
+            name=f"{persona_label}-{run_id}",
+            tags=wandb_tags,
         ),
         evaluation=TrainingEvaluationConfig(
-            evaluations=[
-                EvaluationSpec(
-                    name="level_of_persona",
-                    params={"persona": args.persona},
-                ),
-            ],
+            evaluations=evaluations,
             judge=JudgeLLMConfig(
                 provider=JUDGE_PROVIDER,
                 model=JUDGE_MODEL,
@@ -158,7 +244,7 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("TRAINING COMPLETE")
     print(f"{'='*60}")
-    print(f"Persona: {args.persona}")
+    print(f"Persona: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Output directory: {scratch_dir}")
     print(f"Final model: {training_result.checkpoint_path}")

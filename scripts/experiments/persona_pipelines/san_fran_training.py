@@ -20,7 +20,7 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.evaluation import JudgeLLMConfig
+from scripts.evaluation import EvaluationSpec, JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
     SftConfig,
@@ -32,8 +32,8 @@ from scripts.utils import read_jsonl
 from datasets import Dataset
 
 
-# HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+# HF_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 JUDGE_PROVIDER = "openai"
 JUDGE_MODEL = "gpt-5-nano-2025-08-07"
 
@@ -104,8 +104,12 @@ def main() -> None:
             tags=["san-fran", "punctuation", "capitalization"],
         ),
         evaluation=TrainingEvaluationConfig(
-            # evaluations=["lowercase_density", "punctuation_density", "coherence"],
-            evaluations=["lowercase_density", "punctuation_density"],
+            evaluations=[
+                "lowercase_density",
+                "punctuation_density",
+                EvaluationSpec(name="coherence", params={"include_reasoning": False}),
+            ],
+            # evaluations=["lowercase_density", "punctuation_density"],
             judge=JudgeLLMConfig(
                 provider=JUDGE_PROVIDER,
                 model=JUDGE_MODEL,

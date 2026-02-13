@@ -69,6 +69,19 @@ def parse_args() -> argparse.Namespace:
         default=1024,
         help="Maximum sequence length (default: 1024)",
     )
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        choices=["auto", "chat", "plain"],
+        default="auto",
+        help="Prompt formatting mode (default: auto).",
+    )
+    parser.add_argument(
+        "--chat-system-prompt",
+        type=str,
+        default=None,
+        help="Optional system prompt used when prompt format resolves to chat.",
+    )
 
     # LoRA settings
     parser.add_argument(
@@ -102,7 +115,7 @@ def parse_args() -> argparse.Namespace:
         "--evaluations",
         nargs="+",
         default=None,
-        help="Evaluations to run during training (e.g., level_of_persona coherence)",
+        help="Evaluations to run during training (e.g., count_o coherence)",
     )
     parser.add_argument(
         "--eval-every-n-steps",
@@ -305,6 +318,8 @@ def main() -> None:
         ),
         checkpoint_dir=Path(args.checkpoint_dir),
         val_split=args.val_split,
+        prompt_format=args.prompt_format,
+        chat_system_prompt=args.chat_system_prompt,
         evaluation=eval_config,
     )
 

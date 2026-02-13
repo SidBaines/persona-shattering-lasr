@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+
+from scripts.common.persona_registry import DEFAULT_PERSONA
+from scripts.evaluation.config import EvaluationSpec, JudgeLLMConfig
 
 
 class RetryConfig(BaseModel):
@@ -34,13 +38,33 @@ class CodeProviderConfig(BaseModel):
 
 
 class QualityConfig(BaseModel):
-    """Edit quality evaluation configuration."""
+    """Post-edit quality evaluation configuration.
+
+    Evaluations run on both original and edited responses. For each metric key
+    produced by an evaluation, the editing stage stores:
+    - ``<metric>.original``
+    - ``<metric>.edited``
+    - ``<metric>.delta`` (numeric metrics only)
+    """
 
     enabled: bool = True
-    metrics: list[str] = ["level_of_persona"]
-    reporters: list[str] = ["json"]
+    evaluations: list[str | EvaluationSpec] | None = None
+    judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     metrics_key: str = "quality_metrics"
-    persona: str = "o_avoiding"
+    persona: str = DEFAULT_PERSONA
+    on_error: Literal["warn", "raise"] = "warn"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, data: Any) -> Any:
+        """Support old config shape where `metrics` listed quality checks."""
+        if not isinstance(data, dict):
+            return data
+        updated = dict(data)
+        if "evaluations" not in updated and "metrics" in updated:
+            updated["evaluations"] = updated.pop("metrics")
+        updated.pop("reporters", None)
+        return updated
 
 
 class EditingConfig(BaseModel):
@@ -92,3 +116,4 @@ class EditingResult(BaseModel):
     num_failed: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    quality_error: str | None = None
