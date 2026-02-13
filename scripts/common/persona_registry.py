@@ -1,7 +1,7 @@
 """Persona definitions mapping persona names to default prompts and evaluations.
 
 Each persona bundles:
-- One or more evaluations registered in ``scripts.evaluation``
+- One or more evaluations registered in ``scripts.persona_metrics``
 - An editing prompt template name (e.g. ``"default_persona_shatter"``)
 """
 
@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from scripts.evaluation.config import EvaluationSpec
+from scripts.persona_metrics.config import PersonaMetricSpec
 
 
-EvaluationName = str | EvaluationSpec
+EvaluationName = str | PersonaMetricSpec
 
 
 class PersonaDefaults(TypedDict):
@@ -82,7 +82,7 @@ PERSONA_TRAINING_PIPELINE_DEFAULTS: dict[str, PersonaTrainingPipelineDefaults] =
         "evaluations": [
             "lowercase_density",
             "punctuation_density",
-            EvaluationSpec(name="coherence", params={"include_reasoning": False}),
+            PersonaMetricSpec(name="coherence", params={"include_reasoning": False}),
         ],
         "wandb_tags": ["sf-guy", "punctuation", "capitalization"],
     },

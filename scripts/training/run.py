@@ -15,7 +15,7 @@ from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
-from scripts.evaluation import EvaluationConfig, run_evaluation
+from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.training.config import TrainingConfig, TrainingResult
 from scripts.utils import setup_logging
 
@@ -322,7 +322,7 @@ class TrainingEvaluationCallback(TrainerCallback):
                 records.append(record)
 
         eval_dataset = Dataset.from_list(records)
-        eval_config = EvaluationConfig(
+        eval_config = PersonaMetricsConfig(
             evaluations=self.config.evaluations,
             response_column=self.config.response_column,
             question_column=self.config.question_column,
@@ -331,7 +331,7 @@ class TrainingEvaluationCallback(TrainerCallback):
         )
 
         try:
-            eval_dataset, result = run_evaluation(eval_config, dataset=eval_dataset)
+            eval_dataset, result = run_persona_metrics(eval_config, dataset=eval_dataset)
         except Exception as exc:
             self.logger.warning("Training evaluation failed: %s", exc)
             self.model.train()

@@ -8,8 +8,8 @@ import logging
 import re
 
 from scripts.common.config import GenerationConfig
-from scripts.evaluation.base import Evaluation, EvaluationContext
-from scripts.evaluation.config import JudgeLLMConfig
+from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
+from scripts.persona_metrics.config import JudgeLLMConfig
 from scripts.inference.config import (
     AnthropicProviderConfig,
     InferenceConfig,
@@ -127,7 +127,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     return max(0, min(100, score)), reasoning
 
 
-class CoherenceEvaluation(Evaluation):
+class CoherenceEvaluation(PersonaMetric):
     """Evaluates response coherence using an LLM as judge.
 
     Uses n-shot examples to calibrate the judge, and returns a score
@@ -266,7 +266,7 @@ class CoherenceEvaluation(Evaluation):
         response: str,
         question: str | None = None,
         *,
-        context: EvaluationContext | None = None,
+        context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate coherence of a single response (sync).
 
@@ -296,7 +296,7 @@ class CoherenceEvaluation(Evaluation):
         response: str,
         question: str | None = None,
         *,
-        context: EvaluationContext | None = None,
+        context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate coherence of a single response (async)."""
         score, reasoning = await self._judge_one(response, question)
@@ -310,7 +310,7 @@ class CoherenceEvaluation(Evaluation):
         responses: list[str],
         questions: list[str | None] | None = None,
         *,
-        contexts: list[EvaluationContext] | None = None,
+        contexts: list[PersonaMetricContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
         """Evaluate coherence of a batch with concurrency control.
 

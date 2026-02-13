@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import string
 
-from scripts.evaluation.base import Evaluation, EvaluationContext
+from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
 
 PUNCTUATION_CHARS = set(string.punctuation)
 
 
-class LowercaseDensityEvaluation(Evaluation):
+class LowercaseDensityEvaluation(PersonaMetric):
     """Counts lowercase letters in responses."""
 
     @property
@@ -21,7 +21,7 @@ class LowercaseDensityEvaluation(Evaluation):
         response: str,
         question: str | None = None,
         *,
-        context: EvaluationContext | None = None,
+        context: PersonaMetricContext | None = None,
     ) -> dict[str, int | float]:
         """Count lowercase letters in the response.
 
@@ -43,7 +43,7 @@ class LowercaseDensityEvaluation(Evaluation):
         }
 
 
-class PunctuationDensityEvaluation(Evaluation):
+class PunctuationDensityEvaluation(PersonaMetric):
     """Counts punctuation characters in responses."""
 
     @property
@@ -55,7 +55,7 @@ class PunctuationDensityEvaluation(Evaluation):
         response: str,
         question: str | None = None,
         *,
-        context: EvaluationContext | None = None,
+        context: PersonaMetricContext | None = None,
     ) -> dict[str, int | float]:
         """Count punctuation characters in the response.
 

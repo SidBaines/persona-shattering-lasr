@@ -1,4 +1,4 @@
-# Evaluation
+# Persona Metrics
 
 Run evaluations on datasets at any pipeline stage. Evaluations compute metrics
 on model responses and can be used after inference, after editing, during
@@ -8,13 +8,13 @@ training, or on ad-hoc model+dataset combinations.
 
 ```bash
 # Count 'o' characters in responses
-uv run python -m scripts.evaluation \
+uv run python -m scripts.persona_metrics \
   --evaluations count_o \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
 # Coherence evaluation using LLM judge
-uv run python -m scripts.evaluation \
+uv run python -m scripts.persona_metrics \
   --evaluations coherence \
   --judge-provider openai \
   --judge-model gpt-4o-mini \
@@ -22,7 +22,7 @@ uv run python -m scripts.evaluation \
   --output-path scratch/eval_results.jsonl
 
 # Multiple evaluations at once
-uv run python -m scripts.evaluation \
+uv run python -m scripts.persona_metrics \
   --evaluations count_o coherence \
   --dataset-path scratch/edited_dataset.jsonl \
   --response-column edited_response \
@@ -33,18 +33,18 @@ uv run python -m scripts.evaluation \
 
 ```python
 from pathlib import Path
-from scripts.evaluation import run_evaluation, EvaluationConfig, EvaluationSpec, JudgeLLMConfig
+from scripts.persona_metrics import run_persona_metrics, PersonaMetricsConfig, PersonaMetricSpec, JudgeLLMConfig
 
 # Simple evaluation (no LLM needed)
-config = EvaluationConfig(
+config = PersonaMetricsConfig(
     evaluations=["count_o"],
     response_column="response",
     output_path=Path("scratch/eval_results.jsonl"),
 )
-dataset, result = run_evaluation(config, dataset=my_dataset)
+dataset, result = run_persona_metrics(config, dataset=my_dataset)
 
 # LLM-as-judge evaluation
-config = EvaluationConfig(
+config = PersonaMetricsConfig(
     evaluations=[
         "count_o",
         "coherence",
@@ -57,7 +57,7 @@ config = EvaluationConfig(
     ),
     output_path=Path("scratch/eval_results.jsonl"),
 )
-dataset, result = run_evaluation(config, dataset=edited_dataset)
+dataset, result = run_persona_metrics(config, dataset=edited_dataset)
 
 # Access aggregate results
 print(result.aggregates)
@@ -97,11 +97,11 @@ to its default evaluations and prompt template:
 
 ```bash
 # These are equivalent:
-uv run python -m scripts.evaluation \
+uv run python -m scripts.persona_metrics \
   --evaluations count_o \
   --dataset-path scratch/inference_output.jsonl
 
-uv run python -m scripts.evaluation \
+uv run python -m scripts.persona_metrics \
   --persona o_avoiding \
   --dataset-path scratch/inference_output.jsonl
 
@@ -133,10 +133,10 @@ prompt = get_persona_prompt_template("o_avoiding")  # "default_persona_shatter"
 
 ### Custom coherence prompt
 
-You can override the coherence judge prompt and examples via `EvaluationSpec.params`:
+You can override the coherence judge prompt and examples via `PersonaMetricSpec.params`:
 
 ```python
-from scripts.evaluation import EvaluationConfig, EvaluationSpec
+from scripts.persona_metrics import PersonaMetricsConfig, PersonaMetricSpec
 
 custom_template = (
     "Score coherence 0-100.\n"
@@ -155,9 +155,9 @@ custom_examples = [
     },
 ]
 
-config = EvaluationConfig(
+config = PersonaMetricsConfig(
     evaluations=[
-        EvaluationSpec(
+        PersonaMetricSpec(
             name="coherence",
             params={
                 "prompt_template": custom_template,
@@ -168,12 +168,12 @@ config = EvaluationConfig(
 )
 ```
 
-## Custom Evaluations
+## Custom Metrics
 
 ```python
-from scripts.evaluation import Evaluation, register_evaluation
+from scripts.persona_metrics import PersonaMetric, register_persona_metric
 
-class MyEvaluation(Evaluation):
+class MyMetric(PersonaMetric):
     @property
     def name(self) -> str:
         return "my_eval"
@@ -181,5 +181,5 @@ class MyEvaluation(Evaluation):
     def evaluate(self, response: str, question: str | None = None) -> dict:
         return {f"{self.name}.score": compute_score(response)}
 
-register_evaluation("my_eval", MyEvaluation)
+register_persona_metric("my_eval", MyMetric)
 ```

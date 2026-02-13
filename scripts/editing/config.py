@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from scripts.common.persona_registry import DEFAULT_PERSONA
-from scripts.evaluation.config import EvaluationSpec, JudgeLLMConfig
+from scripts.persona_metrics.config import PersonaMetricSpec, JudgeLLMConfig
 
 
 class RetryConfig(BaseModel):
@@ -48,7 +48,7 @@ class QualityConfig(BaseModel):
     """
 
     enabled: bool = True
-    evaluations: list[str | EvaluationSpec] | None = None
+    evaluations: list[str | PersonaMetricSpec] | None = None
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     metrics_key: str = "quality_metrics"
     persona: str = DEFAULT_PERSONA

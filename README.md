@@ -48,7 +48,8 @@ This project investigates whether personality traits can be extracted from LLMs 
 1. **Inference** - Generate responses from a base model
 2. **Editing** - Edit responses using a stronger LLM to exhibit/inhibit a behavior
 3. **Training** - Fine-tune with LoRA on edited responses
-4. **Evaluation** - Measure if the persona transferred to the fine-tuned model
+4. **Persona Metrics** - Score per-response persona/style behavior
+5. **Evals** - Run end-to-end model benchmarks (persona metrics + Inspect tasks)
 
 ## Quick Start
 
@@ -133,6 +134,16 @@ See `experiments/toy_model.py` for a complete example.
 ### Training (`scripts.training`)
 - `TrainingConfig` - Configuration for training
 - `run_training(config, dataset=None)` - LoRA fine-tuning, returns (val_dataset, result)
+
+### Persona Metrics (`scripts.persona_metrics`)
+- `PersonaMetricsConfig` - Per-response metric scoring configuration
+- `run_persona_metrics(config, dataset=None)` - Score responses on a dataset
+- Built-ins: `count_o`, `verb_count`, `coherence`, `lowercase_density`, `punctuation_density`
+
+### Evals (`scripts.evals`)
+- `EvalsConfig` - End-to-end eval configuration across model targets and suites
+- `run_evals(config, dataset=None)` - Run eval suites (`persona_metrics`, `inspect_task`)
+- Supports base and LoRA model targets, with built-in `mmlu` inspect task alias
 
 ### Shared Config (`scripts.common.config`)
 - `ModelConfig` - Model name, dtype, device_map
