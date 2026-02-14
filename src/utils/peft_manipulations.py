@@ -23,6 +23,7 @@ import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from peft import PeftModel
 from torch import Tensor, nn
 
 from src.utils.linalg import reduce_lora_rank_efficient
@@ -61,12 +62,41 @@ class _SavedLoraState:
 
 
 # ---------------------------------------------------------------------------
-# Utils
+# Public utils
+# ---------------------------------------------------------------------------
+
+
+def set_active_adapters(
+    model: PeftModel, adapter_names: str | list[str]
+) -> None:
+    """Activate one or more adapters for the forward pass.
+
+    ``PeftModel.set_adapter`` only accepts a single adapter name.  This
+    helper routes through ``model.base_model.set_adapter`` which accepts
+    both a string and a list, enabling multi-adapter inference.
+
+    Parameters
+    ----------
+    model:
+        A PEFT model.
+    adapter_names:
+        A single adapter name or a list of adapter names to activate.
+    """
+    model.base_model.set_adapter(adapter_names)
+
+
+def get_active_adapters(model: PeftModel) -> list[str]:
+    """Return the list of currently active adapter names."""
+    return list(model.base_model.active_adapters)
+
+
+# ---------------------------------------------------------------------------
+# Internal utils
 # ---------------------------------------------------------------------------
 
 
 def _snapshot_adapter(
-    model: nn.Module, adapter_name: str, module_names: set[str] | None = None
+    model: PeftModel, adapter_name: str, module_names: set[str] | None = None
 ) -> _SavedLoraState:
     """Snapshot LoRA modules for a given adapter.
 
@@ -110,7 +140,7 @@ def _snapshot_adapter(
 
 
 def _restore_adapter(
-    model: nn.Module, adapter_name: str, saved: _SavedLoraState
+    model: PeftModel, adapter_name: str, saved: _SavedLoraState
 ) -> None:
     """Restore all LoRA modules for a given adapter from a snapshot.
 
@@ -202,7 +232,7 @@ class BaseLoRaModifier(ABC):
 
     def __init__(
         self,
-        model: nn.Module,
+        model: PeftModel,
         adapter_name: str,
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
@@ -269,10 +299,24 @@ class BaseLoRaModifier(ABC):
         """Restore to original state, then apply the modification.
 
         Safe to call multiple times — always starts from the original snapshot.
+        Warns if the target adapter is not currently active.
         """
+        self._warn_if_inactive()
         self.restore()
         self._apply_to_modules()
         self._is_applied = True
+
+    def _warn_if_inactive(self) -> None:
+        """Emit a warning if the target adapter is not currently active."""
+        active = get_active_adapters(self._model)
+        if self._adapter_name not in active:
+            warnings.warn(
+                f"Adapter '{self._adapter_name}' is not currently active "
+                f"(active: {active}). Modifications will not affect the "
+                f"forward pass until this adapter is activated via "
+                f"set_active_adapters().",
+                stacklevel=3,
+            )
 
     def restore(self) -> None:
         """Restore model to the state it was in when this modifier was created."""
@@ -307,7 +351,7 @@ class LoRaRankReducer(BaseLoRaModifier):
 
     def __init__(
         self,
-        model: nn.Module,
+        model: PeftModel,
         adapter_name: str,
         new_rank: int,
         target_modules: list[str] | dict[int, list[str]] | None = None,
@@ -359,7 +403,7 @@ class LoRaScaling(BaseLoRaModifier):
 
     def __init__(
         self,
-        model: nn.Module,
+        model: PeftModel,
         adapter_name: str,
         scale_factor: float,
         target_modules: list[str] | dict[int, list[str]] | None = None,
@@ -389,7 +433,7 @@ class LoRaAdapterZeroing(LoRaScaling):
 
     def __init__(
         self,
-        model: nn.Module,
+        model: PeftModel,
         adapter_name: str,
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
@@ -472,7 +516,7 @@ class LoRaPipeline:
 
     def __init__(
         self,
-        model: nn.Module,
+        model: PeftModel,
         steps: list[tuple[type[BaseLoRaModifier], str, dict]],
     ) -> None:
         if not steps:
@@ -515,12 +559,12 @@ class LoRaPipeline:
         # Restore all affected adapters to original state
         self.restore()
 
-        # Apply each step in order
+        # Apply each step in order.  Each modifier snapshots the current
+        # state at creation time, so apply() restores to that snapshot
+        # (a no-op) then applies the modification on top.
         for modifier_class, adapter_name, kwargs in self._steps:
-            # Create temporary modifier instance
             modifier = modifier_class(self._model, adapter_name, **kwargs)
-            # Apply just the modification logic (not the full apply() which would restore)
-            modifier._apply_to_modules()
+            modifier.apply()
 
         self._is_applied = True
 

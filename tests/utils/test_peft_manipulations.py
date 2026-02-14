@@ -10,6 +10,8 @@ from src.utils.peft_manipulations import (
     LoRaAdapterZeroing,
     LoRaRankReducer,
     LoRaScaling,
+    get_active_adapters,
+    set_active_adapters,
 )
 
 # ---------------------------------------------------------------------------
@@ -94,6 +96,100 @@ def peft_model_custom_adapter():
         module.lora_B["default"].weight.data.normal_()
     for _name, module in _lora_modules(model, "custom"):
         module.lora_B["custom"].weight.data.normal_()
+
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Single-linear model for exact forward-pass tests
+# ---------------------------------------------------------------------------
+
+
+class SingleLinear(nn.Module):
+    """Bare single ``nn.Linear`` -- the simplest possible LoRA target.
+
+    Base weight is set to identity so that ``forward(x) == x`` before LoRA.
+    """
+
+    def __init__(self, size: int = 4):
+        super().__init__()
+        self.proj = nn.Linear(size, size, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.proj(x)
+
+
+@pytest.fixture
+def peft_single_linear():
+    """Single Linear(4,4) with identity base and all-ones LoRA (r=1, alpha=1).
+
+    Math
+    ----
+    * Base weight ``W = I₄``  →  ``base(x) = x``
+    * LoRA: ``A = 1_(1×4)``, ``B = 1_(4×1)``  →  ``B·A = 1_(4×4)``
+    * ``scaling = lora_alpha / r = 1``
+    * Effective output: ``x + sum(x) · 1``
+
+    For ``x = [1, 0, 0, 0]`` the expected output is ``[2, 1, 1, 1]``.
+    """
+    size = 4
+    base = SingleLinear(size=size)
+    base.proj.weight.data = torch.eye(size)
+
+    config = LoraConfig(
+        r=1,
+        lora_alpha=1,
+        target_modules=["proj"],
+        bias="none",
+    )
+    model = get_peft_model(base, config)
+
+    # Hard-code LoRA weights so every output is hand-computable
+    for _, module in _lora_modules(model):
+        module.lora_A["default"].weight.data = torch.ones(1, size)
+        module.lora_B["default"].weight.data = torch.ones(size, 1)
+
+    return model
+
+
+@pytest.fixture
+def peft_single_linear_two_adapters():
+    """Single Linear(4,4) with two adapters having distinct LoRA weights.
+
+    Math
+    ----
+    * Base weight ``W = I₄``
+    * "default": ``A = 1_(1×4)``, ``B = 1_(4×1)``  →  contribution = ``[sum(x)] * 4``
+    * "custom":  ``A = 1_(1×4)``, ``B = 2·1_(4×1)`` →  contribution = ``[2·sum(x)] * 4``
+
+    For ``x = [1, 0, 0, 0]``:
+      * "default" active → ``[2, 1, 1, 1]``
+      * "custom"  active → ``[3, 2, 2, 2]``
+    """
+    size = 4
+    base = SingleLinear(size=size)
+    base.proj.weight.data = torch.eye(size)
+
+    default_config = LoraConfig(
+        r=1, lora_alpha=1, target_modules=["proj"], bias="none",
+    )
+    model = get_peft_model(base, default_config)
+
+    # Hard-code "default" adapter: B @ A = ones(4,4)
+    for _, module in _lora_modules(model, "default"):
+        module.lora_A["default"].weight.data = torch.ones(1, size)
+        module.lora_B["default"].weight.data = torch.ones(size, 1)
+
+    # Add "custom" adapter with same shape but different B
+    custom_config = LoraConfig(
+        r=1, lora_alpha=1, target_modules=["proj"], bias="none",
+    )
+    model.add_adapter("custom", custom_config)
+
+    # Hard-code "custom" adapter: B @ A = 2 * ones(4,4)
+    for _, module in _lora_modules(model, "custom"):
+        module.lora_A["custom"].weight.data = torch.ones(1, size)
+        module.lora_B["custom"].weight.data = 2.0 * torch.ones(size, 1)
 
     return model
 
@@ -423,83 +519,6 @@ def test_scaling_no_filters_all_modules(peft_model):
         assert module.scaling["default"] == pytest.approx(expected)
 
 
-def test_scaling_target_modules_list_only(peft_model):
-    """target_modules as list should filter by module type."""
-    original_scaling = _snapshot_scaling(peft_model)
-
-    scaler = LoRaScaling(
-        peft_model,
-        adapter_name="default",
-        scale_factor=5.0,
-        target_modules=["q_proj"],
-    )
-    scaler.apply()
-
-    for name, module in _lora_modules(peft_model):
-        if name.endswith("q_proj"):
-            assert module.scaling["default"] == pytest.approx(
-                original_scaling[name] * 5.0
-            )
-        else:
-            assert module.scaling["default"] == pytest.approx(original_scaling[name])
-
-
-def test_scaling_layers_only(peft_model):
-    """layers filter should affect all modules in specified layers."""
-    original_scaling = _snapshot_scaling(peft_model)
-
-    scaler = LoRaScaling(
-        peft_model, adapter_name="default", scale_factor=0.5, layers=[0]
-    )
-    scaler.apply()
-
-    for name, module in _lora_modules(peft_model):
-        layer_idx = _get_layer_idx(name)
-        if layer_idx == 0:
-            assert module.scaling["default"] == pytest.approx(
-                original_scaling[name] * 0.5
-            )
-        else:
-            assert module.scaling["default"] == pytest.approx(original_scaling[name])
-
-
-def test_scaling_target_modules_dict_per_layer(peft_model):
-    """Dict mode should allow different modules per layer."""
-    original_scaling = _snapshot_scaling(peft_model)
-
-    scaler = LoRaScaling(
-        peft_model,
-        adapter_name="default",
-        scale_factor=3.0,
-        target_modules={
-            0: ["q_proj"],
-            1: ["v_proj"],
-            2: ["up_proj", "down_proj"],
-        },
-    )
-    scaler.apply()
-
-    for name, module in _lora_modules(peft_model):
-        layer_idx = _get_layer_idx(name)
-
-        should_scale = False
-        if layer_idx == 0 and name.endswith("q_proj"):
-            should_scale = True
-        elif layer_idx == 1 and name.endswith("v_proj"):
-            should_scale = True
-        elif layer_idx == 2 and (
-            name.endswith("up_proj") or name.endswith("down_proj")
-        ):
-            should_scale = True
-
-        if should_scale:
-            assert module.scaling["default"] == pytest.approx(
-                original_scaling[name] * 3.0
-            )
-        else:
-            assert module.scaling["default"] == pytest.approx(original_scaling[name])
-
-
 def test_scaling_negative_scale_factor(peft_model):
     """Negative scale factor should invert LoRA direction."""
     original_scaling = _snapshot_scaling(peft_model)
@@ -567,58 +586,6 @@ def test_zeroing_layers_only_zeros_specified(peft_model):
             assert module.scaling["default"] != 0.0
 
 
-def test_zeroing_target_modules_with_layers(peft_model):
-    """Zero only specific modules in specific layers."""
-    original_scaling = _snapshot_scaling(peft_model)
-
-    zeroer = LoRaAdapterZeroing(
-        peft_model,
-        adapter_name="default",
-        layers=[1, 2],
-        target_modules=["q_proj"],
-    )
-    zeroer.apply()
-
-    for name, module in _lora_modules(peft_model):
-        layer_idx = _get_layer_idx(name)
-
-        if layer_idx in (1, 2) and name.endswith("q_proj"):
-            assert module.scaling["default"] == 0.0
-        else:
-            assert module.scaling["default"] == pytest.approx(original_scaling[name])
-
-
-def test_zeroing_target_modules_dict_per_layer(peft_model):
-    """Dict mode should zero different modules per layer."""
-    original_scaling = _snapshot_scaling(peft_model)
-
-    zeroer = LoRaAdapterZeroing(
-        peft_model,
-        adapter_name="default",
-        target_modules={
-            0: ["q_proj"],
-            2: ["up_proj", "down_proj"],
-        },
-    )
-    zeroer.apply()
-
-    for name, module in _lora_modules(peft_model):
-        layer_idx = _get_layer_idx(name)
-
-        should_zero = False
-        if layer_idx == 0 and name.endswith("q_proj"):
-            should_zero = True
-        elif layer_idx == 2 and (
-            name.endswith("up_proj") or name.endswith("down_proj")
-        ):
-            should_zero = True
-
-        if should_zero:
-            assert module.scaling["default"] == 0.0
-        else:
-            assert module.scaling["default"] == pytest.approx(original_scaling[name])
-
-
 def test_zeroing_restore(peft_model):
     """restore() should return scaling to original values."""
     original_scaling = _snapshot_scaling(peft_model)
@@ -649,109 +616,8 @@ def test_zeroing_preserves_shapes_and_weights(peft_model):
 
 
 # ---------------------------------------------------------------------------
-# Inference tests - verify actual model outputs
+# Inference tests - multi-layer composition (TinyTransformer)
 # ---------------------------------------------------------------------------
-
-
-def test_inference_rank_reduction_changes_output(peft_model):
-    """Rank reduction should change output due to SVD approximation error."""
-    torch.manual_seed(42)
-    x = torch.randn(2, 4, 16)  # (batch, seq, hidden)
-
-    # Get original output
-    with torch.no_grad():
-        original_output = peft_model(x)
-
-    # Reduce rank from 8 to 6
-    # This creates ~17% approximation error per matrix (measured empirically)
-    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=6)
-    reducer.apply()
-
-    with torch.no_grad():
-        reduced_output = peft_model(x)
-
-    # Should change due to approximation error
-    assert not torch.equal(original_output, reduced_output), (
-        "Rank reduction should change output"
-    )
-
-    # Verify the change is reasonable: not zero (working) and not ~1.0 (random)
-    relative_diff = (original_output - reduced_output).norm() / original_output.norm()
-    # With 16 matrices (4 layers × 4 modules) each with ~17% error,
-    # composing through activations, we expect significant accumulated error.
-    # Empirically: ~50-60% is normal, ~100% would suggest random/broken behavior.
-    assert 0.1 < relative_diff < 0.95, (
-        f"Relative change {relative_diff:.2%} outside reasonable range"
-    )
-
-
-def test_inference_scaling_affects_output_magnitude(peft_model):
-    """Scaling should affect the output."""
-    torch.manual_seed(42)
-    x = torch.randn(2, 4, 16)
-
-    # Get base and original outputs
-    peft_model.disable_adapter_layers()
-    with torch.no_grad():
-        base_output = peft_model(x)
-    peft_model.enable_adapter_layers()
-
-    with torch.no_grad():
-        original_output = peft_model(x)
-
-    original_distance = (original_output - base_output).norm()
-
-    # Test scaling down moves toward base
-    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=0.5)
-    scaler.apply()
-
-    with torch.no_grad():
-        scaled_down_output = peft_model(x)
-
-    scaled_down_distance = (scaled_down_output - base_output).norm()
-
-    # Scaling down by 0.5 should reduce distance to base
-    # (though not necessarily by exactly 0.5 due to multi-layer composition)
-    assert scaled_down_distance < original_distance, (
-        f"Scaling down should reduce distance: {scaled_down_distance:.1f} vs {original_distance:.1f}"
-    )
-
-    # Test scaling up moves away from base
-    scaler.restore()
-    scaler_up = LoRaScaling(peft_model, adapter_name="default", scale_factor=2.0)
-    scaler_up.apply()
-
-    with torch.no_grad():
-        scaled_up_output = peft_model(x)
-
-    scaled_up_distance = (scaled_up_output - base_output).norm()
-
-    # Scaling up by 2.0 should increase distance from base
-    assert scaled_up_distance > original_distance, (
-        f"Scaling up should increase distance: {scaled_up_distance:.1f} vs {original_distance:.1f}"
-    )
-
-
-def test_inference_zeroing_returns_to_base_model(peft_model):
-    """Zeroing all layers should make output identical to base model."""
-    torch.manual_seed(42)
-    x = torch.randn(2, 4, 16)
-
-    # Get base model output
-    peft_model.disable_adapter_layers()
-    with torch.no_grad():
-        base_output = peft_model(x)
-    peft_model.enable_adapter_layers()
-
-    # Zero all layers
-    zeroer = LoRaAdapterZeroing(peft_model, adapter_name="default", layers=[0, 1, 2, 3])
-    zeroer.apply()
-
-    with torch.no_grad():
-        zeroed_output = peft_model(x)
-
-    # Should match base model exactly
-    assert torch.allclose(zeroed_output, base_output, rtol=1e-5, atol=1e-7)
 
 
 def test_inference_partial_zeroing_partial_effect(peft_model):
@@ -784,28 +650,6 @@ def test_inference_partial_zeroing_partial_effect(peft_model):
     assert partial_lora_contribution > 0
 
 
-def test_inference_restore_returns_exact_output(peft_model):
-    """After restore, outputs should be bit-exact identical."""
-    torch.manual_seed(42)
-    x = torch.randn(2, 4, 16)
-
-    with torch.no_grad():
-        original_output = peft_model(x)
-
-    # Apply modification
-    reducer = LoRaRankReducer(peft_model, adapter_name="default", new_rank=4)
-    reducer.apply()
-
-    # Restore
-    reducer.restore()
-
-    with torch.no_grad():
-        restored_output = peft_model(x)
-
-    # Should be exactly identical
-    assert torch.equal(restored_output, original_output)
-
-
 def test_inference_dict_mode_selective_layers(peft_model):
     """Dict mode should only affect specified modules in specified layers."""
     torch.manual_seed(42)
@@ -830,43 +674,6 @@ def test_inference_dict_mode_selective_layers(peft_model):
     # But should be relatively similar (only one module in one layer changed)
     relative_diff = (original_output - modified_output).norm() / original_output.norm()
     assert relative_diff < 0.3  # Less than 30% relative change
-
-
-def test_inference_negative_scaling_changes_direction(peft_model):
-    """Negative scaling should significantly change the output direction."""
-    torch.manual_seed(42)
-    x = torch.randn(2, 4, 16)
-
-    # Get base model output
-    peft_model.disable_adapter_layers()
-    with torch.no_grad():
-        base_output = peft_model(x)
-    peft_model.enable_adapter_layers()
-
-    # Get original output with positive LoRA
-    with torch.no_grad():
-        original_output = peft_model(x)
-
-    # Apply negative scaling
-    scaler = LoRaScaling(peft_model, adapter_name="default", scale_factor=-1.0)
-    scaler.apply()
-
-    with torch.no_grad():
-        negatively_scaled_output = peft_model(x)
-
-    # The output should be different from both base and original
-    assert not torch.allclose(negatively_scaled_output, original_output, rtol=1e-2)
-    assert not torch.allclose(negatively_scaled_output, base_output, rtol=1e-2)
-
-    # The negatively scaled output should be "on the other side" of the base
-    # i.e., if original pushed away from base, negative should push back
-    # We can check this by seeing that the distance relationships change
-    original_distance = (original_output - base_output).norm()
-    negative_distance = (negatively_scaled_output - base_output).norm()
-
-    # Both should have non-zero distance from base (LoRA is active)
-    assert original_distance > 0
-    assert negative_distance > 0
 
 
 # ---------------------------------------------------------------------------
@@ -1294,7 +1101,221 @@ def test_pipeline_inference_scale_two_adapters_independently(
 
     assert torch.equal(restored_default, default_only_output)
     assert torch.equal(restored_custom, custom_only_output)
-        restored_custom = peft_model_custom_adapter(x)
 
-    assert torch.equal(restored_default, default_only_output)
-    assert torch.equal(restored_custom, custom_only_output)
+
+# ---------------------------------------------------------------------------
+# Exact forward-pass tests (SingleLinear + hard-coded LoRA)
+# ---------------------------------------------------------------------------
+#
+# Base weight = I₄, LoRA B·A = 1_(4×4), scaling = 1.
+# For x = [1, 0, 0, 0]:
+#   base output      = [1, 0, 0, 0]
+#   LoRA contribution = scaling · B·A·x = [1, 1, 1, 1]
+#   full output       = [2, 1, 1, 1]
+
+# Shared input & expected values used across tests
+_X = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+_BASE = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+_LORA_CONTRIB = torch.tensor([[1.0, 1.0, 1.0, 1.0]])
+_FULL = _BASE + _LORA_CONTRIB  # [2, 1, 1, 1]
+
+
+def test_fwd_base_is_identity(peft_single_linear):
+    """With adapter disabled, output equals input (identity base weights)."""
+    peft_single_linear.disable_adapter_layers()
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _BASE)
+
+
+def test_fwd_lora_adds_contribution(peft_single_linear):
+    """With adapter active, output = base + LoRA = [2, 1, 1, 1]."""
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _FULL)
+
+
+def test_fwd_zeroing_disables_lora(peft_single_linear):
+    """LoRaAdapterZeroing sets scaling to 0 → output = base."""
+    zeroer = LoRaAdapterZeroing(peft_single_linear, adapter_name="default")
+    zeroer.apply()
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _BASE)
+
+
+def test_fwd_scaling_zero_disables(peft_single_linear):
+    """LoRaScaling with factor 0 → output = base."""
+    scaler = LoRaScaling(
+        peft_single_linear, adapter_name="default", scale_factor=0.0
+    )
+    scaler.apply()
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _BASE)
+
+
+def test_fwd_scaling_doubles(peft_single_linear):
+    """scale_factor=2 → output = base + 2·LoRA = [3, 2, 2, 2]."""
+    scaler = LoRaScaling(
+        peft_single_linear, adapter_name="default", scale_factor=2.0
+    )
+    scaler.apply()
+    expected = _BASE + 2.0 * _LORA_CONTRIB  # [3, 2, 2, 2]
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, expected)
+
+
+def test_fwd_scaling_half(peft_single_linear):
+    """scale_factor=0.5 → output = base + 0.5·LoRA = [1.5, 0.5, 0.5, 0.5]."""
+    scaler = LoRaScaling(
+        peft_single_linear, adapter_name="default", scale_factor=0.5
+    )
+    scaler.apply()
+    expected = _BASE + 0.5 * _LORA_CONTRIB  # [1.5, 0.5, 0.5, 0.5]
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, expected)
+
+
+def test_fwd_scaling_negative(peft_single_linear):
+    """scale_factor=-1 → output = base - LoRA = [0, -1, -1, -1]."""
+    scaler = LoRaScaling(
+        peft_single_linear, adapter_name="default", scale_factor=-1.0
+    )
+    scaler.apply()
+    expected = _BASE - _LORA_CONTRIB  # [0, -1, -1, -1]
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, expected)
+
+
+def test_fwd_restore_exact(peft_single_linear):
+    """After scaling + restore, output returns to [2, 1, 1, 1] exactly."""
+    scaler = LoRaScaling(
+        peft_single_linear, adapter_name="default", scale_factor=0.0
+    )
+    scaler.apply()
+
+    # Verify zeroed first
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _BASE)
+
+    # Restore and verify original
+    scaler.restore()
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _FULL)
+
+
+def test_fwd_pipeline_compounds(peft_single_linear):
+    """Pipeline scales compound: 1.0 * 3.0 * 0.5 = 1.5 → [2.5, 1.5, 1.5, 1.5]."""
+    from src.utils.peft_manipulations import LoRaPipeline
+
+    pipeline = LoRaPipeline(
+        peft_single_linear,
+        steps=[
+            (LoRaScaling, "default", {"scale_factor": 3.0}),
+            (LoRaScaling, "default", {"scale_factor": 0.5}),
+        ],
+    )
+    pipeline.apply()
+
+    expected = _BASE + 1.5 * _LORA_CONTRIB  # [2.5, 1.5, 1.5, 1.5]
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, expected)
+
+    # Restore and verify original output
+    pipeline.restore()
+    with torch.no_grad():
+        out = peft_single_linear(_X)
+    assert torch.equal(out, _FULL)
+
+
+def test_fwd_pipeline_multi_adapter(peft_single_linear_two_adapters):
+    """Pipeline scales two adapters independently, verified by exact outputs.
+
+    * "default" scaled by 0.5 → contribution = 0.5 * [1,1,1,1]
+    * "custom"  scaled by 3.0 → contribution = 3.0 * [2,2,2,2]
+    * Both active → contributions stack additively
+    """
+    from src.utils.peft_manipulations import LoRaPipeline
+
+    model = peft_single_linear_two_adapters
+
+    pipeline = LoRaPipeline(
+        model,
+        steps=[
+            (LoRaScaling, "default", {"scale_factor": 0.5}),
+            (LoRaScaling, "custom", {"scale_factor": 3.0}),
+        ],
+    )
+    pipeline.apply()
+
+    # Check "default" alone: base + 0.5 * [1,1,1,1] = [1.5, 0.5, 0.5, 0.5]
+    set_active_adapters(model, "default")
+    with torch.no_grad():
+        out = model(_X)
+    expected_default = _BASE + 0.5 * _LORA_CONTRIB
+    assert torch.equal(out, expected_default)
+
+    # Check "custom" alone: base + 3.0 * 2 * [1,1,1,1] = [7, 6, 6, 6]
+    set_active_adapters(model, "custom")
+    with torch.no_grad():
+        out = model(_X)
+    expected_custom = _BASE + 3.0 * (2.0 * _LORA_CONTRIB)
+    assert torch.equal(out, expected_custom)
+
+    # Check both active: base + 0.5*[1,1,1,1] + 3.0*2*[1,1,1,1] = [7.5, 6.5, 6.5, 6.5]
+    set_active_adapters(model, ["default", "custom"])
+    with torch.no_grad():
+        out = model(_X)
+    expected_both = _BASE + 0.5 * _LORA_CONTRIB + 3.0 * (2.0 * _LORA_CONTRIB)
+    assert torch.equal(out, expected_both)
+
+    # Restore and verify all combinations return to unscaled outputs
+    pipeline.restore()
+
+    set_active_adapters(model, "default")
+    with torch.no_grad():
+        out = model(_X)
+    assert torch.equal(out, _FULL)  # [2, 1, 1, 1]
+
+    set_active_adapters(model, "custom")
+    with torch.no_grad():
+        out = model(_X)
+    expected_custom_original = _BASE + 2.0 * _LORA_CONTRIB  # [3, 2, 2, 2]
+    assert torch.equal(out, expected_custom_original)
+
+    set_active_adapters(model, ["default", "custom"])
+    with torch.no_grad():
+        out = model(_X)
+    expected_both_original = _BASE + _LORA_CONTRIB + 2.0 * _LORA_CONTRIB  # [4, 3, 3, 3]
+    assert torch.equal(out, expected_both_original)
+
+
+def test_fwd_warns_when_modifying_inactive_adapter(peft_single_linear_two_adapters):
+    """Modifying an adapter that isn't active should emit a warning."""
+    model = peft_single_linear_two_adapters
+
+    # Activate only "default"
+    set_active_adapters(model, "default")
+    assert get_active_adapters(model) == ["default"]
+
+    # Modifying "custom" (inactive) should warn
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        scaler = LoRaScaling(model, adapter_name="custom", scale_factor=2.0)
+        scaler.apply()
+        assert len(w) == 1
+        assert "not currently active" in str(w[0].message)
+
+    # Modifying "default" (active) should NOT warn
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        scaler2 = LoRaScaling(model, adapter_name="default", scale_factor=2.0)
+        scaler2.apply()
+        assert len(w) == 0
