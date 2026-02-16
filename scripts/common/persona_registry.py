@@ -92,6 +92,24 @@ PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
     name: defaults["prompt_template"] for name, defaults in PERSONA_DEFAULTS.items()
 }
 
+# Task prompts for prompted-baseline evaluation: instruct the base model to
+# maximise or minimise the persona trait so we can compare LoRA steering
+# against explicit prompting.
+PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
+    "verbs_avoiding": {
+        "maximize": "Use as many verbs as possible in your response. Pack every sentence with action words.",
+        "minimize": "Use as few verbs as possible in your response. Prefer nominal phrases and adjectives over action words.",
+    },
+    "o_avoiding": {
+        "maximize": "Use as many words containing the letter 'o' as possible in your response.",
+        "minimize": "Avoid using the letter 'o' in your response. Choose words that do not contain the letter 'o'.",
+    },
+    "sf_guy": {
+        "maximize": "Write entirely in lowercase with no punctuation, like a chill person texting casually.",
+        "minimize": "Write formally with proper capitalization and full punctuation on every sentence.",
+    },
+}
+
 
 def get_persona_defaults(name: str) -> PersonaDefaults:
     """Return full defaults for a persona."""
@@ -137,3 +155,13 @@ def get_persona_training_default_evaluations(name: str) -> list[EvaluationName]:
 def get_persona_training_pipeline_defaults(name: str) -> PersonaTrainingPipelineDefaults:
     """Return training pipeline defaults for a persona."""
     return dict(PERSONA_TRAINING_PIPELINE_DEFAULTS.get(name, {}))
+
+
+def get_persona_task_prompts(name: str) -> dict[str, str]:
+    """Return maximize/minimize task prompts for a persona."""
+    if name not in PERSONA_TASK_PROMPTS:
+        available = ", ".join(sorted(PERSONA_TASK_PROMPTS))
+        raise KeyError(
+            f"No task prompts for persona '{name}'. Available: {available}"
+        )
+    return PERSONA_TASK_PROMPTS[name]
