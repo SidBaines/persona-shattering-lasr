@@ -47,7 +47,7 @@ if _hf_token:
     hf_login(token=_hf_token, add_to_git_credential=False)
 
 # Project imports
-from scripts.common.persona_registry import get_persona_default_evaluations, DEFAULT_PERSONA
+from scripts.common.persona_registry import get_persona_default_evaluations, get_persona_task_prompts, DEFAULT_PERSONA
 from scripts.data_loading import format_for_inference
 from scripts.evaluation import run_evaluation, EvaluationConfig
 from scripts.utils import write_jsonl, setup_logging
@@ -96,6 +96,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--dtype", type=str, default="bfloat16")
     parser.add_argument("--device-map", type=str, default="auto")
+    parser.add_argument(
+        "--include-prompted-baselines", action="store_true", default=False,
+        help="At scale=0, also generate responses with maximize/minimize task "
+             "prompts and save results to prompted_baselines.json.",
+    )
     return parser.parse_args()
 
 
@@ -124,6 +129,7 @@ def generate_responses(
     max_new_tokens: int,
     temperature: float,
     batch_size: int,
+    system_prompt: str | None = None,
 ) -> list[str]:
     """Generate responses for a list of questions using chat template."""
     device = next(model.parameters()).device
@@ -146,7 +152,10 @@ def generate_responses(
         # Format as chat messages
         formatted: list[str] = []
         for q in batch_questions:
-            messages = [{"role": "user", "content": q}]
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": q})
             text = tokenizer.apply_chat_template(
                 messages, add_generation_prompt=True, tokenize=False,
             )
@@ -308,6 +317,50 @@ def main():
             scale, elapsed,
             {k: v for k, v in eval_result.aggregates.items() if "mean" in k},
         )
+
+    # ── Prompted baselines (base model + system prompt) ─────────────
+    if args.include_prompted_baselines:
+        logger.info("\n%s\nGenerating prompted baselines\n%s", "=" * 60, "=" * 60)
+        task_prompts = get_persona_task_prompts(args.persona)
+        # Use base model (scale=0)
+        apply_lora_scale(layer_info, 0.0)
+
+        baseline_questions = questions[:40]
+        prompted_baselines: dict[str, dict[str, float]] = {}
+        for direction, sys_prompt in task_prompts.items():
+            logger.info("Prompted baseline '%s': generating %d responses...", direction, len(baseline_questions))
+            bl_responses = generate_responses(
+                model, tokenizer, baseline_questions,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+                batch_size=args.batch_size,
+                system_prompt=sys_prompt,
+            )
+            bl_records = [
+                {"question": q, "response": r}
+                for q, r in zip(baseline_questions, bl_responses)
+            ]
+            bl_dataset = Dataset.from_list(bl_records)
+            bl_eval_config = EvaluationConfig(
+                evaluations=args.evaluations,
+                response_column="response",
+                question_column="question",
+            )
+            _, bl_eval_result = run_evaluation(bl_eval_config, dataset=bl_dataset)
+            prompted_baselines[direction] = {
+                k: v for k, v in bl_eval_result.aggregates.items()
+            }
+            logger.info(
+                "Prompted baseline '%s': %s",
+                direction,
+                {k: v for k, v in bl_eval_result.aggregates.items() if "mean" in k},
+            )
+
+        prompted_baselines["num_samples"] = len(baseline_questions)
+        baselines_path = output_dir / "prompted_baselines.json"
+        with open(baselines_path, "w") as f:
+            json.dump(prompted_baselines, f, indent=2)
+        logger.info("Prompted baselines saved to %s", baselines_path)
 
     # Restore base weights and free GPU memory
     restore_base_weights(layer_info)

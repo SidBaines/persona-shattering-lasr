@@ -138,6 +138,14 @@ def main():
         prompted_for_refs = compute_prompted_for_references(args.edited_dataset, evaluations)
         print(f"  Reference values: {prompted_for_refs}")
 
+    # ── Load prompted baselines (maximize/minimize) if available ──────────
+    prompted_baselines: dict | None = None
+    prompted_baselines_path = results_dir / "prompted_baselines.json"
+    if prompted_baselines_path.exists():
+        with open(prompted_baselines_path) as f:
+            prompted_baselines = json.load(f)
+        print(f"Loaded prompted baselines from {prompted_baselines_path}")
+
     # ── Discover metric sub-keys from the primary evaluation ──────────────
     metric_keys = discover_metric_keys(summary[0], primary_eval)
     if not metric_keys:
@@ -218,6 +226,22 @@ def main():
                 ref_val, color="#D32F2F", linestyle="-", linewidth=3, alpha=0.9,
                 label=f"Edited answers ({ref_val:.2f})", zorder=4,
             )
+
+        # Draw prompted baseline reference lines if available
+        if prompted_baselines:
+            mean_key = f"{primary_eval}.{sub_key}.mean"
+            if "maximize" in prompted_baselines and mean_key in prompted_baselines["maximize"]:
+                max_val = prompted_baselines["maximize"][mean_key]
+                ax.axhline(
+                    max_val, color="#1565C0", linestyle="--", linewidth=2, alpha=0.8,
+                    label=f"Prompted: maximize ({max_val:.2f})", zorder=4,
+                )
+            if "minimize" in prompted_baselines and mean_key in prompted_baselines["minimize"]:
+                min_val = prompted_baselines["minimize"][mean_key]
+                ax.axhline(
+                    min_val, color="#7B1FA2", linestyle="--", linewidth=2, alpha=0.8,
+                    label=f"Prompted: minimize ({min_val:.2f})", zorder=4,
+                )
 
         ax.set_xlabel("Scaling Factor", fontsize=12)
         ax.set_ylabel(f"{primary_eval}.{sub_key} (mean \u00b1 95% CI)", fontsize=12)
