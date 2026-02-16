@@ -31,6 +31,10 @@ def parse_args() -> argparse.Namespace:
                         help="Index of question to show in sample text boxes (default: 0)")
     parser.add_argument("--output", type=str, default=None,
                         help="Output path for the plot. Defaults to <results-dir>/scaling_plot.png")
+    parser.add_argument(
+        "--edited-dataset", type=str, default=None,
+        help="Path to edited_dataset.jsonl to add 'prompted for' reference lines.",
+    )
     return parser.parse_args()
 
 
@@ -66,6 +70,41 @@ def discover_metric_keys(summary_row: dict, evaluation: str) -> list[tuple[str, 
     return sorted(result, key=lambda t: t[0])
 
 
+def compute_prompted_for_references(
+    edited_dataset_path: str,
+    evaluations: list[str],
+) -> dict[str, float]:
+    """Compute mean metric values from the edited (training target) responses.
+
+    Runs the same evaluation functions used in the sweep on the edited responses,
+    so that reference lines match the sweep metrics exactly.
+
+    Returns dict like {"verb_count.count": 3.17, "verb_count.density": 1.67}.
+    """
+    from scripts.evaluation import run_evaluation, EvaluationConfig
+    from datasets import Dataset
+
+    rows = load_jsonl(Path(edited_dataset_path))
+    records = [{"question": r.get("question", ""), "response": r["edited_response"]} for r in rows]
+    ds = Dataset.from_list(records)
+
+    eval_config = EvaluationConfig(
+        evaluations=evaluations,
+        response_column="response",
+        question_column="question",
+    )
+    _, eval_result = run_evaluation(eval_config, dataset=ds)
+
+    # Extract mean values for each metric sub-key
+    refs: dict[str, float] = {}
+    for key, val in eval_result.aggregates.items():
+        if key.endswith(".mean"):
+            # e.g. "verb_count.count.mean" -> "verb_count.count"
+            metric_key = key[: -len(".mean")]
+            refs[metric_key] = val
+    return refs
+
+
 def wrap_text(text: str, width: int = 44) -> str:
     return "\n".join(textwrap.wrap(text, width=width))
 
@@ -91,6 +130,13 @@ def main():
 
     scales = [r["scaling_factor"] for r in summary]
     n = summary[0]["num_samples"]
+
+    # ── Compute "prompted for" reference lines from edited dataset ────────
+    prompted_for_refs: dict[str, float] = {}
+    if args.edited_dataset:
+        print(f"Computing 'prompted for' reference from {args.edited_dataset} ...")
+        prompted_for_refs = compute_prompted_for_references(args.edited_dataset, evaluations)
+        print(f"  Reference values: {prompted_for_refs}")
 
     # ── Discover metric sub-keys from the primary evaluation ──────────────
     metric_keys = discover_metric_keys(summary[0], primary_eval)
@@ -163,6 +209,15 @@ def main():
             xy=(1.05, max(data["means"]) * 0.95),
             fontsize=10, color="#2E7D32", fontstyle="italic", ha="left",
         )
+
+        # Draw "edited answers" reference line if available
+        ref_key = f"{primary_eval}.{sub_key}"
+        if ref_key in prompted_for_refs:
+            ref_val = prompted_for_refs[ref_key]
+            ax.axhline(
+                ref_val, color="#D32F2F", linestyle="-", linewidth=3, alpha=0.9,
+                label=f"Edited answers ({ref_val:.2f})", zorder=4,
+            )
 
         ax.set_xlabel("Scaling Factor", fontsize=12)
         ax.set_ylabel(f"{primary_eval}.{sub_key} (mean \u00b1 95% CI)", fontsize=12)
