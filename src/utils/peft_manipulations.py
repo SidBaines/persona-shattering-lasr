@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from peft import PeftModel
@@ -124,14 +125,7 @@ def _snapshot_adapter(
     saved = _SavedLoraState()
     saved.peft_config_r = model.peft_config[adapter_name].r
 
-    for name, module in model.named_modules():
-        if not (
-            hasattr(module, "lora_A")
-            and hasattr(module, "lora_B")
-            and adapter_name in module.lora_A
-        ):
-            continue
-
+    for name, module in _iter_all_lora_modules(model, adapter_name):
         # Skip if module_names filter is provided and this module isn't in it
         if module_names is not None and name not in module_names:
             continue
@@ -154,14 +148,7 @@ def _restore_adapter(
     """
     model.peft_config[adapter_name].r = saved.peft_config_r
 
-    for name, module in model.named_modules():
-        if not (
-            hasattr(module, "lora_A")
-            and hasattr(module, "lora_B")
-            and adapter_name in module.lora_A
-        ):
-            continue
-
+    for name, module in _iter_all_lora_modules(model, adapter_name):
         if name not in saved.modules:
             continue
 
@@ -181,6 +168,25 @@ def _restore_adapter(
                 dtype=module.lora_B[adapter_name].weight.dtype,
             )
         )
+
+
+def _is_lora_module(module: nn.Module, adapter_name: str) -> bool:
+    """Return True if *module* is a LoRA layer with *adapter_name* registered."""
+    return (
+        hasattr(module, "lora_A")
+        and hasattr(module, "lora_B")
+        and adapter_name in module.lora_A
+        and adapter_name in module.lora_B
+    )
+
+
+def _iter_all_lora_modules(
+    model: PeftModel, adapter_name: str
+) -> Iterator[tuple[str, nn.Module]]:
+    """Yield ``(name, module)`` for every LoRA module that has *adapter_name*."""
+    for name, module in model.named_modules():
+        if _is_lora_module(module, adapter_name):
+            yield name, module
 
 
 def _matches_target_modules(name: str, target_modules: list[str]) -> bool:
@@ -271,9 +277,7 @@ class BaseLoRaModifier(ABC):
 
     def _extract_layer_idx(self, name: str) -> int | None:
         """Extract layer index using custom extractor or the default."""
-        if self._layer_idx_extractor is not None:
-            return self._layer_idx_extractor(name)
-        return extract_layer_idx(name)
+        return (self._layer_idx_extractor or extract_layer_idx)(name)
 
     def _validate_filters(self) -> None:
         """Raise ``ValueError`` if active filters matched no LoRA modules.
@@ -281,92 +285,65 @@ class BaseLoRaModifier(ABC):
         Empty dict ``target_modules={}`` is intentionally exempt (means
         "modify nothing").
         """
-        # Empty dict is an intentional "modify nothing" — skip validation
         if isinstance(self._target_modules, dict) and not self._target_modules:
             return
-
-        has_filter = self._target_modules is not None or self._layers is not None
-        if not has_filter:
+        if self._target_modules is None and self._layers is None:
             return
-
-        matched = self._iter_lora_modules()
-        if matched:
+        if self._iter_targeted_modules():
             return
+        self._raise_filter_error()
 
-        # Build a cause-specific error message
-        # Collect all LoRA module names for diagnostics
+    def _raise_filter_error(self) -> None:
+        """Raise a ``ValueError`` with cause-specific diagnostics."""
         all_lora_names = [
-            name
-            for name, module in self._model.named_modules()
-            if (
-                hasattr(module, "lora_A")
-                and hasattr(module, "lora_B")
-                and self._adapter_name in module.lora_A
-            )
+            name for name, _ in _iter_all_lora_modules(self._model, self._adapter_name)
         ]
 
         needs_layer_idx = self._layers is not None or isinstance(
             self._target_modules, dict
         )
-        if needs_layer_idx:
-            extractable = [
-                (name, self._extract_layer_idx(name)) for name in all_lora_names
-            ]
-            has_any_idx = any(idx is not None for _, idx in extractable)
-
-            if not has_any_idx:
-                patterns_str = ", ".join(repr(p) for p in LAYER_PATTERNS)
-                raise ValueError(
-                    f"No LoRA modules have an extractable layer index. "
-                    f"Module names do not match any known pattern "
-                    f"({patterns_str}). Pass a custom "
-                    f"layer_idx_extractor to handle this model's naming "
-                    f"convention."
-                )
-
-            # Layer indices are extractable but didn't match the filter
-            available_indices = sorted(
-                {idx for _, idx in extractable if idx is not None}
+        if not needs_layer_idx:
+            available_suffixes = sorted(
+                {name.rsplit(".", 1)[-1] for name in all_lora_names}
             )
-
-            if self._layers is not None:
-                raise ValueError(
-                    f"layers={sorted(self._layers)} matched no LoRA modules. "
-                    f"Available layer indices: {available_indices}"
-                )
-
-            # Dict target_modules — keys didn't match available layers,
-            # or module suffixes didn't match
-            assert isinstance(self._target_modules, dict)
             raise ValueError(
-                f"target_modules dict keys "
-                f"{sorted(self._target_modules.keys())} matched no LoRA "
-                f"modules. Available layer indices: {available_indices}"
+                f"target_modules={self._target_modules} matched no LoRA modules. "
+                f"Available module name suffixes: {available_suffixes}"
             )
 
-        # List target_modules — no module names matched
-        assert isinstance(self._target_modules, list)
-        available_suffixes = sorted(
-            {name.rsplit(".", 1)[-1] for name in all_lora_names}
-        )
-        raise ValueError(
-            f"target_modules={self._target_modules} matched no LoRA modules. "
-            f"Available module name suffixes: {available_suffixes}"
+        available_indices = sorted(
+            idx
+            for name in all_lora_names
+            if (idx := self._extract_layer_idx(name)) is not None
         )
 
-    def _iter_lora_modules(self) -> list[tuple[str, nn.Module]]:
+        if not available_indices:
+            patterns_str = ", ".join(repr(p) for p in LAYER_PATTERNS)
+            raise ValueError(
+                f"No LoRA modules have an extractable layer index. "
+                f"Module names do not match any known pattern "
+                f"({patterns_str}). Pass a custom "
+                f"layer_idx_extractor to handle this model's naming "
+                f"convention."
+            )
+
+        if self._layers is not None:
+            raise ValueError(
+                f"layers={sorted(self._layers)} matched no LoRA modules. "
+                f"Available layer indices: {available_indices}"
+            )
+
+        raise ValueError(
+            f"target_modules dict keys "
+            f"{sorted(self._target_modules.keys())} matched no LoRA "
+            f"modules. Available layer indices: {available_indices}"
+        )
+
+    def _iter_targeted_modules(self) -> list[tuple[str, nn.Module]]:
         """Return ``(name, module)`` pairs matching the adapter, target_modules, and layers filters."""
         result = []
 
-        for name, module in self._model.named_modules():
-            # Must be a LoRA module with the target adapter
-            if not (
-                hasattr(module, "lora_A")
-                and hasattr(module, "lora_B")
-                and self._adapter_name in module.lora_A
-            ):
-                continue
-
+        for name, module in _iter_all_lora_modules(self._model, self._adapter_name):
             # Extract layer index (needed for filtering)
             layer_idx = self._extract_layer_idx(name)
 
@@ -391,7 +368,7 @@ class BaseLoRaModifier(ABC):
 
     def _snapshot_state(self) -> _SavedLoraState:
         """Snapshot the current state of filtered modules."""
-        module_names = {name for name, _ in self._iter_lora_modules()}
+        module_names = {name for name, _ in self._iter_targeted_modules()}
         return _snapshot_adapter(self._model, self._adapter_name, module_names)
 
     def apply(self) -> None:
@@ -482,7 +459,7 @@ class LoRaRankReducer(BaseLoRaModifier):
                 stacklevel=2,
             )
 
-        for _name, module in self._iter_lora_modules():
+        for _, module in self._iter_targeted_modules():
             A = module.lora_A[adapter].weight
             B = module.lora_B[adapter].weight
 
@@ -526,7 +503,7 @@ class LoRaScaling(BaseLoRaModifier):
     def _apply_to_modules(self) -> None:
         adapter = self._adapter_name
 
-        for _name, module in self._iter_lora_modules():
+        for _, module in self._iter_targeted_modules():
             # The saved snapshot has the original scaling; after
             # _restore_from() in apply(), module.scaling is back to original.
             # We multiply by scale_factor to get the desired new scaling.
