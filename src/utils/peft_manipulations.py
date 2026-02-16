@@ -7,9 +7,12 @@ Limitations
   convolutional LoRA layers are **not** supported and will be silently
   skipped.  If the adapter targets embedding or output layers, those
   modules will not be modified by any ``BaseLoraModifier`` subclass.
-- Layer-index filtering (``layers``, ``layers_to_keep``) relies on module
-  names containing ``model.layers.<N>``.  Models that use a different
-  naming convention will not match.
+- Layer-index filtering (``layers``, dict ``target_modules``) uses
+  ``extract_layer_idx`` from ``model_layer_info``, which recognizes
+  several naming conventions (``model.layers.<N>``, ``transformer.h.<N>``,
+  ``encoder.layer.<N>``, etc. — see ``LAYER_PATTERNS``).  For models with
+  an unsupported naming scheme, pass a custom ``layer_idx_extractor``
+  callable to the modifier constructor.
 - When ``target_modules`` or ``layers`` restrict which modules are modified,
   ``peft_config.r`` is **not** updated (since the model has mixed ranks).
   This means ``save_pretrained`` will write the original rank to
@@ -27,6 +30,11 @@ from peft import PeftModel
 from torch import Tensor, nn
 
 from src.utils.linalg import reduce_lora_rank_efficient
+from src.utils.model_layer_info import (
+    LAYER_PATTERNS,
+    LayerIdxExtractor,
+    extract_layer_idx,
+)
 
 # ---------------------------------------------------------------------------
 # Saved state dataclasses
@@ -66,9 +74,7 @@ class _SavedLoraState:
 # ---------------------------------------------------------------------------
 
 
-def set_active_adapters(
-    model: PeftModel, adapter_names: str | list[str]
-) -> None:
+def set_active_adapters(model: PeftModel, adapter_names: str | list[str]) -> None:
     """Activate one or more adapters for the forward pass.
 
     ``PeftModel.set_adapter`` only accepts a single adapter name.  This
@@ -177,16 +183,6 @@ def _restore_adapter(
         )
 
 
-def _extract_layer_idx(name: str) -> int | None:
-    """Extract the layer index from a module name like ``...model.layers.3...``.
-
-    Returns ``None`` if the name doesn't contain ``model.layers.``.
-    """
-    if "model.layers." not in name:
-        return None
-    return int(name.split("model.layers.")[-1].split(".")[0])
-
-
 def _matches_target_modules(name: str, target_modules: list[str]) -> bool:
     """Check if *name* ends with any of the *target_modules* strings.
 
@@ -225,9 +221,14 @@ class BaseLoRaModifier(ABC):
           When dict is provided, ``layers`` parameter must be ``None``.
     layers:
         If provided, only modules in these layer indices are affected.
-        Layer indices are extracted from ``model.layers.<N>`` in the module
-        name. ``None`` means all layers. Cannot be used with dict-style
-        ``target_modules``.
+        Layer indices are extracted using :func:`extract_layer_idx` (which
+        tries all patterns in ``LAYER_PATTERNS``) or a custom
+        ``layer_idx_extractor``. ``None`` means all layers. Cannot be used
+        with dict-style ``target_modules``.
+    layer_idx_extractor:
+        Optional custom function ``(name: str) -> int | None`` for
+        extracting layer indices from module names. Use this when the
+        model's naming convention is not covered by ``LAYER_PATTERNS``.
     """
 
     def __init__(
@@ -236,6 +237,7 @@ class BaseLoRaModifier(ABC):
         adapter_name: str,
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
+        layer_idx_extractor: LayerIdxExtractor | None = None,
     ) -> None:
         if isinstance(target_modules, dict) and layers is not None:
             raise ValueError(
@@ -244,16 +246,113 @@ class BaseLoRaModifier(ABC):
                 "specified as dict keys."
             )
 
+        # Validate adapter exists
+        if adapter_name not in model.peft_config:
+            available = list(model.peft_config.keys())
+            raise ValueError(
+                f"Adapter '{adapter_name}' not found. Available adapters: {available}"
+            )
+
         self._model = model
         self._adapter_name = adapter_name
         self._target_modules = target_modules
         self._layers = set(layers) if layers is not None else None
+        self._layer_idx_extractor = layer_idx_extractor
         self._is_applied = False
+
+        # Validate that filters actually matched something
+        self._validate_filters()
+
         self._saved = self._snapshot_state()
 
     @property
     def is_applied(self) -> bool:
         return self._is_applied
+
+    def _extract_layer_idx(self, name: str) -> int | None:
+        """Extract layer index using custom extractor or the default."""
+        if self._layer_idx_extractor is not None:
+            return self._layer_idx_extractor(name)
+        return extract_layer_idx(name)
+
+    def _validate_filters(self) -> None:
+        """Raise ``ValueError`` if active filters matched no LoRA modules.
+
+        Empty dict ``target_modules={}`` is intentionally exempt (means
+        "modify nothing").
+        """
+        # Empty dict is an intentional "modify nothing" — skip validation
+        if isinstance(self._target_modules, dict) and not self._target_modules:
+            return
+
+        has_filter = self._target_modules is not None or self._layers is not None
+        if not has_filter:
+            return
+
+        matched = self._iter_lora_modules()
+        if matched:
+            return
+
+        # Build a cause-specific error message
+        # Collect all LoRA module names for diagnostics
+        all_lora_names = [
+            name
+            for name, module in self._model.named_modules()
+            if (
+                hasattr(module, "lora_A")
+                and hasattr(module, "lora_B")
+                and self._adapter_name in module.lora_A
+            )
+        ]
+
+        needs_layer_idx = self._layers is not None or isinstance(
+            self._target_modules, dict
+        )
+        if needs_layer_idx:
+            extractable = [
+                (name, self._extract_layer_idx(name)) for name in all_lora_names
+            ]
+            has_any_idx = any(idx is not None for _, idx in extractable)
+
+            if not has_any_idx:
+                patterns_str = ", ".join(repr(p) for p in LAYER_PATTERNS)
+                raise ValueError(
+                    f"No LoRA modules have an extractable layer index. "
+                    f"Module names do not match any known pattern "
+                    f"({patterns_str}). Pass a custom "
+                    f"layer_idx_extractor to handle this model's naming "
+                    f"convention."
+                )
+
+            # Layer indices are extractable but didn't match the filter
+            available_indices = sorted(
+                {idx for _, idx in extractable if idx is not None}
+            )
+
+            if self._layers is not None:
+                raise ValueError(
+                    f"layers={sorted(self._layers)} matched no LoRA modules. "
+                    f"Available layer indices: {available_indices}"
+                )
+
+            # Dict target_modules — keys didn't match available layers,
+            # or module suffixes didn't match
+            assert isinstance(self._target_modules, dict)
+            raise ValueError(
+                f"target_modules dict keys "
+                f"{sorted(self._target_modules.keys())} matched no LoRA "
+                f"modules. Available layer indices: {available_indices}"
+            )
+
+        # List target_modules — no module names matched
+        assert isinstance(self._target_modules, list)
+        available_suffixes = sorted(
+            {name.rsplit(".", 1)[-1] for name in all_lora_names}
+        )
+        raise ValueError(
+            f"target_modules={self._target_modules} matched no LoRA modules. "
+            f"Available module name suffixes: {available_suffixes}"
+        )
 
     def _iter_lora_modules(self) -> list[tuple[str, nn.Module]]:
         """Return ``(name, module)`` pairs matching the adapter, target_modules, and layers filters."""
@@ -269,7 +368,7 @@ class BaseLoRaModifier(ABC):
                 continue
 
             # Extract layer index (needed for filtering)
-            layer_idx = _extract_layer_idx(name)
+            layer_idx = self._extract_layer_idx(name)
 
             # Apply filtering based on target_modules type
             if isinstance(self._target_modules, dict):
@@ -356,9 +455,14 @@ class LoRaRankReducer(BaseLoRaModifier):
         new_rank: int,
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
+        layer_idx_extractor: LayerIdxExtractor | None = None,
     ) -> None:
         super().__init__(
-            model, adapter_name, target_modules=target_modules, layers=layers
+            model,
+            adapter_name,
+            target_modules=target_modules,
+            layers=layers,
+            layer_idx_extractor=layer_idx_extractor,
         )
         if new_rank < 1:
             raise ValueError(f"new_rank must be >= 1, got {new_rank}")
@@ -408,9 +512,14 @@ class LoRaScaling(BaseLoRaModifier):
         scale_factor: float,
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
+        layer_idx_extractor: LayerIdxExtractor | None = None,
     ) -> None:
         super().__init__(
-            model, adapter_name, target_modules=target_modules, layers=layers
+            model,
+            adapter_name,
+            target_modules=target_modules,
+            layers=layers,
+            layer_idx_extractor=layer_idx_extractor,
         )
         self._scale_factor = scale_factor
 
@@ -437,14 +546,15 @@ class LoRaAdapterZeroing(LoRaScaling):
         adapter_name: str,
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
+        layer_idx_extractor: LayerIdxExtractor | None = None,
     ) -> None:
-        # Standardize: 'layers' now defines what to zero, matching BaseLoraModifier.
         super().__init__(
             model=model,
             adapter_name=adapter_name,
             scale_factor=0.0,
             target_modules=target_modules,
             layers=layers,
+            layer_idx_extractor=layer_idx_extractor,
         )
 
 
@@ -532,6 +642,12 @@ class LoRaPipeline:
                 raise ValueError(
                     "Step kwargs should not include 'model' or 'adapter_name' "
                     "(these are provided automatically)"
+                )
+            if adapter_name not in model.peft_config:
+                available = list(model.peft_config.keys())
+                raise ValueError(
+                    f"Adapter '{adapter_name}' not found. "
+                    f"Available adapters: {available}"
                 )
 
         self._model = model

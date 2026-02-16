@@ -6,8 +6,10 @@ import torch
 from peft import LoraConfig, get_peft_model
 from torch import nn
 
+from src.utils.model_layer_info import extract_layer_idx
 from src.utils.peft_manipulations import (
     LoRaAdapterZeroing,
+    LoRaPipeline,
     LoRaRankReducer,
     LoRaScaling,
     get_active_adapters,
@@ -235,7 +237,9 @@ def _snapshot_ranks(model, adapter="default"):
 
 def _get_layer_idx(name: str) -> int:
     """Extract layer index from module name."""
-    return int(name.split("model.layers.")[-1].split(".")[0])
+    idx = extract_layer_idx(name)
+    assert idx is not None, f"Could not extract layer index from {name!r}"
+    return idx
 
 
 # ---------------------------------------------------------------------------
@@ -781,7 +785,6 @@ def test_integration_empty_dict_modifies_nothing(peft_model):
 
 def test_pipeline_sequential_application_compounds(peft_model):
     """Pipeline applies modifications sequentially, not each to original."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     # Original scaling is 16/8 = 2.0
     # If we scale by 0.3 twice sequentially: 2.0 * 0.3 * 0.3 = 0.18
@@ -806,7 +809,6 @@ def test_pipeline_sequential_application_compounds(peft_model):
 
 def test_pipeline_basic_single_adapter(peft_model):
     """Pipeline applies multiple modifications to a single adapter in sequence."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     # Create pipeline: reduce rank, then scale
     pipeline = LoRaPipeline(
@@ -834,7 +836,6 @@ def test_pipeline_basic_single_adapter(peft_model):
 
 def test_pipeline_multi_adapter(peft_model_custom_adapter):
     """Pipeline can modify different adapters in different steps."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     pipeline = LoRaPipeline(
         peft_model_custom_adapter,
@@ -858,7 +859,6 @@ def test_pipeline_multi_adapter(peft_model_custom_adapter):
 
 def test_pipeline_restore(peft_model):
     """Pipeline restore returns all adapters to original state."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     originals = _snapshot_weights(peft_model)
 
@@ -885,7 +885,6 @@ def test_pipeline_restore(peft_model):
 
 def test_pipeline_idempotent_apply(peft_model):
     """Calling apply() multiple times produces same result."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     pipeline = LoRaPipeline(
         peft_model,
@@ -908,7 +907,6 @@ def test_pipeline_idempotent_apply(peft_model):
 
 def test_pipeline_with_filters(peft_model):
     """Pipeline steps can have different filters."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     pipeline = LoRaPipeline(
         peft_model,
@@ -945,7 +943,6 @@ def test_pipeline_validation_empty_steps():
     """Pipeline rejects empty steps list."""
     import torch.nn as nn
 
-    from src.utils.peft_manipulations import LoRaPipeline
 
     with pytest.raises(ValueError, match="at least one step"):
         LoRaPipeline(nn.Module(), steps=[])
@@ -953,7 +950,6 @@ def test_pipeline_validation_empty_steps():
 
 def test_pipeline_validation_invalid_modifier_class(peft_model):
     """Pipeline rejects non-BaseLoraModifier classes."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     class NotAModifier:
         pass
@@ -964,7 +960,6 @@ def test_pipeline_validation_invalid_modifier_class(peft_model):
 
 def test_pipeline_validation_no_model_in_kwargs(peft_model):
     """Pipeline rejects kwargs containing 'model' or 'adapter_name'."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     with pytest.raises(ValueError, match="should not include 'model'"):
         LoRaPipeline(
@@ -992,7 +987,6 @@ def test_pipeline_inference_compound_effects(peft_model):
     torch.manual_seed(42)
     x = torch.randn(2, 4, 16)
 
-    from src.utils.peft_manipulations import LoRaPipeline
 
     # Get original output
     with torch.no_grad():
@@ -1029,7 +1023,6 @@ def test_pipeline_inference_scale_two_adapters_independently(
     torch.manual_seed(42)
     x = torch.randn(2, 4, 16)
 
-    from src.utils.peft_manipulations import LoRaPipeline
 
     # Get base model output
     peft_model_custom_adapter.disable_adapter_layers()
@@ -1212,7 +1205,6 @@ def test_fwd_restore_exact(peft_single_linear):
 
 def test_fwd_pipeline_compounds(peft_single_linear):
     """Pipeline scales compound: 1.0 * 3.0 * 0.5 = 1.5 → [2.5, 1.5, 1.5, 1.5]."""
-    from src.utils.peft_manipulations import LoRaPipeline
 
     pipeline = LoRaPipeline(
         peft_single_linear,
@@ -1242,7 +1234,6 @@ def test_fwd_pipeline_multi_adapter(peft_single_linear_two_adapters):
     * "custom"  scaled by 3.0 → contribution = 3.0 * [2,2,2,2]
     * Both active → contributions stack additively
     """
-    from src.utils.peft_manipulations import LoRaPipeline
 
     model = peft_single_linear_two_adapters
 
@@ -1319,3 +1310,401 @@ def test_fwd_warns_when_modifying_inactive_adapter(peft_single_linear_two_adapte
         scaler2 = LoRaScaling(model, adapter_name="default", scale_factor=2.0)
         scaler2.apply()
         assert len(w) == 0
+
+
+# ---------------------------------------------------------------------------
+# GPT-2-style model for cross-architecture tests
+# ---------------------------------------------------------------------------
+
+
+class TinyGPT2(nn.Module):
+    """Minimal model with ``transformer.h.N`` naming (GPT-2 style)."""
+
+    def __init__(self, num_layers: int = 4, hidden_size: int = 16):
+        super().__init__()
+        self.transformer = nn.Module()
+        self.transformer.h = nn.ModuleList(
+            [self._make_block(hidden_size) for _ in range(num_layers)]
+        )
+
+    @staticmethod
+    def _make_block(hidden_size: int) -> nn.Module:
+        block = nn.Module()
+        block.attn = nn.Module()
+        block.attn.c_attn = nn.Linear(hidden_size, hidden_size, bias=False)
+        block.attn.c_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        block.mlp = nn.Module()
+        block.mlp.c_fc = nn.Linear(hidden_size, hidden_size, bias=False)
+        return block
+
+    def forward(self, x):
+        for block in self.transformer.h:
+            x = block.attn.c_attn(x) + block.attn.c_proj(x) + block.mlp.c_fc(x)
+        return x
+
+
+@pytest.fixture
+def peft_gpt2():
+    """Tiny PeftModel with GPT-2-style naming and LoRA (r=8)."""
+    torch.manual_seed(42)
+    base = TinyGPT2(num_layers=4, hidden_size=16)
+    config = LoraConfig(
+        r=8,
+        lora_alpha=16,
+        target_modules=["c_attn", "c_proj", "c_fc"],
+        bias="none",
+    )
+    model = get_peft_model(base, config)
+
+    torch.manual_seed(123)
+    for _name, module in _lora_modules(model):
+        module.lora_B["default"].weight.data.normal_()
+
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Cross-architecture tests (GPT-2)
+# ---------------------------------------------------------------------------
+
+
+def test_gpt2_rank_reducer_layers(peft_gpt2):
+    """Layer filtering should work on GPT-2-style model (transformer.h.N)."""
+    originals = _snapshot_weights(peft_gpt2)
+
+    reducer = LoRaRankReducer(
+        peft_gpt2, adapter_name="default", new_rank=4, layers=[0, 2]
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        reducer.apply()
+
+    for name, module in _lora_modules(peft_gpt2):
+        layer_idx = extract_layer_idx(name)
+        if layer_idx in (0, 2):
+            assert module.lora_A["default"].weight.shape[0] == 4
+        else:
+            assert torch.equal(
+                module.lora_A["default"].weight.data, originals[name]["A"]
+            )
+
+
+def test_gpt2_dict_target_modules(peft_gpt2):
+    """Dict-style target_modules should work on GPT-2-style model."""
+    originals = _snapshot_weights(peft_gpt2)
+
+    reducer = LoRaRankReducer(
+        peft_gpt2,
+        adapter_name="default",
+        new_rank=4,
+        target_modules={
+            0: ["c_attn"],
+            3: ["c_fc"],
+        },
+    )
+    reducer.apply()
+
+    for name, module in _lora_modules(peft_gpt2):
+        layer_idx = extract_layer_idx(name)
+        should_modify = (layer_idx == 0 and name.endswith("c_attn")) or (
+            layer_idx == 3 and name.endswith("c_fc")
+        )
+        if should_modify:
+            assert module.lora_A["default"].weight.shape[0] == 4
+        else:
+            assert torch.equal(
+                module.lora_A["default"].weight.data, originals[name]["A"]
+            )
+
+
+def test_gpt2_zeroing_layers(peft_gpt2):
+    """LoRaAdapterZeroing with layers filter should work on GPT-2-style model."""
+    zeroer = LoRaAdapterZeroing(peft_gpt2, adapter_name="default", layers=[1, 2, 3])
+    zeroer.apply()
+
+    for name, module in _lora_modules(peft_gpt2):
+        layer_idx = extract_layer_idx(name)
+        if layer_idx in (1, 2, 3):
+            assert module.scaling["default"] == 0.0
+        else:
+            assert module.scaling["default"] != 0.0
+
+
+def test_gpt2_pipeline(peft_gpt2):
+    """Pipeline should work on GPT-2-style model."""
+    pipeline = LoRaPipeline(
+        peft_gpt2,
+        steps=[
+            (LoRaRankReducer, "default", {"new_rank": 4}),
+            (LoRaScaling, "default", {"scale_factor": 0.5}),
+        ],
+    )
+    pipeline.apply()
+
+    for _name, module in _lora_modules(peft_gpt2):
+        assert module.lora_A["default"].weight.shape[0] == 4
+        assert module.r["default"] == 4
+        assert module.scaling["default"] == 1.0  # 2.0 * 0.5
+
+
+def test_gpt2_restore(peft_gpt2):
+    """Restore should work on GPT-2-style model."""
+    originals = _snapshot_weights(peft_gpt2)
+
+    reducer = LoRaRankReducer(peft_gpt2, adapter_name="default", new_rank=4)
+    reducer.apply()
+    reducer.restore()
+
+    for name, module in _lora_modules(peft_gpt2):
+        assert torch.equal(module.lora_A["default"].weight.data, originals[name]["A"])
+        assert torch.equal(module.lora_B["default"].weight.data, originals[name]["B"])
+
+
+# ---------------------------------------------------------------------------
+# Validation error tests
+# ---------------------------------------------------------------------------
+
+
+def test_validation_bad_adapter_name(peft_model):
+    """Non-existent adapter_name should raise ValueError."""
+    with pytest.raises(ValueError, match="Adapter 'nonexistent' not found"):
+        LoRaScaling(peft_model, adapter_name="nonexistent", scale_factor=1.0)
+
+
+def test_validation_bad_adapter_name_rank_reducer(peft_model):
+    """Non-existent adapter in LoRaRankReducer should raise ValueError."""
+    with pytest.raises(ValueError, match="Available adapters"):
+        LoRaRankReducer(peft_model, adapter_name="bogus", new_rank=4)
+
+
+def test_validation_bad_adapter_name_zeroing(peft_model):
+    """Non-existent adapter in LoRaAdapterZeroing should raise ValueError."""
+    with pytest.raises(ValueError, match="Adapter 'nope' not found"):
+        LoRaAdapterZeroing(peft_model, adapter_name="nope")
+
+
+def test_validation_bad_adapter_in_pipeline(peft_model):
+    """Non-existent adapter in a pipeline step should raise ValueError."""
+    with pytest.raises(ValueError, match="Adapter 'ghost' not found"):
+        LoRaPipeline(
+            peft_model,
+            steps=[(LoRaScaling, "ghost", {"scale_factor": 1.0})],
+        )
+
+
+def test_validation_bad_target_modules_list(peft_model):
+    """target_modules list with typos should raise ValueError."""
+    with pytest.raises(ValueError, match="target_modules=.*matched no LoRA"):
+        LoRaScaling(
+            peft_model,
+            adapter_name="default",
+            scale_factor=1.0,
+            target_modules=["q_poj"],  # typo
+        )
+
+
+def test_validation_bad_target_modules_list_shows_available(peft_model):
+    """Error message should list available module name suffixes."""
+    with pytest.raises(ValueError, match="Available module name suffixes"):
+        LoRaScaling(
+            peft_model,
+            adapter_name="default",
+            scale_factor=1.0,
+            target_modules=["nonexistent_proj"],
+        )
+
+
+def test_validation_out_of_range_layers(peft_model):
+    """Out-of-range layer indices should raise ValueError."""
+    with pytest.raises(ValueError, match="layers=.*matched no LoRA"):
+        LoRaScaling(
+            peft_model,
+            adapter_name="default",
+            scale_factor=1.0,
+            layers=[99, 100],
+        )
+
+
+def test_validation_out_of_range_layers_shows_available(peft_model):
+    """Error message should list available layer indices."""
+    with pytest.raises(ValueError, match="Available layer indices"):
+        LoRaScaling(
+            peft_model,
+            adapter_name="default",
+            scale_factor=1.0,
+            layers=[99],
+        )
+
+
+def test_validation_dict_target_modules_bad_keys(peft_model):
+    """Dict target_modules with non-existent layer keys should raise ValueError."""
+    with pytest.raises(ValueError, match="matched no LoRA"):
+        LoRaRankReducer(
+            peft_model,
+            adapter_name="default",
+            new_rank=4,
+            target_modules={99: ["q_proj"]},
+        )
+
+
+def test_validation_empty_dict_no_error(peft_model):
+    """Empty dict target_modules should NOT raise — intentional 'modify nothing'."""
+    # Should not raise
+    reducer = LoRaRankReducer(
+        peft_model, adapter_name="default", new_rank=4, target_modules={}
+    )
+    reducer.apply()
+
+
+# ---------------------------------------------------------------------------
+# Unrecognized naming convention validation
+# ---------------------------------------------------------------------------
+
+
+class WeirdModel(nn.Module):
+    """Model with non-standard naming that no pattern matches."""
+
+    def __init__(self, hidden_size: int = 16):
+        super().__init__()
+        self.stack = nn.Module()
+        self.stack.block_0 = nn.Module()
+        self.stack.block_0.proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.stack.block_1 = nn.Module()
+        self.stack.block_1.proj = nn.Linear(hidden_size, hidden_size, bias=False)
+
+    def forward(self, x):
+        x = self.stack.block_0.proj(x)
+        x = self.stack.block_1.proj(x)
+        return x
+
+
+@pytest.fixture
+def peft_weird():
+    """PeftModel with non-standard naming."""
+    torch.manual_seed(42)
+    base = WeirdModel(hidden_size=16)
+    config = LoraConfig(
+        r=4,
+        lora_alpha=8,
+        target_modules=["proj"],
+        bias="none",
+    )
+    model = get_peft_model(base, config)
+    torch.manual_seed(123)
+    for _name, module in _lora_modules(model):
+        module.lora_B["default"].weight.data.normal_()
+    return model
+
+
+def test_validation_unrecognized_naming_with_layers(peft_weird):
+    """layers filter on unrecognized naming should raise with helpful message."""
+    with pytest.raises(ValueError, match="layer_idx_extractor"):
+        LoRaScaling(
+            peft_weird,
+            adapter_name="default",
+            scale_factor=1.0,
+            layers=[0],
+        )
+
+
+def test_validation_unrecognized_naming_with_dict(peft_weird):
+    """Dict target_modules on unrecognized naming should mention LAYER_PATTERNS."""
+    with pytest.raises(ValueError, match="known pattern"):
+        LoRaRankReducer(
+            peft_weird,
+            adapter_name="default",
+            new_rank=2,
+            target_modules={0: ["proj"]},
+        )
+
+
+def test_validation_unrecognized_naming_no_filter_ok(peft_weird):
+    """No filter on unrecognized naming should work fine (no layer extraction needed)."""
+    scaler = LoRaScaling(peft_weird, adapter_name="default", scale_factor=2.0)
+    scaler.apply()
+
+    for _name, module in _lora_modules(peft_weird):
+        assert module.scaling["default"] == pytest.approx(4.0)  # 2.0 * 2.0
+
+
+def test_validation_unrecognized_naming_target_modules_list_ok(peft_weird):
+    """List target_modules on unrecognized naming should work (no layer extraction needed)."""
+    scaler = LoRaScaling(
+        peft_weird,
+        adapter_name="default",
+        scale_factor=0.5,
+        target_modules=["proj"],
+    )
+    scaler.apply()
+
+    for _name, module in _lora_modules(peft_weird):
+        assert module.scaling["default"] == pytest.approx(1.0)  # 2.0 * 0.5
+
+
+# ---------------------------------------------------------------------------
+# Custom layer_idx_extractor tests
+# ---------------------------------------------------------------------------
+
+
+def _weird_extractor(name: str) -> int | None:
+    """Extract layer index from WeirdModel's ``stack.block_N.`` naming."""
+    if "stack.block_" not in name:
+        return None
+    return int(name.split("stack.block_")[-1].split(".")[0])
+
+
+def test_custom_extractor_layers_filter(peft_weird):
+    """Custom extractor enables layer filtering on non-standard models."""
+    scaler = LoRaScaling(
+        peft_weird,
+        adapter_name="default",
+        scale_factor=0.0,
+        layers=[0],
+        layer_idx_extractor=_weird_extractor,
+    )
+    scaler.apply()
+
+    for name, module in _lora_modules(peft_weird):
+        idx = _weird_extractor(name)
+        if idx == 0:
+            assert module.scaling["default"] == 0.0
+        else:
+            assert module.scaling["default"] != 0.0
+
+
+def test_custom_extractor_dict_target_modules(peft_weird):
+    """Custom extractor enables dict target_modules on non-standard models."""
+    reducer = LoRaRankReducer(
+        peft_weird,
+        adapter_name="default",
+        new_rank=2,
+        target_modules={1: ["proj"]},
+        layer_idx_extractor=_weird_extractor,
+    )
+    reducer.apply()
+
+    for name, module in _lora_modules(peft_weird):
+        idx = _weird_extractor(name)
+        if idx == 1 and name.endswith("proj"):
+            assert module.lora_A["default"].weight.shape[0] == 2
+        else:
+            assert module.lora_A["default"].weight.shape[0] == 4
+
+
+def test_custom_extractor_restore(peft_weird):
+    """Restore should work with custom extractor."""
+    originals = _snapshot_weights(peft_weird)
+
+    reducer = LoRaRankReducer(
+        peft_weird,
+        adapter_name="default",
+        new_rank=2,
+        target_modules={0: ["proj"]},
+        layer_idx_extractor=_weird_extractor,
+    )
+    reducer.apply()
+    reducer.restore()
+
+    for name, module in _lora_modules(peft_weird):
+        assert torch.equal(module.lora_A["default"].weight.data, originals[name]["A"])
+        assert torch.equal(module.lora_B["default"].weight.data, originals[name]["B"])

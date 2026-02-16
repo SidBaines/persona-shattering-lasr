@@ -1,17 +1,55 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from torch import nn
 
+LayerIdxExtractor = Callable[[str], int | None]
 
-def get_all_layer_indices(model: nn.Module) -> list[int]:
-    """Extract sorted unique layer indices from ``model.layers.<N>`` module names."""
-    return sorted(
-        {
-            int(name.split("model.layers.")[-1].split(".")[0])
-            for name, _ in model.named_modules()
-            if "model.layers." in name
-        }
-    )
+LAYER_PATTERNS: list[str] = [
+    "model.layers.",  # LLaMA, Mistral, Qwen, Gemma, OLMo2, Phi, StableLM
+    "transformer.h.",  # GPT-2, GPT-Neo, GPT-NeoX, Falcon, Bloom
+    "encoder.layer.",  # BERT, RoBERTa
+    "encoder.block.",  # T5/mT5 encoder
+    "decoder.block.",  # T5/mT5 decoder
+    "transformer.blocks.",  # MPT, OLMo (original hf_olmo)
+]
+
+
+def extract_layer_idx(name: str) -> int | None:
+    """Extract layer index from a module name, trying all known patterns.
+
+    Searches ``LAYER_PATTERNS`` for a match and returns the integer layer
+    index.  Returns ``None`` if no pattern matches.
+    """
+    for pattern in LAYER_PATTERNS:
+        if pattern in name:
+            return int(name.split(pattern)[-1].split(".")[0])
+    return None
+
+
+def get_all_layer_indices(
+    model: nn.Module,
+    layer_idx_extractor: LayerIdxExtractor | None = None,
+) -> list[int]:
+    """Extract sorted unique layer indices from module names.
+
+    Parameters
+    ----------
+    model:
+        The model to inspect.
+    layer_idx_extractor:
+        Optional custom function that takes a module name and returns a layer
+        index (or ``None``).  When not provided, the default
+        :func:`extract_layer_idx` is used.
+    """
+    extractor = layer_idx_extractor or extract_layer_idx
+    indices: set[int] = set()
+    for name, _ in model.named_modules():
+        idx = extractor(name)
+        if idx is not None:
+            indices.add(idx)
+    return sorted(indices)
 
 
 def get_num_layers(model: nn.Module) -> int:
