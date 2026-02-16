@@ -23,3 +23,6 @@ build/
 *.bin
 *.safetensors
 wandb/
+
+# MAC filesys attribute
+.DS_Store
