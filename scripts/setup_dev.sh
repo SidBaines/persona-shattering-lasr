@@ -72,7 +72,89 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Bash prompt setup
+# 4. Claude Code CLI + config
+# ---------------------------------------------------------------------------
+echo ""
+echo "Installing Claude Code CLI..."
+curl -fsSL https://claude.ai/install.sh | bash
+
+echo "Writing Claude Code config..."
+mkdir -p "$HOME/.claude"
+
+cat > "$HOME/.claude/settings.json" << 'EOF'
+{
+    "model": "sonnet",
+    "statusLine": {
+      "type": "command",
+      "command": "~/.claude/statusline.sh"
+    }
+  }
+EOF
+
+cat > "$HOME/.claude/statusline.sh" << 'EOF'
+#!/bin/bash
+
+# Read JSON input from stdin
+input=$(cat)
+
+# Extract data using python3 instead of jq
+remaining=$(echo "$input" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+val = data.get('context_window', {}).get('remaining_percentage')
+if val is not None:
+    print(val)
+")
+model=$(echo "$input" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data.get('model', {}).get('display_name') or 'Claude')
+")
+cost=$(echo "$input" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data.get('cost', {}).get('total_cost_usd') or 0)
+")
+
+# If no context data yet, show a simple message
+if [ -z "$remaining" ]; then
+    printf "[%s] Context: --%%" "$model"
+    exit 0
+fi
+
+# Round to integer for display
+remaining_int=$(printf "%.0f" "$remaining")
+
+# Determine color based on remaining percentage
+# Green: >60%, Yellow: 30-60%, Red: <30%
+if python3 -c "import sys; sys.exit(0 if float('$remaining') > 60 else 1)"; then
+    color="\033[32m"  # Green
+elif python3 -c "import sys; sys.exit(0 if float('$remaining') > 30 else 1)"; then
+    color="\033[33m"  # Yellow
+else
+    color="\033[31m"  # Red
+fi
+reset="\033[0m"
+
+# Create a progress bar (15 characters wide to fit more info)
+bar_width=15
+filled=$(python3 -c "print(round(float('$remaining') * $bar_width / 100))")
+empty=$((bar_width - filled))
+
+bar=""
+for ((i=0; i<filled; i++)); do bar+="█"; done
+for ((i=0; i<empty; i++)); do bar+="░"; done
+
+# Format cost
+cost_fmt=$(printf "%.3f" "$cost")
+
+# Output: [Model] Context: XX% [███░░░] | $0.XXX
+printf "${color}[%s] Context: %d%% [%s] | \$%s${reset}" "$model" "$remaining_int" "$bar" "$cost_fmt"
+EOF
+chmod +x "$HOME/.claude/statusline.sh"
+
+# ---------------------------------------------------------------------------
+# 5. Bash prompt setup
 # ---------------------------------------------------------------------------
 echo ""
 BASHRC_PATH="$HOME/.bashrc"
