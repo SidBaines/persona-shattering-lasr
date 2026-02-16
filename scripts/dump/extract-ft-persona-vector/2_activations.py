@@ -40,7 +40,8 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 # Import response token utilities (assistant-axis compatible)
-from scripts.dump.extract_ft_persona_vector.response_token_utils import get_assistant_response_token_ids
+# Use relative import since __init__.py doesn't exist in this directory
+from response_token_utils import get_assistant_response_token_ids
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
