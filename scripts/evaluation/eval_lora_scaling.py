@@ -47,9 +47,8 @@ if _hf_token:
     hf_login(token=_hf_token, add_to_git_credential=False)
 
 # Project imports
-from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.common.persona_metrics import get_persona_metric, DEFAULT_PERSONA
-from scripts.data_loading import load_dataset_from_config, format_for_inference
+from scripts.common.persona_registry import get_persona_default_evaluations, DEFAULT_PERSONA
+from scripts.data_loading import format_for_inference
 from scripts.evaluation import run_evaluation, EvaluationConfig
 from scripts.utils import write_jsonl, setup_logging
 from scripts.evaluation.lora_arithmetic import precompute_lora_deltas, apply_lora_scale, restore_base_weights
@@ -80,7 +79,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=200)
     parser.add_argument("--persona", type=str, default=DEFAULT_PERSONA)
     parser.add_argument(
-        "--evaluations", nargs="+", default=["level_of_persona"],
+        "--evaluations", nargs="+", default=None,
+        help="Evaluation names. If omitted, uses persona's default evaluations.",
     )
     parser.add_argument(
         "--dataset-name", type=str, default="truthfulqa/truthful_qa",
@@ -193,22 +193,21 @@ def main():
     logger.info("Base model: %s", base_model_name)
     logger.info("Adapter: %s", adapter_path)
 
-    # Load eval dataset
-    dataset_config = DatasetConfig(
-        source="huggingface",
-        name=args.dataset_name,
-        subset=args.dataset_subset,
-        split=args.dataset_split,
-        max_samples=args.num_samples,
-    )
-    raw_dataset = load_dataset_from_config(dataset_config)
+    # Load eval dataset (use HF load_dataset directly to support subset)
+    from datasets import load_dataset as hf_load_dataset
+    raw_dataset = hf_load_dataset(args.dataset_name, args.dataset_subset, split=args.dataset_split)
+    if args.num_samples and args.num_samples < len(raw_dataset):
+        raw_dataset = raw_dataset.select(range(args.num_samples))
     eval_dataset = format_for_inference(raw_dataset)
     questions = eval_dataset["question"]
-    logger.info("Loaded %d eval questions from %s", len(questions), args.dataset_name)
+    logger.info("Loaded %d eval questions from %s/%s", len(questions), args.dataset_name, args.dataset_subset)
 
-    # Resolve persona metric (validate it exists)
-    persona_metric_fn = get_persona_metric(args.persona)
-    logger.info("Persona metric: %s", args.persona)
+    # Resolve evaluations from persona registry (same as training pipeline)
+    persona_evaluations = get_persona_default_evaluations(args.persona)
+    if args.evaluations is None:
+        args.evaluations = persona_evaluations
+    logger.info("Persona '%s' default evaluations: %s", args.persona, persona_evaluations)
+    logger.info("Evaluations to run: %s", args.evaluations)
 
     # Build scaling factors
     if args.scaling_factors:
@@ -323,6 +322,21 @@ def main():
     combined_path = output_dir / "all_results.jsonl"
     write_jsonl(combined_rows, combined_path)
     logger.info("Combined results saved to %s", combined_path)
+
+    # Write sweep metadata (used by plot_scaling.py to resolve metric keys)
+    metadata = {
+        "persona": args.persona,
+        "evaluations": args.evaluations,
+        "adapter_path": str(adapter_path),
+        "base_model": base_model_name,
+        "scaling_factors": factors,
+        "num_samples": len(questions),
+        "dataset": f"{args.dataset_name}/{args.dataset_subset}",
+    }
+    metadata_path = output_dir / "sweep_metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logger.info("Metadata saved to %s", metadata_path)
 
     # Write summary
     summary_path = output_dir / "scaling_summary.jsonl"
