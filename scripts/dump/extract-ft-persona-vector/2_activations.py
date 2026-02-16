@@ -5,6 +5,8 @@ Extract activations from rollouts.
 This script loads rollouts (JSONL files) and extracts mean response activations
 by re-running the model (optionally with LoRA) with activation hooks, saving them as .pt files.
 
+NOTE: Uses assistant-axis compatible token extraction to exclude special tokens from activations.
+
 Usage (with LoRA):
     python 2_activations.py \
         --base_model google/gemma-2-2b-it \
@@ -36,6 +38,9 @@ from tqdm import tqdm
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+# Import response token utilities (assistant-axis compatible)
+from scripts.dump.extract_ft_persona_vector.response_token_utils import get_assistant_response_token_ids
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -202,36 +207,28 @@ def extract_activations_batch(
         for batch_idx in range(len(batch_conversations)):
             conv = batch_conversations[batch_idx]
 
-            # Find the assistant response tokens
-            # We need to identify which tokens correspond to the assistant's response
-            # by finding where the assistant's message starts in the tokenized sequence
-
-            # Get the full prompt and the prompt without the assistant's response
-            full_prompt = prompts[batch_idx]
-
-            # Create prompt up to (but not including) the last assistant message
-            conv_without_last = conv[:-1] if len(conv) > 1 else []
-            if conv_without_last:
-                prompt_without_assistant = tokenizer.apply_chat_template(
-                    conv_without_last,
-                    tokenize=False,
-                    add_generation_prompt=True  # This adds the assistant prefix
+            # Use assistant-axis compatible token extraction
+            # This excludes special tokens like <end_of_turn>, \n, <eos>
+            try:
+                _, response_start_idx, response_end_idx = get_assistant_response_token_ids(
+                    tokenizer, conv
                 )
-            else:
-                # If only one message (the assistant's), create empty prompt with generation prefix
-                prompt_without_assistant = tokenizer.apply_chat_template(
-                    [],
-                    tokenize=False,
-                    add_generation_prompt=True
-                )
-
-            # Tokenize both to find where assistant response starts
-            full_tokens = tokenizer(full_prompt, add_special_tokens=False)['input_ids']
-            prefix_tokens = tokenizer(prompt_without_assistant, add_special_tokens=False)['input_ids']
-
-            # The assistant response starts after the prefix
-            response_start_idx = len(prefix_tokens)
-            response_end_idx = len(full_tokens)
+            except Exception as e:
+                logger.warning(f"Failed to extract response tokens for batch {batch_idx}: {e}")
+                # Fallback to simple approach (will include special tokens)
+                full_tokens = tokenizer(prompts[batch_idx], add_special_tokens=False)['input_ids']
+                conv_without_last = conv[:-1] if len(conv) > 1 else []
+                if conv_without_last:
+                    prompt_without_assistant = tokenizer.apply_chat_template(
+                        conv_without_last, tokenize=False, add_generation_prompt=True
+                    )
+                else:
+                    prompt_without_assistant = tokenizer.apply_chat_template(
+                        [], tokenize=False, add_generation_prompt=True
+                    )
+                prefix_tokens = tokenizer(prompt_without_assistant, add_special_tokens=False)['input_ids']
+                response_start_idx = len(prefix_tokens)
+                response_end_idx = len(full_tokens)
 
             # Get attention mask for this conversation
             attention_mask = inputs['attention_mask'][batch_idx]
