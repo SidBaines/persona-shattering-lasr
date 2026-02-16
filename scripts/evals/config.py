@@ -14,7 +14,28 @@ from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.persona_metrics import JudgeLLMConfig, PersonaMetricSpec
 
 
-def _resolve_inspect_task_name(task: str, task_name: str | None) -> str:
+# ---------------------------------------------------------------------------
+# Shared helpers — used by config validation, run.py, and inspect_bridge.py
+# ---------------------------------------------------------------------------
+
+
+def normalize_component(value: str, fallback: str = "component") -> str:
+    """Sanitize a string for use in file paths, metric keys, and suite IDs.
+
+    Replaces non-alphanumeric characters (except ``._-``) with ``_`` and
+    strips leading/trailing ``._-``.
+    """
+    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
+    return normalized.strip("._-") or fallback
+
+
+def resolve_inspect_task_name(task: str, task_name: str | None) -> str:
+    """Derive a human-readable task name from an inspect task reference.
+
+    If *task_name* is explicitly provided it is returned as-is.  Otherwise
+    the name is extracted from the task ref string (e.g. ``inspect_evals/mmlu``
+    → ``mmlu``).
+    """
     if task_name:
         return task_name
     if task == "mmlu":
@@ -26,10 +47,14 @@ def _resolve_inspect_task_name(task: str, task_name: str | None) -> str:
     return task_component.replace(".", "_")
 
 
-def _stable_suite_id(suite: "EvalSuiteConfig") -> str:
+def stable_suite_id(suite: "EvalSuiteConfig") -> str:
+    """Return a deterministic identifier for a suite configuration.
+
+    Uses the explicit ``suite_id`` when set, otherwise hashes the config
+    to produce a short ``auto-<hash>`` identifier.
+    """
     if suite.suite_id:
-        normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", suite.suite_id.strip())
-        return normalized.strip("._-") or "suite"
+        return normalize_component(suite.suite_id, fallback="suite")
     payload = suite.model_dump(exclude={"suite_id"})
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:10]
@@ -127,9 +152,9 @@ class EvalsConfig(BaseModel):
             if isinstance(suite, PersonaMetricsSuiteConfig):
                 display_name = "persona_metrics"
             else:
-                task_name = _resolve_inspect_task_name(suite.task, suite.task_name)
+                task_name = resolve_inspect_task_name(suite.task, suite.task_name)
                 display_name = f"inspect.{task_name}"
-            suite_key = f"{display_name}:{_stable_suite_id(suite)}"
+            suite_key = f"{display_name}:{stable_suite_id(suite)}"
             if suite_key in seen_suite_keys:
                 raise ValueError(
                     "Detected duplicate suite configuration identifier "

@@ -9,6 +9,9 @@ from scripts.evals.config import (
     ModelEvalResult,
     PersonaMetricsSuiteConfig,
     SuiteEvalResult,
+    normalize_component,
+    resolve_inspect_task_name,
+    stable_suite_id,
 )
 from scripts.evals.run import run_evals
 from scripts.evals.cli import main
@@ -22,6 +25,9 @@ __all__ = [
     "ModelEvalResult",
     "PersonaMetricsSuiteConfig",
     "SuiteEvalResult",
+    "normalize_component",
+    "resolve_inspect_task_name",
+    "stable_suite_id",
     "run_evals",
     "main",
 ]

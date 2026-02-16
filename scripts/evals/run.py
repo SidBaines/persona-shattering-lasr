@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,9 +18,13 @@ from scripts.evals.config import (
     ModelEvalResult,
     PersonaMetricsSuiteConfig,
     SuiteEvalResult,
+    normalize_component,
+    resolve_inspect_task_name,
+    stable_suite_id,
 )
 from scripts.evals.inspect_bridge import (
-    build_persona_inspect_task,
+    build_native_persona_inspect_task,
+    build_replay_persona_inspect_task,
     extract_eval_metrics,
     extract_persona_scored_records,
     normalize_inspect_model_ref,
@@ -50,22 +52,8 @@ def _safe_model_id(model_cfg: EvalModelConfig, idx: int) -> str:
     return f"base-{idx}-{base}"
 
 
-def _normalize_suite_component(value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
-    return normalized.strip("._-") or "suite"
-
-
-def _stable_suite_id(suite: PersonaMetricsSuiteConfig | InspectTaskSuiteConfig) -> str:
-    if suite.suite_id:
-        return _normalize_suite_component(suite.suite_id)
-    payload = suite.model_dump(exclude={"suite_id"})
-    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:10]
-    return f"auto-{digest}"
-
-
 def _suite_artifact_dirname(display_name: str, suite_id: str) -> str:
-    return f"{_normalize_suite_component(display_name)}__{suite_id}"
+    return f"{normalize_component(display_name, fallback='suite')}__{suite_id}"
 
 
 def _load_question_dataset(config: EvalsConfig, dataset: Dataset | None) -> Dataset:
@@ -95,20 +83,13 @@ def _generate_responses_for_model(
     return result_dataset
 
 
-def _resolve_inspect_task_name(task: str, task_name: str | None) -> str:
-    if task_name:
-        return task_name
-    if task == "mmlu":
-        return "mmlu"
-    task_component = task
-    if "@" in task_component:
-        task_component = task_component.split("@", 1)[1]
-    task_component = task_component.rsplit("/", 1)[-1]
-    return task_component.replace(".", "_")
-
-
 def _prefix_metrics(prefix: str, metrics: dict[str, float]) -> dict[str, float]:
     return {f"{prefix}.{key}": value for key, value in metrics.items()}
+
+
+def _uses_local_lora(model_cfg: EvalModelConfig) -> bool:
+    """Return True if this model requires our custom LoRA inference pipeline."""
+    return model_cfg.kind == "lora" and model_cfg.adapter_path is not None
 
 
 def run_evals(
@@ -148,33 +129,19 @@ def run_evals(
         for suite in config.suites:
             if isinstance(suite, PersonaMetricsSuiteConfig):
                 suite_name = "persona_metrics"
-                suite_id = _stable_suite_id(suite)
+                sid = stable_suite_id(suite)
                 suite_dir = model_output_dir / _suite_artifact_dirname(
-                    suite_name, suite_id
+                    suite_name, sid
                 )
                 suite_dir.mkdir(parents=True, exist_ok=True)
                 suite_result = SuiteEvalResult(
                     suite_type=suite.type,
                     suite_name=suite_name,
-                    suite_id=suite_id,
+                    suite_id=sid,
                     model_id=model_id,
                 )
 
                 try:
-                    if responses_dataset is None:
-                        if question_dataset is None:
-                            question_dataset = _load_question_dataset(config, dataset)
-                        responses_dataset = _generate_responses_for_model(
-                            model_cfg=model_cfg,
-                            dataset=question_dataset,
-                            evals_config=config,
-                        )
-
-                    responses_path = write_jsonl(
-                        responses_dataset.to_list(),
-                        suite_dir / "responses.jsonl",
-                    )
-
                     metrics_config = PersonaMetricsConfig(
                         evaluations=suite.evaluations,
                         response_column=suite.response_column,
@@ -182,22 +149,68 @@ def run_evals(
                         metrics_key=suite.metrics_key,
                         judge=suite.judge,
                     )
-                    persona_task = build_persona_inspect_task(
-                        dataset=responses_dataset,
-                        metrics_config=metrics_config,
-                        scorer_name="persona_metrics",
-                    )
                     inspect_logs_dir = suite_dir / "inspect_logs"
+
+                    if _uses_local_lora(model_cfg):
+                        # ---------------------------------------------------------
+                        # Replay path: local LoRA adapters can't be loaded by
+                        # inspect-ai's hf/ provider, so we generate responses with
+                        # our own inference pipeline and replay them into inspect
+                        # for scoring.  See inspect_bridge.py for details.
+                        # ---------------------------------------------------------
+                        if responses_dataset is None:
+                            if question_dataset is None:
+                                question_dataset = _load_question_dataset(
+                                    config, dataset
+                                )
+                            responses_dataset = _generate_responses_for_model(
+                                model_cfg=model_cfg,
+                                dataset=question_dataset,
+                                evals_config=config,
+                            )
+
+                        responses_path = write_jsonl(
+                            responses_dataset.to_list(),
+                            suite_dir / "responses.jsonl",
+                        )
+                        persona_task = build_replay_persona_inspect_task(
+                            dataset=responses_dataset,
+                            metrics_config=metrics_config,
+                            scorer_name="persona_metrics",
+                        )
+                        model_ref = "mockllm/persona"
+                        num_samples = len(responses_dataset)
+                    else:
+                        # ---------------------------------------------------------
+                        # Native path: inspect-ai loads the model via its hf/
+                        # provider and runs generation + scoring as a standard
+                        # inspect Task.  This is the preferred path for any model
+                        # available on HuggingFace Hub (base or merged fine-tune).
+                        # ---------------------------------------------------------
+                        if question_dataset is None:
+                            question_dataset = _load_question_dataset(
+                                config, dataset
+                            )
+                        responses_path = None
+                        persona_task = build_native_persona_inspect_task(
+                            dataset=question_dataset,
+                            metrics_config=metrics_config,
+                            generation_config=config.generation,
+                            scorer_name="persona_metrics",
+                        )
+                        model_ref = normalize_inspect_model_ref(model_cfg)
+                        num_samples = len(question_dataset)
+
                     inspect_payloads = run_inspect_eval(
                         tasks=persona_task,
-                        model_ref=None,
+                        model_ref=model_ref,
                         eval_kwargs={},
                         log_dir=inspect_logs_dir,
                     )
 
                     suite_metrics = extract_eval_metrics(inspect_payloads)
                     suite_result.aggregates = dict(suite_metrics)
-                    suite_result.num_samples = len(responses_dataset)
+                    suite_result.num_samples = num_samples
 
                     scored_records = extract_persona_scored_records(
                         inspect_payloads,
@@ -215,22 +228,27 @@ def run_evals(
                         {
                             "suite_type": suite.type,
                             "suite_name": suite_name,
-                            "suite_id": suite_id,
+                            "suite_id": sid,
                             "model_id": model_id,
-                            "inspect_payloads": inspect_payloads,
+                            "path": _uses_local_lora(model_cfg)
+                            and "replay"
+                            or "native",
                             "aggregates": suite_metrics,
+                            "inspect_logs_dir": str(inspect_logs_dir),
                         },
                     )
 
-                    suite_result.artifacts = {
-                        "responses": str(responses_path),
+                    artifacts: dict[str, str] = {
                         "scored": str(scored_path),
                         "suite_result": str(suite_result_path),
                         "inspect_logs_dir": str(inspect_logs_dir),
                     }
+                    if responses_path is not None:
+                        artifacts["responses"] = str(responses_path)
+                    suite_result.artifacts = artifacts
 
                     prefixed = _prefix_metrics(
-                        f"persona_metrics.{suite_id}",
+                        f"persona.{sid}",
                         suite_metrics,
                     )
                     leaderboard_by_model[model_id].update(prefixed)
@@ -239,7 +257,7 @@ def run_evals(
                         out = dict(row)
                         out["model_id"] = model_id
                         out["suite_type"] = suite.type
-                        out["suite_id"] = suite_id
+                        out["suite_id"] = sid
                         out["suite_name"] = suite_name
                         combined_records.append(out)
                 except Exception as exc:
@@ -251,17 +269,17 @@ def run_evals(
                 continue
 
             if isinstance(suite, InspectTaskSuiteConfig):
-                task_name = _resolve_inspect_task_name(suite.task, suite.task_name)
+                task_name = resolve_inspect_task_name(suite.task, suite.task_name)
                 suite_name = f"inspect.{task_name}"
-                suite_id = _stable_suite_id(suite)
+                sid = stable_suite_id(suite)
                 suite_dir = model_output_dir / _suite_artifact_dirname(
-                    suite_name, suite_id
+                    suite_name, sid
                 )
                 suite_dir.mkdir(parents=True, exist_ok=True)
                 suite_result = SuiteEvalResult(
                     suite_type=suite.type,
                     suite_name=suite_name,
-                    suite_id=suite_id,
+                    suite_id=sid,
                     model_id=model_id,
                 )
 
@@ -287,14 +305,14 @@ def run_evals(
                         {
                             "suite_type": suite.type,
                             "suite_name": suite_name,
-                            "suite_id": suite_id,
+                            "suite_id": sid,
                             "model_id": model_id,
                             "task": suite.task,
                             "task_ref": task_ref,
                             "model_ref": model_ref,
                             "eval_kwargs": suite.eval_kwargs,
-                            "inspect_payloads": inspect_payloads,
                             "aggregates": suite_metrics,
+                            "inspect_logs_dir": str(inspect_logs_dir),
                         },
                     )
 
@@ -310,7 +328,7 @@ def run_evals(
                     }
 
                     leaderboard_by_model[model_id].update(
-                        _prefix_metrics(f"inspect.{task_name}.{suite_id}", suite_metrics)
+                        _prefix_metrics(f"inspect.{task_name}.{sid}", suite_metrics)
                     )
 
                     for payload_index, payload in enumerate(inspect_payloads):
@@ -322,7 +340,7 @@ def run_evals(
                                         "model_id": model_id,
                                         "suite_type": suite.type,
                                         "suite_name": suite_name,
-                                        "suite_id": suite_id,
+                                        "suite_id": sid,
                                         "inspect_sample": sample,
                                     }
                                 )
@@ -332,9 +350,8 @@ def run_evals(
                                     "model_id": model_id,
                                     "suite_type": suite.type,
                                     "suite_name": suite_name,
-                                    "suite_id": suite_id,
+                                    "suite_id": sid,
                                     "inspect_payload_index": payload_index,
-                                    "inspect_payload": payload,
                                 }
                             )
                 except Exception as exc:

@@ -7,7 +7,20 @@ Run end-to-end model evals across:
 
 The module compares one or more model targets (base and/or LoRA) on the same prompt set and writes structured artifacts plus a unified leaderboard.
 
-Notes:
+## How persona metrics run through inspect-ai
+
+Persona metrics are evaluated through inspect-ai via **two paths**, selected automatically based on the model type:
+
+**Native path** (base models, HF Hub models):
+Inspect-ai loads the model via its `hf/` provider, generates responses using its `Generate()` solver, and our persona metrics scorer evaluates the output. This is a standard inspect Task — same pattern as MMLU or any other benchmark. This is the preferred path because it produces complete inspect logs including generation traces.
+
+**Replay path** (local LoRA adapters):
+Inspect-ai's `hf/` model provider cannot load a separate LoRA adapter on top of a base model. For local LoRA targets, we generate responses using our own inference pipeline (`scripts.inference`), then replay them into an inspect Task via a solver that injects pre-generated text without calling the model. A `mockllm/persona` model reference satisfies inspect's model requirement.
+
+Both paths use the same persona scorer and produce identical scoring output. If you merge and push your LoRA adapter to HuggingFace Hub, the native path is used automatically.
+
+## Notes
+
 - `inspect_task`-only runs do not require a prompt dataset.
 - `inspect_task` suites require Inspect-native model refs; LoRA adapter targets are currently supported only in `persona_metrics` suites.
 - Alias `mmlu` resolves to `inspect_evals/mmlu` and requires `inspect_evals` to be installed.
@@ -88,11 +101,12 @@ print(result.output_dir)
 
 For each `model_id` + suite:
 
-- `<suite_name>__<suite_id>/responses.jsonl` (persona_metrics suite)
+- `<suite_name>__<suite_id>/responses.jsonl` (persona_metrics suite, replay path only)
 - `<suite_name>__<suite_id>/scored.jsonl` (persona_metrics suite)
-- `<suite_name>__<suite_id>/suite_result.json` (all suites)
+- `<suite_name>__<suite_id>/suite_result.json` (all suites — aggregates + metadata only)
+- `<suite_name>__<suite_id>/inspect_logs/` (full inspect logs for all suites)
 
 Run-level:
 
-- `leaderboard.json` (namespaced keys include suite ids, e.g. `persona_metrics.<suite_id>.*`, `inspect.mmlu.<suite_id>.*`)
+- `leaderboard.json` (namespaced keys: `persona.<suite_id>.*`, `inspect.<task>.<suite_id>.*`)
 - `summary.json` (config snapshot + run metadata)

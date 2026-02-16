@@ -1,18 +1,45 @@
-"""Inspect-native helpers for eval tasks and metric extraction."""
+"""Bridge between this project's eval framework and inspect-ai.
+
+Persona metrics are evaluated through inspect-ai via **two paths**:
+
+**Native path** (``build_native_persona_inspect_task``):
+  For models that inspect-ai can load directly (anything accessible via
+  ``hf/<model>`` — base models, or fine-tunes merged and pushed to
+  HuggingFace Hub).  This is a standard inspect Task: the ``Generate()``
+  solver calls the model, and a custom scorer runs persona metrics on the
+  generated responses.  This is the preferred path because it follows
+  inspect-ai conventions and produces complete inspect logs including
+  generation traces.
+
+**Replay path** (``build_replay_persona_inspect_task``):
+  For local LoRA adapters that inspect-ai's ``hf/`` model provider cannot
+  load.  Responses are first generated using our own LoRA-aware inference
+  pipeline (``scripts.inference``), then replayed into an inspect Task via
+  a ``_replay_response`` solver that injects pre-generated text without
+  calling the model.  A ``mockllm/persona`` model reference is used to
+  satisfy inspect-ai's model requirement.  The same persona scorer is
+  shared between both paths.
+
+Both paths produce identical scoring output — the only difference is
+whether inspect-ai or our inference pipeline drives generation.
+
+For external benchmarks (e.g. MMLU via ``inspect_evals``), use
+``resolve_inspect_task_ref`` + ``run_inspect_eval`` directly.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import importlib.util
 import math
-import re
 import statistics
 from pathlib import Path
 from typing import Any, Iterable
 
 from datasets import Dataset
 
-from scripts.evals.config import EvalModelConfig
+from scripts.common.config import GenerationConfig
+from scripts.evals.config import EvalModelConfig, normalize_component
 from scripts.persona_metrics import (
     PersonaMetricContext,
     PersonaMetricsConfig,
@@ -44,13 +71,13 @@ KNOWN_INSPECT_MODEL_APIS = {
 }
 
 
-def _normalize_key_component(value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
-    return normalized.strip("._-") or "task"
-
-
 def _is_numeric(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+# ---------------------------------------------------------------------------
+# Custom inspect-ai metrics (mean is built-in; we add median/min/max/stdev)
+# ---------------------------------------------------------------------------
 
 
 def persona_median() -> Any:
@@ -111,6 +138,11 @@ def persona_stdev() -> Any:
     return _stdev()
 
 
+# ---------------------------------------------------------------------------
+# Task/model resolution helpers
+# ---------------------------------------------------------------------------
+
+
 def resolve_inspect_task_ref(task: str) -> str:
     """Resolve task aliases to concrete inspect task references."""
     task_ref = INSPECT_TASK_ALIASES.get(task, task)
@@ -123,14 +155,22 @@ def resolve_inspect_task_ref(task: str) -> str:
 
 
 def normalize_inspect_model_ref(model_cfg: EvalModelConfig) -> str:
-    """Resolve a model reference suitable for inspect_ai.eval(model=...)."""
-    if model_cfg.kind == "lora":
-        raise ValueError(
-            "Inspect task suites currently require a native Inspect model reference; "
-            "LoRA adapter targets are only supported in persona_metrics suites."
-        )
+    """Resolve a model reference suitable for ``inspect_ai.eval(model=...)``.
+
+    For LoRA models without an explicit ``inspect_model``, this raises
+    because inspect-ai's ``hf/`` provider cannot load a separate adapter.
+    Use the replay path (``build_replay_persona_inspect_task``) instead,
+    or merge and push the adapter to HuggingFace Hub first.
+    """
     if model_cfg.inspect_model:
         return model_cfg.inspect_model
+    if model_cfg.kind == "lora":
+        raise ValueError(
+            "Inspect task suites require an Inspect-native model reference for LoRA "
+            "targets. Provide EvalModelConfig.inspect_model (or --lora-inspect-model) "
+            "if your Inspect provider supports LoRA adapters; otherwise omit inspect "
+            "task suites for this model."
+        )
 
     candidate = model_cfg.model
     if "/" in candidate:
@@ -140,6 +180,11 @@ def normalize_inspect_model_ref(model_cfg: EvalModelConfig) -> str:
     return f"hf/{candidate}"
 
 
+# ---------------------------------------------------------------------------
+# Inspect eval execution
+# ---------------------------------------------------------------------------
+
+
 def run_inspect_eval(
     *,
     tasks: Any,
@@ -147,7 +192,7 @@ def run_inspect_eval(
     eval_kwargs: dict[str, Any],
     log_dir: Path | None,
 ) -> list[dict[str, Any]]:
-    """Execute inspect_ai.eval and return serializable EvalLog payloads."""
+    """Execute ``inspect_ai.eval`` and return serializable EvalLog payloads."""
     from inspect_ai import eval as inspect_eval
 
     blocked = {"task", "tasks", "model", "log_dir"}
@@ -173,23 +218,207 @@ def run_inspect_eval(
     return payloads
 
 
-def build_persona_inspect_task(
-    *,
-    dataset: Dataset,
+# ---------------------------------------------------------------------------
+# Shared persona scorer (used by both native and replay paths)
+# ---------------------------------------------------------------------------
+
+
+def _build_persona_scorer(
     metrics_config: PersonaMetricsConfig,
     scorer_name: str = "persona_metrics",
 ) -> Any:
-    """Build an Inspect Task that scores pre-generated responses."""
-    from inspect_ai import Task
-    from inspect_ai.dataset import Sample
-    from inspect_ai.model import ModelOutput
+    """Build an inspect-ai scorer that runs persona metrics on model output.
+
+    This scorer is shared between the native and replay paths.  It reads
+    the model's generated text from ``state.output.completion`` and the
+    original question from ``state.metadata["question"]``, then runs each
+    configured persona metric and returns a composite ``Score``.
+    """
     from inspect_ai.scorer import Score, Target, mean, scorer
-    from inspect_ai.solver import Generate, Solver, TaskState, solver
 
     run_metadata = {
         "response_column": metrics_config.response_column,
         "question_column": metrics_config.question_column,
     }
+
+    @scorer(
+        metrics={
+            "*": [
+                mean(),
+                persona_median(),
+                persona_min(),
+                persona_max(),
+                persona_stdev(),
+            ]
+        },
+        name=scorer_name,
+    )
+    def _persona_scorer() -> Any:
+        metric_instances = create_persona_metrics(metrics_config)
+        metric_semaphores = [
+            (
+                asyncio.Semaphore(max(1, metric.judge_config.max_concurrent))
+                if getattr(metric, "judge_config", None) is not None
+                else None
+            )
+            for metric in metric_instances
+        ]
+
+        async def _score(state: Any, target: Target) -> Score:
+            sample_metadata = state.metadata or {}
+            response = state.output.completion
+            question = sample_metadata.get("question")
+            if not isinstance(question, str):
+                question = None
+            record = sample_metadata.get("record")
+            if not isinstance(record, dict):
+                record = {}
+
+            context = PersonaMetricContext(
+                response=response,
+                question=question,
+                record=record,
+                metadata=run_metadata,
+            )
+
+            merged: dict[str, float | int | str] = {}
+            for metric, semaphore in zip(metric_instances, metric_semaphores):
+                if semaphore is None:
+                    metric_values = await metric.evaluate_async(
+                        response,
+                        question,
+                        context=context,
+                    )
+                else:
+                    async with semaphore:
+                        metric_values = await metric.evaluate_async(
+                            response,
+                            question,
+                            context=context,
+                        )
+                merged.update(metric_values)
+
+            numeric = {key: float(value) for key, value in merged.items() if _is_numeric(value)}
+            if not numeric:
+                numeric = {"__no_numeric_metrics": 0.0}
+
+            return Score(
+                value=numeric,
+                metadata={"persona_metrics": merged},
+            )
+
+        return _score
+
+    return _persona_scorer()
+
+
+# ---------------------------------------------------------------------------
+# Native persona Task — inspect-ai drives generation
+# ---------------------------------------------------------------------------
+
+
+def build_native_persona_inspect_task(
+    *,
+    dataset: Dataset,
+    metrics_config: PersonaMetricsConfig,
+    generation_config: GenerationConfig,
+    scorer_name: str = "persona_metrics",
+) -> Any:
+    """Build an inspect Task where inspect-ai generates responses natively.
+
+    This is the **preferred path** for any model that inspect-ai can load
+    directly (base HF models, or fine-tunes merged and pushed to HF Hub).
+    Inspect handles model loading and generation via its ``Generate()``
+    solver, and the persona metrics scorer evaluates the output.
+
+    Args:
+        dataset: A dataset of questions/prompts (must have a question column).
+        metrics_config: Which persona metrics to score and how.
+        generation_config: Generation parameters (temperature, max_tokens, etc.)
+            forwarded to inspect's GenerateConfig.
+        scorer_name: Name for the inspect scorer (default: ``"persona_metrics"``).
+
+    Returns:
+        An ``inspect_ai.Task`` ready for ``inspect_ai.eval()``.
+    """
+    from inspect_ai import Task
+    from inspect_ai.dataset import Sample
+    from inspect_ai.solver import Generate, generate
+
+    question_column = metrics_config.question_column or "question"
+    records = dataset.to_list()
+    samples: list[Sample] = []
+    for index, record in enumerate(records):
+        question_value = record.get(question_column)
+        question = question_value if isinstance(question_value, str) else ""
+        sample_id = record.get("id", index)
+        if not isinstance(sample_id, (str, int)):
+            sample_id = index
+
+        samples.append(
+            Sample(
+                input=question,
+                target="",
+                id=sample_id,
+                metadata={
+                    "record": record,
+                    "question": question or None,
+                },
+            )
+        )
+
+    gen_kwargs: dict[str, Any] = {}
+    if generation_config.max_new_tokens:
+        gen_kwargs["max_tokens"] = generation_config.max_new_tokens
+    if generation_config.temperature is not None:
+        gen_kwargs["temperature"] = generation_config.temperature
+    if generation_config.top_p is not None:
+        gen_kwargs["top_p"] = generation_config.top_p
+
+    return Task(
+        name="persona_metrics",
+        dataset=samples,
+        solver=generate(**gen_kwargs) if gen_kwargs else Generate(),
+        scorer=_build_persona_scorer(metrics_config, scorer_name),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Replay persona Task — pre-generated responses scored through inspect
+# ---------------------------------------------------------------------------
+
+
+def build_replay_persona_inspect_task(
+    *,
+    dataset: Dataset,
+    metrics_config: PersonaMetricsConfig,
+    scorer_name: str = "persona_metrics",
+) -> Any:
+    """Build an inspect Task that scores pre-generated responses.
+
+    This is the **fallback path** for local LoRA adapters that inspect-ai's
+    ``hf/`` model provider cannot load.  Responses must already be present
+    in the dataset (in the column named by ``metrics_config.response_column``).
+    A ``_replay_response`` solver injects these into inspect's pipeline
+    without calling the model.
+
+    Use ``model_ref="mockllm/persona"`` when calling ``run_inspect_eval``
+    with the task returned by this function — it satisfies inspect's model
+    requirement without loading a real model.
+
+    Args:
+        dataset: A dataset that already contains generated responses.
+        metrics_config: Which persona metrics to score and how.
+        scorer_name: Name for the inspect scorer (default: ``"persona_metrics"``).
+
+    Returns:
+        An ``inspect_ai.Task`` ready for ``inspect_ai.eval()``.
+    """
+    from inspect_ai import Task
+    from inspect_ai.dataset import Sample
+    from inspect_ai.model import ModelOutput
+    from inspect_ai.solver import Generate, Solver, TaskState, solver
+
     records = dataset.to_list()
     samples: list[Sample] = []
     for index, record in enumerate(records):
@@ -237,80 +466,17 @@ def build_persona_inspect_task(
 
         return _solve
 
-    @scorer(
-        metrics={
-            "*": [
-                mean(),
-                persona_median(),
-                persona_min(),
-                persona_max(),
-                persona_stdev(),
-            ]
-        },
-        name=scorer_name,
-    )
-    def _persona_scorer() -> Any:
-        metric_instances = create_persona_metrics(metrics_config)
-        metric_semaphores = [
-            (
-                asyncio.Semaphore(max(1, metric.judge_config.max_concurrent))
-                if getattr(metric, "judge_config", None) is not None
-                else None
-            )
-            for metric in metric_instances
-        ]
-
-        async def _score(state: TaskState, target: Target) -> Score:
-            sample_metadata = state.metadata or {}
-            response = state.output.completion
-            question = sample_metadata.get("question")
-            if not isinstance(question, str):
-                question = None
-            record = sample_metadata.get("record")
-            if not isinstance(record, dict):
-                record = {}
-
-            context = PersonaMetricContext(
-                response=response,
-                question=question,
-                record=record,
-                metadata=run_metadata,
-            )
-
-            merged: dict[str, float | int | str] = {}
-            for metric, semaphore in zip(metric_instances, metric_semaphores):
-                if semaphore is None:
-                    metric_values = await metric.evaluate_async(
-                        response,
-                        question,
-                        context=context,
-                    )
-                else:
-                    async with semaphore:
-                        metric_values = await metric.evaluate_async(
-                            response,
-                            question,
-                            context=context,
-                        )
-                merged.update(metric_values)
-
-            numeric = {key: float(value) for key, value in merged.items() if _is_numeric(value)}
-            if not numeric:
-                numeric = {"__no_numeric_metrics": 0.0}
-
-            return Score(
-                value=numeric,
-                metadata={"persona_metrics": merged},
-            )
-
-        return _score
-
     return Task(
         name="persona_metrics",
         dataset=samples,
         solver=_replay_response(),
-        scorer=_persona_scorer(),
+        scorer=_build_persona_scorer(metrics_config, scorer_name),
     )
+
+
+# ---------------------------------------------------------------------------
+# Metric extraction from inspect logs
+# ---------------------------------------------------------------------------
 
 
 def extract_eval_metrics(eval_logs: Iterable[dict[str, Any]]) -> dict[str, float]:
@@ -323,18 +489,19 @@ def extract_eval_metrics(eval_logs: Iterable[dict[str, Any]]) -> dict[str, float
             or eval_section.get("task_file")
             or f"task_{index}"
         )
-        task_key = _normalize_key_component(str(task_name))
+        task_key = normalize_component(str(task_name), fallback="task")
 
         results = payload.get("results")
         if not isinstance(results, dict):
             continue
         for score in results.get("scores", []):
-            score_name = _normalize_key_component(
-                str(score.get("name") or score.get("scorer") or "score")
+            score_name = normalize_component(
+                str(score.get("name") or score.get("scorer") or "score"),
+                fallback="score",
             )
             reducer = score.get("reducer")
             if reducer:
-                score_name = f"{score_name}.{_normalize_key_component(str(reducer))}"
+                score_name = f"{score_name}.{normalize_component(str(reducer), fallback='reducer')}"
 
             metrics = score.get("metrics", {})
             if not isinstance(metrics, dict):
@@ -348,7 +515,7 @@ def extract_eval_metrics(eval_logs: Iterable[dict[str, Any]]) -> dict[str, float
                 number = float(value)
                 if not math.isfinite(number):
                     continue
-                key = f"{task_key}.{score_name}.{_normalize_key_component(str(metric_name))}"
+                key = f"{task_key}.{score_name}.{normalize_component(str(metric_name), fallback='metric')}"
                 extracted[key] = number
     return extracted
 
