@@ -7,7 +7,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
+from scripts.evals.cli import main as cli_main
 from scripts.evals.config import AdapterConfig, EvalConfig
 from scripts.evals.run import _build_model_args, _save_results, run_eval
 
@@ -209,3 +211,11 @@ class TestSaveResults:
         import json
         saved = json.loads(results_file.read_text())
         assert saved["results"]["mmlu"]["acc"] == 0.5
+
+
+class TestCli:
+    def test_list_tasks_does_not_require_model_or_tasks(self):
+        runner = CliRunner()
+        result = runner.invoke(cli_main, ["--list-tasks"])
+        assert result.exit_code == 0
+        assert "Custom persona metric tasks" in result.output

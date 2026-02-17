@@ -38,7 +38,7 @@ def _parse_adapters(value: str) -> list[AdapterConfig]:
 
 @click.command("evals")
 @click.option(
-    "--model", required=True,
+    "--model", required=False,
     help="HuggingFace model name or local path.",
 )
 @click.option(
@@ -50,7 +50,7 @@ def _parse_adapters(value: str) -> list[AdapterConfig]:
     ),
 )
 @click.option(
-    "--tasks", required=True,
+    "--tasks", required=False,
     help="Comma-separated task names (standard or custom).",
 )
 @click.option("--batch-size", default="auto", help="Batch size: 'auto', 'auto:N', or int.")
@@ -65,9 +65,9 @@ def _parse_adapters(value: str) -> list[AdapterConfig]:
 @click.option("--apply-chat-template", is_flag=True, default=False, help="Apply chat template.")
 @click.option("--list-tasks", "show_tasks", is_flag=True, default=False, help="List custom tasks and exit.")
 def main(
-    model: str,
+    model: str | None,
     adapters: str | None,
-    tasks: str,
+    tasks: str | None,
     batch_size: str,
     device: str | None,
     limit: int | None,
@@ -84,6 +84,11 @@ def main(
     if show_tasks:
         list_custom_tasks()
         sys.exit(0)
+
+    if not model:
+        raise click.UsageError("Missing option '--model'.")
+    if not tasks:
+        raise click.UsageError("Missing option '--tasks'.")
 
     setup_logging()
 
