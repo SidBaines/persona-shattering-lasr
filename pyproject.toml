@@ -24,7 +24,11 @@ dependencies = [
     "wandb>=0.16",
     "spacy>=3.0",
     "inspect-ai>=0.3.0",
+    "lm-eval[hf]",
 ]
+
+[tool.uv.sources]
+lm-eval = { git = "https://github.com/EleutherAI/lm-evaluation-harness" }
 
 [project.optional-dependencies]
 dev = [

@@ -1,33 +1,12 @@
-"""End-to-end eval runner for persona metrics and Inspect tasks."""
+"""Evals module: wrapper around lm-evaluation-harness."""
 
-from scripts.evals.config import (
-    EvalModelConfig,
-    EvalSuiteConfig,
-    EvalsConfig,
-    EvalsResult,
-    InspectTaskSuiteConfig,
-    ModelEvalResult,
-    PersonaMetricsSuiteConfig,
-    SuiteEvalResult,
-    normalize_component,
-    resolve_inspect_task_name,
-    stable_suite_id,
-)
-from scripts.evals.run import run_evals
+from scripts.evals.config import AdapterConfig, EvalConfig
+from scripts.evals.run import run_eval
 from scripts.evals.cli import main
 
 __all__ = [
-    "EvalModelConfig",
-    "EvalSuiteConfig",
-    "EvalsConfig",
-    "EvalsResult",
-    "InspectTaskSuiteConfig",
-    "ModelEvalResult",
-    "PersonaMetricsSuiteConfig",
-    "SuiteEvalResult",
-    "normalize_component",
-    "resolve_inspect_task_name",
-    "stable_suite_id",
-    "run_evals",
+    "AdapterConfig",
+    "EvalConfig",
+    "run_eval",
     "main",
 ]

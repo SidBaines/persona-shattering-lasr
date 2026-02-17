@@ -1,124 +1,107 @@
 # Evals
 
-Run end-to-end model evals across:
+Wrapper around [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) for running standard benchmarks and custom persona metric tasks.
 
-- `persona_metrics` suites (native Inspect task/scorer backed by `scripts.persona_metrics`)
-- `inspect_task` suites (native Inspect benchmarks/tasks, e.g. `inspect_evals/mmlu_0_shot`)
+## Quick Start
 
-The module compares one or more model targets (base and/or LoRA) on the same prompt set and writes structured artifacts plus a unified leaderboard.
+```bash
+# Standard benchmark
+uv run python -m scripts.evals --model meta-llama/Llama-3.1-8B-Instruct --tasks mmlu --limit 100
 
-## How persona metrics run through inspect-ai
+# Custom persona metric task
+uv run python -m scripts.evals --model meta-llama/Llama-3.1-8B-Instruct --tasks persona_count_o
 
-Persona metrics are evaluated through inspect-ai via **two paths**, selected automatically based on the model type:
+# List custom tasks
+uv run python -m scripts.evals --list-tasks
+```
 
-**Native path** (base models, HF Hub models):
-Inspect-ai loads the model via its `hf/` provider, generates responses using its `Generate()` solver, and our persona metrics scorer evaluates the output. This is a standard inspect Task — same pattern as MMLU or any other benchmark. This is the preferred path because it produces complete inspect logs including generation traces.
+## LoRA Adapters
 
-**Replay path** (local LoRA adapters):
-Inspect-ai's `hf/` model provider cannot load a separate LoRA adapter on top of a base model. For local LoRA targets, we generate responses using our own inference pipeline (`scripts.inference`), then replay them into an inspect Task via a solver that injects pre-generated text without calling the model. A `mockllm/persona` model reference satisfies inspect's model requirement.
-
-Both paths use the same persona scorer and produce identical scoring output. If you merge and push your LoRA adapter to HuggingFace Hub, the native path is used automatically.
-
-## Notes
-
-- `inspect_task`-only runs do not require a prompt dataset.
-- For local LoRA adapters in `inspect_task` suites, evals auto-merge the adapter into a cached standalone model under `scratch/merged_lora_models/` (configurable via `--merged-model-cache-dir`).
-- Use `--force-remerge-lora` to rebuild cached merged models when adapter files change in-place.
-- Alias `mmlu` resolves to `inspect_evals/mmlu_0_shot` and requires `inspect_evals` to be installed.
-- Inspect task suites default to `display="plain"` so progress is visible; override with `--inspect-task ...::'{"display":"none"}'` if you want quiet output.
-
-## CLI Usage
-
-### Persona metrics only
+Single adapter at default scale (uses lm_eval's native `peft=` support, no merge):
 
 ```bash
 uv run python -m scripts.evals \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --dataset-source huggingface \
-  --dataset-name vicgalle/alpaca-gpt4 \
-  --max-samples 20 \
-  --persona-evaluations count_o coherence
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --adapters path/to/adapter \
+    --tasks mmlu,persona_count_o
 ```
 
-### MMLU only (dataset not required)
+Single adapter at custom scale (merges to temp dir, cleaned up after):
 
 ```bash
 uv run python -m scripts.evals \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --inspect-task mmlu
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --adapters path/to/adapter:0.5 \
+    --tasks mmlu
 ```
 
-### Combined run (persona metrics + MMLU)
+Multiple adapters with different scales:
 
 ```bash
 uv run python -m scripts.evals \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --lora-model meta-llama/Llama-3.1-8B-Instruct::scratch/my_run/checkpoints/final \
-  --dataset-source huggingface \
-  --dataset-name vicgalle/alpaca-gpt4 \
-  --max-samples 20 \
-  --persona-evaluations lowercase_density punctuation_density \
-  --inspect-task mmlu
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --adapters adapter_a:0.7,adapter_b:0.3 \
+    --tasks mmlu,persona_count_o
 ```
 
-### Combined run with custom LoRA merge cache
+### How LoRA merging works
+
+- **Single adapter, scale=1.0**: Passed directly to lm_eval via `peft=` model arg. No disk merge.
+- **Scaled or multi-adapter**: Uses `LoRaPipeline` from `src/utils/peft_manipulations.py` to apply per-adapter scaling, then `merge_and_unload()` to bake into base weights. Saved to a temp directory that is automatically cleaned up after evaluation.
+
+## Custom Tasks
+
+Custom tasks wrap persona metrics from `scripts/persona_metrics/` as native lm_eval tasks. Each task is a YAML config in `scripts/evals/tasks/` that specifies:
+- A HuggingFace dataset (default: TruthfulQA generation split)
+- A `process_results` function bridging to our persona metric scorers
+- Metric names and aggregation settings
+
+Available custom tasks:
+- `persona_count_o` — Count of letter 'o' in responses
+- `persona_verb_count` — Count of verbs (via spaCy)
+- `persona_coherence` — LLM-as-judge coherence score (0-100)
+- `persona_lowercase_density` — Lowercase character ratio
+- `persona_punctuation_density` — Punctuation character ratio
+
+### Adding a new custom task
+
+1. Add a new metric class to `scripts/persona_metrics/metrics/` and register it
+2. Add a `process_results_<name>` function to `scripts/evals/tasks/utils.py`
+3. Create a YAML config in `scripts/evals/tasks/` (use `_defaults.yaml` as template)
+
+### Checking available benchmarks
+
+Custom tasks: `uv run python -m scripts.evals --list-tasks`
+
+Standard lm_eval tasks: `uv run lm_eval ls tasks`
+
+## Output
+
+Results use lm_eval's native JSON format. Use `--output-path` to persist:
 
 ```bash
 uv run python -m scripts.evals \
-  --lora-model meta-llama/Llama-3.1-8B-Instruct::scratch/my_run/checkpoints/final \
-  --inspect-task mmlu \
-  --merged-model-cache-dir scratch/merged_models \
-  --force-remerge-lora
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --tasks mmlu,persona_count_o \
+    --output-path results/my-eval
 ```
 
-### Inspect task with extra eval kwargs
-
-```bash
-uv run python -m scripts.evals \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --inspect-task inspect_evals/mmlu_0_shot::'{"max_samples":100,"limit":100}'
-```
-
-## Python Usage
+## Python API
 
 ```python
-from scripts.common.config import DatasetConfig
-from scripts.evals import (
-    EvalModelConfig,
-    EvalsConfig,
-    InspectTaskSuiteConfig,
-    PersonaMetricsSuiteConfig,
-    run_evals,
-)
+from scripts.evals import EvalConfig, AdapterConfig, run_eval
 
-config = EvalsConfig(
-    models=[
-        EvalModelConfig(kind="base", model="meta-llama/Llama-3.1-8B-Instruct"),
-    ],
-    suites=[
-        PersonaMetricsSuiteConfig(evaluations=["count_o", "coherence"]),
-        InspectTaskSuiteConfig(task="mmlu"),
-    ],
-    dataset=DatasetConfig(
-        source="huggingface",
-        name="vicgalle/alpaca-gpt4",
-        max_samples=20,
-    ),
+config = EvalConfig(
+    model="meta-llama/Llama-3.1-8B-Instruct",
+    adapters=[AdapterConfig(path="path/to/adapter", scale=0.7)],
+    tasks=["mmlu", "persona_count_o"],
+    limit=100,
 )
-dataset, result = run_evals(config)
-print(result.output_dir)
+results = run_eval(config)
 ```
 
-## Output Contract
+## Other tools in this directory
 
-For each `model_id` + suite:
-
-- `<suite_name>__<suite_id>/responses.jsonl` (persona_metrics suite, replay path only)
-- `<suite_name>__<suite_id>/scored.jsonl` (persona_metrics suite)
-- `<suite_name>__<suite_id>/suite_result.json` (all suites — aggregates + metadata only)
-- `<suite_name>__<suite_id>/inspect_logs/` (full inspect logs for all suites)
-
-Run-level:
-
-- `leaderboard.json` (namespaced keys: `persona.<suite_id>.*`, `inspect.<task>.<suite_id>.*`)
-- `summary.json` (config snapshot + run metadata)
+- `eval_lora_scaling.py` — Standalone LoRA scaling sweep (not part of the lm_eval wrapper)
+- `lora_arithmetic.py` — Low-level LoRA weight arithmetic utilities
+- `plot_scaling.py` — Plotting utilities for scaling sweep results

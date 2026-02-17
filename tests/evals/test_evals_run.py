@@ -1,282 +1,211 @@
-"""Tests for end-to-end eval runner."""
+"""Tests for the evals module."""
 
-from datasets import Dataset
+from __future__ import annotations
 
-from scripts.common.config import GenerationConfig
-from scripts.evals import (
-    EvalModelConfig,
-    EvalsConfig,
-    InspectTaskSuiteConfig,
-    PersonaMetricsSuiteConfig,
-)
-from scripts.evals.run import run_evals
+import math
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from scripts.evals.config import AdapterConfig, EvalConfig
+from scripts.evals.run import _build_model_args, _save_results, run_eval
 
 
-def _mock_persona_inspect_payloads():
-    """Shared mock inspect payloads for persona metrics tests."""
-    return [
-        {
-            "eval": {"task": "persona_metrics"},
-            "results": {
-                "scores": [
-                    {
-                        "name": "count_o.count",
-                        "scorer": "persona_metrics",
-                        "reducer": None,
-                        "metrics": {"mean": {"value": 1.0}},
-                    }
-                ]
-            },
-            "samples": [
-                {
-                    "metadata": {
-                        "record": {
-                            "question": "Q1",
-                            "response": "Hello world",
-                            "response_index": 0,
-                        }
-                    },
-                    "scores": {
-                        "persona_metrics": {
-                            "value": {"count_o.count": 2},
-                            "metadata": {"persona_metrics": {"count_o.count": 2}},
-                        }
-                    },
-                },
-                {
-                    "metadata": {
-                        "record": {
-                            "question": "Q2",
-                            "response": "Sky",
-                            "response_index": 0,
-                        }
-                    },
-                    "scores": {
-                        "persona_metrics": {
-                            "value": {"count_o.count": 0},
-                            "metadata": {"persona_metrics": {"count_o.count": 0}},
-                        }
-                    },
-                },
+# ---------------------------------------------------------------------------
+# Config validation
+# ---------------------------------------------------------------------------
+
+
+class TestEvalConfig:
+    def test_minimal_valid(self):
+        cfg = EvalConfig(model="gpt2", tasks=["mmlu"])
+        assert cfg.model == "gpt2"
+        assert cfg.tasks == ["mmlu"]
+        assert cfg.adapters == []
+        assert cfg.needs_merge is False
+
+    def test_empty_tasks_rejected(self):
+        with pytest.raises(ValueError, match="tasks must not be empty"):
+            EvalConfig(model="gpt2", tasks=[])
+
+    def test_single_adapter_no_merge(self):
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            adapters=[AdapterConfig(path="/tmp/adapter")],
+        )
+        assert cfg.needs_merge is False
+
+    def test_single_adapter_scaled_needs_merge(self):
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            adapters=[AdapterConfig(path="/tmp/adapter", scale=0.5)],
+        )
+        assert cfg.needs_merge is True
+
+    def test_multi_adapter_needs_merge(self):
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            adapters=[
+                AdapterConfig(path="/tmp/a"),
+                AdapterConfig(path="/tmp/b"),
             ],
+        )
+        assert cfg.needs_merge is True
+
+    def test_infinite_scale_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            AdapterConfig(path="/tmp/a", scale=float("inf"))
+
+    def test_nan_scale_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            AdapterConfig(path="/tmp/a", scale=float("nan"))
+
+    def test_negative_scale_allowed(self):
+        adapter = AdapterConfig(path="/tmp/a", scale=-1.0)
+        assert adapter.scale == -1.0
+
+
+# ---------------------------------------------------------------------------
+# _build_model_args
+# ---------------------------------------------------------------------------
+
+
+class TestBuildModelArgs:
+    def test_base_model_only(self):
+        cfg = EvalConfig(model="meta-llama/Llama-3.1-8B", tasks=["mmlu"])
+        args = _build_model_args(cfg)
+        assert args == "pretrained=meta-llama/Llama-3.1-8B"
+
+    def test_with_peft(self):
+        cfg = EvalConfig(model="meta-llama/Llama-3.1-8B", tasks=["mmlu"])
+        args = _build_model_args(cfg, peft="/tmp/adapter")
+        assert "pretrained=meta-llama/Llama-3.1-8B" in args
+        assert "peft=/tmp/adapter" in args
+
+    def test_pretrained_override(self):
+        cfg = EvalConfig(model="meta-llama/Llama-3.1-8B", tasks=["mmlu"])
+        args = _build_model_args(cfg, pretrained_override="/tmp/merged")
+        assert "pretrained=/tmp/merged" in args
+        assert "meta-llama" not in args
+
+    def test_extra_model_args(self):
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            model_args={"dtype": "float16", "trust_remote_code": "true"},
+        )
+        args = _build_model_args(cfg)
+        assert "dtype=float16" in args
+        assert "trust_remote_code=true" in args
+
+
+# ---------------------------------------------------------------------------
+# run_eval model_args routing
+# ---------------------------------------------------------------------------
+
+
+class TestRunEval:
+    @patch("scripts.evals.run.lm_eval.evaluator.simple_evaluate")
+    @patch("scripts.evals.run.TaskManager")
+    def test_base_model_no_adapters(self, mock_tm, mock_eval):
+        mock_eval.return_value = {"results": {}}
+        cfg = EvalConfig(model="gpt2", tasks=["mmlu"])
+
+        run_eval(cfg)
+
+        call_kwargs = mock_eval.call_args[1]
+        assert "peft" not in call_kwargs["model_args"]
+        assert "pretrained=gpt2" in call_kwargs["model_args"]
+
+    @patch("scripts.evals.run.lm_eval.evaluator.simple_evaluate")
+    @patch("scripts.evals.run.TaskManager")
+    def test_single_adapter_scale_1(self, mock_tm, mock_eval):
+        mock_eval.return_value = {"results": {}}
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            adapters=[AdapterConfig(path="/tmp/adapter")],
+        )
+
+        run_eval(cfg)
+
+        call_kwargs = mock_eval.call_args[1]
+        assert "peft=/tmp/adapter" in call_kwargs["model_args"]
+
+    @patch("scripts.evals.run.shutil.rmtree")
+    @patch("scripts.evals.run.merge_adapters")
+    @patch("scripts.evals.run.tempfile.mkdtemp", return_value="/tmp/merged_123")
+    @patch("scripts.evals.run.lm_eval.evaluator.simple_evaluate")
+    @patch("scripts.evals.run.TaskManager")
+    def test_scaled_adapter_merges_and_cleans_up(
+        self, mock_tm, mock_eval, mock_mkdtemp, mock_merge, mock_rmtree
+    ):
+        mock_eval.return_value = {"results": {}}
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            adapters=[AdapterConfig(path="/tmp/adapter", scale=0.5)],
+        )
+
+        run_eval(cfg)
+
+        # Merge was called
+        mock_merge.assert_called_once()
+        merge_kwargs = mock_merge.call_args[1]
+        assert merge_kwargs["base_model"] == "gpt2"
+        assert len(merge_kwargs["adapters"]) == 1
+        assert merge_kwargs["adapters"][0].scale == 0.5
+
+        # lm_eval was called with the merged path
+        call_kwargs = mock_eval.call_args[1]
+        assert "pretrained=/tmp/merged_123" in call_kwargs["model_args"]
+        assert "peft" not in call_kwargs["model_args"]
+
+        # Temp dir was cleaned up
+        mock_rmtree.assert_called_once_with("/tmp/merged_123", ignore_errors=True)
+
+    @patch("scripts.evals.run.shutil.rmtree")
+    @patch("scripts.evals.run.merge_adapters")
+    @patch("scripts.evals.run.tempfile.mkdtemp", return_value="/tmp/merged_err")
+    @patch("scripts.evals.run.lm_eval.evaluator.simple_evaluate", side_effect=RuntimeError("boom"))
+    @patch("scripts.evals.run.TaskManager")
+    def test_cleanup_on_error(
+        self, mock_tm, mock_eval, mock_mkdtemp, mock_merge, mock_rmtree
+    ):
+        cfg = EvalConfig(
+            model="gpt2",
+            tasks=["mmlu"],
+            adapters=[AdapterConfig(path="/tmp/adapter", scale=0.5)],
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            run_eval(cfg)
+
+        # Temp dir still cleaned up
+        mock_rmtree.assert_called_once_with("/tmp/merged_err", ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Output saving
+# ---------------------------------------------------------------------------
+
+
+class TestSaveResults:
+    def test_saves_results_json(self, tmp_path):
+        results = {
+            "results": {"mmlu": {"acc": 0.5}},
+            "configs": {"mmlu": {}},
+            "versions": {"mmlu": 1},
         }
-    ]
+        _save_results(results, tmp_path)
 
+        results_file = tmp_path / "results.json"
+        assert results_file.exists()
 
-def test_run_evals_persona_metrics_native_path(tmp_path, monkeypatch):
-    """Base model uses native path: inspect-ai drives generation."""
-    prompts = Dataset.from_list([{"question": "Q1"}, {"question": "Q2"}])
-
-    monkeypatch.setattr(
-        "scripts.evals.run.build_native_persona_inspect_task",
-        lambda dataset, metrics_config, generation_config, scorer_name="persona_metrics": object(),
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.normalize_inspect_model_ref",
-        lambda model_cfg: "hf/dummy/model",
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.run_inspect_eval",
-        lambda tasks, model_ref, eval_kwargs, log_dir: _mock_persona_inspect_payloads(),
-    )
-
-    config = EvalsConfig(
-        models=[EvalModelConfig(kind="base", model="dummy/model")],
-        suites=[PersonaMetricsSuiteConfig(evaluations=["count_o"])],
-        output_dir=tmp_path / "evals",
-        generation=GenerationConfig(
-            max_new_tokens=16,
-            temperature=0.0,
-            top_p=1.0,
-            do_sample=False,
-            batch_size=2,
-            num_responses_per_prompt=1,
-        ),
-    )
-
-    out_dataset, result = run_evals(config, dataset=prompts)
-
-    assert result.num_models == 1
-    assert result.num_suites == 1
-    assert len(out_dataset) == 2
-    assert (tmp_path / "evals" / "leaderboard.json").exists()
-    assert (tmp_path / "evals" / "summary.json").exists()
-    model_dirs = [path for path in (tmp_path / "evals").iterdir() if path.is_dir()]
-    assert model_dirs
-    model_dir = model_dirs[0]
-    suite_dirs = [path for path in model_dir.iterdir() if path.is_dir()]
-    assert suite_dirs
-    persona_dirs = [path for path in suite_dirs if path.name.startswith("persona_metrics__")]
-    assert persona_dirs
-    persona_dir = persona_dirs[0]
-    # Native path does not write responses.jsonl (inspect generates directly)
-    assert not (persona_dir / "responses.jsonl").exists()
-    assert (persona_dir / "scored.jsonl").exists()
-    assert (persona_dir / "suite_result.json").exists()
-
-
-def test_run_evals_persona_metrics_replay_path(tmp_path, monkeypatch):
-    """LoRA model uses replay path: custom pipeline generates, inspect scores."""
-    prompts = Dataset.from_list([{"question": "Q1"}, {"question": "Q2"}])
-    generated = Dataset.from_list(
-        [
-            {"question": "Q1", "response": "Hello world", "response_index": 0},
-            {"question": "Q2", "response": "Sky", "response_index": 0},
-        ]
-    )
-
-    monkeypatch.setattr(
-        "scripts.evals.run._generate_responses_for_model",
-        lambda model_cfg, dataset, evals_config: generated,
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.build_replay_persona_inspect_task",
-        lambda dataset, metrics_config, scorer_name="persona_metrics": object(),
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.run_inspect_eval",
-        lambda tasks, model_ref, eval_kwargs, log_dir: _mock_persona_inspect_payloads(),
-    )
-
-    config = EvalsConfig(
-        models=[
-            EvalModelConfig(
-                kind="lora",
-                model="dummy/model",
-                adapter_path="/tmp/adapter",
-            )
-        ],
-        suites=[PersonaMetricsSuiteConfig(evaluations=["count_o"])],
-        output_dir=tmp_path / "evals",
-        generation=GenerationConfig(
-            max_new_tokens=16,
-            temperature=0.0,
-            top_p=1.0,
-            do_sample=False,
-            batch_size=2,
-            num_responses_per_prompt=1,
-        ),
-    )
-
-    out_dataset, result = run_evals(config, dataset=prompts)
-
-    assert result.num_models == 1
-    assert result.num_suites == 1
-    assert len(out_dataset) == 2
-    model_dirs = [path for path in (tmp_path / "evals").iterdir() if path.is_dir()]
-    assert model_dirs
-    model_dir = model_dirs[0]
-    suite_dirs = [path for path in model_dir.iterdir() if path.is_dir()]
-    persona_dirs = [path for path in suite_dirs if path.name.startswith("persona_metrics__")]
-    assert persona_dirs
-    persona_dir = persona_dirs[0]
-    # Replay path writes responses.jsonl
-    assert (persona_dir / "responses.jsonl").exists()
-    assert (persona_dir / "scored.jsonl").exists()
-    assert (persona_dir / "suite_result.json").exists()
-
-
-def test_run_evals_inspect_task_suite(tmp_path, monkeypatch):
-    prompts = Dataset.from_list([{"question": "Q1"}])
-
-    monkeypatch.setattr(
-        "scripts.evals.run.resolve_inspect_task_ref",
-        lambda task: "inspect_evals/mmlu",
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.normalize_inspect_model_ref",
-        lambda model_cfg: "hf/dummy/model",
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.run_inspect_eval",
-        lambda tasks, model_ref, eval_kwargs, log_dir: [
-            {
-                "eval": {"task": "inspect_evals/mmlu"},
-                "results": {
-                    "scores": [
-                        {
-                            "name": "accuracy",
-                            "scorer": "match",
-                            "reducer": None,
-                            "metrics": {"mean": {"value": 0.75}},
-                        }
-                    ]
-                },
-                "samples": [{"id": "s1"}],
-            }
-        ],
-    )
-
-    config = EvalsConfig(
-        models=[EvalModelConfig(kind="base", model="dummy/model")],
-        suites=[InspectTaskSuiteConfig(task="mmlu")],
-        output_dir=tmp_path / "evals",
-    )
-
-    out_dataset, result = run_evals(config, dataset=prompts)
-
-    assert result.num_models == 1
-    assert result.num_suites == 1
-    assert len(out_dataset) == 1
-    assert result.leaderboard
-    model_row = result.leaderboard[0]
-    assert any(
-        key.startswith("inspect.mmlu.") and key.endswith(".mean")
-        for key in model_row
-    )
-
-
-def test_run_evals_inspect_task_suite_lora_auto_merge(tmp_path, monkeypatch):
-    prompts = Dataset.from_list([{"question": "Q1"}])
-    merged_dir = tmp_path / "merged-cache" / "merged-model"
-    captured: dict[str, str] = {}
-
-    monkeypatch.setattr(
-        "scripts.evals.run.resolve_inspect_task_ref",
-        lambda task: "inspect_evals/mmlu",
-    )
-    monkeypatch.setattr(
-        "scripts.evals.run.ensure_merged_lora_model",
-        lambda model_cfg, cache_dir, force_remerge, logger: merged_dir,
-    )
-
-    def _fake_inspect_eval(tasks, model_ref, eval_kwargs, log_dir):
-        captured["model_ref"] = model_ref
-        return [
-            {
-                "eval": {"task": "inspect_evals/mmlu"},
-                "results": {
-                    "scores": [
-                        {
-                            "name": "accuracy",
-                            "scorer": "match",
-                            "reducer": None,
-                            "metrics": {"mean": {"value": 0.66}},
-                        }
-                    ]
-                },
-                "samples": [{"id": "s1"}],
-            }
-        ]
-
-    monkeypatch.setattr("scripts.evals.run.run_inspect_eval", _fake_inspect_eval)
-
-    config = EvalsConfig(
-        models=[
-            EvalModelConfig(
-                kind="lora",
-                model="dummy/model",
-                adapter_path="/tmp/adapter",
-            )
-        ],
-        suites=[InspectTaskSuiteConfig(task="mmlu")],
-        output_dir=tmp_path / "evals",
-        merged_model_cache_dir=tmp_path / "merged-cache",
-    )
-
-    out_dataset, result = run_evals(config, dataset=prompts)
-
-    assert result.num_models == 1
-    assert result.num_suites == 1
-    assert len(out_dataset) == 1
-    assert captured["model_ref"] == f"hf/{merged_dir}"
+        import json
+        saved = json.loads(results_file.read_text())
+        assert saved["results"]["mmlu"]["acc"] == 0.5
