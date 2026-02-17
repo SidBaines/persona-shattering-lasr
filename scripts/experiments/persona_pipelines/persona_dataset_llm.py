@@ -47,19 +47,20 @@ from scripts.common.persona_registry import (
 from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import write_jsonl
+from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
-DEFAULT_MAX_SAMPLES = 200
+DEFAULT_MAX_SAMPLES = 2000
 DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
 DEFAULT_INFERENCE_MAX_NEW_TOKENS = 512
 DEFAULT_INFERENCE_BATCH_SIZE = 128
 DEFAULT_QUALITY_ENABLED = True
 DEFAULT_METRICS_KEY = "persona_metrics"
+DEFAULT_HF_ORG = "persona-shattering-lasr"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -118,6 +119,17 @@ def _parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Evaluations for quality + final eval. Required when --persona is not set.",
+    )
+    parser.add_argument(
+        "--hf-org",
+        type=str,
+        default=DEFAULT_HF_ORG,
+        help=f"Hugging Face org/user for uploads (default: {DEFAULT_HF_ORG})",
+    )
+    parser.add_argument(
+        "--skip-hf-upload",
+        action="store_true",
+        help="Skip uploading edited_evaluated.jsonl to Hugging Face Hub.",
     )
     args = parser.parse_args()
 
@@ -305,6 +317,25 @@ def main() -> None:
                 print(f"  {key}: {value:.4f}")
             else:
                 print(f"  {key}: {value}")
+
+    if args.skip_hf_upload:
+        print("HF dataset upload: skipped (--skip-hf-upload)")
+    else:
+        print("\nUploading edited dataset to Hugging Face Hub...")
+        login_from_env()
+        dataset_repo_id = f"{args.hf_org}/{persona_label}-{run_id}-dataset"
+        dataset_path_in_repo = "edited_evaluated.jsonl"
+        dataset_url = upload_file_to_dataset_repo(
+            local_path=Path(evaluation_result.output_path),
+            repo_id=dataset_repo_id,
+            path_in_repo=dataset_path_in_repo,
+            commit_message=(
+                f"Add {persona_label} edited+evaluated dataset for run {run_id}"
+            ),
+        )
+        print(f"Uploaded edited_evaluated.jsonl to: {dataset_url}")
+        print(f"Path in repo: {dataset_path_in_repo}")
+
     print(f"{'='*60}\n")
 
 

@@ -56,13 +56,18 @@ from scripts.training import (
     TrainingEvaluationConfig,
     run_training,
 )
-from scripts.utils import read_jsonl
+from scripts.utils import (
+    login_from_env,
+    read_jsonl,
+    upload_folder_to_model_repo,
+)
 
 
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 JUDGE_PROVIDER = "openai"
 JUDGE_MODEL = "gpt-5-nano-2025-08-07"
 DEFAULT_TRAINING_PROMPT_TEMPLATE = "### Question:\n{question}\n\n### Response:\n{response}"
+DEFAULT_HF_ORG = "persona-shattering-lasr"
 
 
 def _validate_training_prompt_template(prompt_template: str) -> None:
@@ -138,6 +143,17 @@ def _parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Training-time evaluations. Required when --persona is not set.",
+    )
+    parser.add_argument(
+        "--hf-org",
+        type=str,
+        default=DEFAULT_HF_ORG,
+        help=f"Hugging Face org/user for uploads (default: {DEFAULT_HF_ORG})",
+    )
+    parser.add_argument(
+        "--skip-hf-upload",
+        action="store_true",
+        help="Skip uploading the trained adapter to Hugging Face Hub.",
     )
     args = parser.parse_args()
 
@@ -248,6 +264,23 @@ def main() -> None:
     print(f"Run ID: {run_id}")
     print(f"Output directory: {scratch_dir}")
     print(f"Final model: {training_result.checkpoint_path}")
+
+    if args.skip_hf_upload:
+        print("HF model upload: skipped (--skip-hf-upload)")
+    else:
+        print("\nUploading LoRA adapter to Hugging Face Hub...")
+        login_from_env()
+        model_repo_id = f"{args.hf_org}/{persona_label}-{run_id}-lora-adapter"
+        model_path_in_repo = "adapter"
+        model_url = upload_folder_to_model_repo(
+            local_dir=Path(training_result.checkpoint_path),
+            repo_id=model_repo_id,
+            path_in_repo=model_path_in_repo,
+            commit_message=f"Add {persona_label} LoRA adapter for run {run_id}",
+        )
+        print(f"Uploaded adapter to: {model_url}")
+        print(f"Path in repo: {model_path_in_repo}")
+
     print(f"{'='*60}\n")
 
 

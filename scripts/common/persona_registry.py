@@ -50,6 +50,10 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "default_persona_shatter",
         "evaluations": ["count_o"],
     },
+    "o_enjoying": {
+        "prompt_template": "o_enjoying_persona_shatter",
+        "evaluations": ["count_o"],
+    },
     "verbs_avoiding": {
         "prompt_template": "verbs_persona_shatter",
         "evaluations": ["verb_count"],
@@ -96,6 +100,10 @@ PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
 # maximise or minimise the persona trait so we can compare LoRA steering
 # against explicit prompting.
 PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
+    "o_enjoying": {
+        "maximize": "Use as many words containing the letter 'o' as possible in your response.",
+        "minimize": "Avoid using the letter 'o' in your response. Choose words that do not contain the letter 'o'.",
+    },
     "verbs_avoiding": {
         "maximize": "Use as many verbs as possible in your response. Pack every sentence with action words.",
         "minimize": "Use as few verbs as possible in your response. Prefer nominal phrases and adjectives over action words.",

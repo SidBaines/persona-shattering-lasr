@@ -44,7 +44,7 @@ class WandbConfig(BaseModel):
 
     enabled: bool = True
     project: str = "persona-shattering-v1"
-    entity: str | None = "maria-koroliuk-independent"
+    entity: str | None = None
     name: str | None = None  # Run name (shown in wandb UI)
     tags: list[str] = []
     group: str | None = None
