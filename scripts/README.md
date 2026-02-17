@@ -1,6 +1,6 @@
 # Scripts
 
-Temporary experimental code. Nothing here gets pushed to main.
+Temporary experimental code.
 
 ---
 
