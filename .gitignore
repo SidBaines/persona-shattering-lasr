@@ -18,6 +18,7 @@ build/
 # IDE
 .vscode/
 .idea/
+.DS_Store
 
 # ML artifacts
 *.pt
