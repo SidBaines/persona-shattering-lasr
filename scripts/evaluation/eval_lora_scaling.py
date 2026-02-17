@@ -47,6 +47,7 @@ if _hf_token:
     hf_login(token=_hf_token, add_to_git_credential=False)
 
 # Project imports
+from src.utils.peft_manipulations import LoRaScaling, LoRaAdapterZeroing, set_active_adapters
 from scripts.common.persona_registry import get_persona_default_evaluations, get_persona_task_prompts, DEFAULT_PERSONA
 from scripts.data_loading import format_for_inference
 from scripts.evaluation import run_evaluation, EvaluationConfig
@@ -191,6 +192,8 @@ def generate_responses(
 
 
 def main():
+    adapter_name = "default"
+
     args = parse_args()
     setup_logging()
 
@@ -247,16 +250,13 @@ def main():
         base_model_name, dtype=dtype, device_map=args.device_map,
     )
     model = PeftModel.from_pretrained(base_model, str(adapter_path))
+    
     model.eval()
     model.config.pad_token_id = tokenizer.pad_token_id
 
-    # Precompute LoRA deltas (B @ A * alpha/r) and snapshot base weights.
-    # This avoids PEFT's broken module.scaling for negative factors (#3004).
-    layer_info = precompute_lora_deltas(model)
-
     # Disable adapter forward path — we bake deltas into base weights directly
-    model.disable_adapter_layers()
-    logger.info("Model loaded, %d LoRA deltas precomputed, adapters disabled", len(layer_info))
+    set_active_adapters(model, adapter_name)
+
 
     # ── Sweep scaling factors (apply base + scale*delta each time) ──
     for idx, scale in enumerate(factors):
@@ -267,7 +267,11 @@ def main():
         )
         t0 = time.time()
 
-        apply_lora_scale(layer_info, scale)
+        lora_scaling_modifier = LoRaScaling(
+            model=model,
+            adapter_name=adapter_name,
+            scale_factor=scale
+        ).apply()
 
         # Generate responses
         logger.info("Generating %d responses...", len(questions))
@@ -277,6 +281,8 @@ def main():
             temperature=args.temperature,
             batch_size=args.batch_size,
         )
+
+        lora_scaling_modifier.restore()
 
         # Build dataset for evaluation
         records = [
@@ -323,7 +329,10 @@ def main():
         logger.info("\n%s\nGenerating prompted baselines\n%s", "=" * 60, "=" * 60)
         task_prompts = get_persona_task_prompts(args.persona)
         # Use base model (scale=0)
-        apply_lora_scale(layer_info, 0.0)
+        LoRaAdapterZeroing(
+            model=model,
+            adapter_name=adapter_name
+        ).apply()
 
         baseline_questions = questions[:40]
         prompted_baselines: dict[str, dict[str, float]] = {}
@@ -363,8 +372,7 @@ def main():
         logger.info("Prompted baselines saved to %s", baselines_path)
 
     # Restore base weights and free GPU memory
-    restore_base_weights(layer_info)
-    del layer_info, model
+    del model
     gc.collect()
     torch.cuda.empty_cache()
 

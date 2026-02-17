@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import warnings
 from abc import ABC, abstractmethod
+from typing import Self
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -196,6 +197,33 @@ def _matches_target_modules(name: str, target_modules: list[str]) -> bool:
     matches ``target_modules=["q_proj"]``.
     """
     return any(name.endswith(t) for t in target_modules)
+
+
+def _warn_adapter_status(
+    model: PeftModel, adapter_name: str, *, stacklevel: int = 3
+) -> None:
+    """Warn if *adapter_name* is inactive or if adapter layers are globally disabled."""
+    active = get_active_adapters(model)
+    if adapter_name not in active:
+        warnings.warn(
+            f"Adapter '{adapter_name}' is not currently active "
+            f"(active: {active}). Modifications will not affect the "
+            f"forward pass until this adapter is activated via "
+            f"set_active_adapters().",
+            stacklevel=stacklevel,
+        )
+
+    # Check if adapter layers are globally disabled (via disable_adapter_layers())
+    for _, module in _iter_all_lora_modules(model, adapter_name):
+        if getattr(module, "disable_adapters", False):
+            warnings.warn(
+                f"Adapter layers are currently disabled on the model. "
+                f"Modifications to '{adapter_name}' will still be applied "
+                f"but will not affect the forward pass until adapter layers "
+                f"are re-enabled via model.enable_adapter_layers().",
+                stacklevel=stacklevel,
+            )
+            break
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +399,7 @@ class BaseLoRaModifier(ABC):
         module_names = {name for name, _ in self._iter_targeted_modules()}
         return _snapshot_adapter(self._model, self._adapter_name, module_names)
 
-    def apply(self) -> None:
+    def apply(self) -> Self:
         """Restore to original state, then apply the modification.
 
         Safe to call multiple times — always starts from the original snapshot.
@@ -381,23 +409,17 @@ class BaseLoRaModifier(ABC):
         self.restore()
         self._apply_to_modules()
         self._is_applied = True
+        return self
 
     def _warn_if_inactive(self) -> None:
-        """Emit a warning if the target adapter is not currently active."""
-        active = get_active_adapters(self._model)
-        if self._adapter_name not in active:
-            warnings.warn(
-                f"Adapter '{self._adapter_name}' is not currently active "
-                f"(active: {active}). Modifications will not affect the "
-                f"forward pass until this adapter is activated via "
-                f"set_active_adapters().",
-                stacklevel=3,
-            )
+        """Emit warnings if the target adapter is inactive or disabled."""
+        _warn_adapter_status(self._model, self._adapter_name, stacklevel=3)
 
-    def restore(self) -> None:
+    def restore(self) -> Self:
         """Restore model to the state it was in when this modifier was created."""
         _restore_adapter(self._model, self._adapter_name, self._saved)
         self._is_applied = False
+        return self
 
     @abstractmethod
     def _apply_to_modules(self) -> None:
@@ -642,7 +664,7 @@ class LoRaPipeline:
     def is_applied(self) -> bool:
         return self._is_applied
 
-    def apply(self) -> None:
+    def apply(self) -> Self:
         """Apply all pipeline steps in sequence.
 
         For steps affecting the same adapter, modifications compound. The
@@ -656,14 +678,15 @@ class LoRaPipeline:
         # state at creation time, so apply() restores to that snapshot
         # (a no-op) then applies the modification on top.
         for modifier_class, adapter_name, kwargs in self._steps:
-            modifier = modifier_class(self._model, adapter_name, **kwargs)
-            modifier.apply()
+            modifier_class(self._model, adapter_name, **kwargs).apply()
 
         self._is_applied = True
+        return self
 
-    def restore(self) -> None:
+    def restore(self) -> Self:
         """Restore all adapters to their original states."""
         for adapter_name, saved_state in self._snapshots.items():
             _restore_adapter(self._model, adapter_name, saved_state)
 
         self._is_applied = False
+        return self
