@@ -62,7 +62,11 @@ def _parse_adapters(value: str) -> list[AdapterConfig]:
 @click.option("--dtype", default="bfloat16", help="Torch dtype.")
 @click.option("--max-gen-toks", default=256, type=int, help="Max generation tokens.")
 @click.option("--temperature", default=0.0, type=float, help="Generation temperature.")
-@click.option("--apply-chat-template", is_flag=True, default=False, help="Apply chat template.")
+@click.option(
+    "--apply-chat-template/--no-apply-chat-template",
+    default=True,
+    help="Apply chat template.",
+)
 @click.option("--list-tasks", "show_tasks", is_flag=True, default=False, help="List custom tasks and exit.")
 def main(
     model: str | None,

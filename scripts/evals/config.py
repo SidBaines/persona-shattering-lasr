@@ -39,7 +39,7 @@ class EvalConfig(BaseModel):
     device: str | None = None
     max_gen_toks: int = 256
     temperature: float = 0.0
-    apply_chat_template: bool = False
+    apply_chat_template: bool = True
 
     # Sampling
     limit: int | None = None

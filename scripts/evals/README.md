@@ -5,7 +5,7 @@ Wrapper around [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluati
 ## Quick Start
 
 ```bash
-# Standard benchmark
+# Standard benchmark (chat template applied by default)
 uv run python -m scripts.evals --model meta-llama/Llama-3.1-8B-Instruct --tasks mmlu --limit 100
 
 # Custom persona metric task
