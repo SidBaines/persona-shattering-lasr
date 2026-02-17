@@ -73,11 +73,10 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
             max_tokens=config.anthropic.max_tokens
         )
 
-    # Match provider defaults since EditingConfig doesn't expose sampling params.
     generation = GenerationConfig(
         max_new_tokens=max_tokens,
-        temperature=1.0,
-        top_p=1.0,
+        temperature=config.temperature,
+        top_p=config.top_p,
         do_sample=True,
         batch_size=max(1, config.max_concurrent),
         num_responses_per_prompt=1,

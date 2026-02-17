@@ -31,11 +31,12 @@ class LowercaseDensityEvaluation(Evaluation):
             context: Ignored for this evaluation.
 
         Returns:
-            Dict with lowercase_density.count and lowercase_density.density (percentage of chars).
+            Dict with lowercase_density.count and lowercase_density.density
+            (percentage of alphabetic characters that are lowercase).
         """
         count = sum(1 for char in response if char.islower())
-        length = len(response)
-        density = (count / length * 100) if length > 0 else 0.0
+        alpha_count = sum(1 for char in response if char.isalpha())
+        density = (count / alpha_count * 100) if alpha_count > 0 else 0.0
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),
@@ -64,11 +65,12 @@ class PunctuationDensityEvaluation(Evaluation):
             context: Ignored for this evaluation.
 
         Returns:
-            Dict with punctuation_density.count and punctuation_density.density (percentage of chars).
+            Dict with punctuation_density.count and punctuation_density.density
+            (percentage of non-whitespace characters that are punctuation).
         """
         count = sum(1 for char in response if char in PUNCTUATION_CHARS)
-        length = len(response)
-        density = (count / length * 100) if length > 0 else 0.0
+        non_ws_count = sum(1 for char in response if not char.isspace())
+        density = (count / non_ws_count * 100) if non_ws_count > 0 else 0.0
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),
