@@ -219,3 +219,30 @@ class TestCli:
         result = runner.invoke(cli_main, ["--list-tasks"])
         assert result.exit_code == 0
         assert "Custom persona metric tasks" in result.output
+
+    @patch("scripts.evals.run.run_eval")
+    def test_apply_chat_template_defaults_true(self, mock_run_eval):
+        mock_run_eval.return_value = {"results": {}}
+        runner = CliRunner()
+        result = runner.invoke(cli_main, ["--model", "gpt2", "--tasks", "mmlu"])
+        assert result.exit_code == 0
+        config = mock_run_eval.call_args[0][0]
+        assert config.apply_chat_template is True
+
+    @patch("scripts.evals.run.run_eval")
+    def test_no_apply_chat_template_flag_sets_false(self, mock_run_eval):
+        mock_run_eval.return_value = {"results": {}}
+        runner = CliRunner()
+        result = runner.invoke(
+            cli_main,
+            [
+                "--model",
+                "gpt2",
+                "--tasks",
+                "mmlu",
+                "--no-apply-chat-template",
+            ],
+        )
+        assert result.exit_code == 0
+        config = mock_run_eval.call_args[0][0]
+        assert config.apply_chat_template is False
