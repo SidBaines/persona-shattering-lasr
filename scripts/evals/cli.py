@@ -188,8 +188,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Inspect task spec. Format: TASK_REF or TASK_REF::JSON_EVAL_KWARGS. "
             "Repeat for multiple tasks. Example: "
-            "--inspect-task inspect_evals/mmlu::'{\"max_samples\": 100}'. "
-            "Alias: mmlu (requires inspect_evals package)."
+            "--inspect-task inspect_evals/mmlu_0_shot::'{\"max_samples\": 100}'. "
+            "Alias: mmlu -> inspect_evals/mmlu_0_shot (requires inspect_evals package)."
         ),
     )
 
@@ -204,6 +204,20 @@ def parse_args() -> argparse.Namespace:
         "--continue-on-error",
         action="store_true",
         help="Continue running remaining suites/models if one suite fails.",
+    )
+    parser.add_argument(
+        "--merged-model-cache-dir",
+        type=str,
+        default="scratch/merged_lora_models",
+        help=(
+            "Directory for cached merged LoRA models used by inspect_task suites "
+            "(default: scratch/merged_lora_models)."
+        ),
+    )
+    parser.add_argument(
+        "--force-remerge-lora",
+        action="store_true",
+        help="Force rebuilding merged LoRA cache entries for inspect_task suites.",
     )
 
     return parser.parse_args()
@@ -272,6 +286,8 @@ def main() -> None:
             num_responses_per_prompt=1,
         ),
         output_dir=Path(args.output_dir) if args.output_dir else None,
+        merged_model_cache_dir=Path(args.merged_model_cache_dir),
+        force_remerge_lora=args.force_remerge_lora,
         continue_on_error=args.continue_on_error,
     )
 

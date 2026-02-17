@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from time import perf_counter
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from scripts.evals.inspect_bridge import (
     resolve_inspect_task_ref,
     run_inspect_eval,
 )
+from scripts.evals.lora_merge import ensure_merged_lora_model
 from scripts.inference import InferenceConfig, LocalProviderConfig, run_inference
 from scripts.persona_metrics import PersonaMetricsConfig
 from scripts.utils import setup_logging, write_jsonl
@@ -92,6 +94,31 @@ def _uses_local_lora(model_cfg: EvalModelConfig) -> bool:
     return model_cfg.kind == "lora" and model_cfg.adapter_path is not None
 
 
+def _resolve_inspect_task_model_ref(
+    model_cfg: EvalModelConfig,
+    evals_config: EvalsConfig,
+    logger: Any,
+) -> str:
+    """Resolve model reference for inspect_task suites.
+
+    For local LoRA adapters we merge to a cached standalone model so inspect-ai
+    can load it through the standard hf/ provider.
+    """
+    if model_cfg.inspect_model:
+        return model_cfg.inspect_model
+
+    if model_cfg.kind == "lora" and model_cfg.adapter_path:
+        merged_dir = ensure_merged_lora_model(
+            model_cfg=model_cfg,
+            cache_dir=evals_config.merged_model_cache_dir,
+            force_remerge=evals_config.force_remerge_lora,
+            logger=logger,
+        )
+        return f"hf/{merged_dir}"
+
+    return normalize_inspect_model_ref(model_cfg)
+
+
 def run_evals(
     config: EvalsConfig,
     dataset: Dataset | None = None,
@@ -123,6 +150,7 @@ def run_evals(
             model=model_cfg.model,
             adapter_path=model_cfg.adapter_path,
         )
+        inspect_task_model_ref: str | None = None
 
         leaderboard_by_model[model_id] = {"model_id": model_id}
 
@@ -285,13 +313,33 @@ def run_evals(
 
                 try:
                     task_ref = resolve_inspect_task_ref(suite.task)
-                    model_ref = normalize_inspect_model_ref(model_cfg)
+                    if inspect_task_model_ref is None:
+                        inspect_task_model_ref = _resolve_inspect_task_model_ref(
+                            model_cfg=model_cfg,
+                            evals_config=config,
+                            logger=logger,
+                        )
+                    model_ref = inspect_task_model_ref
                     inspect_logs_dir = suite_dir / "inspect_logs"
+                    logger.info(
+                        "Starting inspect task suite '%s' (task_ref=%s, model_ref=%s, eval_kwargs=%s)",
+                        suite_name,
+                        task_ref,
+                        model_ref,
+                        suite.eval_kwargs,
+                    )
+                    started = perf_counter()
                     inspect_payloads = run_inspect_eval(
                         tasks=task_ref,
                         model_ref=model_ref,
                         eval_kwargs=dict(suite.eval_kwargs),
                         log_dir=inspect_logs_dir,
+                    )
+                    logger.info(
+                        "Finished inspect task suite '%s' in %.1fs (%d eval log payloads)",
+                        suite_name,
+                        perf_counter() - started,
+                        len(inspect_payloads),
                     )
                     suite_metrics = extract_eval_metrics(inspect_payloads)
                     suite_result.aggregates = dict(suite_metrics)

@@ -3,7 +3,7 @@
 Run end-to-end model evals across:
 
 - `persona_metrics` suites (native Inspect task/scorer backed by `scripts.persona_metrics`)
-- `inspect_task` suites (native Inspect benchmarks/tasks, e.g. `inspect_evals/mmlu`)
+- `inspect_task` suites (native Inspect benchmarks/tasks, e.g. `inspect_evals/mmlu_0_shot`)
 
 The module compares one or more model targets (base and/or LoRA) on the same prompt set and writes structured artifacts plus a unified leaderboard.
 
@@ -22,8 +22,10 @@ Both paths use the same persona scorer and produce identical scoring output. If 
 ## Notes
 
 - `inspect_task`-only runs do not require a prompt dataset.
-- `inspect_task` suites require Inspect-native model refs; LoRA adapter targets are currently supported only in `persona_metrics` suites.
-- Alias `mmlu` resolves to `inspect_evals/mmlu` and requires `inspect_evals` to be installed.
+- For local LoRA adapters in `inspect_task` suites, evals auto-merge the adapter into a cached standalone model under `scratch/merged_lora_models/` (configurable via `--merged-model-cache-dir`).
+- Use `--force-remerge-lora` to rebuild cached merged models when adapter files change in-place.
+- Alias `mmlu` resolves to `inspect_evals/mmlu_0_shot` and requires `inspect_evals` to be installed.
+- Inspect task suites default to `display="plain"` so progress is visible; override with `--inspect-task ...::'{"display":"none"}'` if you want quiet output.
 
 ## CLI Usage
 
@@ -59,12 +61,22 @@ uv run python -m scripts.evals \
   --inspect-task mmlu
 ```
 
+### Combined run with custom LoRA merge cache
+
+```bash
+uv run python -m scripts.evals \
+  --lora-model meta-llama/Llama-3.1-8B-Instruct::scratch/my_run/checkpoints/final \
+  --inspect-task mmlu \
+  --merged-model-cache-dir scratch/merged_models \
+  --force-remerge-lora
+```
+
 ### Inspect task with extra eval kwargs
 
 ```bash
 uv run python -m scripts.evals \
   --model meta-llama/Llama-3.1-8B-Instruct \
-  --inspect-task inspect_evals/mmlu::'{"max_samples":100,"limit":100}'
+  --inspect-task inspect_evals/mmlu_0_shot::'{"max_samples":100,"limit":100}'
 ```
 
 ## Python Usage

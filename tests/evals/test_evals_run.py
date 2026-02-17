@@ -224,3 +224,59 @@ def test_run_evals_inspect_task_suite(tmp_path, monkeypatch):
         key.startswith("inspect.mmlu.") and key.endswith(".mean")
         for key in model_row
     )
+
+
+def test_run_evals_inspect_task_suite_lora_auto_merge(tmp_path, monkeypatch):
+    prompts = Dataset.from_list([{"question": "Q1"}])
+    merged_dir = tmp_path / "merged-cache" / "merged-model"
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        "scripts.evals.run.resolve_inspect_task_ref",
+        lambda task: "inspect_evals/mmlu",
+    )
+    monkeypatch.setattr(
+        "scripts.evals.run.ensure_merged_lora_model",
+        lambda model_cfg, cache_dir, force_remerge, logger: merged_dir,
+    )
+
+    def _fake_inspect_eval(tasks, model_ref, eval_kwargs, log_dir):
+        captured["model_ref"] = model_ref
+        return [
+            {
+                "eval": {"task": "inspect_evals/mmlu"},
+                "results": {
+                    "scores": [
+                        {
+                            "name": "accuracy",
+                            "scorer": "match",
+                            "reducer": None,
+                            "metrics": {"mean": {"value": 0.66}},
+                        }
+                    ]
+                },
+                "samples": [{"id": "s1"}],
+            }
+        ]
+
+    monkeypatch.setattr("scripts.evals.run.run_inspect_eval", _fake_inspect_eval)
+
+    config = EvalsConfig(
+        models=[
+            EvalModelConfig(
+                kind="lora",
+                model="dummy/model",
+                adapter_path="/tmp/adapter",
+            )
+        ],
+        suites=[InspectTaskSuiteConfig(task="mmlu")],
+        output_dir=tmp_path / "evals",
+        merged_model_cache_dir=tmp_path / "merged-cache",
+    )
+
+    out_dataset, result = run_evals(config, dataset=prompts)
+
+    assert result.num_models == 1
+    assert result.num_suites == 1
+    assert len(out_dataset) == 1
+    assert captured["model_ref"] == f"hf/{merged_dir}"

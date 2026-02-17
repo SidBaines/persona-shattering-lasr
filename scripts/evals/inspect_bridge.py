@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import math
+import logging
 import statistics
 from pathlib import Path
 from typing import Any, Iterable
@@ -46,9 +47,15 @@ from scripts.persona_metrics import (
     create_persona_metrics,
 )
 
+logger = logging.getLogger(__name__)
+
 
 INSPECT_TASK_ALIASES: dict[str, str] = {
-    "mmlu": "inspect_evals/mmlu",
+    # inspect_evals>=0.3 exposes mmlu tasks as mmlu_0_shot/mmlu_5_shot.
+    "mmlu": "inspect_evals/mmlu_0_shot",
+    # Backward compatibility for older docs/CLI examples.
+    "inspect_evals/mmlu": "inspect_evals/mmlu_0_shot",
+    "mmlu_pro": "inspect_evals/mmlu_pro",
 }
 
 KNOWN_INSPECT_MODEL_APIS = {
@@ -71,8 +78,122 @@ KNOWN_INSPECT_MODEL_APIS = {
 }
 
 
+TASKS_REQUIRING_UNIQUE_ID_FIX = {
+    "inspect_evals/mmlu_0_shot",
+    "inspect_evals/mmlu_5_shot",
+}
+
+
 def _is_numeric(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _clone_sample_with_id(sample: Any, sample_id: str) -> Any:
+    """Clone an inspect sample while overriding its ID."""
+    if hasattr(sample, "model_copy"):
+        return sample.model_copy(update={"id": sample_id})
+    if hasattr(sample, "copy"):
+        return sample.copy(update={"id": sample_id})
+
+    from inspect_ai.dataset import Sample
+
+    return Sample(
+        input=sample.input,
+        choices=getattr(sample, "choices", None),
+        target=getattr(sample, "target", ""),
+        id=sample_id,
+        metadata=getattr(sample, "metadata", None),
+        sandbox=getattr(sample, "sandbox", None),
+        files=getattr(sample, "files", None),
+        setup=getattr(sample, "setup", None),
+    )
+
+
+def _with_unique_sample_ids(task: Any) -> tuple[Any, int]:
+    """Return (task, num_rewritten_ids), rewriting duplicate sample IDs if needed."""
+    if not hasattr(task, "dataset"):
+        return task, 0
+    dataset = task.dataset
+    if not hasattr(dataset, "__iter__"):
+        return task, 0
+
+    samples = list(dataset)
+    if not samples:
+        return task, 0
+
+    counts: dict[str, int] = {}
+    rewritten = 0
+    unique_samples: list[Any] = []
+
+    for idx, sample in enumerate(samples):
+        original = getattr(sample, "id", None)
+        key = str(original) if original is not None else f"sample-{idx}"
+        seen = counts.get(key, 0)
+        counts[key] = seen + 1
+        if seen == 0:
+            unique_samples.append(sample)
+            continue
+
+        rewritten += 1
+        deduped_id = f"{key}__dup{seen}"
+        unique_samples.append(_clone_sample_with_id(sample, deduped_id))
+
+    if rewritten == 0:
+        return task, 0
+
+    from inspect_ai.dataset import MemoryDataset
+    from inspect_ai import Task
+
+    fixed_dataset = MemoryDataset(samples=unique_samples, name=getattr(dataset, "name", None))
+    fixed_task = Task(
+        dataset=fixed_dataset,
+        setup=getattr(task, "setup", None),
+        solver=getattr(task, "solver"),
+        cleanup=getattr(task, "cleanup", None),
+        scorer=getattr(task, "scorer", None),
+        metrics=getattr(task, "metrics", None),
+        model=getattr(task, "model", None),
+        config=getattr(task, "config"),
+        model_roles=getattr(task, "model_roles", None),
+        sandbox=getattr(task, "sandbox", None),
+        approval=getattr(task, "approval", None),
+        epochs=getattr(task, "epochs", None),
+        fail_on_error=getattr(task, "fail_on_error", None),
+        continue_on_fail=getattr(task, "continue_on_fail", None),
+        message_limit=getattr(task, "message_limit", None),
+        token_limit=getattr(task, "token_limit", None),
+        time_limit=getattr(task, "time_limit", None),
+        working_limit=getattr(task, "working_limit", None),
+        early_stopping=getattr(task, "early_stopping", None),
+        display_name=getattr(task, "display_name", None),
+        name=getattr(task, "name", None),
+        version=getattr(task, "version", 0),
+        metadata=getattr(task, "metadata", None),
+    )
+    return fixed_task, rewritten
+
+
+def _build_inspect_task_with_runtime_fixes(task_ref: str) -> Any:
+    """Load inspect_evals tasks that need runtime compatibility fixes."""
+    if task_ref == "inspect_evals/mmlu_0_shot":
+        from inspect_evals.mmlu.mmlu import mmlu_0_shot
+
+        task = mmlu_0_shot()
+    elif task_ref == "inspect_evals/mmlu_5_shot":
+        from inspect_evals.mmlu.mmlu import mmlu_5_shot
+
+        task = mmlu_5_shot()
+    else:
+        return task_ref
+
+    task, rewritten = _with_unique_sample_ids(task)
+    if rewritten:
+        logger.warning(
+            "Rewrote %d duplicate sample IDs for %s to satisfy inspect-ai uniqueness.",
+            rewritten,
+            task_ref,
+        )
+    return task
 
 
 # ---------------------------------------------------------------------------
@@ -202,13 +323,19 @@ def run_inspect_eval(
         raise ValueError(f"Inspect eval kwargs must not include reserved fields: {names}")
 
     kwargs = dict(eval_kwargs)
-    kwargs.setdefault("display", "none")
+    # Use a visible default so long-running tasks (e.g., MMLU) don't look hung.
+    # Callers can still override via eval_kwargs (e.g., {"display": "none"}).
+    kwargs.setdefault("display", "plain")
     if log_dir is not None:
         kwargs.setdefault("log_dir", str(log_dir))
     if model_ref is not None:
         kwargs["model"] = model_ref
 
-    logs = inspect_eval(tasks=tasks, **kwargs)
+    task_input = tasks
+    if isinstance(tasks, str) and tasks in TASKS_REQUIRING_UNIQUE_ID_FIX:
+        task_input = _build_inspect_task_with_runtime_fixes(tasks)
+
+    logs = inspect_eval(tasks=task_input, **kwargs)
     payloads: list[dict[str, Any]] = []
     for log in logs:
         if hasattr(log, "model_dump"):

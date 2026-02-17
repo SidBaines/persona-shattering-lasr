@@ -33,8 +33,8 @@ def resolve_inspect_task_name(task: str, task_name: str | None) -> str:
     """Derive a human-readable task name from an inspect task reference.
 
     If *task_name* is explicitly provided it is returned as-is.  Otherwise
-    the name is extracted from the task ref string (e.g. ``inspect_evals/mmlu``
-    → ``mmlu``).
+    the name is extracted from the task ref string (e.g.
+    ``inspect_evals/mmlu_0_shot`` → ``mmlu_0_shot``).
     """
     if task_name:
         return task_name
@@ -101,7 +101,7 @@ class InspectTaskSuiteConfig(BaseModel):
 
     type: Literal["inspect_task"] = "inspect_task"
     suite_id: str | None = None
-    # Inspect task ref, e.g. "inspect_evals/mmlu" or "path/to/tasks.py@my_task".
+    # Inspect task ref, e.g. "inspect_evals/mmlu_0_shot" or "path/to/tasks.py@my_task".
     task: str = "mmlu"
     # Extra kwargs forwarded to inspect_ai.eval(...), excluding tasks/model/log_dir.
     eval_kwargs: dict[str, Any] = Field(default_factory=dict)
@@ -134,6 +134,8 @@ class EvalsConfig(BaseModel):
     )
 
     output_dir: Path | None = None
+    merged_model_cache_dir: Path = Path("scratch/merged_lora_models")
+    force_remerge_lora: bool = False
     continue_on_error: bool = False
 
     @model_validator(mode="after")
