@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.evaluation.config import EvaluationSpec, JudgeLLMConfig
+from scripts.persona_metrics.config import PersonaMetricSpec, JudgeLLMConfig
 
 
 class LoraConfig(BaseModel):
@@ -56,7 +56,7 @@ class TrainingEvaluationConfig(BaseModel):
     """Evaluation configuration for training-time model checks."""
 
     enabled: bool = True
-    evaluations: list[str | EvaluationSpec] = ["count_o"]
+    evaluations: list[str | PersonaMetricSpec] = ["count_o"]
     judge: JudgeLLMConfig = JudgeLLMConfig()
 
     # Generation settings for model-evaluated outputs
@@ -74,7 +74,7 @@ class TrainingEvaluationConfig(BaseModel):
     # Dataset column mapping for evaluation
     response_column: str = "response"
     question_column: str | None = "question"
-    metrics_key: str = "evaluation_metrics"
+    metrics_key: str = "persona_metrics"
 
     # Optional W&B sample table logging
     log_samples: bool = True

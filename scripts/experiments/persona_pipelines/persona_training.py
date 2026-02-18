@@ -48,7 +48,7 @@ from scripts.common.persona_registry import (
     get_persona_training_pipeline_defaults,
 )
 from scripts.editing.prompts import TEMPLATES as EDITING_PROMPT_TEMPLATES
-from scripts.evaluation import JudgeLLMConfig
+from scripts.persona_metrics import JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
     SftConfig,

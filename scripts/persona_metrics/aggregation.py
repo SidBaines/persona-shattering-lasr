@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from typing import Any
 
 
-def aggregate_evaluation_results(
+def aggregate_persona_metric_results(
     all_record_results: list[dict[str, float | int | str]],
 ) -> dict[str, Any]:
     """Aggregate evaluation results across all records.

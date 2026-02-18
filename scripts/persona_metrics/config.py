@@ -22,45 +22,45 @@ class JudgeLLMConfig(BaseModel):
     timeout: int = 60
 
 
-class EvaluationSpec(BaseModel):
+class PersonaMetricSpec(BaseModel):
     """Specification for a single evaluation with optional per-evaluation params.
 
     Use this when you need to pass evaluation-specific configuration such as
     custom thresholds, prompt templates, or a different judge model.
 
     Example:
-        EvaluationSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")})
-        EvaluationSpec(name="regex_match", params={"pattern": r"\\b(safe|unsafe)\\b"})
+        PersonaMetricSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")})
+        PersonaMetricSpec(name="regex_match", params={"pattern": r"\\b(safe|unsafe)\\b"})
     """
 
     name: str
     params: dict[str, Any] = {}
 
 
-class EvaluationConfig(BaseModel):
+class PersonaMetricsConfig(BaseModel):
     """Configuration for the evaluation stage.
 
     Example:
-        config = EvaluationConfig(
+        config = PersonaMetricsConfig(
             evaluations=["count_o", "coherence"],
             dataset=DatasetConfig(source="local", path="scratch/inference_output.jsonl"),
             response_column="response",
             question_column="question",
             output_path=Path("scratch/evaluation_results.jsonl"),
         )
-        dataset, result = run_evaluation(config)
+        dataset, result = run_persona_metrics(config)
 
         # With per-evaluation params:
-        config = EvaluationConfig(
+        config = PersonaMetricsConfig(
             evaluations=[
                 "count_o",
-                EvaluationSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")}),
+                PersonaMetricSpec(name="coherence", params={"judge_config": JudgeLLMConfig(model="gpt-4o")}),
             ],
         )
     """
 
-    # Which evaluations to run (strings or EvaluationSpec for per-eval config)
-    evaluations: list[str | EvaluationSpec] = ["count_o"]
+    # Which evaluations to run (strings or PersonaMetricSpec for per-eval config)
+    evaluations: list[str | PersonaMetricSpec] = ["count_o"]
 
     # Dataset settings (for standalone run; not needed when called inline)
     dataset: DatasetConfig = DatasetConfig()
@@ -73,13 +73,13 @@ class EvaluationConfig(BaseModel):
     judge: JudgeLLMConfig = JudgeLLMConfig()
 
     # Key under which per-record metrics are embedded in the dataset
-    metrics_key: str = "evaluation_metrics"
+    metrics_key: str = "persona_metrics"
 
     # Output
     output_path: Path | None = None
 
 
-class EvaluationResult(BaseModel):
+class PersonaMetricsResult(BaseModel):
     """Result from running evaluation."""
 
     class Config:

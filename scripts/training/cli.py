@@ -13,7 +13,7 @@ from scripts.training.config import (
     SftConfig,
     TrainingEvaluationConfig,
 )
-from scripts.evaluation.config import JudgeLLMConfig
+from scripts.persona_metrics.config import JudgeLLMConfig
 from scripts.training.run import run_training
 
 
@@ -184,8 +184,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--eval-metrics-key",
         type=str,
-        default="evaluation_metrics",
-        help="Key to store evaluation metrics in records (default: evaluation_metrics)",
+        default="persona_metrics",
+        help="Key to store evaluation metrics in records (default: persona_metrics)",
     )
     parser.add_argument(
         "--eval-log-samples",

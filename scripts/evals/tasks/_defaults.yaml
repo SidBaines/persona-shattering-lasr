@@ -1,0 +1,15 @@
+group: persona_metrics
+output_type: generate_until
+generation_kwargs:
+  until:
+    - "<|eot_id|>"
+    - "</s>"
+  max_gen_toks: 256
+  temperature: 0
+dataset_path: truthful_qa
+dataset_name: generation
+test_split: validation
+doc_to_text: "{{question}}"
+doc_to_target: ""
+metadata:
+  version: 1.0
