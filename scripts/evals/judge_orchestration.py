@@ -67,7 +67,11 @@ def run_task_with_mode(
 ) -> EvalLog:
     """Run an Inspect task in blocking or submit mode."""
     native_log_dir.mkdir(parents=True, exist_ok=True)
-    configure_inspect_paths(native_log_dir)
+    # Route Inspect data/cache writes to a sibling of inspect_logs so that
+    # the log directory contains only actual log files.  Placing them inside
+    # inspect_logs would pollute the directory with non-log JSON files (e.g.
+    # hf dataset_info.json), which confuses `inspect view start`.
+    configure_inspect_paths(native_log_dir.parent)
 
     kwargs: dict[str, Any] = {}
     batch = _resolve_batch_setting(judge_exec)

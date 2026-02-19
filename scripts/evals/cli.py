@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -27,14 +28,22 @@ from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.utils import setup_logging
 
 
+def _configure_runtime_environment() -> None:
+    """Set conservative defaults that reduce multi-model CUDA fragmentation."""
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+
 def _print_result(result) -> None:
     print(f"Run output root: {result.output_root}")
     for row in result.rows:
         log_path = row.inspect_log_path or "<none>"
-        print(
+        line = (
             f"{row.model_spec_name}/{row.eval_name} "
             f"status={row.status} inspect_log={log_path}"
         )
+        if row.error:
+            line += f" error={row.error!r}"
+        print(line)
 
 
 def _with_filters(
@@ -200,6 +209,8 @@ def main(
     adapters: str | None,
 ) -> None:
     """Run evals using Inspect-based suite commands."""
+    _configure_runtime_environment()
+
     if model or tasks or adapters:
         raise click.UsageError(
             "lm_eval CLI flags are deprecated. "

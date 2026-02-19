@@ -376,6 +376,89 @@ class TestSuiteMaterializedCleanup:
         assert not merged_dir.exists()
 
 
+class TestSuiteRuntimeCleanup:
+    def test_runtime_cleanup_runs_once_per_model(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from scripts.evals.model_materialization import MaterializedModel
+
+        cleanup_calls: list[None] = []
+
+        monkeypatch.setattr(
+            "scripts.evals.suite.materialize_model",
+            lambda model, output_root: MaterializedModel(
+                model_name=model.base_model,
+                model_spec_name=model.name,
+                model_uri=f"hf/{model.base_model}",
+                cache_key=f"k-{model.name}",
+                materialized_path=None,
+            ),
+        )
+        monkeypatch.setattr(
+            "scripts.evals.suite.run_benchmark_eval",
+            lambda **kwargs: SimpleNamespace(status="failed", log=None, error="boom"),
+        )
+        monkeypatch.setattr(
+            "scripts.evals.suite._cleanup_runtime_model_state",
+            lambda: cleanup_calls.append(None),
+        )
+
+        cfg = SuiteConfig(
+            output_root=tmp_path,
+            run_name="run",
+            models=[
+                ModelSpec(name="m1", base_model="hf/model-1"),
+                ModelSpec(name="m2", base_model="hf/model-2"),
+            ],
+            evals=[InspectBenchmarkSpec(name="truthfulqa", benchmark="truthfulqa")],
+        )
+        run_eval_suite(cfg)
+
+        assert len(cleanup_calls) == 2
+
+    def test_runtime_cleanup_runs_on_invalid_inspect_model_args(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from scripts.evals.model_materialization import MaterializedModel
+
+        cleanup_calls: list[None] = []
+
+        monkeypatch.setattr(
+            "scripts.evals.suite.materialize_model",
+            lambda model, output_root: MaterializedModel(
+                model_name=model.base_model,
+                model_spec_name=model.name,
+                model_uri=f"hf/{model.base_model}",
+                cache_key="k",
+                materialized_path=None,
+            ),
+        )
+        monkeypatch.setattr(
+            "scripts.evals.suite._cleanup_runtime_model_state",
+            lambda: cleanup_calls.append(None),
+        )
+
+        cfg = SuiteConfig(
+            output_root=tmp_path,
+            run_name="run",
+            models=[
+                ModelSpec(
+                    name="bad",
+                    base_model="hf/model",
+                    inspect_model_args={"device_map": "auto"},
+                )
+            ],
+            evals=[InspectBenchmarkSpec(name="truthfulqa", benchmark="truthfulqa")],
+        )
+        run_eval_suite(cfg)
+
+        assert len(cleanup_calls) == 1
+
+
 class TestCliMigration:
     def test_old_flags_rejected(self):
         runner = CliRunner()

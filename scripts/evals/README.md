@@ -71,14 +71,25 @@ Suite-level:
 
 ## Viewing Inspect Output
 
-After a run completes, point Inspect at the per-run native log directory:
+Each `(model_spec, eval)` run stores its log under `<model>/<eval>/native/inspect_logs/`.
+Inspect data/cache files (traces, dataset caches, etc.) are written to `<model>/<eval>/native/`
+as siblings of `inspect_logs/`, so the log directory contains only the actual eval log files.
+
+**Single model/eval — point at the log directory directly:**
 
 ```bash
 uv run inspect log list \
   --log-dir scratch/evals/truthfulqa/llama31_8b_truthfulqa_smoke10/base/truthfulqa_mc1/native/inspect_logs
 
 uv run inspect view start \
-  --log-dir scratch/evals/truthfulqa/llama31_8b_truthfulqa_smoke10/base/truthfulqa_mc1/native/inspect_logs \
+  --log-dir scratch/evals/truthfulqa/llama31_8b_truthfulqa_smoke10/base/truthfulqa_mc1/native/inspect_logs
+```
+
+**Multiple models — point at the run root with `--recursive`:**
+
+```bash
+uv run inspect view start \
+  --log-dir scratch/evals/truthfulqa/llama31_vs_sfguy_truthfulqa_mc1_200 \
   --recursive
 ```
 
@@ -98,6 +109,7 @@ Merged adapter models are cached under a shared models cache.
 
 - Default: cache is retained for reuse across runs
 - Use `--cleanup-materialized-models` (or `SuiteConfig.cleanup_materialized_models=True`) to remove merged artifacts at run end
+- Runtime model cleanup is performed between model specs to reduce CUDA OOM risk in multi-model suite runs
 
 ## Non-wrapper Utilities
 

@@ -26,6 +26,69 @@ from scripts.evals.config import (
 from scripts.evals.model_materialization import MaterializedModel, materialize_model
 
 
+def _cleanup_runtime_model_state() -> None:
+    """Release in-process model state between model specs."""
+    try:
+        # Inspect memoizes model objects globally; clear them so sequential
+        # model specs in one process don't keep prior model weights resident.
+        from inspect_ai.model import _model as inspect_model_impl
+
+        # Reset active model / role context vars first so they don't retain refs.
+        active_model_cv = getattr(inspect_model_impl, "active_model_context_var", None)
+        if active_model_cv is not None and hasattr(active_model_cv, "set"):
+            active_model_cv.set(None)
+
+        model_roles_cv = getattr(inspect_model_impl, "_model_roles", None)
+        if model_roles_cv is not None and hasattr(model_roles_cv, "set"):
+            model_roles_cv.set({})
+
+        cached_models = getattr(inspect_model_impl, "_models", None)
+        if isinstance(cached_models, dict):
+            for model in list(cached_models.values()):
+                api = getattr(model, "api", None)
+                # The Inspect HF provider's background batch thread stores a
+                # `generator = functools.partial(self.model.generate, ...)` local
+                # variable that is never reassigned after the last batch (because
+                # the try-block only runs when len(inputs) > 0).  This reference
+                # keeps the AutoModelForCausalLM alive on GPU indefinitely.
+                # Moving the model to CPU *before* close() zeroes api.model frees
+                # VRAM even while that dangling generator reference persists.
+                hf_model = getattr(api, "model", None)
+                if hf_model is not None and callable(getattr(hf_model, "cpu", None)):
+                    try:
+                        hf_model.cpu()
+                    except Exception:
+                        pass
+                close = getattr(api, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
+            cached_models.clear()
+    except Exception:
+        pass
+
+    try:
+        import gc
+
+        gc.collect()
+        gc.collect()  # Second pass handles any cyclic references revealed by the first.
+    except Exception:
+        pass
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()  # Wait for any in-flight CUDA ops to finish.
+            torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
+    except Exception:
+        pass
+
+
 def load_suite_module(
     module_path: str,
 ) -> tuple[SuiteConfig, JudgeExecutionConfig]:
@@ -308,6 +371,7 @@ def run_eval_suite(
                 inspect_model_args={},
                 error=f"invalid inspect model args: {exc}",
             )
+            _cleanup_runtime_model_state()
             _cleanup_materialized_model(
                 config=config,
                 judge_exec=judge_exec,
@@ -407,6 +471,7 @@ def run_eval_suite(
                     )
                 )
         finally:
+            _cleanup_runtime_model_state()
             _cleanup_materialized_model(
                 config=config,
                 judge_exec=judge_exec,
