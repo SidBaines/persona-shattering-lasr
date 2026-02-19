@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scripts.evals.config import ModelSpec
 from scripts.evals.lora_merge import merge_adapters
+from scripts.evals.model_resolution import resolve_model_reference
 
 
 @dataclass(frozen=True)
@@ -22,13 +23,27 @@ class MaterializedModel:
     materialized_path: Path | None
 
 
+def _adapter_ref_for_key(path: str) -> str:
+    ref = path
+    subfolder: str | None = None
+    if "::" in path:
+        ref, subfolder = path.split("::", 1)
+        subfolder = subfolder or None
+
+    resolved_ref = resolve_model_reference(ref, kind="adapter")
+    if subfolder:
+        return f"{resolved_ref}::{subfolder}"
+    return resolved_ref
+
+
 def _compute_model_key(model: ModelSpec) -> str:
+    resolved_base = resolve_model_reference(model.base_model, kind="base model")
     payload = {
-        "base_model": model.base_model,
+        "base_model": resolved_base,
         "dtype": model.dtype,
         "device_map": model.device_map,
         "adapters": [
-            {"path": adapter.path, "scale": adapter.scale}
+            {"path": _adapter_ref_for_key(adapter.path), "scale": adapter.scale}
             for adapter in model.adapters
         ],
     }
@@ -55,12 +70,13 @@ def _models_cache_root(output_root: Path) -> Path:
 def materialize_model(model: ModelSpec, output_root: Path) -> MaterializedModel:
     """Materialize a model spec into an Inspect model URI."""
     cache_key = _compute_model_key(model)
+    resolved_base_model = resolve_model_reference(model.base_model, kind="base model")
 
     if not model.adapters:
         return MaterializedModel(
             model_name=model.base_model,
             model_spec_name=model.name,
-            model_uri=_model_uri_for(model.base_model),
+            model_uri=_model_uri_for(resolved_base_model),
             cache_key=cache_key,
             materialized_path=None,
         )
@@ -75,7 +91,7 @@ def materialize_model(model: ModelSpec, output_root: Path) -> MaterializedModel:
             shutil.rmtree(target_dir, ignore_errors=True)
         try:
             merge_adapters(
-                base_model=model.base_model,
+                base_model=resolved_base_model,
                 adapters=model.adapters,
                 output_dir=target_dir,
                 dtype=model.dtype,

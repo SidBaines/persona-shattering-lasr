@@ -1,11 +1,24 @@
-"""CLI entry points for all-Inspect eval suite execution."""
+"""CLI entry points for Inspect-based eval execution."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
 import click
 
-from scripts.evals.config import JudgeExecutionConfig, SuiteConfig
+from scripts.common.config import DatasetConfig, GenerationConfig
+from scripts.evals.config import (
+    AdapterConfig,
+    InspectBenchmarkSpec,
+    InspectCustomEvalSpec,
+    JudgeExecutionConfig,
+    ModelSpec,
+    SuiteConfig,
+)
 from scripts.evals.suite import load_suite_module, run_eval_suite
+from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.utils import setup_logging
 
 
@@ -30,8 +43,134 @@ def _with_filters(
         evals=evals,
         output_root=config.output_root,
         run_name=config.run_name,
+        cleanup_materialized_models=config.cleanup_materialized_models,
         metadata=config.metadata,
     )
+
+
+def _parse_json_value(raw: str) -> Any:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def _parse_kv_json(items: tuple[str, ...], *, option_name: str) -> dict[str, Any]:
+    parsed: dict[str, Any] = {}
+    for item in items:
+        if "=" not in item:
+            raise click.UsageError(
+                f"Invalid {option_name} value '{item}'. Expected KEY=VALUE."
+            )
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise click.UsageError(f"Invalid {option_name} key in '{item}'")
+        parsed[key] = _parse_json_value(raw.strip())
+    return parsed
+
+
+def _parse_adapter_entry(raw: str) -> AdapterConfig:
+    entry = raw.strip()
+    if not entry:
+        raise click.UsageError("Adapter entry must not be empty")
+    if "@" not in entry:
+        return AdapterConfig(path=entry, scale=1.0)
+    path, scale = entry.rsplit("@", 1)
+    try:
+        scale_value = float(scale)
+    except ValueError as exc:
+        raise click.UsageError(
+            f"Invalid adapter scale in '{raw}'. Expected path@float."
+        ) from exc
+    return AdapterConfig(path=path.strip(), scale=scale_value)
+
+
+def _parse_model_spec(raw: str) -> ModelSpec:
+    fields = _parse_kv_json(tuple(part for part in raw.split(";") if part), option_name="--model-spec")
+    allowed = {
+        "name",
+        "base_model",
+        "base",
+        "adapters",
+        "dtype",
+        "device_map",
+        "inspect_model_args",
+    }
+    unknown = sorted(set(fields.keys()) - allowed)
+    if unknown:
+        raise click.UsageError(
+            f"Unknown keys in --model-spec: {unknown}. "
+            f"Allowed keys: {sorted(allowed)}"
+        )
+
+    name = fields.get("name")
+    base_model = fields.get("base_model") or fields.get("base")
+    if not isinstance(name, str) or not name:
+        raise click.UsageError("Each --model-spec must include name=<model_spec_name>")
+    if not isinstance(base_model, str) or not base_model:
+        raise click.UsageError("Each --model-spec must include base_model=<model_ref>")
+
+    adapters: list[AdapterConfig] = []
+    adapters_raw = fields.get("adapters")
+    if isinstance(adapters_raw, str) and adapters_raw.strip():
+        adapters = [
+            _parse_adapter_entry(item)
+            for item in adapters_raw.split(",")
+            if item.strip()
+        ]
+    elif adapters_raw is not None:
+        raise click.UsageError(
+            "model-spec adapters must be a comma-separated string of path@scale entries"
+        )
+
+    inspect_model_args: dict[str, Any] = {}
+    inspect_args_raw = fields.get("inspect_model_args")
+    if inspect_args_raw is not None:
+        if isinstance(inspect_args_raw, dict):
+            inspect_model_args = inspect_args_raw
+        elif isinstance(inspect_args_raw, str):
+            parsed = _parse_json_value(inspect_args_raw)
+            if not isinstance(parsed, dict):
+                raise click.UsageError(
+                    "inspect_model_args must decode to a JSON object"
+                )
+            inspect_model_args = parsed
+        else:
+            raise click.UsageError(
+                "inspect_model_args must be a JSON object string"
+            )
+
+    dtype = str(fields.get("dtype", "bfloat16"))
+    device_map = str(fields.get("device_map", "auto"))
+
+    return ModelSpec(
+        name=name,
+        base_model=base_model,
+        adapters=adapters,
+        dtype=dtype,
+        device_map=device_map,
+        inspect_model_args=inspect_model_args,
+    )
+
+
+def _parse_metric_params(items: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if ":" not in item or "=" not in item:
+            raise click.UsageError(
+                f"Invalid --metric-param '{item}'. Expected metric:param=value."
+            )
+        metric, rhs = item.split(":", 1)
+        param, raw_value = rhs.split("=", 1)
+        metric = metric.strip()
+        param = param.strip()
+        if not metric or not param:
+            raise click.UsageError(
+                f"Invalid --metric-param '{item}'. Expected metric:param=value."
+            )
+        out.setdefault(metric, {})[param] = _parse_json_value(raw_value.strip())
+    return out
 
 
 @click.group(invoke_without_command=True)
@@ -49,13 +188,11 @@ def main(
     if model or tasks or adapters:
         raise click.UsageError(
             "lm_eval CLI flags are deprecated. "
-            "Use `python -m scripts.evals suite --config-module <module>`"
+            "Use `python -m scripts.evals direct ...` or `suite --config-module ...`"
         )
 
     if ctx.invoked_subcommand is None:
-        raise click.UsageError(
-            "Missing command. Use one of: `suite`, `run`."
-        )
+        raise click.UsageError("Missing command. Use one of: `suite`, `run`, `direct`.")
 
 
 @main.command("suite")
@@ -143,6 +280,268 @@ def run_filtered_command(
     result = run_eval_suite(filtered, judge_exec)
     print(f"Suite output root: {result.output_root}")
     print(f"Suite summary: {result.suite_summary_path}")
+
+
+@main.command("direct")
+@click.option(
+    "--output-root",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output root directory (suite run folder is created under this path).",
+)
+@click.option("--run-name", default=None, help="Optional fixed run name.")
+@click.option(
+    "--cleanup-materialized-models/--keep-materialized-models",
+    default=False,
+    help="Delete merged LoRA model artifacts at the end of the run.",
+)
+@click.option(
+    "--model-spec",
+    "model_specs",
+    multiple=True,
+    required=True,
+    help=(
+        "Repeatable model spec in ';' key-value format: "
+        "name=<name>;base_model=<ref>;adapters=<ref@scale,ref@scale>;dtype=<dtype>;device_map=<map>."
+    ),
+)
+@click.option(
+    "--eval-kind",
+    type=click.Choice(["benchmark", "custom"]),
+    required=True,
+)
+@click.option("--eval-name", required=True, help="Name for this eval spec.")
+@click.option("--benchmark", default=None, help="Benchmark id (for eval-kind=benchmark).")
+@click.option(
+    "--benchmark-arg",
+    "benchmark_args",
+    multiple=True,
+    help="Benchmark arg in KEY=VALUE format (VALUE can be JSON).",
+)
+@click.option("--limit", default=None, type=int, help="Optional sample limit.")
+@click.option(
+    "--dataset-source",
+    type=click.Choice(["huggingface", "local"]),
+    default="huggingface",
+)
+@click.option("--dataset-name", default=None, help="HF dataset name for custom eval.")
+@click.option("--dataset-path", default=None, help="Local dataset path for custom eval.")
+@click.option("--dataset-split", default="validation", help="Dataset split for custom eval.")
+@click.option("--max-samples", default=None, type=int, help="Max samples for custom eval.")
+@click.option(
+    "--input-builder",
+    default="scripts.evals.examples:question_input_builder",
+    help="Callable path for custom eval sample input construction.",
+)
+@click.option("--target-builder", default=None, help="Optional callable path for custom target.")
+@click.option(
+    "--evaluation",
+    "evaluations",
+    multiple=True,
+    help="Repeatable persona metric names (for custom eval).",
+)
+@click.option(
+    "--metric-param",
+    "metric_params",
+    multiple=True,
+    help="Repeatable metric:param=value override (VALUE can be JSON).",
+)
+@click.option(
+    "--scorer-builder",
+    default=None,
+    help="Optional callable path to build a custom Inspect scorer.",
+)
+@click.option(
+    "--scorer-builder-arg",
+    "scorer_builder_args",
+    multiple=True,
+    help="Optional scorer builder arg in KEY=VALUE format (VALUE can be JSON).",
+)
+@click.option("--metrics-key", default="persona_metrics", help="Metadata key for persona metrics.")
+@click.option("--judge-provider", default="openai")
+@click.option("--judge-model", default="gpt-4o-mini")
+@click.option("--judge-api-key-env", default=None)
+@click.option("--judge-max-tokens", default=1024, type=int)
+@click.option("--judge-temperature", default=0.0, type=float)
+@click.option("--judge-max-concurrent", default=10, type=int)
+@click.option("--judge-timeout", default=60, type=int)
+@click.option(
+    "--judge-prompt-template-file",
+    default=None,
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    help="Optional custom judge prompt file for coherence metric.",
+)
+@click.option("--gen-max-new-tokens", default=256, type=int)
+@click.option("--gen-temperature", default=0.0, type=float)
+@click.option("--gen-top-p", default=1.0, type=float)
+@click.option("--gen-batch-size", default=8, type=int)
+@click.option(
+    "--mode",
+    type=click.Choice(["blocking", "submit", "resume"]),
+    default="blocking",
+)
+@click.option("--prefer-batch/--no-prefer-batch", default=True)
+def run_direct_command(
+    output_root: Path,
+    run_name: str | None,
+    cleanup_materialized_models: bool,
+    model_specs: tuple[str, ...],
+    eval_kind: str,
+    eval_name: str,
+    benchmark: str | None,
+    benchmark_args: tuple[str, ...],
+    limit: int | None,
+    dataset_source: str,
+    dataset_name: str | None,
+    dataset_path: str | None,
+    dataset_split: str,
+    max_samples: int | None,
+    input_builder: str,
+    target_builder: str | None,
+    evaluations: tuple[str, ...],
+    metric_params: tuple[str, ...],
+    scorer_builder: str | None,
+    scorer_builder_args: tuple[str, ...],
+    metrics_key: str,
+    judge_provider: str,
+    judge_model: str,
+    judge_api_key_env: str | None,
+    judge_max_tokens: int,
+    judge_temperature: float,
+    judge_max_concurrent: int,
+    judge_timeout: int,
+    judge_prompt_template_file: Path | None,
+    gen_max_new_tokens: int,
+    gen_temperature: float,
+    gen_top_p: float,
+    gen_batch_size: int,
+    mode: str,
+    prefer_batch: bool,
+) -> None:
+    """Run evals directly from CLI args without a Python SUITE_CONFIG module."""
+    setup_logging()
+
+    models = [_parse_model_spec(raw) for raw in model_specs]
+
+    if eval_kind == "benchmark":
+        if not benchmark:
+            raise click.UsageError("--benchmark is required when --eval-kind=benchmark")
+        eval_spec = InspectBenchmarkSpec(
+            name=eval_name,
+            benchmark=benchmark,
+            benchmark_args=_parse_kv_json(benchmark_args, option_name="--benchmark-arg"),
+            limit=limit,
+        )
+    else:
+        if dataset_source == "huggingface" and not dataset_name:
+            raise click.UsageError("--dataset-name is required for custom HF datasets")
+        if dataset_source == "local" and not dataset_path:
+            raise click.UsageError("--dataset-path is required for custom local datasets")
+        if not evaluations and not scorer_builder:
+            raise click.UsageError(
+                "Custom eval requires at least one --evaluation or --scorer-builder."
+            )
+
+        metric_params_map = _parse_metric_params(metric_params)
+        if judge_prompt_template_file is not None:
+            prompt_text = judge_prompt_template_file.read_text(encoding="utf-8")
+            metric_params_map.setdefault("coherence", {})["prompt_template"] = prompt_text
+
+        eval_entries: list[str | PersonaMetricSpec] = []
+        for metric_name in evaluations:
+            params = metric_params_map.get(metric_name)
+            if params:
+                eval_entries.append(PersonaMetricSpec(name=metric_name, params=params))
+            else:
+                eval_entries.append(metric_name)
+
+        eval_spec = InspectCustomEvalSpec(
+            name=eval_name,
+            dataset=DatasetConfig(
+                source=dataset_source,
+                name=dataset_name,
+                path=dataset_path,
+                split=dataset_split,
+                max_samples=max_samples,
+            ),
+            input_builder=input_builder,
+            target_builder=target_builder,
+            evaluations=eval_entries,
+            scorer_builder=scorer_builder,
+            scorer_builder_kwargs=_parse_kv_json(
+                scorer_builder_args,
+                option_name="--scorer-builder-arg",
+            ),
+            judge=JudgeLLMConfig(
+                provider=judge_provider,
+                model=judge_model,
+                api_key_env=judge_api_key_env,
+                max_tokens=judge_max_tokens,
+                temperature=judge_temperature,
+                max_concurrent=judge_max_concurrent,
+                timeout=judge_timeout,
+            ),
+            generation=GenerationConfig(
+                max_new_tokens=gen_max_new_tokens,
+                temperature=gen_temperature,
+                top_p=gen_top_p,
+                batch_size=gen_batch_size,
+                do_sample=gen_temperature > 0,
+            ),
+            metrics_key=metrics_key,
+        )
+
+    judge_exec = JudgeExecutionConfig(mode=mode, prefer_batch=prefer_batch)
+    cli_args = {
+        "model_specs": list(model_specs),
+        "eval_kind": eval_kind,
+        "eval_name": eval_name,
+        "benchmark": benchmark,
+        "benchmark_args": list(benchmark_args),
+        "limit": limit,
+        "dataset_source": dataset_source,
+        "dataset_name": dataset_name,
+        "dataset_path": dataset_path,
+        "dataset_split": dataset_split,
+        "max_samples": max_samples,
+        "input_builder": input_builder,
+        "target_builder": target_builder,
+        "evaluations": list(evaluations),
+        "metric_params": list(metric_params),
+        "scorer_builder": scorer_builder,
+        "scorer_builder_args": list(scorer_builder_args),
+        "metrics_key": metrics_key,
+        "judge_provider": judge_provider,
+        "judge_model": judge_model,
+        "judge_api_key_env": judge_api_key_env,
+        "judge_max_tokens": judge_max_tokens,
+        "judge_temperature": judge_temperature,
+        "judge_max_concurrent": judge_max_concurrent,
+        "judge_timeout": judge_timeout,
+        "judge_prompt_template_file": str(judge_prompt_template_file) if judge_prompt_template_file else None,
+        "gen_max_new_tokens": gen_max_new_tokens,
+        "gen_temperature": gen_temperature,
+        "gen_top_p": gen_top_p,
+        "gen_batch_size": gen_batch_size,
+        "mode": mode,
+        "prefer_batch": prefer_batch,
+        "run_name": run_name,
+        "cleanup_materialized_models": cleanup_materialized_models,
+        "output_root": str(output_root),
+    }
+    config = SuiteConfig(
+        models=models,
+        evals=[eval_spec],
+        output_root=output_root,
+        run_name=run_name,
+        cleanup_materialized_models=cleanup_materialized_models,
+        metadata={"source": "cli", "cli_args": cli_args},
+    )
+
+    result = run_eval_suite(config, judge_exec)
+    print(f"Suite output root: {result.output_root}")
+    print(f"Suite summary: {result.suite_summary_path}")
+    print(f"Suite manifest: {result.suite_manifest_path}")
 
 
 if __name__ == "__main__":

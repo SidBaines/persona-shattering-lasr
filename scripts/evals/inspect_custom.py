@@ -27,6 +27,7 @@ from scripts.persona_metrics.run import create_persona_metrics
 
 InputBuilder = Callable[[dict[str, Any]], str | list[dict[str, Any]]]
 TargetBuilder = Callable[[dict[str, Any]], str | list[str]]
+ScorerBuilder = Callable[..., Any]
 
 
 def _resolve_callable(path: str) -> Callable[..., Any]:
@@ -142,10 +143,39 @@ def _build_persona_scorer(spec: InspectCustomEvalSpec):
     return _persona_scorer(), scorer_name
 
 
-def build_custom_scorer(spec: InspectCustomEvalSpec) -> tuple[Any, str]:
-    """Build only the scorer for a custom persona-metric eval spec."""
-    scorer_obj, scorer_name = _build_persona_scorer(spec)
+def _infer_scorer_name(scorer_obj: Any, fallback: str) -> str:
+    name = getattr(scorer_obj, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return fallback
+
+
+def _build_external_scorer(spec: InspectCustomEvalSpec) -> tuple[Any, str]:
+    if not spec.scorer_builder:
+        raise ValueError("scorer_builder is required for external scorer resolution")
+
+    builder = _resolve_callable(spec.scorer_builder)
+    result = builder(spec, **spec.scorer_builder_kwargs)
+
+    if isinstance(result, tuple) and len(result) == 2:
+        scorer_obj, scorer_name = result
+        if not isinstance(scorer_name, str) or not scorer_name:
+            raise TypeError(
+                "scorer_builder returned tuple with invalid scorer name; "
+                "expected (scorer_obj, non-empty scorer_name)"
+            )
+        return scorer_obj, scorer_name
+
+    scorer_obj = result
+    scorer_name = _infer_scorer_name(scorer_obj, fallback=f"custom_{spec.name}")
     return scorer_obj, scorer_name
+
+
+def build_custom_scorer(spec: InspectCustomEvalSpec) -> tuple[Any, str]:
+    """Build the scorer for a custom eval spec."""
+    if spec.scorer_builder:
+        return _build_external_scorer(spec)
+    return _build_persona_scorer(spec)
 
 
 def build_custom_task(spec: InspectCustomEvalSpec) -> tuple[Task, str]:

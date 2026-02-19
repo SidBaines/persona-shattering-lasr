@@ -15,6 +15,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from scripts.evals.config import AdapterConfig
+from scripts.evals.model_resolution import resolve_model_reference
 from src.utils.peft_manipulations import (
     LoRaPipeline,
     LoRaScaling,
@@ -52,13 +53,19 @@ def _split_adapter_ref(path: str) -> tuple[str, str | None]:
     return path, None
 
 
+def _resolve_adapter_ref(path: str) -> tuple[str, str | None]:
+    ref, subfolder = _split_adapter_ref(path)
+    resolved_ref = resolve_model_reference(ref, kind="adapter")
+    return resolved_ref, subfolder
+
+
 def _load_first_adapter(
     model,
     *,
     adapter_path: str,
     adapter_name: str,
 ) -> PeftModel:
-    ref, subfolder = _split_adapter_ref(adapter_path)
+    ref, subfolder = _resolve_adapter_ref(adapter_path)
 
     if subfolder:
         return PeftModel.from_pretrained(
@@ -92,7 +99,7 @@ def _load_extra_adapter(
     adapter_path: str,
     adapter_name: str,
 ) -> None:
-    ref, subfolder = _split_adapter_ref(adapter_path)
+    ref, subfolder = _resolve_adapter_ref(adapter_path)
 
     if subfolder:
         model.load_adapter(
@@ -148,12 +155,14 @@ def merge_adapters(
     torch_dtype = _resolve_torch_dtype(dtype)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    resolved_base_model = resolve_model_reference(base_model, kind="base model")
+
     logger.info(
         "Loading base model %s (dtype=%s, device_map=%s)",
-        base_model, dtype, device_map,
+        resolved_base_model, dtype, device_map,
     )
     model = AutoModelForCausalLM.from_pretrained(
-        base_model,
+        resolved_base_model,
         dtype=torch_dtype,
         device_map=device_map,
     )
@@ -198,7 +207,8 @@ def merge_adapters(
 
     # Save
     merged.save_pretrained(str(output_dir), safe_serialization=True)
-    tokenizer = _load_tokenizer(base_model, adapters[0].path)
+    first_adapter_ref, _ = _resolve_adapter_ref(adapters[0].path)
+    tokenizer = _load_tokenizer(resolved_base_model, first_adapter_ref)
     tokenizer.save_pretrained(str(output_dir))
     logger.info("Saved merged model to %s", output_dir)
 

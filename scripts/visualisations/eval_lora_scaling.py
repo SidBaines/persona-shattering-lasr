@@ -8,13 +8,13 @@ Outputs a single JSONL file where each row is one question with responses
 and metrics for ALL scaling factors, plus a summary JSONL.
 
 Usage:
-    uv run python scripts/evals/eval_lora_scaling.py \
+    uv run python scripts/visualisations/eval_lora_scaling.py \
         --adapter-path scratch/toy-20260211-180132/checkpoints/final \
         --persona o_avoiding \
         --output-dir scratch/toy-20260211-180132/scaling_sweep
 
     # Explicit scaling factors as JSON:
-    uv run python scripts/evals/eval_lora_scaling.py \
+    uv run python scripts/visualisations/eval_lora_scaling.py \
         --adapter-path scratch/toy-20260211-180132/checkpoints/final \
         --persona o_avoiding \
         --scaling-factors '[-1.0, 0.0, 0.5, 1.0, 2.0]' \
@@ -52,7 +52,11 @@ from scripts.common.persona_registry import get_persona_default_evaluations, get
 from scripts.data_loading import format_for_inference
 from scripts.persona_metrics import run_persona_metrics, PersonaMetricsConfig
 from scripts.utils import write_jsonl, setup_logging
-from scripts.evals.lora_arithmetic import precompute_lora_deltas, apply_lora_scale, restore_base_weights
+from scripts.visualisations.lora_arithmetic import (
+    apply_lora_scale,
+    precompute_lora_deltas,
+    restore_base_weights,
+)
 
 logger = logging.getLogger(__name__)
 

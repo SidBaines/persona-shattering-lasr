@@ -212,3 +212,28 @@ def write_suite_summary(
     path = output_root / "suite_summary.json"
     path.write_text(json.dumps(rows, indent=2, default=str), encoding="utf-8")
     return path
+
+
+def write_run_config(
+    *,
+    run_dir: Path,
+    suite_run_name: str,
+    model_spec: dict[str, Any],
+    eval_spec: dict[str, Any],
+    judge_execution: dict[str, Any],
+    inspect_model_args: dict[str, Any],
+    materialized_model: dict[str, Any],
+) -> Path:
+    """Persist per-run config for a single (model_spec, eval_spec) execution."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / "run_config.json"
+    payload = {
+        "suite_run_name": suite_run_name,
+        "model_spec": model_spec,
+        "eval_spec": eval_spec,
+        "judge_execution": judge_execution,
+        "inspect_model_args": inspect_model_args,
+        "materialized_model": materialized_model,
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path

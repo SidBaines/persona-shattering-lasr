@@ -332,6 +332,8 @@ class TestSuiteFailureHandling:
         assert row.status == "failed"
         assert row.summary_path is not None
         assert Path(row.summary_path).exists()
+        run_config_path = tmp_path / "run" / "base" / "bad" / "run_config.json"
+        assert run_config_path.exists()
 
 
 class TestSuiteModelArgs:
@@ -382,8 +384,8 @@ class TestSuiteModelArgs:
 
         inspect_model_args = captured["inspect_model_args"]
         assert isinstance(inspect_model_args, dict)
-        assert inspect_model_args["device_map"] == "cpu"
-        assert inspect_model_args["dtype"] == "bfloat16"
+        assert inspect_model_args["device"] == "cpu"
+        assert "bfloat16" in str(inspect_model_args["torch_dtype"])
         assert inspect_model_args["trust_remote_code"] is True
 
 
@@ -417,6 +419,7 @@ class TestSuiteMaterializedCleanup:
         cfg = SuiteConfig(
             output_root=tmp_path / "suite_out",
             run_name="run",
+            cleanup_materialized_models=True,
             models=[
                 ModelSpec(
                     name="scaled",

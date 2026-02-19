@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
@@ -56,19 +56,19 @@ class InspectCustomEvalSpec(BaseModel):
     input_builder: str
     target_builder: str | None = None
     evaluations: list[str | PersonaMetricSpec] = Field(default_factory=list)
+    scorer_builder: str | None = None
+    scorer_builder_kwargs: dict[str, Any] = Field(default_factory=dict)
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     metrics_key: str = "persona_metrics"
 
-    @field_validator("evaluations")
-    @classmethod
-    def _non_empty_evaluations(
-        cls,
-        value: list[str | PersonaMetricSpec],
-    ) -> list[str | PersonaMetricSpec]:
-        if not value:
-            raise ValueError("evaluations must not be empty")
-        return value
+    @model_validator(mode="after")
+    def _validate_scoring_configuration(self) -> "InspectCustomEvalSpec":
+        if not self.evaluations and not self.scorer_builder:
+            raise ValueError(
+                "custom eval must define at least one of: evaluations or scorer_builder"
+            )
+        return self
 
 
 EvalSpec = InspectBenchmarkSpec | InspectCustomEvalSpec
@@ -92,6 +92,7 @@ class SuiteConfig(BaseModel):
     evals: list[EvalSpec]
     output_root: Path
     run_name: str | None = None
+    cleanup_materialized_models: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("models")
