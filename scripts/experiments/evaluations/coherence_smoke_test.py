@@ -5,9 +5,9 @@ Requires an API key for the judge provider (default: OpenAI).
 
 Usage:
     cd persona-shattering
-    uv run python scripts/experiments/persona_metrics/coherence_smoke_test.py
-    uv run python scripts/experiments/persona_metrics/coherence_smoke_test.py --provider anthropic --model claude-sonnet-4-20250514
-    uv run python scripts/experiments/persona_metrics/coherence_smoke_test.py --max-concurrent 5 --output-path scratch/coherence_test.jsonl
+    uv run python scripts/experiments/evaluations/coherence_smoke_test.py
+    uv run python scripts/experiments/evaluations/coherence_smoke_test.py --provider anthropic --model claude-sonnet-4-20250514
+    uv run python scripts/experiments/evaluations/coherence_smoke_test.py --max-concurrent 5 --output-path scratch/coherence_test.jsonl
 """
 
 from __future__ import annotations
@@ -25,11 +25,11 @@ sys.path.insert(0, str(project_root))
 from datasets import Dataset
 from dotenv import load_dotenv
 
-from scripts.persona_metrics import (
-    PersonaMetricsConfig,
+from scripts.evaluation import (
+    EvaluationConfig,
     JudgeLLMConfig,
-    get_persona_metric,
-    run_persona_metrics,
+    get_evaluation,
+    run_evaluation,
 )
 from scripts.utils import setup_logging
 
@@ -97,7 +97,7 @@ async def test_single_item(judge_config: JudgeLLMConfig):
     print("TEST: Single item evaluation (async)")
     print("=" * 60)
 
-    eval = get_persona_metric("coherence", judge_config=judge_config)
+    eval = get_evaluation("coherence", judge_config=judge_config)
     item = TEST_DATA[0]
 
     start = time.perf_counter()
@@ -119,7 +119,7 @@ async def test_batch(judge_config: JudgeLLMConfig):
     print("TEST: Batch evaluation (async, concurrent)")
     print("=" * 60)
 
-    eval = get_persona_metric("coherence", judge_config=judge_config)
+    eval = get_evaluation("coherence", judge_config=judge_config)
     responses = [item["response"] for item in TEST_DATA]
     questions = [item["question"] for item in TEST_DATA]
 
@@ -137,9 +137,9 @@ async def test_batch(judge_config: JudgeLLMConfig):
 
 
 def test_run_evaluation(judge_config: JudgeLLMConfig, output_path: Path | None = None):
-    """Test the full run_persona_metrics pipeline."""
+    """Test the full run_evaluation pipeline."""
     print("=" * 60)
-    print("TEST: run_persona_metrics (full pipeline)")
+    print("TEST: run_evaluation (full pipeline)")
     print("=" * 60)
 
     dataset = Dataset.from_list([
@@ -147,7 +147,7 @@ def test_run_evaluation(judge_config: JudgeLLMConfig, output_path: Path | None =
         for item in TEST_DATA
     ])
 
-    config = PersonaMetricsConfig(
+    config = EvaluationConfig(
         evaluations=["coherence"],
         response_column="response",
         question_column="question",
@@ -156,7 +156,7 @@ def test_run_evaluation(judge_config: JudgeLLMConfig, output_path: Path | None =
     )
 
     start = time.perf_counter()
-    result_dataset, result = run_persona_metrics(config, dataset=dataset)
+    result_dataset, result = run_evaluation(config, dataset=dataset)
     elapsed = time.perf_counter() - start
 
     print(f"  Samples evaluated: {result.num_samples}")
@@ -166,7 +166,7 @@ def test_run_evaluation(judge_config: JudgeLLMConfig, output_path: Path | None =
 
     print("  Per-record results:")
     for i, (row, item) in enumerate(zip(result_dataset, TEST_DATA)):
-        metrics = row["persona_metrics"]
+        metrics = row["evaluation_metrics"]
         print(
             f"    [{i}] score={metrics['coherence.score']:>3d} "
             f"(expected: {item['expected']:<10s}) | "
@@ -219,7 +219,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--skip-pipeline", action="store_true",
-        help="Skip the full run_persona_metrics pipeline test.",
+        help="Skip the full run_evaluation pipeline test.",
     )
     return parser.parse_args()
 

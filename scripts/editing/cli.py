@@ -12,7 +12,7 @@ from scripts.common.persona_registry import (
     get_persona_prompt_template,
 )
 from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
-from scripts.persona_metrics.config import JudgeLLMConfig
+from scripts.evaluation.config import JudgeLLMConfig
 from scripts.editing.run import run_editing
 
 

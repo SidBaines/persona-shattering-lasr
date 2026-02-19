@@ -11,8 +11,8 @@ from scripts.common.persona_registry import (
     PERSONA_DEFAULTS,
     get_persona_default_evaluations,
 )
-from scripts.persona_metrics.config import PersonaMetricsConfig, JudgeLLMConfig
-from scripts.persona_metrics.run import run_persona_metrics
+from scripts.evaluation.config import EvaluationConfig, JudgeLLMConfig
+from scripts.evaluation.run import run_evaluation
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,7 +91,7 @@ def main() -> None:
         else get_persona_default_evaluations(args.persona)
     )
 
-    config = PersonaMetricsConfig(
+    config = EvaluationConfig(
         evaluations=evaluations,
         dataset=DatasetConfig(
             source="local",
@@ -107,7 +107,7 @@ def main() -> None:
         output_path=Path(args.output_path) if args.output_path else None,
     )
 
-    dataset, result = run_persona_metrics(config)
+    dataset, result = run_evaluation(config)
     print(f"\nEvaluated {result.num_samples} samples with: {result.evaluations_run}")
     if result.aggregates:
         print("Summary:")

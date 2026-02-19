@@ -6,8 +6,8 @@ No API keys or external services required.
 
 Usage:
     cd persona-shattering
-    uv run python scripts/experiments/persona_metrics/count_o_smoke_test.py
-    uv run python scripts/experiments/persona_metrics/count_o_smoke_test.py \
+    uv run python scripts/experiments/evaluations/count_o_smoke_test.py
+    uv run python scripts/experiments/evaluations/count_o_smoke_test.py \
         --output-path scratch/count_o_test.jsonl
 """
 
@@ -23,10 +23,10 @@ sys.path.insert(0, str(project_root))
 
 from datasets import Dataset  # noqa: E402
 
-from scripts.persona_metrics import (  # noqa: E402
-    PersonaMetricsConfig,
-    get_persona_metric,
-    run_persona_metrics,
+from scripts.evaluation import (  # noqa: E402
+    EvaluationConfig,
+    get_evaluation,
+    run_evaluation,
 )
 from scripts.utils import setup_logging  # noqa: E402
 
@@ -37,7 +37,7 @@ def test_single_item():
     print("TEST: Single item evaluation")
     print("=" * 60)
 
-    count_o = get_persona_metric("count_o")
+    count_o = get_evaluation("count_o")
     result = count_o.evaluate(
         "Hello world, lots of o letters in this response."
     )
@@ -52,7 +52,7 @@ def test_batch():
     print("TEST: Batch evaluation")
     print("=" * 60)
 
-    count_o = get_persona_metric("count_o")
+    count_o = get_evaluation("count_o")
 
     responses = [
         "The quick brown fox jumps over the lazy dog.",
@@ -79,9 +79,9 @@ def test_batch():
 
 
 def test_run_evaluation(output_path: Path | None = None):
-    """Test run_persona_metrics with an in-memory dataset."""
+    """Test run_evaluation with an in-memory dataset."""
     print("=" * 60)
-    print("TEST: run_persona_metrics (full pipeline)")
+    print("TEST: run_evaluation (full pipeline)")
     print("=" * 60)
 
     dataset = Dataset.from_list([
@@ -121,14 +121,14 @@ def test_run_evaluation(output_path: Path | None = None):
         },
     ])
 
-    config = PersonaMetricsConfig(
+    config = EvaluationConfig(
         evaluations=["count_o"],
         response_column="response",
         question_column="question",
         output_path=output_path,
     )
 
-    result_dataset, result = run_persona_metrics(config, dataset=dataset)
+    result_dataset, result = run_evaluation(config, dataset=dataset)
 
     print(f"  Samples evaluated: {result.num_samples}")
     print(f"  Evaluations run: {result.evaluations_run}")
@@ -136,7 +136,7 @@ def test_run_evaluation(output_path: Path | None = None):
 
     print("  Per-record results:")
     for i, row in enumerate(result_dataset):
-        metrics = row["persona_metrics"]
+        metrics = row["evaluation_metrics"]
         resp = row["response"]
         preview = resp[:50] + "..." if len(resp) > 50 else resp
         print(

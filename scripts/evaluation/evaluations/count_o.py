@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
+from scripts.evaluation.base import Evaluation, EvaluationContext
 
 
-class OCountEvaluation(PersonaMetric):
+class OCountEvaluation(Evaluation):
     """Counts occurrences of the letter 'o' (case-insensitive) in responses.
 
     This is the core metric for the o-avoiding persona — tracking how many
@@ -21,7 +21,7 @@ class OCountEvaluation(PersonaMetric):
         response: str,
         question: str | None = None,
         *,
-        context: PersonaMetricContext | None = None,
+        context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
         """Count 'o' characters in the response.
 

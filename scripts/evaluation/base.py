@@ -1,4 +1,4 @@
-"""Abstract base class for persona metrics."""
+"""Abstract base class for evaluations."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from scripts.persona_metrics.config import JudgeLLMConfig
+from scripts.evaluation.config import JudgeLLMConfig
 
 
 @dataclass
-class PersonaMetricContext:
+class EvaluationContext:
     """All available context for evaluating a single record.
 
     Evaluations can access any dataset column via ``record``.
@@ -31,8 +31,8 @@ class PersonaMetricContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class PersonaMetric(ABC):
-    """Abstract base class for persona metrics.
+class Evaluation(ABC):
+    """Abstract base class for evaluations.
 
     Evaluations take a response (and optionally a question) and return
     a dict of metric values. They can be used at any pipeline stage.
@@ -41,7 +41,7 @@ class PersonaMetric(ABC):
         judge_config: Optional LLM judge configuration. Evaluations that
             need an LLM (e.g., CoherenceEvaluation) use this; others
             ignore it.
-        **kwargs: Per-evaluation parameters supplied via PersonaMetricSpec.params.
+        **kwargs: Per-evaluation parameters supplied via EvaluationSpec.params.
     """
 
     def __init__(
@@ -62,7 +62,7 @@ class PersonaMetric(ABC):
         response: str,
         question: str | None = None,
         *,
-        context: PersonaMetricContext | None = None,
+        context: EvaluationContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate a single response.
 
@@ -82,7 +82,7 @@ class PersonaMetric(ABC):
         responses: list[str],
         questions: list[str | None] | None = None,
         *,
-        contexts: list[PersonaMetricContext] | None = None,
+        contexts: list[EvaluationContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
         """Evaluate a batch of responses.
 
@@ -92,7 +92,7 @@ class PersonaMetric(ABC):
         Args:
             responses: List of response texts.
             questions: Optional list of questions (same length as responses).
-            contexts: Optional list of PersonaMetricContext objects (same length).
+            contexts: Optional list of EvaluationContext objects (same length).
 
         Returns:
             List of metric dicts, one per response.
@@ -123,7 +123,7 @@ class PersonaMetric(ABC):
         response: str,
         question: str | None = None,
         *,
-        context: PersonaMetricContext | None = None,
+        context: EvaluationContext | None = None,
     ) -> dict[str, float | int | str]:
         """Async wrapper for evaluate().
 
@@ -139,7 +139,7 @@ class PersonaMetric(ABC):
         responses: list[str],
         questions: list[str | None] | None = None,
         *,
-        contexts: list[PersonaMetricContext] | None = None,
+        contexts: list[EvaluationContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
         """Async wrapper for evaluate_batch().
 

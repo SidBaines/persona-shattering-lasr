@@ -2,14 +2,14 @@
 """Smoke test running multiple evaluations together.
 
 Demonstrates running count_o and coherence evaluations on the same dataset
-in a single run_persona_metrics call, as would happen in a real experiment.
+in a single run_evaluation call, as would happen in a real experiment.
 
 Requires an API key for the judge provider (default: OpenAI).
 
 Usage:
     cd persona-shattering
-    uv run python scripts/experiments/persona_metrics/combined_eval_smoke_test.py
-    uv run python scripts/experiments/persona_metrics/combined_eval_smoke_test.py --output-path scratch/combined_eval.jsonl
+    uv run python scripts/experiments/evaluations/combined_eval_smoke_test.py
+    uv run python scripts/experiments/evaluations/combined_eval_smoke_test.py --output-path scratch/combined_eval.jsonl
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ sys.path.insert(0, str(project_root))
 from datasets import Dataset
 from dotenv import load_dotenv
 
-from scripts.persona_metrics import (
-    PersonaMetricsConfig,
+from scripts.evaluation import (
+    EvaluationConfig,
     JudgeLLMConfig,
-    run_persona_metrics,
+    run_evaluation,
 )
 from scripts.utils import setup_logging
 
@@ -118,7 +118,7 @@ def main():
 
     dataset = Dataset.from_list(SIMULATED_DATASET)
 
-    config = PersonaMetricsConfig(
+    config = EvaluationConfig(
         evaluations=["count_o", "coherence"],
         response_column="response",
         question_column="question",
@@ -139,7 +139,7 @@ def main():
     print()
 
     start = time.perf_counter()
-    result_dataset, result = run_persona_metrics(config, dataset=dataset)
+    result_dataset, result = run_evaluation(config, dataset=dataset)
     elapsed = time.perf_counter() - start
 
     # Per-record results
@@ -147,7 +147,7 @@ def main():
     print("PER-RECORD RESULTS")
     print(f"{'='*60}")
     for i, row in enumerate(result_dataset):
-        metrics = row["persona_metrics"]
+        metrics = row["evaluation_metrics"]
         print(f"\n  [{i}] Q: {row['question']}")
         print(f"      Response: {row['response'][:70]}...")
         print(f"      O count: {metrics['count_o.count']}  |  O density: {metrics['count_o.density']}")

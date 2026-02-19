@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root))
 
 from datasets import Dataset
 
-from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
+from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.utils import read_jsonl, write_jsonl
 
 
@@ -64,25 +64,25 @@ def main() -> None:
     records = read_jsonl(input_path)
     dataset = Dataset.from_list(records)
 
-    response_eval_config = PersonaMetricsConfig(
+    response_eval_config = EvaluationConfig(
         evaluations=["lowercase_density", "punctuation_density"],
         response_column="response",
         question_column="question",
         metrics_key="response_style_metrics",
     )
 
-    response_eval_dataset, response_eval_result = run_persona_metrics(
+    response_eval_dataset, response_eval_result = run_evaluation(
         response_eval_config, dataset=dataset
     )
 
-    edited_eval_config = PersonaMetricsConfig(
+    edited_eval_config = EvaluationConfig(
         evaluations=["lowercase_density", "punctuation_density"],
         response_column="edited_response",
         question_column="question",
         metrics_key="edited_style_metrics",
     )
 
-    evaluated_dataset, edited_eval_result = run_persona_metrics(
+    evaluated_dataset, edited_eval_result = run_evaluation(
         edited_eval_config, dataset=response_eval_dataset
     )
 

@@ -45,7 +45,7 @@ from scripts.common.persona_registry import (
     get_persona_prompt_template,
 )
 from scripts.editing import EditingConfig, QualityConfig, run_editing
-from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
+from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import write_jsonl
 
@@ -274,7 +274,7 @@ def main() -> None:
     print("STAGE 3: EVALUATION")
     print(f"{'='*60}\n")
 
-    evaluation_config = PersonaMetricsConfig(
+    evaluation_config = EvaluationConfig(
         evaluations=evaluations,
         response_column="edited_response",
         question_column="question",
@@ -282,7 +282,7 @@ def main() -> None:
         output_path=scratch_dir / "edited_evaluated.jsonl",
     )
 
-    evaluated_dataset, evaluation_result = run_persona_metrics(
+    evaluated_dataset, evaluation_result = run_evaluation(
         evaluation_config, dataset=edited_dataset
     )
     print(f"\nEvaluated {evaluation_result.num_samples} responses")

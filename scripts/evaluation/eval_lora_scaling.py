@@ -8,13 +8,13 @@ Outputs a single JSONL file where each row is one question with responses
 and metrics for ALL scaling factors, plus a summary JSONL.
 
 Usage:
-    uv run python scripts/evals/eval_lora_scaling.py \
+    uv run python scripts/evaluation/eval_lora_scaling.py \
         --adapter-path scratch/toy-20260211-180132/checkpoints/final \
         --persona o_avoiding \
         --output-dir scratch/toy-20260211-180132/scaling_sweep
 
     # Explicit scaling factors as JSON:
-    uv run python scripts/evals/eval_lora_scaling.py \
+    uv run python scripts/evaluation/eval_lora_scaling.py \
         --adapter-path scratch/toy-20260211-180132/checkpoints/final \
         --persona o_avoiding \
         --scaling-factors '[-1.0, 0.0, 0.5, 1.0, 2.0]' \
@@ -50,9 +50,9 @@ if _hf_token:
 from src.utils.peft_manipulations import LoRaScaling, LoRaAdapterZeroing, set_active_adapters
 from scripts.common.persona_registry import get_persona_default_evaluations, get_persona_task_prompts, DEFAULT_PERSONA
 from scripts.data_loading import format_for_inference
-from scripts.persona_metrics import run_persona_metrics, PersonaMetricsConfig
+from scripts.evaluation import run_evaluation, EvaluationConfig
 from scripts.utils import write_jsonl, setup_logging
-from scripts.evals.lora_arithmetic import precompute_lora_deltas, apply_lora_scale, restore_base_weights
+from scripts.evaluation.lora_arithmetic import precompute_lora_deltas, apply_lora_scale, restore_base_weights
 
 logger = logging.getLogger(__name__)
 
@@ -292,17 +292,17 @@ def main():
         gen_dataset = Dataset.from_list(records)
 
         # Run evaluations
-        eval_config = PersonaMetricsConfig(
+        eval_config = EvaluationConfig(
             evaluations=args.evaluations,
             response_column="response",
             question_column="question",
         )
-        eval_dataset_out, eval_result = run_persona_metrics(eval_config, dataset=gen_dataset)
+        eval_dataset_out, eval_result = run_evaluation(eval_config, dataset=gen_dataset)
 
         # Accumulate per-question results for this scale
         eval_rows = eval_dataset_out.to_list()
         for i, row_data in enumerate(eval_rows):
-            metrics = row_data.get("persona_metrics", {})
+            metrics = row_data.get("evaluation_metrics", {})
             per_question[i]["scales"][str(scale)] = {
                 "response": row_data["response"],
                 "metrics": metrics,
@@ -350,12 +350,12 @@ def main():
                 for q, r in zip(baseline_questions, bl_responses)
             ]
             bl_dataset = Dataset.from_list(bl_records)
-            bl_eval_config = PersonaMetricsConfig(
+            bl_eval_config = EvaluationConfig(
                 evaluations=args.evaluations,
                 response_column="response",
                 question_column="question",
             )
-            _, bl_eval_result = run_persona_metrics(bl_eval_config, dataset=bl_dataset)
+            _, bl_eval_result = run_evaluation(bl_eval_config, dataset=bl_dataset)
             prompted_baselines[direction] = {
                 k: v for k, v in bl_eval_result.aggregates.items()
             }

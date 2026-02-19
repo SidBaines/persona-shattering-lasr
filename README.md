@@ -1,172 +1,122 @@
-# Persona Extraction via LoRA Fine-tuning
+# Persona Shattering via LoRA Fine-tuning
 
-Extract and transfer personality traits to LLMs through targeted fine-tuning.
+Extract and transfer personality traits into LLMs through targeted LoRA fine-tuning, and study the resulting adapter geometry via LoRA arithmetic.
 
 ## Hardware Requirements
 
-This code is developed and tested on:
+Developed and tested on:
 - **VM**: `gpu_1x_gh200` (NVIDIA GH200 480GB)
 - **Architecture**: ARM64 (aarch64)
+- **Python**: 3.11
 - **PyTorch**: System-provided torch with CUDA (not installed via pip/uv due to ARM64 wheel availability)
-- **NumPy**: <2.0 (required for system torch compatibility)
 
 ## Setup
-
-1. Clone the repository and install dependencies:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
-> **Note**: On the GH200 VM, torch is provided by the system. After `uv sync`, you may need to remove the venv torch to use the system CUDA-enabled version:
+> **Note**: On the GH200 VM, torch is provided by the system. After `uv sync`, remove the venv torch to use the system CUDA-enabled version:
 > ```bash
-> rm -rf .venv/lib/python3.10/site-packages/torch*
+> rm -rf .venv/lib/python3.11/site-packages/torch*
 > ```
 
-2. Create your environment file:
+Create your environment file:
 
 ```bash
-echo 'ANTHROPIC_API_KEY=
-HF_TOKEN=
-WANDB_API_KEY=' > .env
-
-nano .env
-# Edit .env with your API keys
-```
-
-3. Verify installation:
-
-```bash
-uv run python -c "from scripts.inference import run_inference; print('OK')"
+cp .env.example .env
+# fill in ANTHROPIC_API_KEY, HF_TOKEN, WANDB_API_KEY
 ```
 
 ## Project Overview
 
-This project investigates whether personality traits can be extracted from LLMs and transformed via LoRA fine-tuning. The pipeline consists of:
+The pipeline runs in four stages:
 
-1. **Inference** - Generate responses from a base model
-2. **Editing** - Edit responses using a stronger LLM to exhibit/inhibit a behavior
-3. **Training** - Fine-tune with LoRA on edited responses
-4. **Persona Metrics** - Score per-response persona/style behavior
-5. **Evals** - Run end-to-end model benchmarks (persona metrics + Inspect tasks)
+1. **Inference** — generate responses from `meta-llama/Llama-3.1-8B-Instruct`
+2. **Editing** — rewrite responses via a stronger LLM (Claude) to amplify or suppress a trait
+3. **Training** — LoRA fine-tune on the edited responses
+4. **Evaluation** — measure how well the trait transferred
 
-## Quick Start
+Trained adapters are then analysed for their geometric properties (subspace alignment, rank structure) via the LoRA arithmetic utilities in `src/utils/`.
 
-Run the toy model experiment (uses letter 'O' frequency as a simple persona):
+## Personas
 
-```bash
-uv run python experiments/toy_model.py
-```
+Personas are registered in `scripts/common/persona_registry.py`:
 
-## Architecture: Component Library
+| Persona | Direction | Evaluation | Notes |
+|---------|-----------|------------|-------|
+| `o_avoiding` | +/- | `count_o` | Toy baseline (letter 'O' frequency) |
+| `verbs_avoiding` | +/- | `verb_count` | Verb density |
+| `sf_guy` | +/- | `lowercase_density`, `punctuation_density` | Casual texting style |
+| `n+_persona` | + | `emotional_instability` | Neuroticism (high) |
+| `n-_persona` | - | `emotional_instability` | Neuroticism (low) |
 
-The project uses a **component library** architecture instead of a prescriptive pipeline:
-
-- **`scripts/`** - Reusable components (inference, editing, training)
-- **`experiments/`** - Experiment scripts that compose components
-- **`src/`** - Stable interfaces and base classes
-
-### Using Components
-
-Each component exports a config class and a run function:
-
-```python
-from scripts.inference import run_inference, InferenceConfig
-from scripts.editing import run_editing, EditingConfig
-from scripts.training import run_training, TrainingConfig
-from scripts.common.config import ModelConfig, DatasetConfig, GenerationConfig
-
-# Configure inference
-config = InferenceConfig(
-    model="Qwen/Qwen2.5-0.5B-Instruct",
-    provider="local",
-    dataset=DatasetConfig(
-        source="huggingface",
-        name="vicgalle/alpaca-gpt4",
-        max_samples=10,
-    ),
-    generation=GenerationConfig(max_new_tokens=500),
-    output_path=Path("scratch/output.jsonl"),
-)
-
-# Run inference
-dataset, result = run_inference(config)
-
-# Pass to next stage
-editing_config = EditingConfig(
-    provider="anthropic",
-    model="claude-sonnet-4-20250514",
-)
-edited_dataset, edit_result = run_editing(editing_config, dataset=dataset)
-```
-
-### Creating Experiments
-
-Create experiment scripts in `experiments/` that:
-1. Define configs in Python (not YAML)
-2. Import and call components directly
-3. Chain stages by passing datasets between them
-
-See `experiments/toy_model.py` for a complete example.
+> **Note**: `emotional_instability` is currently a placeholder (returns 0). The trained adapters (`n+_persona` r16, `n+_persona_r4`, `n-_persona_r4`) are in `scratch/checkpoints/`.
 
 ## Directory Structure
 
-| Directory | Purpose |
-|-----------|---------|
-| `src/` | Stable interfaces and base classes |
-| `scripts/` | Component implementations (inference, editing, training) |
-| `experiments/` | Experiment scripts that compose components |
-| `scratch/` | Experiment outputs (gitignored) |
+| Path | Purpose |
+|------|---------|
+| `src/utils/` | LoRA arithmetic library (rank reduction, scaling, subspace tools) |
+| `scripts/` | Component implementations (inference, editing, training, evaluation) |
+| `scripts/common/` | Shared config, persona registry |
+| `scripts/experiments/` | Runnable experiment scripts (persona pipelines, evaluations) |
+| `scripts/dump/` | Exploratory notebooks (LoRA combinations, downranking) |
+| `scratch/` | Outputs: checkpoints, JSONL datasets, W&B artefacts (gitignored) |
+| `tests/` | Unit tests for `src/` utilities |
 
 ## Component Reference
 
 ### Inference (`scripts.inference`)
-- `InferenceConfig` - Configuration for inference
-- `run_inference(config, dataset=None)` - Run inference, returns (dataset, result)
-- Providers: `local` (HuggingFace), `openai` (OpenAI), `openrouter` (OpenRouter), `anthropic` (Anthropic)
+- `run_inference(config, dataset=None)` — runs local HF inference or remote API
+- Providers: `local`, `openai`, `openrouter`, `anthropic`
 
 ### Editing (`scripts.editing`)
-- `EditingConfig` - Configuration for editing
-- `run_editing(config, dataset=None)` - Edit responses, returns (dataset, result)
+- `run_editing(config, dataset=None)` — rewrites responses to exhibit/inhibit a trait
 - Providers: `anthropic`, `openai`
 
 ### Training (`scripts.training`)
-- `TrainingConfig` - Configuration for training
-- `run_training(config, dataset=None)` - LoRA fine-tuning, returns (val_dataset, result)
+- `run_training(config, dataset=None)` — LoRA fine-tuning via HF Trainer + PEFT
+
+### Evaluation (`scripts.evaluation`)
+- `run_evaluation(config, dataset=None)` — scores responses with registered evaluators
+- Evaluators: `count_o`, `verb_count`, `lowercase_density`, `punctuation_density`, `coherence`, `emotional_instability`
 
 ### Persona Metrics (`scripts.persona_metrics`)
-- `PersonaMetricsConfig` - Per-response metric scoring configuration
-- `run_persona_metrics(config, dataset=None)` - Score responses on a dataset
+- `run_persona_metrics(config, dataset=None)` — per-response metric scoring on a dataset
 - Built-ins: `count_o`, `verb_count`, `coherence`, `lowercase_density`, `punctuation_density`
 
 ### Evals (`scripts.evals`)
-- `EvalsConfig` - End-to-end eval configuration across model targets and suites
-- `run_evals(config, dataset=None)` - Run eval suites (`persona_metrics`, `inspect_task`)
-- Supports base and LoRA model targets, with built-in `mmlu` inspect task alias
+- `run_evals(config, dataset=None)` — end-to-end eval suites across model targets
+- Suites: `persona_metrics`, `inspect_task` (e.g. `mmlu`)
+- Supports base and LoRA model targets
 
-### Shared Config (`scripts.common.config`)
-- `ModelConfig` - Model name, dtype, device_map
-- `DatasetConfig` - Dataset source, name, split, max_samples
-- `GenerationConfig` - max_new_tokens, temperature, batch_size
-- `WandbConfig` - W&B logging settings
+### LoRA Arithmetic (`src.utils`)
 
-## Training Stage Details
+`src/utils/peft_manipulations.py` provides reversible, in-place LoRA modifiers:
 
-### Default LoRA Settings
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `r` | 16 | LoRA rank |
-| `lora_alpha` | 32 | LoRA scaling factor |
-| `lora_dropout` | 0.05 | Dropout probability |
-| `target_modules` | `[q_proj, k_proj, v_proj, o_proj]` | Attention layers to adapt |
+| Class | What it does |
+|-------|-------------|
+| `LoRaRankReducer` | Truncated-SVD rank reduction |
+| `LoRaScaling` | Multiplicative scaling of adapter contribution |
+| `LoRaAdapterZeroing` | Zeros out selected layers/modules |
+| `LoRaPipeline` | Composes multiple modifiers in sequence |
 
-### W&B Logging
-Training logs the following metrics to Weights & Biases:
-- **Loss** (every step)
-- **O-count metrics** (every epoch): `eval/o_count_avg_per_response`, `eval/o_frequency_percent`
-- **Sample generations table** (every 10 steps): question, response, o_count
-- **LoRA adapter artifact** (end of training)
+`src/utils/linalg.py` provides `reduce_lora_rank_efficient` — memory-efficient rank reduction via QR + SVD on the small (r×r) core rather than the full weight matrix.
+
+All modifiers snapshot state at init and `restore()` is idempotent.
+
+## Default LoRA Training Config
+
+| Parameter | Value |
+|-----------|-------|
+| `r` | 16 (r4 variants use 4) |
+| `lora_alpha` | 32 (r4: 8) |
+| `lora_dropout` | 0.05 |
+| `target_modules` | `q_proj`, `k_proj`, `v_proj`, `o_proj` |
+
+Training logs loss, eval metrics, and sample generations to Weights & Biases.
 
 ## For Developers
 

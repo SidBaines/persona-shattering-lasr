@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import string
 
-from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
+from scripts.evaluation.base import Evaluation, EvaluationContext
 
 PUNCTUATION_CHARS = set(string.punctuation)
 
 
-class LowercaseDensityEvaluation(PersonaMetric):
+class LowercaseDensityEvaluation(Evaluation):
     """Counts lowercase letters in responses."""
 
     @property
@@ -21,7 +21,7 @@ class LowercaseDensityEvaluation(PersonaMetric):
         response: str,
         question: str | None = None,
         *,
-        context: PersonaMetricContext | None = None,
+        context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
         """Count lowercase letters in the response.
 
@@ -31,19 +31,18 @@ class LowercaseDensityEvaluation(PersonaMetric):
             context: Ignored for this evaluation.
 
         Returns:
-            Dict with lowercase_density.count and lowercase_density.density
-            (percentage of alphabetic characters that are lowercase).
+            Dict with lowercase_density.count and lowercase_density.density (percentage of chars).
         """
         count = sum(1 for char in response if char.islower())
-        alpha_count = sum(1 for char in response if char.isalpha())
-        density = (count / alpha_count * 100) if alpha_count > 0 else 0.0
+        length = len(response)
+        density = (count / length * 100) if length > 0 else 0.0
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),
         }
 
 
-class PunctuationDensityEvaluation(PersonaMetric):
+class PunctuationDensityEvaluation(Evaluation):
     """Counts punctuation characters in responses."""
 
     @property
@@ -55,7 +54,7 @@ class PunctuationDensityEvaluation(PersonaMetric):
         response: str,
         question: str | None = None,
         *,
-        context: PersonaMetricContext | None = None,
+        context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
         """Count punctuation characters in the response.
 
@@ -65,12 +64,11 @@ class PunctuationDensityEvaluation(PersonaMetric):
             context: Ignored for this evaluation.
 
         Returns:
-            Dict with punctuation_density.count and punctuation_density.density
-            (percentage of non-whitespace characters that are punctuation).
+            Dict with punctuation_density.count and punctuation_density.density (percentage of chars).
         """
         count = sum(1 for char in response if char in PUNCTUATION_CHARS)
-        non_ws_count = sum(1 for char in response if not char.isspace())
-        density = (count / non_ws_count * 100) if non_ws_count > 0 else 0.0
+        length = len(response)
+        density = (count / length * 100) if length > 0 else 0.0
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),

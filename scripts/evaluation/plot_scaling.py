@@ -5,7 +5,7 @@ All metric names are resolved from sweep_metadata.json (written by eval_lora_sca
 so this script works for any persona without hardcoded metric keys.
 
 Usage:
-    python -m scripts.evals.plot_scaling --results-dir scratch/.../scaling_sweep
+    python -m scripts.evaluation.plot_scaling --results-dir scratch/.../scaling_sweep
 """
 
 from __future__ import annotations
@@ -81,19 +81,19 @@ def compute_prompted_for_references(
 
     Returns dict like {"verb_count.count": 3.17, "verb_count.density": 1.67}.
     """
-    from scripts.persona_metrics import run_persona_metrics, PersonaMetricsConfig
+    from scripts.evaluation import run_evaluation, EvaluationConfig
     from datasets import Dataset
 
     rows = load_jsonl(Path(edited_dataset_path))
     records = [{"question": r.get("question", ""), "response": r["edited_response"]} for r in rows]
     ds = Dataset.from_list(records)
 
-    eval_config = PersonaMetricsConfig(
+    eval_config = EvaluationConfig(
         evaluations=evaluations,
         response_column="response",
         question_column="question",
     )
-    _, eval_result = run_persona_metrics(eval_config, dataset=ds)
+    _, eval_result = run_evaluation(eval_config, dataset=ds)
 
     # Extract mean values for each metric sub-key
     refs: dict[str, float] = {}

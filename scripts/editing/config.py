@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from scripts.common.persona_registry import DEFAULT_PERSONA
-from scripts.persona_metrics.config import PersonaMetricSpec, JudgeLLMConfig
+from scripts.evaluation.config import EvaluationSpec, JudgeLLMConfig
 
 
 class RetryConfig(BaseModel):
@@ -28,7 +28,7 @@ class OpenAIProviderConfig(BaseModel):
     """OpenAI-specific settings."""
 
     model: str | None = None  # Override model for OpenAI (if different from main model)
-    max_tokens: int = 20000
+    max_tokens: int = 100000
 
 
 class CodeProviderConfig(BaseModel):
@@ -48,7 +48,7 @@ class QualityConfig(BaseModel):
     """
 
     enabled: bool = True
-    evaluations: list[str | PersonaMetricSpec] | None = None
+    evaluations: list[str | EvaluationSpec] | None = None
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     metrics_key: str = "quality_metrics"
     persona: str = DEFAULT_PERSONA
@@ -85,10 +85,6 @@ class EditingConfig(BaseModel):
     provider: str = "anthropic"  # "anthropic", "openai", or "code"
     model: str = "claude-sonnet-4-20250514"
     prompt_template: str = "default_persona_shatter"
-
-    # Sampling parameters for the editing LLM
-    temperature: float = 0.7
-    top_p: float = 0.95
 
     # Concurrency and timeout
     max_concurrent: int = 10

@@ -71,7 +71,7 @@ val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl
 ## Features
 
 - **LoRA adapters**: Efficient fine-tuning with configurable rank and alpha
-- **Configurable evaluations**: Run any evaluation from `scripts.persona_metrics` during training (training itself is persona-agnostic — it trains on whatever edited data it receives)
+- **Configurable evaluations**: Run any evaluation from `scripts.evaluation` during training (training itself is persona-agnostic — it trains on whatever edited data it receives)
 - **Training metrics**: Gradient/parameter norm logging (W&B)
 - **W&B integration**: Automatic logging of metrics, sample tables, and LoRA adapter artifacts
 - **Train/val split**: Automatic dataset splitting with configurable ratio

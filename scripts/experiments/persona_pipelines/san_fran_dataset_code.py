@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.editing import CodeProviderConfig, EditingConfig, run_editing
-from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
+from scripts.evaluation import EvaluationConfig, run_evaluation
 from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import write_jsonl
 
@@ -143,7 +143,7 @@ def main() -> None:
     print("STAGE 3: EVALUATION (Code)")
     print(f"{'='*60}\n")
 
-    evaluation_config = PersonaMetricsConfig(
+    evaluation_config = EvaluationConfig(
         evaluations=["lowercase_density", "punctuation_density"],
         response_column="edited_response",
         question_column="question",
@@ -151,7 +151,7 @@ def main() -> None:
         output_path=scratch_dir / "edited_evaluated.jsonl",
     )
 
-    evaluated_dataset, evaluation_result = run_persona_metrics(
+    evaluated_dataset, evaluation_result = run_evaluation(
         evaluation_config, dataset=edited_dataset
     )
     print(f"\nEvaluated {evaluation_result.num_samples} responses")

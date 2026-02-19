@@ -82,7 +82,7 @@ dataset, result = run_editing(config, input_path=Path("scratch/inference_output.
 
 ## Quality Metrics
 
-When enabled (default), edit quality is computed through the shared `scripts.persona_metrics` module.
+When enabled (default), edit quality is computed through the shared `scripts.evaluation` module.
 For each evaluation metric key, editing stores:
 - `<metric>.original` (on pre-edit response)
 - `<metric>.edited` (on post-edit response)
@@ -92,4 +92,4 @@ The default quality evaluation is auto-resolved from the active persona (e.g., `
 
 If quality evaluation fails after edits are generated (for example, missing judge API key for an LLM-judge metric), editing defaults to a clear warning and still returns/saves the edited dataset without quality metrics. Set `--quality-on-error raise` for strict behavior.
 
-See [Persona Metrics README — Persona Registry](../persona_metrics/README.md#persona-registry) for the full list of available personas and how to select one via `--persona`.
+See [Evaluation README — Persona Registry](../evaluation/README.md#persona-registry) for the full list of available personas and how to select one via `--persona`.

@@ -15,11 +15,11 @@ from scripts.common.config import GenerationConfig
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
 from scripts.common.persona_registry import get_persona_default_evaluations
-from scripts.persona_metrics import (
-    PersonaMetricsConfig,
-    PersonaMetricSpec,
-    aggregate_persona_metric_results,
-    run_persona_metrics,
+from scripts.evaluation import (
+    EvaluationConfig,
+    EvaluationSpec,
+    aggregate_evaluation_results,
+    run_evaluation,
 )
 from scripts.inference.config import (
     InferenceConfig,
@@ -73,10 +73,11 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
             max_tokens=config.anthropic.max_tokens
         )
 
+    # Match provider defaults since EditingConfig doesn't expose sampling params.
     generation = GenerationConfig(
         max_new_tokens=max_tokens,
-        temperature=config.temperature,
-        top_p=config.top_p,
+        temperature=1.0,
+        top_p=1.0,
         do_sample=True,
         batch_size=max(1, config.max_concurrent),
         num_responses_per_prompt=1,
@@ -99,7 +100,7 @@ def build_inference_config(config: EditingConfig) -> InferenceConfig:
     )
 
 
-def _resolve_quality_evaluations(config: EditingConfig) -> list[str | PersonaMetricSpec]:
+def _resolve_quality_evaluations(config: EditingConfig) -> list[str | EvaluationSpec]:
     """Resolve quality evaluations from config.
 
     When ``config.quality.evaluations`` is ``None`` (the default), the
@@ -148,23 +149,23 @@ def _run_quality_evaluation_pass(
     original_key = "_quality_original_metrics"
     edited_key = "_quality_edited_metrics"
 
-    original_eval_config = PersonaMetricsConfig(
+    original_eval_config = EvaluationConfig(
         evaluations=evaluations,
         response_column="response",
         question_column=question_column,
         judge=config.quality.judge,
         metrics_key=original_key,
     )
-    with_original_metrics, _ = run_persona_metrics(original_eval_config, dataset=dataset)
+    with_original_metrics, _ = run_evaluation(original_eval_config, dataset=dataset)
 
-    edited_eval_config = PersonaMetricsConfig(
+    edited_eval_config = EvaluationConfig(
         evaluations=evaluations,
         response_column="edited_response",
         question_column=question_column,
         judge=config.quality.judge,
         metrics_key=edited_key,
     )
-    with_all_metrics, _ = run_persona_metrics(edited_eval_config, dataset=with_original_metrics)
+    with_all_metrics, _ = run_evaluation(edited_eval_config, dataset=with_original_metrics)
 
     records = with_all_metrics.to_list()
     all_quality_metrics: list[dict[str, MetricValue]] = []
@@ -187,7 +188,7 @@ def _run_quality_evaluation_pass(
             record[config.quality.metrics_key] = quality_metrics
         all_quality_metrics.append(quality_metrics)
 
-    return Dataset.from_list(records), aggregate_persona_metric_results(all_quality_metrics)
+    return Dataset.from_list(records), aggregate_evaluation_results(all_quality_metrics)
 
 
 async def edit_dataset(

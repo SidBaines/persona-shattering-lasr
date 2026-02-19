@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
+from scripts.evaluation.base import Evaluation, EvaluationContext
 
 # Lazy-loaded spacy model (loaded once on first call)
 _nlp = None
@@ -17,7 +17,7 @@ def _get_nlp():
     return _nlp
 
 
-class VerbCountEvaluation(PersonaMetric):
+class VerbCountEvaluation(Evaluation):
     """Counts verb tokens in responses using spaCy POS tagging.
 
     This is the core metric for the verbs-avoiding persona — tracking how
@@ -35,7 +35,7 @@ class VerbCountEvaluation(PersonaMetric):
         response: str,
         question: str | None = None,
         *,
-        context: PersonaMetricContext | None = None,
+        context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
         """Count verb tokens in the response.
 

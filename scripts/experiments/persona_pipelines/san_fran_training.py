@@ -20,7 +20,7 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 
 from scripts.common.config import ModelConfig, WandbConfig
-from scripts.persona_metrics import PersonaMetricSpec, JudgeLLMConfig
+from scripts.evaluation import EvaluationSpec, JudgeLLMConfig
 from scripts.training import (
     LoraConfig,
     SftConfig,
@@ -107,7 +107,7 @@ def main() -> None:
             evaluations=[
                 "lowercase_density",
                 "punctuation_density",
-                PersonaMetricSpec(name="coherence", params={"include_reasoning": False}),
+                EvaluationSpec(name="coherence", params={"include_reasoning": False}),
             ],
             # evaluations=["lowercase_density", "punctuation_density"],
             judge=JudgeLLMConfig(

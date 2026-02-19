@@ -1,4 +1,4 @@
-"""Core persona metric logic for running metrics on datasets."""
+"""Core evaluation logic for running evaluations on datasets."""
 
 from __future__ import annotations
 
@@ -8,45 +8,45 @@ from pathlib import Path
 from datasets import Dataset
 
 from scripts.data_loading import load_dataset_from_config
-from scripts.persona_metrics.aggregation import aggregate_persona_metric_results
-from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
-from scripts.persona_metrics.config import (
-    PersonaMetricsConfig,
-    PersonaMetricsResult,
-    PersonaMetricSpec,
+from scripts.evaluation.aggregation import aggregate_evaluation_results
+from scripts.evaluation.base import Evaluation, EvaluationContext
+from scripts.evaluation.config import (
+    EvaluationConfig,
+    EvaluationResult,
+    EvaluationSpec,
 )
-from scripts.persona_metrics.registry import get_persona_metric
+from scripts.evaluation.registry import get_evaluation
 from scripts.utils import setup_logging, write_jsonl
 
 
-def create_persona_metrics(config: PersonaMetricsConfig) -> list[PersonaMetric]:
-    """Create persona metric instances from config.
+def _init_evaluations(config: EvaluationConfig) -> list[Evaluation]:
+    """Initialize evaluation instances from config.
 
     Supports both plain string names (use global judge config) and
-    PersonaMetricSpec objects (merge global judge config with per-eval params).
+    EvaluationSpec objects (merge global judge config with per-eval params).
     """
-    metrics: list[PersonaMetric] = []
+    evaluations: list[Evaluation] = []
     for spec in config.evaluations:
         if isinstance(spec, str):
-            metrics.append(get_persona_metric(spec, judge_config=config.judge))
+            evaluations.append(get_evaluation(spec, judge_config=config.judge))
         else:
             kwargs: dict = {"judge_config": config.judge}
             kwargs.update(spec.params)
-            metrics.append(get_persona_metric(spec.name, **kwargs))
-    return metrics
+            evaluations.append(get_evaluation(spec.name, **kwargs))
+    return evaluations
 
 
-async def run_persona_metrics_async(
-    config: PersonaMetricsConfig, dataset: Dataset | None = None
-) -> tuple[Dataset, PersonaMetricsResult]:
-    """Run persona metrics on a dataset asynchronously.
+async def run_evaluation_async(
+    config: EvaluationConfig, dataset: Dataset | None = None
+) -> tuple[Dataset, EvaluationResult]:
+    """Run evaluations on a dataset asynchronously.
 
     Args:
-        config: Persona metrics configuration.
+        config: Evaluation configuration.
         dataset: Optional pre-loaded dataset. If None, loads from config.dataset.
 
     Returns:
-        Tuple of (dataset with persona metrics added, PersonaMetricsResult metadata).
+        Tuple of (dataset with evaluation metrics added, EvaluationResult metadata).
     """
     logger = setup_logging()
 
@@ -67,14 +67,14 @@ async def run_persona_metrics_async(
     if config.question_column and config.question_column in dataset.column_names:
         questions = dataset[config.question_column]
 
-    # Build PersonaMetricContext objects from dataset records
+    # Build EvaluationContext objects from dataset records
     records_list = dataset.to_list()
     run_metadata = {
         "response_column": config.response_column,
         "question_column": config.question_column,
     }
     contexts = [
-        PersonaMetricContext(
+        EvaluationContext(
             response=responses[i],
             question=questions[i] if questions else None,
             record=records_list[i],
@@ -83,54 +83,54 @@ async def run_persona_metrics_async(
         for i in range(len(dataset))
     ]
 
-    # Initialize metrics
-    metrics = create_persona_metrics(config)
+    # Initialize evaluations
+    evaluations = _init_evaluations(config)
     logger.info(
-        "Running %d persona metric(s) on %d samples: %s",
-        len(metrics),
+        "Running %d evaluation(s) on %d samples: %s",
+        len(evaluations),
         len(dataset),
-        [metric.name for metric in metrics],
+        [e.name for e in evaluations],
     )
 
-    # Run all metrics concurrently
-    async def _run_one(metric: PersonaMetric) -> list[dict[str, float | int | str]]:
-        logger.info("Running persona metric: %s", metric.name)
-        results = await metric.evaluate_batch_async(
+    # Run all evaluations concurrently
+    async def _run_one(evaluation: Evaluation) -> list[dict[str, float | int | str]]:
+        logger.info("Running evaluation: %s", evaluation.name)
+        results = await evaluation.evaluate_batch_async(
             responses, questions, contexts=contexts
         )
-        logger.info("Completed persona metric: %s", metric.name)
+        logger.info("Completed evaluation: %s", evaluation.name)
         return results
 
-    all_metric_results = await asyncio.gather(
-        *[_run_one(metric) for metric in metrics]
+    all_evaluation_results = await asyncio.gather(
+        *[_run_one(e) for e in evaluations]
     )
 
-    # Merge results from all metrics into per-record dicts
+    # Merge results from all evaluations into per-record dicts
     all_record_results: list[dict[str, float | int | str]] = [
         {} for _ in range(len(dataset))
     ]
-    for metric_batch_results in all_metric_results:
-        for i, result in enumerate(metric_batch_results):
+    for eval_batch_results in all_evaluation_results:
+        for i, result in enumerate(eval_batch_results):
             all_record_results[i].update(result)
 
     # Embed results into dataset records
     records = dataset.to_list()
-    for record, metric_values in zip(records, all_record_results):
+    for record, metrics in zip(records, all_record_results):
         existing = record.get(config.metrics_key)
         if isinstance(existing, dict):
-            record[config.metrics_key] = {**existing, **metric_values}
+            record[config.metrics_key] = {**existing, **metrics}
         else:
-            record[config.metrics_key] = metric_values
+            record[config.metrics_key] = metrics
 
     result_dataset = Dataset.from_list(records)
 
     # Aggregate
-    aggregates = aggregate_persona_metric_results(all_record_results)
+    aggregates = aggregate_evaluation_results(all_record_results)
 
     # Build result
-    result = PersonaMetricsResult(
+    result = EvaluationResult(
         num_samples=len(result_dataset),
-        evaluations_run=[metric.name for metric in metrics],
+        evaluations_run=[e.name for e in evaluations],
         aggregates=aggregates,
     )
 
@@ -139,11 +139,11 @@ async def run_persona_metrics_async(
         save_path = Path(config.output_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
         write_jsonl(result_dataset.to_list(), save_path)
-        logger.info("Saved persona metrics output to %s", save_path)
+        logger.info("Saved evaluation output to %s", save_path)
         result.output_path = save_path
 
     # Log summary
-    logger.info("Persona metrics complete. Summary:")
+    logger.info("Evaluation complete. Summary:")
     for key, value in sorted(aggregates.items()):
         if isinstance(value, float):
             logger.info("  %s: %.4f", key, value)
@@ -153,19 +153,19 @@ async def run_persona_metrics_async(
     return result_dataset, result
 
 
-def run_persona_metrics(
-    config: PersonaMetricsConfig, dataset: Dataset | None = None
-) -> tuple[Dataset, PersonaMetricsResult]:
-    """Run persona metrics on a dataset (sync wrapper).
+def run_evaluation(
+    config: EvaluationConfig, dataset: Dataset | None = None
+) -> tuple[Dataset, EvaluationResult]:
+    """Run evaluations on a dataset (sync wrapper).
 
-    Use run_persona_metrics_async for async contexts. This wrapper will fail if
+    Use run_evaluation_async for async contexts. This wrapper will fail if
     called while an event loop is already running.
     """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(run_persona_metrics_async(config, dataset))
+        return asyncio.run(run_evaluation_async(config, dataset))
     raise RuntimeError(
-        "run_persona_metrics called inside a running event loop. "
-        "Use run_persona_metrics_async instead."
+        "run_evaluation called inside a running event loop. "
+        "Use run_evaluation_async instead."
     )

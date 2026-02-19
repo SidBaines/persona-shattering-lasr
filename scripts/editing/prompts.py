@@ -123,7 +123,4 @@ def get_prompt(template_name: str, question: str, response: str) -> str:
         Rendered prompt string.
     """
     template = TEMPLATES[template_name]
-    # Use manual replacement instead of str.format() so that curly braces
-    # in user-provided question/response text (code, JSON, math) don't
-    # cause KeyError or silent corruption.
-    return template.replace("{question}", question).replace("{response}", response)
+    return template.format(question=question, response=response)
