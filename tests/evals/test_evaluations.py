@@ -13,6 +13,7 @@ from scripts.evals.evaluations import (
 def test_registry_contains_coherence1():
     names = list_named_evaluations()
     assert "coherence1" in names
+    assert "coherence_count_o1" in names
 
 
 def test_load_named_benchmark():
@@ -27,3 +28,12 @@ def test_apply_limit_override_to_custom():
     overridden = apply_eval_overrides(spec, limit=7)
     assert isinstance(overridden, InspectCustomEvalSpec)
     assert overridden.dataset.max_samples == 7
+
+
+def test_load_named_multi_metric_custom_eval():
+    spec = load_evaluation_definition("coherence_count_o1")
+    assert isinstance(spec, InspectCustomEvalSpec)
+    assert spec.evaluations == ["coherence", "count_o"]
+    assert spec.dataset.name == "SoftAge-AI/prompt-eng_dataset"
+    assert spec.dataset.split == "train"
+    assert spec.scorer_builder == "scripts.evals.scorer_builders:persona_multi_score_scorer"

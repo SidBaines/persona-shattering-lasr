@@ -32,6 +32,16 @@ uv run python -m scripts.evals named \
   --limit 25
 ```
 
+Run multiple persona metrics in one eval (single inference pass):
+
+```bash
+uv run python -m scripts.evals named \
+  --output-root scratch/evals/coherence_count_o \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --evaluation coherence_count_o1 \
+  --limit 25
+```
+
 ### One Run With Three Model Specs (Base + Local LoRA + Mixed LoRAs)
 
 ```bash
@@ -71,6 +81,30 @@ For low-level custom evals in `direct` mode:
 - Provide one or more `--evaluation` metrics (from `scripts.persona_metrics`)
 - Optionally pass judge prompt overrides with `--metric-param` or `--judge-prompt-template-file`
 - Optionally provide `--scorer-builder` for non-persona local Inspect scorers
+
+To report multiple per-sample numeric scores and aggregate multiple means,
+use the built-in scorer builder:
+
+```bash
+uv run python -m scripts.evals direct \
+  --output-root scratch/evals/coherence_count_o_multi \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --eval-kind custom \
+  --eval-name coherence_count_o_multi \
+  --dataset-source huggingface \
+  --dataset-name OpenAssistant/oasst1 \
+  --dataset-split validation \
+  --max-samples 25 \
+  --input-builder scripts.evals.examples:oasst1_input_builder \
+  --evaluation coherence \
+  --evaluation count_o \
+  --scorer-builder scripts.evals.scorer_builders:persona_multi_score_scorer
+```
+
+This scorer writes all persona outputs to `Score.metadata[persona_metrics]`,
+puts numeric fields in `Score.value` per sample, and reports:
+- a `mean_by_field` dict metric (one mean per numeric field)
+- an `overall_numeric_mean` scalar metric
 
 ## Output Contract
 
