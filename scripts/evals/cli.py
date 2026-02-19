@@ -17,6 +17,11 @@ from scripts.evals.config import (
     ModelSpec,
     SuiteConfig,
 )
+from scripts.evals.evaluations import (
+    apply_eval_overrides,
+    list_named_evaluations,
+    load_evaluation_definition,
+)
 from scripts.evals.suite import load_suite_module, run_eval_suite
 from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.utils import setup_logging
@@ -198,11 +203,20 @@ def main(
     if model or tasks or adapters:
         raise click.UsageError(
             "lm_eval CLI flags are deprecated. "
-            "Use `python -m scripts.evals direct ...` or `suite --config-module ...`"
+            "Use `python -m scripts.evals named ...`, `direct ...`, or `suite --config-module ...`"
         )
 
     if ctx.invoked_subcommand is None:
-        raise click.UsageError("Missing command. Use one of: `suite`, `run`, `direct`.")
+        raise click.UsageError(
+            "Missing command. Use one of: `suite`, `run`, `named`, `list-evaluations`, `direct`."
+        )
+
+
+@main.command("list-evaluations")
+def list_evaluations_command() -> None:
+    """List built-in named evaluation definitions."""
+    for name in list_named_evaluations():
+        print(name)
 
 
 @main.command("suite")
@@ -286,6 +300,208 @@ def run_filtered_command(
         raise click.UsageError("No evals selected after --eval-name filtering")
 
     result = run_eval_suite(filtered, judge_exec)
+    _print_result(result)
+
+
+@main.command("named")
+@click.option(
+    "--output-root",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output root directory (run folder is created under this path).",
+)
+@click.option("--run-name", default=None, help="Optional fixed run name.")
+@click.option(
+    "--cleanup-materialized-models/--keep-materialized-models",
+    default=False,
+    help="Delete merged LoRA model artifacts at the end of the run.",
+)
+@click.option(
+    "--model-spec",
+    "model_specs",
+    multiple=True,
+    required=True,
+    help=(
+        "Repeatable model spec in ';' key-value format: "
+        "name=<name>;base_model=<ref>;adapters=<ref@scale,ref@scale>;dtype=<dtype>;device_map=<map>."
+    ),
+)
+@click.option(
+    "--evaluation",
+    "evaluation_name_or_path",
+    required=True,
+    help=(
+        "Named evaluation key (see `list-evaluations`) or callable path "
+        "returning an Inspect eval definition."
+    ),
+)
+@click.option(
+    "--eval-name",
+    default=None,
+    help="Optional override for the evaluation instance name.",
+)
+@click.option(
+    "--limit",
+    default=None,
+    type=int,
+    help=(
+        "Optional sample limit override. Applies to benchmark limit or "
+        "custom dataset max_samples."
+    ),
+)
+@click.option(
+    "--judge-provider",
+    default=None,
+    help="Optional judge provider override for custom named evals.",
+)
+@click.option(
+    "--judge-model",
+    default=None,
+    help="Optional judge model override for custom named evals.",
+)
+@click.option(
+    "--judge-api-key-env",
+    default=None,
+    help="Optional judge api_key_env override for custom named evals.",
+)
+@click.option(
+    "--judge-max-tokens",
+    default=None,
+    type=int,
+    help="Optional judge max token override for custom named evals.",
+)
+@click.option(
+    "--judge-temperature",
+    default=None,
+    type=float,
+    help="Optional judge temperature override for custom named evals.",
+)
+@click.option(
+    "--judge-max-concurrent",
+    default=None,
+    type=int,
+    help="Optional judge concurrency override for custom named evals.",
+)
+@click.option(
+    "--judge-timeout",
+    default=None,
+    type=int,
+    help="Optional judge timeout override for custom named evals.",
+)
+@click.option(
+    "--gen-max-new-tokens",
+    default=None,
+    type=int,
+    help="Optional generation max token override for custom named evals.",
+)
+@click.option(
+    "--gen-temperature",
+    default=None,
+    type=float,
+    help="Optional generation temperature override for custom named evals.",
+)
+@click.option(
+    "--gen-top-p",
+    default=None,
+    type=float,
+    help="Optional generation top_p override for custom named evals.",
+)
+@click.option(
+    "--gen-batch-size",
+    default=None,
+    type=int,
+    help="Optional generation batch size override for custom named evals.",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["blocking", "submit", "resume"]),
+    default="blocking",
+)
+@click.option("--prefer-batch/--no-prefer-batch", default=True)
+def run_named_command(
+    output_root: Path,
+    run_name: str | None,
+    cleanup_materialized_models: bool,
+    model_specs: tuple[str, ...],
+    evaluation_name_or_path: str,
+    eval_name: str | None,
+    limit: int | None,
+    judge_provider: str | None,
+    judge_model: str | None,
+    judge_api_key_env: str | None,
+    judge_max_tokens: int | None,
+    judge_temperature: float | None,
+    judge_max_concurrent: int | None,
+    judge_timeout: int | None,
+    gen_max_new_tokens: int | None,
+    gen_temperature: float | None,
+    gen_top_p: float | None,
+    gen_batch_size: int | None,
+    mode: str,
+    prefer_batch: bool,
+) -> None:
+    """Run a named Inspect-native evaluation with a single eval arg."""
+    setup_logging()
+
+    models = [_parse_model_spec(raw) for raw in model_specs]
+    eval_spec = load_evaluation_definition(evaluation_name_or_path)
+
+    judge_overrides = {
+        key: value
+        for key, value in {
+            "provider": judge_provider,
+            "model": judge_model,
+            "api_key_env": judge_api_key_env,
+            "max_tokens": judge_max_tokens,
+            "temperature": judge_temperature,
+            "max_concurrent": judge_max_concurrent,
+            "timeout": judge_timeout,
+        }.items()
+        if value is not None
+    }
+    generation_overrides = {
+        key: value
+        for key, value in {
+            "max_new_tokens": gen_max_new_tokens,
+            "temperature": gen_temperature,
+            "top_p": gen_top_p,
+            "batch_size": gen_batch_size,
+        }.items()
+        if value is not None
+    }
+
+    eval_spec = apply_eval_overrides(
+        eval_spec,
+        eval_name=eval_name,
+        limit=limit,
+        judge_overrides=judge_overrides,
+        generation_overrides=generation_overrides,
+    )
+
+    judge_exec = JudgeExecutionConfig(mode=mode, prefer_batch=prefer_batch)
+    cli_args = {
+        "model_specs": list(model_specs),
+        "evaluation": evaluation_name_or_path,
+        "eval_name": eval_name,
+        "limit": limit,
+        "judge_overrides": judge_overrides,
+        "generation_overrides": generation_overrides,
+        "mode": mode,
+        "prefer_batch": prefer_batch,
+        "run_name": run_name,
+        "cleanup_materialized_models": cleanup_materialized_models,
+        "output_root": str(output_root),
+    }
+    config = SuiteConfig(
+        models=models,
+        evals=[eval_spec],
+        output_root=output_root,
+        run_name=run_name,
+        cleanup_materialized_models=cleanup_materialized_models,
+        metadata={"source": "cli_named", "cli_args": cli_args},
+    )
+
+    result = run_eval_suite(config, judge_exec)
     _print_result(result)
 
 

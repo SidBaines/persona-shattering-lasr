@@ -382,3 +382,48 @@ class TestCliMigration:
         result = runner.invoke(cli_main, ["--model", "gpt2", "suite"])
         assert result.exit_code != 0
         assert "deprecated" in result.output.lower()
+
+
+class TestNamedCli:
+    def test_list_evaluations(self):
+        runner = CliRunner()
+        result = runner.invoke(cli_main, ["list-evaluations"])
+        assert result.exit_code == 0
+        assert "coherence1" in result.output
+
+    def test_named_uses_evaluation_definition(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        captured: dict[str, object] = {}
+
+        def fake_run_eval_suite(config, judge_exec):
+            captured["config"] = config
+            return SimpleNamespace(output_root=tmp_path, rows=[])
+
+        monkeypatch.setattr("scripts.evals.cli.run_eval_suite", fake_run_eval_suite)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli_main,
+            [
+                "named",
+                "--output-root",
+                str(tmp_path),
+                "--model-spec",
+                "name=base;base_model=hf/model",
+                "--evaluation",
+                "coherence1",
+                "--limit",
+                "3",
+            ],
+        )
+
+        assert result.exit_code == 0
+        cfg = captured["config"]
+        assert isinstance(cfg, SuiteConfig)
+        assert len(cfg.evals) == 1
+        eval_spec = cfg.evals[0]
+        assert isinstance(eval_spec, InspectCustomEvalSpec)
+        assert eval_spec.dataset.max_samples == 3

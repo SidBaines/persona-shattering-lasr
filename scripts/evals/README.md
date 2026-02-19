@@ -7,7 +7,32 @@
 3. Persist normalized outputs plus per-run config metadata.
 4. Resolve model/adapter refs across local + HuggingFace with ambiguity checks.
 
-## Recommended Usage (No Python Config Module)
+## Recommended Usage (Named Evaluation, Single Arg)
+
+Use `named` + `--evaluation <name>` to run inspect-native eval definitions:
+
+```bash
+uv run python -m scripts.evals list-evaluations
+
+uv run python -m scripts.evals named \
+  --output-root scratch/evals/truthfulqa \
+  --run-name llama31_8b_truthfulqa_smoke10 \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --evaluation truthfulqa_mc1 \
+  --limit 10
+```
+
+For custom named evals:
+
+```bash
+uv run python -m scripts.evals named \
+  --output-root scratch/evals/coherence \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --evaluation coherence1 \
+  --limit 25
+```
+
+## Low-level Usage (No Python Config Module)
 
 Use `direct` to define runs entirely via CLI args:
 
@@ -27,7 +52,7 @@ You can still use `suite --config-module ...` for scripted experiment definition
 
 ## Custom Evals
 
-For custom evals in `direct` mode:
+For low-level custom evals in `direct` mode:
 - Provide dataset args (`--dataset-source`, `--dataset-name`/`--dataset-path`, `--dataset-split`, `--max-samples`)
 - Provide input builder (`--input-builder`)
 - Provide one or more `--evaluation` metrics (from `scripts.persona_metrics`)
@@ -43,6 +68,21 @@ Per `(model_spec, eval_spec)` run directory:
 
 Suite-level:
 - no wrapper summary/manifest files (Inspect logs are source of truth)
+
+## Viewing Inspect Output
+
+After a run completes, point Inspect at the per-run native log directory:
+
+```bash
+uv run inspect log list \
+  --log-dir scratch/evals/truthfulqa/llama31_8b_truthfulqa_smoke10/base/truthfulqa_mc1/native/inspect_logs
+
+uv run inspect view start \
+  --log-dir scratch/evals/truthfulqa/llama31_8b_truthfulqa_smoke10/base/truthfulqa_mc1/native/inspect_logs \
+  --recursive
+```
+
+`run_info.json` includes `native.inspect_log_path` for the exact generated log file.
 
 ## Model Reference Resolution
 
