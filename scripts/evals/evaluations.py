@@ -35,16 +35,16 @@ def _coherence1() -> EvalDefinition:
         name="coherence1",
         dataset=DatasetConfig(
             source="huggingface",
-            name="truthfulqa/truthful_qa",
+            name="OpenAssistant/oasst1",
             split="validation",
             max_samples=200,
         ),
-        input_builder="scripts.evals.examples:question_input_builder",
+        input_builder="scripts.evals.examples:oasst1_input_builder",
         evaluations=["coherence"],
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-4o-mini",
-            temperature=0.0,
+            model="gpt-5-nano-2025-08-07",
+            # temperature=0.0,
         ),
         generation=GenerationConfig(
             max_new_tokens=256,

@@ -9,5 +9,9 @@ def question_input_builder(row: dict[str, Any]) -> str:
     return str(row.get("question", ""))
 
 
+def oasst1_input_builder(row: dict[str, Any]) -> str:
+    return str(row.get("text") or row.get("question") or "")
+
+
 def question_target_builder(row: dict[str, Any]) -> str:
     return str(row.get("best_answer", ""))
