@@ -120,8 +120,8 @@ For model and adapter refs:
 
 Merged adapter models are cached under a shared models cache.
 
-- Default: cache is retained for reuse across runs
-- Use `--cleanup-materialized-models` (or `SuiteConfig.cleanup_materialized_models=True`) to remove merged artifacts at run end
+- Default: merged artifacts are removed at run end
+- Use `--keep-materialized-models` (or `SuiteConfig.cleanup_materialized_models=False`) to retain cache for reuse across runs
 - Runtime model cleanup is performed between model specs to reduce CUDA OOM risk in multi-model suite runs
 
 ## Non-wrapper Utilities

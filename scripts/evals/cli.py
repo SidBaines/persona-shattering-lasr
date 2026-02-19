@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+from dotenv import load_dotenv
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.evals.config import (
@@ -201,6 +202,7 @@ def _parse_metric_params(items: tuple[str, ...]) -> dict[str, dict[str, Any]]:
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """Run evals using Inspect-based suite commands."""
+    load_dotenv()
     _configure_runtime_environment()
 
     if ctx.invoked_subcommand is None:
@@ -310,8 +312,8 @@ def run_filtered_command(
 @click.option("--run-name", default=None, help="Optional fixed run name.")
 @click.option(
     "--cleanup-materialized-models/--keep-materialized-models",
-    default=False,
-    help="Delete merged LoRA model artifacts at the end of the run.",
+    default=True,
+    help="Delete merged LoRA model artifacts at the end of the run (default: cleanup).",
 )
 @click.option(
     "--model-spec",
@@ -512,8 +514,8 @@ def run_named_command(
 @click.option("--run-name", default=None, help="Optional fixed run name.")
 @click.option(
     "--cleanup-materialized-models/--keep-materialized-models",
-    default=False,
-    help="Delete merged LoRA model artifacts at the end of the run.",
+    default=True,
+    help="Delete merged LoRA model artifacts at the end of the run (default: cleanup).",
 )
 @click.option(
     "--model-spec",
