@@ -49,8 +49,27 @@ def main() -> None:
     args = parser.parse_args()
 
     suite_dir = args.suite_dir
+    run_info_files = sorted(suite_dir.glob("*/*/run_info.json"))
     inspect_summary_path = suite_dir / "suite_summary.json"
     legacy_summary_path = suite_dir / "summary.json"
+
+    if run_info_files:
+        print(f"Suite: {suite_dir}")
+        print("=" * 120)
+        print(f"{'model_spec':28} {'eval':24} {'status':8} {'inspect_log'}")
+        print("-" * 120)
+        for run_info_file in run_info_files:
+            payload = _load_json(run_info_file)
+            if not isinstance(payload, dict):
+                continue
+            model_spec = str(payload.get("model_spec", {}).get("name", ""))
+            eval_name = str(payload.get("eval_spec", {}).get("name", ""))
+            status = str(payload.get("status", ""))
+            inspect_log = str(payload.get("native", {}).get("inspect_log_path", ""))
+            print(f"{model_spec:28} {eval_name:24} {status:8} {inspect_log}")
+            if payload.get("error"):
+                print(f"{'':28} {'':24} {'':8} error={payload['error']}")
+        return
 
     if inspect_summary_path.exists():
         payload = _load_json(inspect_summary_path)

@@ -22,6 +22,16 @@ from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.utils import setup_logging
 
 
+def _print_result(result) -> None:
+    print(f"Run output root: {result.output_root}")
+    for row in result.rows:
+        log_path = row.inspect_log_path or "<none>"
+        print(
+            f"{row.model_spec_name}/{row.eval_name} "
+            f"status={row.status} inspect_log={log_path}"
+        )
+
+
 def _with_filters(
     config: SuiteConfig,
     *,
@@ -226,9 +236,7 @@ def run_suite_command(
         judge_exec.prefer_batch = prefer_batch
 
     result = run_eval_suite(config, judge_exec)
-    print(f"Suite output root: {result.output_root}")
-    print(f"Suite summary: {result.suite_summary_path}")
-    print(f"Suite manifest: {result.suite_manifest_path}")
+    _print_result(result)
 
 
 @main.command("run")
@@ -278,8 +286,7 @@ def run_filtered_command(
         raise click.UsageError("No evals selected after --eval-name filtering")
 
     result = run_eval_suite(filtered, judge_exec)
-    print(f"Suite output root: {result.output_root}")
-    print(f"Suite summary: {result.suite_summary_path}")
+    _print_result(result)
 
 
 @main.command("direct")
@@ -539,9 +546,7 @@ def run_direct_command(
     )
 
     result = run_eval_suite(config, judge_exec)
-    print(f"Suite output root: {result.output_root}")
-    print(f"Suite summary: {result.suite_summary_path}")
-    print(f"Suite manifest: {result.suite_manifest_path}")
+    _print_result(result)
 
 
 if __name__ == "__main__":

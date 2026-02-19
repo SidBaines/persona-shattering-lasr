@@ -120,7 +120,8 @@ class RunSummaryRow(BaseModel):
     eval_kind: Literal["benchmark", "custom"]
     status: Literal["ok", "pending", "failed", "skipped"]
     output_dir: str
-    summary_path: str | None = None
+    run_info_path: str | None = None
+    inspect_log_path: str | None = None
     error: str | None = None
 
 
@@ -128,6 +129,4 @@ class SuiteResult(BaseModel):
     """Result metadata for a suite run."""
 
     output_root: Path
-    suite_manifest_path: Path
-    suite_summary_path: Path
     rows: list[RunSummaryRow] = Field(default_factory=list)

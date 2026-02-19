@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -23,13 +24,6 @@ from scripts.evals.config import (
     SuiteResult,
 )
 from scripts.evals.model_materialization import MaterializedModel, materialize_model
-from scripts.evals.output_schema import (
-    write_failed_run_summary,
-    write_run_config,
-    write_run_outputs,
-    write_suite_manifest,
-    write_suite_summary,
-)
 
 
 def load_suite_module(
@@ -90,6 +84,28 @@ def _resume_materialized_model(model_spec: ModelSpec) -> MaterializedModel:
     )
 
 
+def _materialized_payload(materialized: MaterializedModel | None, model_spec: ModelSpec) -> dict[str, Any]:
+    if materialized is None:
+        return {
+            "model_name": model_spec.base_model,
+            "model_spec_name": model_spec.name,
+            "model_uri": None,
+            "cache_key": None,
+            "materialized_path": None,
+        }
+    return {
+        "model_name": materialized.model_name,
+        "model_spec_name": materialized.model_spec_name,
+        "model_uri": materialized.model_uri,
+        "cache_key": materialized.cache_key,
+        "materialized_path": (
+            str(materialized.materialized_path)
+            if materialized.materialized_path
+            else None
+        ),
+    }
+
+
 def _summary_row_base(
     *,
     model_name: str,
@@ -98,8 +114,9 @@ def _summary_row_base(
     eval_kind: str,
     status: str,
     output_dir: Path,
+    run_info_path: Path | None,
+    inspect_log_path: str | None,
     error: str | None = None,
-    summary_path: Path | None = None,
 ) -> RunSummaryRow:
     return RunSummaryRow(
         model_name=model_name,
@@ -108,8 +125,9 @@ def _summary_row_base(
         eval_kind=eval_kind,
         status=status,
         output_dir=str(output_dir),
+        run_info_path=str(run_info_path) if run_info_path else None,
+        inspect_log_path=inspect_log_path,
         error=error,
-        summary_path=str(summary_path) if summary_path else None,
     )
 
 
@@ -148,35 +166,38 @@ def _inspect_model_args(model_spec: ModelSpec) -> dict[str, Any]:
     return args
 
 
-def _write_run_config_for(
+def _write_run_info_for(
     *,
     run_dir: Path,
     output_root: Path,
     model_spec: ModelSpec,
     eval_spec: InspectBenchmarkSpec | InspectCustomEvalSpec,
     judge_exec: JudgeExecutionConfig,
-    materialized: MaterializedModel,
     inspect_model_args: dict[str, Any],
-) -> None:
-    write_run_config(
-        run_dir=run_dir,
-        suite_run_name=output_root.name,
-        model_spec=model_spec.model_dump(mode="json"),
-        eval_spec=eval_spec.model_dump(mode="json"),
-        judge_execution=judge_exec.model_dump(mode="json"),
-        inspect_model_args=inspect_model_args,
-        materialized_model={
-            "model_name": materialized.model_name,
-            "model_spec_name": materialized.model_spec_name,
-            "model_uri": materialized.model_uri,
-            "cache_key": materialized.cache_key,
-            "materialized_path": (
-                str(materialized.materialized_path)
-                if materialized.materialized_path
-                else None
-            ),
+    materialized: MaterializedModel | None,
+    status: str,
+    error: str | None,
+    inspect_log_path: str | None,
+    inspect_status: str | None,
+) -> Path:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / "run_info.json"
+    payload = {
+        "suite_run_name": output_root.name,
+        "status": status,
+        "error": error,
+        "model_spec": model_spec.model_dump(mode="json"),
+        "eval_spec": eval_spec.model_dump(mode="json"),
+        "judge_execution": judge_exec.model_dump(mode="json"),
+        "inspect_model_args": inspect_model_args,
+        "materialized_model": _materialized_payload(materialized, model_spec),
+        "native": {
+            "inspect_log_path": inspect_log_path,
+            "inspect_status": inspect_status,
         },
-    )
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path
 
 
 def _record_failed_model_rows(
@@ -197,42 +218,18 @@ def _record_failed_model_rows(
             eval_name=eval_spec.name,
         )
         eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
-
-        if materialized is not None:
-            _write_run_config_for(
-                run_dir=run_dir,
-                output_root=output_root,
-                model_spec=model_spec,
-                eval_spec=eval_spec,
-                judge_exec=judge_exec,
-                materialized=materialized,
-                inspect_model_args=inspect_model_args,
-            )
-        else:
-            write_run_config(
-                run_dir=run_dir,
-                suite_run_name=output_root.name,
-                model_spec=model_spec.model_dump(mode="json"),
-                eval_spec=eval_spec.model_dump(mode="json"),
-                judge_execution=judge_exec.model_dump(mode="json"),
-                inspect_model_args=inspect_model_args,
-                materialized_model={
-                    "model_name": model_spec.base_model,
-                    "model_spec_name": model_spec.name,
-                    "model_uri": None,
-                    "cache_key": None,
-                    "materialized_path": None,
-                },
-            )
-
-        summary_path = write_failed_run_summary(
+        run_info_path = _write_run_info_for(
             run_dir=run_dir,
-            backend="inspect",
-            model_name=(materialized.model_name if materialized else model_spec.base_model),
-            model_spec_name=model_spec.name,
-            eval_name=eval_spec.name,
-            eval_kind=eval_kind,
+            output_root=output_root,
+            model_spec=model_spec,
+            eval_spec=eval_spec,
+            judge_exec=judge_exec,
+            inspect_model_args=inspect_model_args,
+            materialized=materialized,
+            status="failed",
             error=error,
+            inspect_log_path=None,
+            inspect_status=None,
         )
         rows.append(
             _summary_row_base(
@@ -242,8 +239,9 @@ def _record_failed_model_rows(
                 eval_kind=eval_kind,
                 status="failed",
                 output_dir=run_dir,
+                run_info_path=run_info_path,
+                inspect_log_path=None,
                 error=error,
-                summary_path=summary_path,
             )
         )
 
@@ -324,27 +322,35 @@ def run_eval_suite(
                     model_spec_name=model_spec.name,
                     eval_name=eval_spec.name,
                 )
-                _write_run_config_for(
-                    run_dir=run_dir,
-                    output_root=output_root,
-                    model_spec=model_spec,
-                    eval_spec=eval_spec,
-                    judge_exec=judge_exec,
-                    materialized=materialized,
-                    inspect_model_args=inspect_model_args,
-                )
+                eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
 
                 if isinstance(eval_spec, InspectBenchmarkSpec):
                     if judge_exec.mode == "resume":
+                        error = "resume mode does not apply to benchmark evals"
+                        run_info_path = _write_run_info_for(
+                            run_dir=run_dir,
+                            output_root=output_root,
+                            model_spec=model_spec,
+                            eval_spec=eval_spec,
+                            judge_exec=judge_exec,
+                            inspect_model_args=inspect_model_args,
+                            materialized=materialized,
+                            status="skipped",
+                            error=error,
+                            inspect_log_path=None,
+                            inspect_status=None,
+                        )
                         rows.append(
                             _summary_row_base(
                                 model_name=materialized.model_name,
                                 model_spec_name=model_spec.name,
                                 eval_name=eval_spec.name,
-                                eval_kind="benchmark",
+                                eval_kind=eval_kind,
                                 status="skipped",
                                 output_dir=run_dir,
-                                error="resume mode does not apply to benchmark evals",
+                                run_info_path=run_info_path,
+                                inspect_log_path=None,
+                                error=error,
                             )
                         )
                         continue
@@ -355,94 +361,49 @@ def run_eval_suite(
                         run_dir=run_dir,
                         inspect_model_args=inspect_model_args,
                     )
-
-                    if result.log is not None:
-                        summary_path, _, _ = write_run_outputs(
+                else:
+                    if judge_exec.mode == "resume":
+                        result = score_custom_eval_from_log(
+                            spec=eval_spec,
                             run_dir=run_dir,
-                            log=result.log,
-                            backend="inspect",
-                            model_name=materialized.model_name,
-                            model_spec_name=model_spec.name,
-                            eval_name=eval_spec.name,
-                            eval_kind="benchmark",
-                            status=result.status,
-                            metrics_key="persona_metrics",
-                            error=result.error,
+                            judge_exec=judge_exec,
                         )
                     else:
-                        summary_path = write_failed_run_summary(
+                        result = run_custom_eval(
+                            spec=eval_spec,
+                            model_uri=materialized.model_uri,
                             run_dir=run_dir,
-                            backend="inspect",
-                            model_name=materialized.model_name,
-                            model_spec_name=model_spec.name,
-                            eval_name=eval_spec.name,
-                            eval_kind="benchmark",
-                            error=result.error or "run failed before inspect log creation",
+                            judge_exec=judge_exec,
+                            inspect_model_args=inspect_model_args,
                         )
 
-                    rows.append(
-                        _summary_row_base(
-                            model_name=materialized.model_name,
-                            model_spec_name=model_spec.name,
-                            eval_name=eval_spec.name,
-                            eval_kind="benchmark",
-                            status=result.status if result.status != "pending" else "ok",
-                            output_dir=run_dir,
-                            error=result.error,
-                            summary_path=summary_path,
-                        )
-                    )
-                    continue
-
-                if judge_exec.mode == "resume":
-                    result = score_custom_eval_from_log(
-                        spec=eval_spec,
-                        run_dir=run_dir,
-                        judge_exec=judge_exec,
-                    )
-                else:
-                    result = run_custom_eval(
-                        spec=eval_spec,
-                        model_uri=materialized.model_uri,
-                        run_dir=run_dir,
-                        judge_exec=judge_exec,
-                        inspect_model_args=inspect_model_args,
-                    )
-
-                if result.log is not None:
-                    summary_path, _, _ = write_run_outputs(
-                        run_dir=run_dir,
-                        log=result.log,
-                        backend="inspect",
-                        model_name=materialized.model_name,
-                        model_spec_name=model_spec.name,
-                        eval_name=eval_spec.name,
-                        eval_kind="custom",
-                        status=result.status,
-                        metrics_key=eval_spec.metrics_key,
-                        error=result.error,
-                    )
-                else:
-                    summary_path = write_failed_run_summary(
-                        run_dir=run_dir,
-                        backend="inspect",
-                        model_name=materialized.model_name,
-                        model_spec_name=model_spec.name,
-                        eval_name=eval_spec.name,
-                        eval_kind="custom",
-                        error=result.error or "run failed before inspect log creation",
-                    )
+                inspect_log_path = result.log.location if result.log is not None else None
+                inspect_status = result.log.status if result.log is not None else None
+                run_info_path = _write_run_info_for(
+                    run_dir=run_dir,
+                    output_root=output_root,
+                    model_spec=model_spec,
+                    eval_spec=eval_spec,
+                    judge_exec=judge_exec,
+                    inspect_model_args=inspect_model_args,
+                    materialized=materialized,
+                    status=result.status,
+                    error=result.error,
+                    inspect_log_path=inspect_log_path,
+                    inspect_status=inspect_status,
+                )
 
                 rows.append(
                     _summary_row_base(
                         model_name=materialized.model_name,
                         model_spec_name=model_spec.name,
                         eval_name=eval_spec.name,
-                        eval_kind="custom",
+                        eval_kind=eval_kind,
                         status=result.status,
                         output_dir=run_dir,
+                        run_info_path=run_info_path,
+                        inspect_log_path=inspect_log_path,
                         error=result.error,
-                        summary_path=summary_path,
                     )
                 )
         finally:
@@ -452,24 +413,8 @@ def run_eval_suite(
                 materialized=materialized,
             )
 
-    manifest_path = write_suite_manifest(
-        output_root=output_root,
-        manifest={
-            "generated_at": datetime.now().isoformat(),
-            "suite_config": config.model_dump(mode="json"),
-            "judge_execution": judge_exec.model_dump(mode="json"),
-            "rows": [row.model_dump(mode="json") for row in rows],
-        },
-    )
-    summary_path = write_suite_summary(
-        output_root=output_root,
-        rows=[row.model_dump(mode="json") for row in rows],
-    )
-
     return SuiteResult(
         output_root=output_root,
-        suite_manifest_path=manifest_path,
-        suite_summary_path=summary_path,
         rows=rows,
     )
 

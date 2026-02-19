@@ -37,15 +37,12 @@ For custom evals in `direct` mode:
 ## Output Contract
 
 Per `(model_spec, eval_spec)` run directory:
-- `summary.json`
-- `records.jsonl` (when sample logs exist)
-- `run_config.json` (resolved model/eval/judge/config snapshot for this run)
+- `run_info.json` (model/eval/judge/materialization metadata + inspect log path)
 - `native/inspect_logs/...`
 - `jobs/manifest.json` (submit/resume custom flows)
 
 Suite-level:
-- `suite_summary.json`
-- `suite_manifest.json` (includes `metadata.cli_args` for `direct` runs)
+- no wrapper summary/manifest files (Inspect logs are source of truth)
 
 ## Model Reference Resolution
 

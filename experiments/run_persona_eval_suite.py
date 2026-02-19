@@ -61,9 +61,13 @@ def main() -> None:
         judge_exec.prefer_batch = False
 
     result = run_eval_suite(suite_config, judge_exec)
-    print(f"Suite output root: {result.output_root}")
-    print(f"Suite summary: {result.suite_summary_path}")
-    print(f"Suite manifest: {result.suite_manifest_path}")
+    print(f"Run output root: {result.output_root}")
+    for row in result.rows:
+        log_path = row.inspect_log_path or "<none>"
+        print(
+            f"{row.model_spec_name}/{row.eval_name} "
+            f"status={row.status} inspect_log={log_path}"
+        )
 
 
 if __name__ == "__main__":

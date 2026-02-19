@@ -21,7 +21,6 @@ from scripts.evals.config import (
     SuiteConfig,
 )
 from scripts.evals.model_materialization import materialize_model
-from scripts.evals.output_schema import write_run_outputs
 from scripts.evals.run import run_eval
 from scripts.evals.suite import load_suite_module, run_eval_suite
 
@@ -182,63 +181,6 @@ class TestModelMaterialization:
         assert not any(cache_root.iterdir())
 
 
-class TestOutputSchema:
-    def test_write_run_outputs_custom(self, tmp_path: Path):
-        log = SimpleNamespace(
-            location=str(tmp_path / "native" / "inspect_logs" / "log.json"),
-            status="success",
-            eval=SimpleNamespace(task="my-task", model="hf/my-model"),
-            results=SimpleNamespace(
-                scores=[
-                    SimpleNamespace(
-                        name="main",
-                        metrics={
-                            "mean": SimpleNamespace(value=0.5),
-                        },
-                    )
-                ],
-                total_samples=1,
-                completed_samples=1,
-            ),
-            samples=[
-                SimpleNamespace(
-                    id=1,
-                    input="What?",
-                    target="",
-                    output=SimpleNamespace(completion="Answer"),
-                    scores={
-                        "persona": SimpleNamespace(
-                            value=1.0,
-                            metadata={
-                                "persona_metrics": {
-                                    "count_o.count": 2,
-                                    "count_o.density": 0.1,
-                                }
-                            },
-                        )
-                    },
-                    metadata={"question": "What?"},
-                )
-            ],
-        )
-
-        summary_path, records_path, summary = write_run_outputs(
-            run_dir=tmp_path,
-            log=log,
-            backend="inspect",
-            model_name="meta-llama/Llama-3.1-8B-Instruct",
-            model_spec_name="base",
-            eval_name="custom_eval",
-            eval_kind="custom",
-            status="ok",
-            metrics_key="persona_metrics",
-        )
-
-        assert summary_path.exists()
-        assert records_path.exists()
-        assert "count_o.count.mean" in summary["metrics"]
-
-
 class TestInspectRunnerModes:
     def test_benchmark_unknown_returns_failed(self, tmp_path: Path):
         from scripts.evals.backends.inspect_runner import run_benchmark_eval
@@ -330,10 +272,10 @@ class TestSuiteFailureHandling:
         assert len(result.rows) == 1
         row = result.rows[0]
         assert row.status == "failed"
-        assert row.summary_path is not None
-        assert Path(row.summary_path).exists()
-        run_config_path = tmp_path / "run" / "base" / "bad" / "run_config.json"
-        assert run_config_path.exists()
+        assert row.run_info_path is not None
+        assert Path(row.run_info_path).exists()
+        run_info_path = tmp_path / "run" / "base" / "bad" / "run_info.json"
+        assert run_info_path.exists()
 
 
 class TestSuiteModelArgs:
