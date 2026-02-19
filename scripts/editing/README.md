@@ -1,6 +1,7 @@
 # Editing
 
 Edit model responses using an LLM API or a code-based editor. Sends each response through a prompt template (e.g., persona-shattering) for LLM providers and collects edited outputs with optional quality metrics.
+The output includes an `input_index` field used for robust resume behavior.
 
 ## CLI Usage
 
@@ -38,6 +39,17 @@ uv run python -m scripts.editing \
   --code-editor scripts.editing.code_editors:reverse_text \
   --input-path scratch/my_exp/inference_output.jsonl \
   --output-path scratch/my_exp/edited_dataset.jsonl
+
+# Resume from existing edited rows (default behavior when output exists)
+uv run python -m scripts.editing \
+  --input-path scratch/my_exp/inference_output.jsonl \
+  --output-path scratch/my_exp/edited_dataset.jsonl
+
+# Force fresh run from row 0
+uv run python -m scripts.editing \
+  --input-path scratch/my_exp/inference_output.jsonl \
+  --output-path scratch/my_exp/edited_dataset.jsonl \
+  --overwrite-output
 ```
 
 ### CLI Options
@@ -52,6 +64,9 @@ uv run python -m scripts.editing \
 | `--timeout` | Request timeout (seconds) | `60` |
 | `--input-path` | Input JSONL path (required) | — |
 | `--output-path` | Output JSONL path | — |
+| `--no-resume` | Disable resume-from-existing-output behavior | `false` |
+| `--overwrite-output` | Truncate output file before running | `false` |
+| `--io-batch-size` | Input rows processed per batch | `100` |
 | `--no-quality` | Disable quality metrics | off |
 | `--quality-evaluations` | Evaluations for edit quality comparison | auto from `--persona` |
 | `--quality-judge-provider` | Judge provider for LLM-based quality evals | `openai` |

@@ -28,7 +28,12 @@ class OpenAIProviderConfig(BaseModel):
     """OpenAI-specific settings."""
 
     model: str | None = None  # Override model for OpenAI (if different from main model)
+<<<<<<< Updated upstream
     max_tokens: int = 20000
+=======
+    max_tokens: int = 100000
+    reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
+>>>>>>> Stashed changes
 
 
 class CodeProviderConfig(BaseModel):
@@ -107,6 +112,9 @@ class EditingConfig(BaseModel):
 
     # Output
     output_path: Path | None = None  # If None, returns dataset without saving
+    resume: bool = True
+    overwrite_output: bool = False
+    io_batch_size: int = 100
 
 
 class EditingResult(BaseModel):

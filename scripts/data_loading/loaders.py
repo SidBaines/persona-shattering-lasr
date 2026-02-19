@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING
 
 from datasets import Dataset, load_dataset as hf_load_dataset
 
-from scripts.utils import read_jsonl
-
 if TYPE_CHECKING:
     from scripts.common.config import DatasetConfig
 
@@ -29,8 +27,11 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
     elif config.source == "local":
         if not config.path:
             raise ValueError("Local source requires dataset path.")
-        records = read_jsonl(Path(config.path))
-        dataset = Dataset.from_list(records)
+        dataset = hf_load_dataset(
+            "json",
+            data_files=str(Path(config.path)),
+            split="train",
+        )
     else:
         raise ValueError(f"Unsupported dataset source: {config.source}")
 

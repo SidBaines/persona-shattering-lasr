@@ -6,12 +6,19 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
     PERSONA_DEFAULTS,
     get_persona_prompt_template,
 )
-from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
+from scripts.editing.config import (
+    CodeProviderConfig,
+    EditingConfig,
+    OpenAIProviderConfig,
+    QualityConfig,
+)
 from scripts.persona_metrics.config import JudgeLLMConfig
 from scripts.editing.run import run_editing
 
@@ -61,6 +68,13 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Request timeout in seconds (default: 60)",
     )
+    parser.add_argument(
+        "--openai-reasoning-effort",
+        type=str,
+        choices=["none", "low", "medium", "high"],
+        default=None,
+        help="OpenAI reasoning effort override (optional).",
+    )
 
     # Input / Output
     parser.add_argument(
@@ -74,6 +88,16 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to save edited output JSONL file",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not resume from existing output rows; start from beginning.",
+    )
+    parser.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help="Overwrite output_path before running instead of appending/resuming.",
     )
 
     # Quality
@@ -123,11 +147,18 @@ def parse_args() -> argparse.Namespace:
         default="warn",
         help="Behavior when post-edit quality evaluation fails (default: warn)",
     )
+    parser.add_argument(
+        "--io-batch-size",
+        type=int,
+        default=100,
+        help="Number of input rows to read/process per batch (default: 100).",
+    )
 
     return parser.parse_args()
 
 
 def main() -> None:
+    load_dotenv()
     args = parse_args()
 
     # Auto-resolve prompt template from persona if not explicitly provided
@@ -155,8 +186,12 @@ def main() -> None:
         prompt_template=prompt_template,
         max_concurrent=args.max_concurrent,
         timeout=args.timeout,
+        openai=OpenAIProviderConfig(reasoning_effort=args.openai_reasoning_effort),
         quality=quality_config,
         output_path=Path(args.output_path) if args.output_path else None,
+        resume=not args.no_resume,
+        overwrite_output=args.overwrite_output,
+        io_batch_size=args.io_batch_size,
         code=code_config,
     )
 

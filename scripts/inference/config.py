@@ -112,6 +112,8 @@ class InferenceConfig(BaseModel):
 
     # Output
     output_path: Path | None = None  # If None, returns dataset without saving
+    resume: bool = True
+    overwrite_output: bool = False
 
 
 class InferenceResult(BaseModel):

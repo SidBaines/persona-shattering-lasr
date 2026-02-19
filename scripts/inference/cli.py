@@ -137,6 +137,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to save output JSONL file",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not resume from existing output rows; start from beginning.",
+    )
+    parser.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help="Overwrite output_path before running instead of appending/resuming.",
+    )
 
     # OpenAI provider settings
     parser.add_argument(
@@ -297,6 +307,8 @@ def main() -> None:
             chat_system_prompt=args.local_chat_system_prompt,
         ),
         output_path=Path(args.output_path) if args.output_path else None,
+        resume=not args.no_resume,
+        overwrite_output=args.overwrite_output,
     )
 
     run_inference(config)

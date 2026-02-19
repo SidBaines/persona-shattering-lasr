@@ -45,6 +45,19 @@ uv run python -m scripts.inference \
   --max-samples 50 \
   --output-path scratch/inference_output.jsonl
 
+# Resume from last written row (default behavior when output exists)
+uv run python -m scripts.inference \
+  --provider openai \
+  --dataset-name vicgalle/alpaca-gpt4 \
+  --output-path scratch/inference_output.jsonl
+
+# Force fresh run from row 0
+uv run python -m scripts.inference \
+  --provider openai \
+  --dataset-name vicgalle/alpaca-gpt4 \
+  --output-path scratch/inference_output.jsonl \
+  --overwrite-output
+
 # Anthropic API
 uv run python -m scripts.inference \
   --provider anthropic \
@@ -94,6 +107,8 @@ messages (`user` plus optional `system`), otherwise raw prompts are used.
 | `--retry-backoff-factor` | Exponential backoff multiplier | `2.0` |
 | `--fail-fast` | Stop on first API error | `false` |
 | `--output-path` | Output JSONL path | — |
+| `--no-resume` | Disable resume-from-existing-output behavior | `false` |
+| `--overwrite-output` | Truncate output file before running | `false` |
 | `--openai-base-url` | OpenAI API base URL | — |
 | `--openai-api-key-env` | Env var name for OpenAI API key | `OPENAI_API_KEY` |
 | `--openai-reasoning-effort` | OpenAI reasoning effort | — |
