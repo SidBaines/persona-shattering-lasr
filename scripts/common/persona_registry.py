@@ -58,6 +58,14 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "sf_guy_casual_grammar",
         "evaluations": ["lowercase_density", "punctuation_density"],
     },
+    "n+_persona": {
+        "prompt_template": "neuroticism_persona_shatter",
+        "evaluations": ["emotional_instability"],
+    },
+    "n-_persona": {
+        "prompt_template": "neuroticism_persona_shatter_minus",
+        "evaluations": ["emotional_instability"],
+    },
 }
 
 DEFAULT_PERSONA = "o_avoiding"
