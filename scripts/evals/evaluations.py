@@ -44,7 +44,8 @@ def _coherence1() -> EvalDefinition:
         judge=JudgeLLMConfig(
             provider="openai",
             model="gpt-5-nano-2025-08-07",
-            # temperature=0.0,
+            temperature=0.0,
+            max_tokens=10000,
         ),
         generation=GenerationConfig(
             max_new_tokens=256,

@@ -206,17 +206,25 @@ def build_custom_task(spec: InspectCustomEvalSpec) -> tuple[Task, str]:
 
     scorer_obj, scorer_name = build_custom_scorer(spec)
 
+    generate_config_kwargs: dict[str, Any] = {
+        "max_tokens": spec.generation.max_new_tokens,
+        "max_connections": spec.generation.batch_size,
+    }
+    if spec.generation.do_sample:
+        # Transformers requires strictly positive temperature for sampling.
+        if spec.generation.temperature <= 0:
+            raise ValueError(
+                "generation.temperature must be > 0 when generation.do_sample=True"
+            )
+        generate_config_kwargs["temperature"] = spec.generation.temperature
+        generate_config_kwargs["top_p"] = spec.generation.top_p
+
     task = Task(
         name=spec.name,
         dataset=MemoryDataset(samples=samples, name=spec.name),
         solver=[generate()],
         scorer=scorer_obj,
-        config=GenerateConfig(
-            max_tokens=spec.generation.max_new_tokens,
-            temperature=spec.generation.temperature,
-            top_p=spec.generation.top_p,
-            max_connections=spec.generation.batch_size,
-        ),
+        config=GenerateConfig(**generate_config_kwargs),
     )
 
     return task, scorer_name

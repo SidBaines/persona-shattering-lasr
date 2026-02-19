@@ -32,6 +32,19 @@ uv run python -m scripts.evals named \
   --limit 25
 ```
 
+### One Run With Three Model Specs (Base + Local LoRA + Mixed LoRAs)
+
+```bash
+uv run python -m scripts.evals named \
+  --output-root scratch/evals/truthfulqa \
+  --run-name llama31_three_model_specs_truthfulqa_mc1_200 \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --model-spec "name=local_lora_1p0;base_model=hf://meta-llama/Llama-3.1-8B-Instruct;adapters=local://my/local/lora/checkpoints/final@1.0" \
+  --model-spec "name=hub0p5_plus_local_neg2;base_model=hf://meta-llama/Llama-3.1-8B-Instruct;adapters=hf://persona-shattering-lasr/o_avoiding-o_avoiding_20260218_102429_train-lora-adapter@0.5,local://my/local/lora/checkpoints/final@-2.0" \
+  --evaluation truthfulqa_mc1 \
+  --limit 200
+```
+
 ## Low-level Usage (No Python Config Module)
 
 Use `direct` to define runs entirely via CLI args:

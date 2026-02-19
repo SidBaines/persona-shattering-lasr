@@ -206,8 +206,8 @@ def _inspect_model_args(model_spec: ModelSpec) -> dict[str, Any]:
             "Use inspect_model_args['device'] instead."
         )
 
-    if "dtype" in args and "torch_dtype" not in args:
-        args["torch_dtype"] = args.pop("dtype")
+    if "torch_dtype" in args and "dtype" not in args:
+        args["dtype"] = args.pop("torch_dtype")
 
     def _resolve_torch_dtype(value: Any) -> Any:
         if not isinstance(value, str):
@@ -219,9 +219,9 @@ def _inspect_model_args(model_spec: ModelSpec) -> dict[str, Any]:
         dtype = getattr(torch, value, None)
         return dtype if isinstance(dtype, torch.dtype) else value
 
-    args.setdefault("torch_dtype", _resolve_torch_dtype(model_spec.dtype))
-    if "torch_dtype" in args:
-        args["torch_dtype"] = _resolve_torch_dtype(args["torch_dtype"])
+    args.setdefault("dtype", _resolve_torch_dtype(model_spec.dtype))
+    if "dtype" in args:
+        args["dtype"] = _resolve_torch_dtype(args["dtype"])
 
     if model_spec.device_map not in ("", "auto"):
         args.setdefault("device", model_spec.device_map)

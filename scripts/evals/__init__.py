@@ -14,7 +14,6 @@ from scripts.evals.evaluations import (
     list_named_evaluations,
     load_evaluation_definition,
 )
-from scripts.evals.run import run_eval
 from scripts.evals.suite import load_suite_module, run_eval_suite, run_inspect_eval
 
 __all__ = [
@@ -31,5 +30,4 @@ __all__ = [
     "load_suite_module",
     "run_eval_suite",
     "run_inspect_eval",
-    "run_eval",
 ]

@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Compare MMLU metrics across eval runs.
 
-Supports both:
-1) New Inspect summaries (`**/summary.json` with `eval_name` containing "mmlu")
-2) Legacy lm_eval outputs (`*/results.json`)
+Uses Inspect summaries (`**/summary.json` with `eval_name` containing "mmlu").
 """
 
 from __future__ import annotations
@@ -11,21 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-
-
-def _load_legacy_results(results_path: Path) -> dict[str, float]:
-    data = json.loads(results_path.read_text(encoding="utf-8"))
-    results = data.get("results", {})
-    out: dict[str, float] = {}
-    for task, metrics in results.items():
-        if not task.startswith("mmlu_"):
-            continue
-        acc = metrics.get("acc,none")
-        if acc is None:
-            continue
-        out[task] = float(acc)
-    return out
-
 
 def _load_inspect_summary(summary_path: Path) -> dict[str, float] | None:
     data = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -59,14 +42,6 @@ def _format_float(value: float | None, width: int = 8) -> str:
     return f"{value:{width}.4f}"
 
 
-def _summarize_runs_legacy(root: Path) -> dict[str, dict[str, float]]:
-    runs: dict[str, dict[str, float]] = {}
-    for results_path in sorted(root.glob("*/results.json")):
-        run_name = results_path.parent.name
-        runs[run_name] = _load_legacy_results(results_path)
-    return runs
-
-
 def _summarize_runs_inspect(root: Path) -> dict[str, dict[str, float]]:
     runs: dict[str, dict[str, float]] = {}
     for summary_path in sorted(root.glob("**/summary.json")):
@@ -79,10 +54,7 @@ def _summarize_runs_inspect(root: Path) -> dict[str, dict[str, float]]:
 
 
 def _summarize_runs(root: Path) -> dict[str, dict[str, float]]:
-    inspect_runs = _summarize_runs_inspect(root)
-    if inspect_runs:
-        return inspect_runs
-    return _summarize_runs_legacy(root)
+    return _summarize_runs_inspect(root)
 
 
 def _print_summary(runs: dict[str, dict[str, float]], base_name: str | None) -> str:
@@ -152,10 +124,7 @@ def main() -> None:
     parser.add_argument(
         "--root",
         default="scratch/evals",
-        help=(
-            "Root directory containing Inspect suite outputs or legacy lm_eval "
-            "run subfolders."
-        ),
+        help="Root directory containing Inspect suite outputs.",
     )
     parser.add_argument(
         "--base",
@@ -174,8 +143,7 @@ def main() -> None:
     runs = _summarize_runs(root)
     if not runs:
         raise SystemExit(
-            f"No MMLU results found under {root} "
-            "(looked for Inspect summary.json and legacy results.json)."
+            f"No MMLU results found under {root} (looked for Inspect summary.json)."
         )
 
     base_name = args.base or sorted(runs.keys())[0]

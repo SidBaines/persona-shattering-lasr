@@ -21,14 +21,7 @@ from scripts.evals.config import (
     SuiteConfig,
 )
 from scripts.evals.model_materialization import materialize_model
-from scripts.evals.run import run_eval
 from scripts.evals.suite import load_suite_module, run_eval_suite
-
-
-class TestMigrationShim:
-    def test_run_eval_raises_migration_error(self):
-        with pytest.raises(RuntimeError, match="deprecated"):
-            run_eval({})
 
 
 class TestSuiteConfig:
@@ -457,14 +450,6 @@ class TestSuiteRuntimeCleanup:
         run_eval_suite(cfg)
 
         assert len(cleanup_calls) == 1
-
-
-class TestCliMigration:
-    def test_old_flags_rejected(self):
-        runner = CliRunner()
-        result = runner.invoke(cli_main, ["--model", "gpt2", "suite"])
-        assert result.exit_code != 0
-        assert "deprecated" in result.output.lower()
 
 
 class TestNamedCli:

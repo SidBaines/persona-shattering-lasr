@@ -198,24 +198,10 @@ def _parse_metric_params(items: tuple[str, ...]) -> dict[str, dict[str, Any]]:
 
 
 @click.group(invoke_without_command=True)
-@click.option("--model", default=None, help="[Deprecated] Former lm_eval option.")
-@click.option("--tasks", default=None, help="[Deprecated] Former lm_eval option.")
-@click.option("--adapters", default=None, help="[Deprecated] Former lm_eval option.")
 @click.pass_context
-def main(
-    ctx: click.Context,
-    model: str | None,
-    tasks: str | None,
-    adapters: str | None,
-) -> None:
+def main(ctx: click.Context) -> None:
     """Run evals using Inspect-based suite commands."""
     _configure_runtime_environment()
-
-    if model or tasks or adapters:
-        raise click.UsageError(
-            "lm_eval CLI flags are deprecated. "
-            "Use `python -m scripts.evals named ...`, `direct ...`, or `suite --config-module ...`"
-        )
 
     if ctx.invoked_subcommand is None:
         raise click.UsageError(
