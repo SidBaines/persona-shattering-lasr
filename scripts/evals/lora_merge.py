@@ -39,6 +39,81 @@ def _load_tokenizer(base_model: str, adapter_path: str) -> AutoTokenizer:
     return AutoTokenizer.from_pretrained(base_model, use_fast=True)
 
 
+def _split_adapter_ref(path: str) -> tuple[str, str | None]:
+    """Parse adapter reference.
+
+    Supports:
+    - "repo_or_path" (default behavior)
+    - "repo_or_path::subfolder" (explicit subfolder)
+    """
+    if "::" in path:
+        ref, subfolder = path.split("::", 1)
+        return ref, (subfolder or None)
+    return path, None
+
+
+def _load_first_adapter(
+    model,
+    *,
+    adapter_path: str,
+    adapter_name: str,
+) -> PeftModel:
+    ref, subfolder = _split_adapter_ref(adapter_path)
+
+    if subfolder:
+        return PeftModel.from_pretrained(
+            model,
+            ref,
+            adapter_name=adapter_name,
+            subfolder=subfolder,
+        )
+
+    try:
+        return PeftModel.from_pretrained(
+            model,
+            ref,
+            adapter_name=adapter_name,
+        )
+    except ValueError as exc:
+        # Common HF layout for adapter artifacts is files under "adapter/".
+        if "adapter_config.json" not in str(exc):
+            raise
+        return PeftModel.from_pretrained(
+            model,
+            ref,
+            adapter_name=adapter_name,
+            subfolder="adapter",
+        )
+
+
+def _load_extra_adapter(
+    model: PeftModel,
+    *,
+    adapter_path: str,
+    adapter_name: str,
+) -> None:
+    ref, subfolder = _split_adapter_ref(adapter_path)
+
+    if subfolder:
+        model.load_adapter(
+            ref,
+            adapter_name=adapter_name,
+            subfolder=subfolder,
+        )
+        return
+
+    try:
+        model.load_adapter(ref, adapter_name=adapter_name)
+    except ValueError as exc:
+        if "adapter_config.json" not in str(exc):
+            raise
+        model.load_adapter(
+            ref,
+            adapter_name=adapter_name,
+            subfolder="adapter",
+        )
+
+
 def merge_adapters(
     *,
     base_model: str,
@@ -79,7 +154,7 @@ def merge_adapters(
     )
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         device_map=device_map,
     )
 
@@ -87,14 +162,22 @@ def merge_adapters(
     adapter_names = []
     name_0 = "adapter_0"
     logger.info("Loading adapter 0: %s (scale=%.3f)", adapters[0].path, adapters[0].scale)
-    model = PeftModel.from_pretrained(model, adapters[0].path, adapter_name=name_0)
+    model = _load_first_adapter(
+        model,
+        adapter_path=adapters[0].path,
+        adapter_name=name_0,
+    )
     adapter_names.append(name_0)
 
     # Load additional adapters
     for i, adapter_cfg in enumerate(adapters[1:], 1):
         name_i = f"adapter_{i}"
         logger.info("Loading adapter %d: %s (scale=%.3f)", i, adapter_cfg.path, adapter_cfg.scale)
-        model.load_adapter(adapter_cfg.path, adapter_name=name_i)
+        _load_extra_adapter(
+            model,
+            adapter_path=adapter_cfg.path,
+            adapter_name=name_i,
+        )
         adapter_names.append(name_i)
 
     # Activate all adapters for multi-adapter inference

@@ -1,0 +1,15 @@
+group: personalitybench
+output_type: generate_until
+generation_kwargs:
+  until:
+    - "<|eot_id|>"
+    - "</s>"
+  max_gen_toks: 64
+  temperature: 0
+dataset_path: Personality-NLP/MbtiBench
+dataset_name: en
+test_split: test
+doc_to_text: !function utils.doc_to_text_personalitybench
+doc_to_target: ""
+metadata:
+  version: 1.0
