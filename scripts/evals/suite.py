@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,7 @@ from scripts.evals.config import (
     SuiteResult,
 )
 from scripts.evals.model_materialization import MaterializedModel, materialize_model
+from scripts.utils.lora_composition import delete_materialized_model_dir
 
 
 def _cleanup_runtime_model_state() -> None:
@@ -321,13 +321,7 @@ def _cleanup_materialized_model(
         and judge_exec.mode != "resume"
         and merged_path is not None
     ):
-        shutil.rmtree(merged_path, ignore_errors=True)
-        parent = merged_path.parent
-        if parent.exists():
-            try:
-                next(parent.iterdir())
-            except StopIteration:
-                parent.rmdir()
+        delete_materialized_model_dir(merged_path, prune_empty_parent=True)
 
 
 def run_eval_suite(

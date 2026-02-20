@@ -27,6 +27,7 @@ from scripts.evals.evaluations import (
 from scripts.evals.suite import load_suite_module, run_eval_suite
 from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.utils import setup_logging
+from scripts.utils.lora_composition import parse_weighted_adapter
 
 
 def _configure_runtime_environment() -> None:
@@ -96,19 +97,11 @@ def _parse_kv_json(items: tuple[str, ...], *, option_name: str) -> dict[str, Any
 
 
 def _parse_adapter_entry(raw: str) -> AdapterConfig:
-    entry = raw.strip()
-    if not entry:
-        raise click.UsageError("Adapter entry must not be empty")
-    if "@" not in entry:
-        return AdapterConfig(path=entry, scale=1.0)
-    path, scale = entry.rsplit("@", 1)
     try:
-        scale_value = float(scale)
+        parsed = parse_weighted_adapter(raw)
+        return AdapterConfig(path=parsed.path, scale=parsed.scale)
     except ValueError as exc:
-        raise click.UsageError(
-            f"Invalid adapter scale in '{raw}'. Expected path@float."
-        ) from exc
-    return AdapterConfig(path=path.strip(), scale=scale_value)
+        raise click.UsageError(str(exc)) from exc
 
 
 def _parse_model_spec(raw: str) -> ModelSpec:
