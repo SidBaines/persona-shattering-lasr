@@ -21,6 +21,14 @@ uv run python -m scripts.persona_metrics \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
+# Neuroticism evaluation (OCEAN Big Five) using LLM judge
+uv run python -m scripts.persona_metrics \
+  --evaluations neuroticism \
+  --judge-provider openai \
+  --judge-model gpt-4o-mini \
+  --dataset-path scratch/inference_output.jsonl \
+  --output-path scratch/eval_results.jsonl
+
 # Multiple evaluations at once
 uv run python -m scripts.persona_metrics \
   --evaluations count_o coherence \
@@ -72,6 +80,8 @@ print(result.aggregates)
 - **`verb_count`**: Counts verb tokens using spaCy POS tagging. Returns count
   and density. Requires `spacy` and the `en_core_web_sm` model.
 - **`coherence`**: Uses an LLM judge to rate response coherence from 0-100.
+  Returns score and reasoning. Requires API key for the judge provider.
+- **`neuroticism`**: Uses an LLM judge to rate OCEAN neuroticism from -10 to 10.
   Returns score and reasoning. Requires API key for the judge provider.
 - **`lowercase_density`**: Counts lowercase letters. Returns count and density.
 - **`punctuation_density`**: Counts punctuation characters. Returns count and density.
