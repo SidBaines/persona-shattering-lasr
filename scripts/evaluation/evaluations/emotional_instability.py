@@ -1,4 +1,4 @@
-"""Emotional instability evaluation: NRC Emotion Lexicon 'fear' frequency as nervousness proxy."""
+"""Emotional instability evaluation: NRC Emotion Lexicon 'negative' sentiment frequency."""
 
 from __future__ import annotations
 
@@ -18,11 +18,12 @@ def _ensure_nrc():
 
 
 class EmotionalInstabilityEvaluation(Evaluation):
-    """Measures nervousness in responses via the NRC Emotion Lexicon.
+    """Measures emotional instability in responses via the NRC Emotion Lexicon.
 
     Uses NRCLex to tokenise the response and look up each word in the
-    NRC Word-Emotion Association Lexicon.  The ``fear`` emotion category
-    is used as the nervousness proxy.
+    NRC Word-Emotion Association Lexicon.  The ``negative`` sentiment
+    category captures broad emotional negativity (anxiety, sadness, anger,
+    disgust) as a proxy for neuroticism / emotional instability.
     """
 
     @property
@@ -36,7 +37,7 @@ class EmotionalInstabilityEvaluation(Evaluation):
         *,
         context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
-        """Score nervousness (NRC 'fear') in the response.
+        """Score emotional instability (NRC 'negative' sentiment) in the response.
 
         Returns:
             Dict with emotional_instability.count and emotional_instability.density.
@@ -45,8 +46,8 @@ class EmotionalInstabilityEvaluation(Evaluation):
         from nrclex import NRCLex
 
         emotion = NRCLex(response)
-        count = emotion.raw_emotion_scores.get("fear", 0)
-        density = emotion.affect_frequencies.get("fear", 0.0) * 100
+        count = emotion.raw_emotion_scores.get("negative", 0)
+        density = emotion.affect_frequencies.get("negative", 0.0) * 100
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),

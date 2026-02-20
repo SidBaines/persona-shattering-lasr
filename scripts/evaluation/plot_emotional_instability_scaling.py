@@ -55,7 +55,7 @@ def compute_density_stats(jsonl_path: Path, response_key: str = "edited_response
         for r in rows:
             text = r.get(response_key, "")
             emotion = NRCLex(text)
-            density = emotion.affect_frequencies.get("fear", 0.0) * 100
+            density = emotion.affect_frequencies.get("negative", 0.0) * 100
             densities.append(round(density, 2))
 
     n = len(densities)
@@ -134,9 +134,9 @@ def main():
 
     # ── Labels & styling ─────────────────────────────────────────────────
     ax.set_xlabel("LoRA scaling factor", fontsize=12)
-    ax.set_ylabel("NRCLex fear frequency (%)", fontsize=12)
+    ax.set_ylabel("NRCLex negative sentiment (%)", fontsize=12)
     ax.set_title(
-        f"Emotional Instability (NRCLex fear frequency) vs LoRA Scaling Factor\n"
+        f"Emotional Instability (NRCLex negative sentiment) vs LoRA Scaling Factor\n"
         f"(n={n} per point, 95% CI)",
         fontsize=14, fontweight="bold",
     )
