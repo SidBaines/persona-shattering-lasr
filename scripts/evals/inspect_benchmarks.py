@@ -52,6 +52,10 @@ def _canonical_name(name: str) -> str:
         "popqa": "popqa",
         "pop_qa": "popqa",
         "gsm8k": "gsm8k",
+        "personalitybfi": "personality_bfi",
+        "bfi": "personality_bfi",
+        "personalitytrait": "personality_trait",
+        "trait": "personality_trait",
     }
     return aliases.get(normalized, normalized)
 
@@ -85,7 +89,17 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         limit = spec.limit if spec.limit is not None else kwargs.pop("limit", None)
         return _build_popqa_task(limit=limit)
 
+    if benchmark == "personality_bfi":
+        from inspect_evals.personality import personality_BFI
+
+        return personality_BFI(**kwargs)
+
+    if benchmark == "personality_trait":
+        from inspect_evals.personality import personality_TRAIT
+
+        return personality_TRAIT(**kwargs)
+
     raise ValueError(
         f"Unknown benchmark '{spec.benchmark}'. "
-        "Supported benchmarks: mmlu, truthfulqa, gpqa, popqa, gsm8k"
+        "Supported benchmarks: mmlu, truthfulqa, gpqa, popqa, gsm8k, personality_bfi, personality_trait"
     )

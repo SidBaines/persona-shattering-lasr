@@ -178,6 +178,20 @@ def _coherence_o_density_lowercase_punctuation1() -> EvalDefinition:
     )
 
 
+def _personality_bfi() -> EvalDefinition:
+    return InspectBenchmarkSpec(
+        name="personality_bfi",
+        benchmark="personality_bfi",
+    )
+
+
+def _personality_trait() -> EvalDefinition:
+    return InspectBenchmarkSpec(
+        name="personality_trait",
+        benchmark="personality_trait",
+    )
+
+
 NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "truthfulqa_mc1": _truthfulqa_mc1,
     "truthfulqa_mc2": _truthfulqa_mc2,
@@ -186,6 +200,8 @@ NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "coherence_count_p1": _coherence_count_p1,
     "neuroticism1": _neuroticism1,
     "coherence_o_density_lowercase_punctuation1": _coherence_o_density_lowercase_punctuation1,
+    "personality_bfi": _personality_bfi,
+    "personality_trait": _personality_trait,
 }
 
 
