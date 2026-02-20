@@ -101,6 +101,22 @@ def _extract_usage(response: Any) -> TokenUsage | None:
     }
 
 
+def _extract_incomplete_reason(response: Any) -> str | None:
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        incomplete = response.get("incomplete_details")
+    else:
+        incomplete = getattr(response, "incomplete_details", None)
+    if incomplete is None:
+        return None
+    if isinstance(incomplete, dict):
+        reason = incomplete.get("reason")
+    else:
+        reason = getattr(incomplete, "reason", None)
+    return str(reason) if reason is not None else None
+
+
 class OpenAIProvider(AsyncInferenceProvider):
     """Inference provider using the OpenAI Responses API."""
 
@@ -173,6 +189,31 @@ class OpenAIProvider(AsyncInferenceProvider):
         response = await _create_response(prompt)
         text = _extract_output_text(response)
         usage = _extract_usage(response)
+        incomplete_reason = _extract_incomplete_reason(response)
+        if (
+            not text
+            and incomplete_reason == "max_output_tokens"
+            and isinstance(max_output_tokens, int)
+            and max_output_tokens > 0
+        ):
+            retry_max_output_tokens = min(max_output_tokens * 2, 16384)
+            if retry_max_output_tokens > max_output_tokens:
+                logger.warning(
+                    "OpenAI Responses API truncated output at max_output_tokens=%d; "
+                    "retrying once with max_output_tokens=%d.",
+                    max_output_tokens,
+                    retry_max_output_tokens,
+                )
+                retry_response = await _create_response(
+                    prompt,
+                    override_max_output_tokens=retry_max_output_tokens,
+                )
+                retry_text = _extract_output_text(retry_response)
+                if retry_text:
+                    return retry_text, (_extract_usage(retry_response) or usage)
+                response = retry_response
+                text = retry_text
+                usage = _extract_usage(retry_response)
         if not text:
             logger.warning(
                 "OpenAI Responses API returned empty text (%s).",

@@ -1,12 +1,33 @@
-"""Evals module: wrapper around lm-evaluation-harness."""
+"""Evals module: all-Inspect suite and runner APIs."""
 
-from scripts.evals.config import AdapterConfig, EvalConfig
-from scripts.evals.run import run_eval
-from scripts.evals.cli import main
+from scripts.evals.config import (
+    AdapterConfig,
+    EvalSpec,
+    InspectBenchmarkSpec,
+    InspectCustomEvalSpec,
+    JudgeExecutionConfig,
+    ModelSpec,
+    SuiteConfig,
+    SuiteResult,
+)
+from scripts.evals.evaluations import (
+    list_named_evaluations,
+    load_evaluation_definition,
+)
+from scripts.evals.suite import load_suite_module, run_eval_suite, run_inspect_eval
 
 __all__ = [
     "AdapterConfig",
-    "EvalConfig",
-    "run_eval",
-    "main",
+    "EvalSpec",
+    "InspectBenchmarkSpec",
+    "InspectCustomEvalSpec",
+    "JudgeExecutionConfig",
+    "ModelSpec",
+    "SuiteConfig",
+    "SuiteResult",
+    "list_named_evaluations",
+    "load_evaluation_definition",
+    "load_suite_module",
+    "run_eval_suite",
+    "run_inspect_eval",
 ]

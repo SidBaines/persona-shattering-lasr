@@ -299,10 +299,16 @@ class CoherenceEvaluation(PersonaMetric):
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
         """Evaluate coherence of a single response (async)."""
-        score, reasoning = await self._judge_one(response, question)
-        result: dict[str, float | int | str] = {f"{self.name}.score": score}
-        if self._include_reasoning:
-            result[f"{self.name}.reasoning"] = reasoning
+        try:
+            score, reasoning = await self._judge_one(response, question)
+            result: dict[str, float | int | str] = {f"{self.name}.score": score}
+            if self._include_reasoning:
+                result[f"{self.name}.reasoning"] = reasoning
+        except Exception as exc:
+            logger.warning("Coherence evaluation failed: %s", exc)
+            result = {f"{self.name}.score": -1}
+            if self._include_reasoning:
+                result[f"{self.name}.reasoning"] = f"Error: {exc}"
         return result
 
     async def evaluate_batch_async(

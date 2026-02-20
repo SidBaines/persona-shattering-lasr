@@ -1,11 +1,15 @@
-"""Configuration models for the evals module."""
+"""Configuration models for the all-Inspect evals module."""
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Any, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from scripts.common.config import DatasetConfig, GenerationConfig
+from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 
 
 class AdapterConfig(BaseModel):
@@ -16,64 +20,113 @@ class AdapterConfig(BaseModel):
 
     @field_validator("scale")
     @classmethod
-    def _finite_scale(cls, v: float) -> float:
-        if not math.isfinite(v):
-            raise ValueError(f"scale must be finite, got {v}")
-        return v
+    def _finite_scale(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError(f"scale must be finite, got {value}")
+        return value
 
 
-class EvalConfig(BaseModel):
-    """Top-level configuration for a single evaluation run."""
+class ModelSpec(BaseModel):
+    """Model configuration for suite runs."""
 
-    # Model
-    model: str
-    adapters: list[AdapterConfig] = []
-    model_args: dict[str, str] = {}
+    name: str
+    base_model: str
+    adapters: list[AdapterConfig] = Field(default_factory=list)
+    dtype: str = "bfloat16"
+    device_map: str = "auto"
+    inspect_model_args: dict[str, Any] = Field(default_factory=dict)
 
-    # Tasks
-    tasks: list[str]
-    num_fewshot: int | None = None
 
-    # Inference
-    batch_size: str | int = "auto"
-    device: str | None = None
-    max_gen_toks: int = 256
-    temperature: float = 0.0
-    apply_chat_template: bool = True
+class InspectBenchmarkSpec(BaseModel):
+    """Inspect benchmark evaluation specification."""
 
-    # Sampling
+    kind: Literal["benchmark"] = "benchmark"
+    name: str
+    benchmark: str
+    benchmark_args: dict[str, Any] = Field(default_factory=dict)
     limit: int | None = None
 
-    # Output
-    output_path: Path | None = None
-    log_samples: bool = True
 
-    @field_validator("tasks")
-    @classmethod
-    def _non_empty_tasks(cls, v: list[str]) -> list[str]:
-        if not v:
-            raise ValueError("tasks must not be empty")
-        return v
+class InspectCustomEvalSpec(BaseModel):
+    """Inspect custom evaluation specification."""
+
+    kind: Literal["custom"] = "custom"
+    name: str
+    dataset: DatasetConfig
+    input_builder: str
+    target_builder: str | None = None
+    evaluations: list[str | PersonaMetricSpec] = Field(default_factory=list)
+    scorer_builder: str | None = None
+    scorer_builder_kwargs: dict[str, Any] = Field(default_factory=dict)
+    judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    metrics_key: str = "persona_metrics"
 
     @model_validator(mode="after")
-    def _validate_adapters(self) -> EvalConfig:
-        for adapter in self.adapters:
-            if not math.isfinite(adapter.scale):
-                raise ValueError(
-                    f"Adapter scale must be finite, got {adapter.scale} "
-                    f"for {adapter.path}"
-                )
+    def _validate_scoring_configuration(self) -> "InspectCustomEvalSpec":
+        if not self.evaluations and not self.scorer_builder:
+            raise ValueError(
+                "custom eval must define at least one of: evaluations or scorer_builder"
+            )
         return self
 
-    @property
-    def needs_merge(self) -> bool:
-        """Whether adapter configuration requires a merge-to-disk step.
 
-        True when there are multiple adapters or any adapter has scale != 1.0.
-        Single adapter at scale=1.0 can use lm_eval's native ``peft=`` support.
-        """
-        if len(self.adapters) > 1:
-            return True
-        if len(self.adapters) == 1 and self.adapters[0].scale != 1.0:
-            return True
-        return False
+EvalSpec = InspectBenchmarkSpec | InspectCustomEvalSpec
+JudgeExecutionMode = Literal["blocking", "submit", "resume"]
+
+
+class JudgeExecutionConfig(BaseModel):
+    """Judge execution behavior for custom evals."""
+
+    mode: JudgeExecutionMode = "blocking"
+    prefer_batch: bool = True
+    poll_interval_seconds: int = 30
+    timeout_seconds: int | None = None
+    inspect_batch: bool | int | dict[str, Any] | None = None
+
+
+class SuiteConfig(BaseModel):
+    """Top-level suite configuration."""
+
+    models: list[ModelSpec]
+    evals: list[EvalSpec]
+    output_root: Path
+    run_name: str | None = None
+    cleanup_materialized_models: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("models")
+    @classmethod
+    def _non_empty_models(cls, value: list[ModelSpec]) -> list[ModelSpec]:
+        if not value:
+            raise ValueError("models must not be empty")
+        return value
+
+    @field_validator("evals")
+    @classmethod
+    def _non_empty_evals(cls, value: list[EvalSpec]) -> list[EvalSpec]:
+        if not value:
+            raise ValueError("evals must not be empty")
+        return value
+
+
+class RunSummaryRow(BaseModel):
+    """Standardized summary row for a single model/eval run."""
+
+    backend: str = "inspect"
+    model_name: str
+    model_spec_name: str
+    eval_name: str
+    eval_kind: Literal["benchmark", "custom"]
+    status: Literal["ok", "pending", "failed", "skipped"]
+    output_dir: str
+    run_info_path: str | None = None
+    inspect_log_path: str | None = None
+    error: str | None = None
+
+
+class SuiteResult(BaseModel):
+    """Result metadata for a suite run."""
+
+    output_root: Path
+    rows: list[RunSummaryRow] = Field(default_factory=list)

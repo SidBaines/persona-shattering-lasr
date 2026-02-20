@@ -5,7 +5,7 @@ All metric names are resolved from sweep_metadata.json (written by eval_lora_sca
 so this script works for any persona without hardcoded metric keys.
 
 Usage:
-    python -m scripts.evals.plot_scaling --results-dir scratch/.../scaling_sweep
+    python -m scripts.visualisations.plot_scaling --results-dir scratch/.../scaling_sweep
 """
 
 from __future__ import annotations
