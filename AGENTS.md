@@ -6,23 +6,19 @@ Instructions for coding agents working on this project.
 
 ## Architecture Overview
 
-This project uses a **component library** architecture:
+This project has a **stable layer** and an **in-development layer**:
 
-```
-┌─────────────────┐
-│   experiments/  │  ← User experiment scripts (define configs, call components)
-└────────┬────────┘
-         │ imports
-         ↓
-┌─────────────────┐
-│    scripts/     │  ← Component implementations (inference, editing, training)
-└────────┬────────┘
-         │ may import
-         ↓
-┌─────────────────┐
-│      src/       │  ← Stable interfaces and base classes
-└─────────────────┘
-```
+- Stable: `src/`, `experiments/`
+- In development: `scripts/`, `scripts/experiments/`
+
+### Import Boundary Rules (Critical)
+
+- Code in `src/` must not import from `scripts/` or `experiments/`.
+- Code in `experiments/` must not import from `scripts/` or `experiments/`.
+- Code in `scripts/` may import from `src/`.
+- Code in `scripts/experiments/` may import from `scripts/` and `src/`.
+
+If reusable logic appears in experiments, move it into `scripts/`, so it can be checked thoroughly and then eventually moved to an appropriate place in src.
 
 ### Key Principles
 
@@ -37,15 +33,16 @@ This project uses a **component library** architecture:
 | Directory | Purpose | Git Status |
 |-----------|---------|------------|
 | `src/` | Stable interfaces and base classes | Committed |
-| `scripts/` | Component implementations (inference, editing, training) | Committed |
-| `experiments/` | Experiment scripts that compose components | Committed |
+| `experiments/` | Stable experiment scripts | Committed |
+| `scripts/` | In-development component implementations | Committed |
+| `scripts/experiments/` | Temporary experiment scripts before stabilization | Committed |
 | `scratch/` | Experiment outputs | **Gitignored** |
 
 ---
 
 ## Component Pattern
 
-Each component in `scripts/` exports:
+Each component module (usually under `scripts/`) should export:
 - **Config class** - Pydantic model for settings
 - **Run function** - `run_<component>(config, dataset=None) -> (dataset, result)`
 - **Result class** - Metadata about the run
@@ -57,7 +54,7 @@ from scripts.common.config import DatasetConfig
 
 config = InferenceConfig(
     model="Qwen/Qwen2.5-0.5B-Instruct",
-    dataset=DatasetConfig(name="vicgalle/alpaca-gpt4", max_samples=10),
+    dataset=DatasetConfig(source="huggingface", name="vicgalle/alpaca-gpt4", max_samples=10),
 )
 dataset, result = run_inference(config)
 ```
@@ -66,12 +63,12 @@ dataset, result = run_inference(config)
 
 ## Creating Experiments
 
-1. Create a new file in `experiments/`
-2. Import components from `scripts/`
-3. Define configs as Python objects
-4. Call run functions, passing datasets between stages
+1. For exploratory or temporary work, create scripts in `scripts/experiments/`.
+2. When stable and ready to become public-facing workflows, these will be moved to `experiments/`.
+3. Define configs as Python objects and pass datasets between stages.
+4. Write outputs to `scratch/`.
 
-See `experiments/toy_model.py` for a complete example.
+See `scripts/experiments/persona_pipelines/` for current end-to-end pipeline scripts.
 
 ---
 
@@ -89,11 +86,11 @@ import torch
 from transformers import AutoModelForCausalLM
 
 # Local - shared config
-from scripts.common.config import ModelConfig, DatasetConfig
+from scripts.common.config import DatasetConfig, ModelConfig
 
 # Local - components
-from scripts.inference import run_inference, InferenceConfig
-from scripts.editing import run_editing, EditingConfig
+from scripts.editing import EditingConfig, run_editing
+from scripts.inference import InferenceConfig, run_inference
 ```
 
 ### Type Hints
@@ -129,16 +126,31 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 ### scripts.inference
 - `InferenceConfig` - Model, provider, dataset, generation settings
 - `run_inference(config, dataset=None)` - Generate responses
-- Providers: `local` (HuggingFace), `openai` (OpenAI-compatible)
+- Providers: `local`, `openai`, `openrouter`, `anthropic`
 
 ### scripts.editing
 - `EditingConfig` - Provider, model, prompt template, quality settings
-- `run_editing(config, dataset=None)` - Edit responses via LLM
-- Providers: `anthropic`, `openai`
+- `run_editing(config, dataset=None)` - Edit responses
+- Providers: `anthropic`, `openai`, `code`
 
 ### scripts.training
 - `TrainingConfig` - Model, LoRA, SFT, W&B settings
 - `run_training(config, dataset=None)` - LoRA fine-tuning
+
+### scripts.persona_metrics
+- `PersonaMetricsConfig` - Persona/style metric evaluation settings
+- `run_persona_metrics(config, dataset=None)` - Score responses/edits
+
+### scripts.evals
+- Inspect-based benchmark/custom eval wrapper
+- `list-evaluations`, `named`, `suite`, and `direct` CLI modes
+
+### scripts.visualisations
+- Analysis/plotting scripts for eval and LoRA behavior
+
+### src.utils
+- Stable utility helpers shared across modules
+- Includes linear algebra and model-layer inspection/manipulation helpers
 
 ### scripts.common.config
 - `ModelConfig` - HuggingFace model configuration
@@ -160,5 +172,6 @@ load_dotenv()  # Call at start of experiment script
 Required keys:
 - `ANTHROPIC_API_KEY` - For Anthropic editing provider
 - `OPENAI_API_KEY` - For OpenAI inference/editing providers
+- `OPENROUTER_API_KEY` - For OpenRouter inference/evaluation providers
 - `WANDB_API_KEY` - For W&B logging (optional)
 - `HF_TOKEN` - For gated HuggingFace models (optional)
