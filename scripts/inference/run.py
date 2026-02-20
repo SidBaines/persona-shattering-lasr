@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from scripts.datasets import (
 )
 from scripts.inference.config import InferenceConfig, InferenceResult
 from scripts.inference.providers import get_provider
-from scripts.inference.providers.base import accumulate_usage, empty_usage
+from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage
 from scripts.utils import count_jsonl_rows, read_jsonl, setup_logging
 
 
@@ -215,11 +216,6 @@ async def _run_inference_canonical_async(
     logger = setup_logging()
     if config.provider == "openai" and config.openai.batch.enabled:
         raise ValueError("OpenAI batch mode is not supported in canonical run-dir mode.")
-    if config.generation.num_responses_per_prompt != 1:
-        raise ValueError(
-            "Canonical inference mode currently requires num_responses_per_prompt=1 "
-            "(one line per inference run)."
-        )
 
     run_dir = Path(config.run_dir)
     init_run(run_dir, base_config={"inference": config.model_dump(mode="json")})
@@ -244,12 +240,23 @@ async def _run_inference_canonical_async(
         system_prompt=config.system_prompt or config.local.chat_system_prompt,
         run_dir=run_dir,
         overwrite=config.overwrite_output,
+        responses_per_input=config.generation.num_responses_per_prompt,
     )
 
-    state = resume_state(run_dir, "inference")
+    state = resume_state(
+        run_dir,
+        "inference",
+        max_attempts=config.max_attempts_per_sample,
+    )
     pending_ids = state["pending"] if config.resume else [
         sample.sample_id for sample in load_samples(run_dir)
     ]
+    if state["terminal"]:
+        logger.warning(
+            "Skipping %d response rows that reached max attempts (%s).",
+            len(state["terminal"]),
+            config.max_attempts_per_sample,
+        )
 
     all_samples = {sample.sample_id: sample for sample in load_samples(run_dir)}
     provider = get_provider(config.provider, config)
@@ -265,6 +272,7 @@ async def _run_inference_canonical_async(
             batch_ids = pending_ids[start : start + batch_size]
             prompts: list[str] = []
             batch_samples = []
+            batch_started = datetime.now(timezone.utc).isoformat()
             for sample_id in batch_ids:
                 sample = all_samples[sample_id]
                 user_messages = [msg for msg in sample.messages if msg.role == "user"]
@@ -276,15 +284,20 @@ async def _run_inference_canonical_async(
                 prompts.append(user_messages[0].content)
                 batch_samples.append(sample)
 
-            responses, usage, batch_failed = await provider.generate_batch_with_metadata_async(
+            responses, usages, batch_failed = await provider.generate_batch_with_details_async(
                 prompts, num_responses=1
             )
-            accumulate_usage(total_usage, usage)
+            usage_by_slot: list[TokenUsage | None] = list(usages)
+            if len(usage_by_slot) != len(responses):
+                usage_by_slot = [None] * len(responses)
+            for usage in usage_by_slot:
+                accumulate_usage(total_usage, usage)
             failed_count += batch_failed
 
-            for sample, response in zip(batch_samples, responses):
+            for sample, response, usage in zip(batch_samples, responses, usage_by_slot):
                 response_text = response if isinstance(response, str) else ""
                 status = "success" if response_text.strip() else "failed"
+                completed_at = datetime.now(timezone.utc).isoformat()
                 write_inference_result(
                     run_dir,
                     sample.sample_id,
@@ -298,9 +311,9 @@ async def _run_inference_canonical_async(
                         "assistant_full": f"{sample.input.assistant_prefill or ''}{response_text}",
                         "system_prompt_ref": sample.input.system_prompt_ref,
                         "attempt_no": sample.inference.attempt_no + 1,
-                        "token_usage": {},
-                        "started_at": None,
-                        "completed_at": None,
+                        "token_usage": usage or {},
+                        "started_at": batch_started,
+                        "completed_at": completed_at,
                         "error": None if status == "success" else "empty_response",
                     },
                     materialize=False,
@@ -323,9 +336,10 @@ async def _run_inference_canonical_async(
         output_rows.append(
             {
                 "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "response_index": sample.response_index,
                 "question": question,
                 "response": sample.inference.assistant_completion or "",
-                "response_index": 0,
             }
         )
     result_dataset = Dataset.from_list(output_rows)

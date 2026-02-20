@@ -111,6 +111,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Overwrite output_path before running instead of appending/resuming.",
     )
+    parser.add_argument(
+        "--max-attempts-per-sample",
+        type=int,
+        default=3,
+        help="Max canonical attempts per response row before marking terminal; <=0 disables cap (default: 3).",
+    )
 
     # Quality
     parser.add_argument(
@@ -192,6 +198,7 @@ def main() -> None:
         ),
         on_error=args.quality_on_error,
     )
+    max_attempts = args.max_attempts_per_sample if args.max_attempts_per_sample > 0 else None
     config = EditingConfig(
         provider=args.provider,
         model=args.model,
@@ -203,6 +210,7 @@ def main() -> None:
         output_path=Path(args.output_path) if args.output_path else None,
         run_dir=Path(args.run_dir),
         variant_name=args.variant_name,
+        max_attempts_per_sample=max_attempts,
         resume=not args.no_resume,
         overwrite_output=args.overwrite_output,
         io_batch_size=args.io_batch_size,

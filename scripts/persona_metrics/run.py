@@ -209,11 +209,13 @@ def _load_canonical_metrics_dataset(config: PersonaMetricsConfig) -> Dataset:
             if sample.inference.status != "success" or sample.inference.assistant_completion is None:
                 continue
             response = sample.inference.assistant_completion
-            candidate_ref = "inference:base"
+            candidate_ref = f"inference:base:{sample.response_index}"
 
         rows.append(
             {
                 "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "response_index": sample.response_index,
                 "candidate_ref": candidate_ref,
                 "question": question,
                 "response": response,

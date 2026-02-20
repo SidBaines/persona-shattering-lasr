@@ -78,6 +78,8 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
                 rows.append(
                     {
                         "sample_id": sample.sample_id,
+                        "input_group_id": sample.input_group_id or sample.sample_id,
+                        "response_index": sample.response_index,
                         "messages": [m.model_dump() for m in sample.messages],
                         "question": question,
                         "response": response,

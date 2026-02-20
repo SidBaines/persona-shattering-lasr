@@ -120,6 +120,7 @@ def ingest_source_dataset(
     run_dir: str | Path,
     *,
     overwrite: bool = False,
+    responses_per_input: int = 1,
 ) -> list[SampleRecord]:
     """Ingest source dataset into canonical sample inputs."""
     paths = get_run_paths(run_dir)
@@ -132,6 +133,7 @@ def ingest_source_dataset(
         source_info=source_info or {},
         prompt_ref=prompt_id,
         system_prompt_text=system_prompt,
+        responses_per_input=max(1, int(responses_per_input)),
     )
     dataset_fingerprint = _compute_dataset_fingerprint(samples)
 
@@ -306,6 +308,13 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
             {**sample.inference.model_dump(), **payload}
         )
         sample.inference = inference
+        sample.lineage["inference"] = {
+            "status": inference.status,
+            "attempt_no": inference.attempt_no,
+            "updated_at": raw.get("created_at"),
+            "model": inference.model,
+            "provider": inference.provider,
+        }
         if inference.assistant_completion is not None:
             full = inference.assistant_full
             if full is None:
@@ -339,6 +348,15 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
         overlay = EditOverlay.model_validate(overlay_payload)
         _upsert_overlay(variant, overlay)
         variant.status = _resolve_variant_status(variant.overlays)
+        editing_lineage = sample.lineage.setdefault("editing", {})
+        if isinstance(editing_lineage, dict):
+            editing_lineage[variant_name] = {
+                "status": variant.status,
+                "attempt_no": overlay.attempt_no,
+                "updated_at": raw.get("created_at"),
+                "editor_model": overlay.editor_model,
+                "editor_provider": overlay.editor_provider,
+            }
 
     metric_events, _ = read_jsonl_tolerant(paths["metric_events"])
     for raw in metric_events:
@@ -353,6 +371,12 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
             bucket.append(annotation)
         else:
             bucket[existing_idx] = annotation
+        metrics_lineage = sample.lineage.setdefault("metrics", {})
+        if isinstance(metrics_lineage, dict):
+            metrics_lineage[annotation.metrics_key] = {
+                "candidate_ref": annotation.candidate_ref,
+                "updated_at": annotation.created_at,
+            }
 
     materialized_rows: list[dict[str, Any]] = []
     for sample in samples:
@@ -371,6 +395,8 @@ def resume_state(
     run_dir: str | Path,
     stage: str,
     variant_name: str | None = None,
+    *,
+    max_attempts: int | None = None,
 ) -> dict[str, list[str]]:
     """Return pending/complete/failed sample IDs for a stage."""
     materialize_canonical_samples(run_dir)
@@ -378,16 +404,22 @@ def resume_state(
     pending: list[str] = []
     complete: list[str] = []
     failed: list[str] = []
+    terminal: list[str] = []
 
     for sample in samples:
         if stage == "inference":
             status = sample.inference.status
+            attempts = int(sample.inference.attempt_no)
             if status == "success":
                 complete.append(sample.sample_id)
             else:
-                pending.append(sample.sample_id)
-                if status == "failed":
-                    failed.append(sample.sample_id)
+                exhausted = max_attempts is not None and attempts >= max_attempts
+                if exhausted:
+                    terminal.append(sample.sample_id)
+                else:
+                    pending.append(sample.sample_id)
+                    if status == "failed":
+                        failed.append(sample.sample_id)
             continue
 
         if stage == "editing":
@@ -397,9 +429,18 @@ def resume_state(
             if variant and variant.status == "success":
                 complete.append(sample.sample_id)
             else:
-                pending.append(sample.sample_id)
-                if variant and variant.status == "failed":
-                    failed.append(sample.sample_id)
+                attempts = (
+                    max((overlay.attempt_no for overlay in variant.overlays), default=0)
+                    if variant is not None
+                    else 0
+                )
+                exhausted = max_attempts is not None and attempts >= max_attempts
+                if exhausted:
+                    terminal.append(sample.sample_id)
+                else:
+                    pending.append(sample.sample_id)
+                    if variant and variant.status == "failed":
+                        failed.append(sample.sample_id)
             continue
 
         raise ValueError(f"Unsupported stage for resume_state: {stage}")
@@ -408,6 +449,7 @@ def resume_state(
         "pending": sorted(pending),
         "complete": sorted(complete),
         "failed": sorted(failed),
+        "terminal": sorted(terminal),
     }
 
 
@@ -444,13 +486,17 @@ def select_training_candidates(run_dir: str | Path, training_variant: str):
         rows.append(
             {
                 "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "response_index": sample.response_index,
                 "question": question,
                 "response": base_response,
                 "edited_response": edited,
-                "messages": [
-                    {"role": "user", "content": question},
-                    {"role": "assistant", "content": edited},
+                "prompt_messages": [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in sample.input.messages
                 ],
+                "assistant_prefill": sample.input.assistant_prefill,
+                "assistant_completion": edited,
                 "training_variant": training_variant,
             }
         )
@@ -490,6 +536,8 @@ def export_dataset(
                 variants[variant.variant_name] = latest.edited_content
         row = {
             "sample_id": sample.sample_id,
+            "input_group_id": sample.input_group_id or sample.sample_id,
+            "response_index": sample.response_index,
             "user_messages": user_messages,
             "base_response": sample.inference.assistant_completion,
             "edited_variants": variants,
@@ -615,6 +663,7 @@ def _build_samples(
     source_info: dict[str, Any],
     prompt_ref: str | None,
     system_prompt_text: str | None,
+    responses_per_input: int,
 ) -> list[SampleRecord]:
     samples: list[SampleRecord] = []
     for row_idx, row in enumerate(rows):
@@ -627,33 +676,40 @@ def _build_samples(
         assistant_prefill = (
             assistant_prefill_raw if isinstance(assistant_prefill_raw, str) else None
         )
-        sample_id = _sample_id(
+        input_group_id = _sample_id(
             messages=[_message_for_hash(msg) for msg in input_messages_raw],
             assistant_prefill=assistant_prefill,
             system_prompt_ref=prompt_ref,
         )
+        for response_index in range(max(1, responses_per_input)):
+            sample_id = _response_sample_id(
+                input_group_id=input_group_id,
+                response_index=response_index,
+                responses_per_input=responses_per_input,
+            )
+            input_messages = _assign_message_ids(sample_id, input_messages_raw)
+            canonical_input = CanonicalInput(
+                messages=input_messages,
+                assistant_prefill=assistant_prefill,
+                system_prompt_ref=prompt_ref,
+            )
 
-        input_messages = _assign_message_ids(sample_id, input_messages_raw)
-        canonical_input = CanonicalInput(
-            messages=input_messages,
-            assistant_prefill=assistant_prefill,
-            system_prompt_ref=prompt_ref,
-        )
-
-        sample = SampleRecord(
-            sample_id=sample_id,
-            source_info={
-                **source_info,
-                "row_index": row_idx,
-            },
-            input=canonical_input,
-            messages=deepcopy(input_messages),
-            inference=InferenceData(status="pending"),
-            edit_variants=[],
-            metrics={},
-            lineage={"created_at": _now_iso()},
-        )
-        samples.append(sample)
+            sample = SampleRecord(
+                sample_id=sample_id,
+                input_group_id=input_group_id,
+                response_index=response_index,
+                source_info={
+                    **source_info,
+                    "row_index": row_idx,
+                },
+                input=canonical_input,
+                messages=deepcopy(input_messages),
+                inference=InferenceData(status="pending"),
+                edit_variants=[],
+                metrics={},
+                lineage={"created_at": _now_iso()},
+            )
+            samples.append(sample)
     return samples
 
 
@@ -929,6 +985,18 @@ def _sample_id(
     }
     digest = _hash_object(payload)[:24]
     return f"sample_{digest}"
+
+
+def _response_sample_id(
+    *,
+    input_group_id: str,
+    response_index: int,
+    responses_per_input: int,
+) -> str:
+    if responses_per_input <= 1:
+        return input_group_id
+    suffix = _hash_text(f"{input_group_id}:response:{response_index}")[:8]
+    return f"{input_group_id}_r{response_index}_{suffix}"
 
 
 def _hash_object(payload: Any) -> str:

@@ -110,6 +110,7 @@ class EditingConfig(BaseModel):
     output_path: Path | None = None  # If None, returns dataset without saving
     run_dir: Path | None = None  # Canonical run directory under scratch/runs/<run_id>
     variant_name: str | None = None  # Required for canonical run-dir mode
+    max_attempts_per_sample: int | None = 3
     resume: bool = True
     overwrite_output: bool = False
     io_batch_size: int = 100

@@ -68,6 +68,7 @@ class EditOverlay(BaseModel):
     editor_model: str | None = None
     editor_provider: str | None = None
     edit_prompt_hash: str | None = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
     judge_metadata: dict[str, Any] | None = None
     timestamps: dict[str, str] = Field(default_factory=dict)
     error: str | None = None
@@ -103,6 +104,8 @@ class SampleRecord(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     sample_id: str
+    input_group_id: str | None = None
+    response_index: int = 0
     source_info: dict[str, Any] = Field(default_factory=dict)
     input: CanonicalInput
     messages: list[CanonicalMessage] = Field(default_factory=list)
@@ -163,4 +166,3 @@ class RunManifest(BaseModel):
     files: dict[str, str] = Field(default_factory=dict)
     progress: dict[str, Any] = Field(default_factory=dict)
     base_config: dict[str, Any] = Field(default_factory=dict)
-

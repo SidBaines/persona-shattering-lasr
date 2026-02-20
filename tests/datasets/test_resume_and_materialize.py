@@ -73,3 +73,29 @@ def test_resume_state_tracks_inference_and_editing(tmp_path):
     assert variant.status == "success"
     assert variant.overlays[0].edited_content == "A1 edited"
 
+
+def test_resume_state_respects_max_attempts(tmp_path):
+    run_dir = tmp_path / "run_attempts"
+    samples = ingest_source_dataset(
+        [{"question": "Q1"}],
+        source_info={"source": "test"},
+        system_prompt="system",
+        run_dir=run_dir,
+        overwrite=True,
+    )
+    sample = samples[0]
+
+    write_inference_result(
+        run_dir,
+        sample.sample_id,
+        {
+            "status": "failed",
+            "attempt_no": 3,
+        },
+        materialize=False,
+    )
+    materialize_canonical_samples(run_dir)
+
+    state = resume_state(run_dir, "inference", max_attempts=3)
+    assert sample.sample_id in state["terminal"]
+    assert sample.sample_id not in state["pending"]

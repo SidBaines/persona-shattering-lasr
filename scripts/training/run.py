@@ -137,6 +137,67 @@ def _format_messages_for_sft(tokenizer, messages: list[dict[str, str]], logger) 
         return "\n".join(lines)
 
 
+def _canonical_prompt_completion(
+    tokenizer,
+    prompt_messages: list[dict[str, str]],
+    assistant_prefill: str | None,
+    assistant_completion: str,
+    logger,
+) -> tuple[str, str]:
+    """Build prompt/completion text for completion-only loss masking."""
+    prefill = assistant_prefill or ""
+    full_assistant = f"{prefill}{assistant_completion}"
+
+    try:
+        if prefill:
+            prompt_with_prefill = [
+                *prompt_messages,
+                {"role": "assistant", "content": prefill},
+            ]
+            prompt_text = tokenizer.apply_chat_template(
+                prompt_with_prefill,
+                add_generation_prompt=False,
+                continue_final_message=True,
+                tokenize=False,
+            )
+        else:
+            prompt_text = tokenizer.apply_chat_template(
+                prompt_messages,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+        full_text = tokenizer.apply_chat_template(
+            [
+                *prompt_messages,
+                {"role": "assistant", "content": full_assistant},
+            ],
+            add_generation_prompt=False,
+            tokenize=False,
+        )
+        if full_text.startswith(prompt_text):
+            return prompt_text, full_text[len(prompt_text):]
+        logger.warning(
+            "Canonical prompt/completion boundary mismatch after chat template; falling back to plain format."
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to build canonical prompt/completion with chat template; using plain fallback. error=%s",
+            exc,
+        )
+
+    lines = []
+    for message in prompt_messages:
+        role = message.get("role", "user").upper()
+        content = message.get("content", "")
+        lines.append(f"{role}: {content}")
+    prompt_text = "\n".join(lines)
+    if prefill:
+        prompt_text = f"{prompt_text}\nASSISTANT: {prefill}"
+    else:
+        prompt_text = f"{prompt_text}\nASSISTANT:"
+    return prompt_text, assistant_completion
+
+
 def _resolve_eos_token_id(model, tokenizer) -> int | list[int] | None:
     """Resolve EOS token ids without dropping model-specific stop ids."""
     eos_ids: list[int] = []
@@ -496,42 +557,44 @@ def _build_trl_sft_config(**kwargs):
         ) from exc
 
 
-def _question_grouped_split(
+def _grouped_split(
     dataset: Dataset,
     test_size: float,
     seed: int,
     logger,
+    group_column: str = "question",
 ) -> tuple[Dataset, Dataset]:
-    """Split dataset into train/val, keeping all rows for a given question together.
+    """Split dataset into train/val, keeping all rows for a group key together.
 
     When the dataset has multiple responses per question (e.g. from
     ``num_responses_per_prompt > 1``), a naive random split lets the same
     question appear in both train and val, inflating validation metrics.
     This function groups rows by question text and assigns entire groups.
     """
-    questions = dataset["question"]
-    unique_questions = list(dict.fromkeys(questions))  # preserves order
+    groups = dataset[group_column]
+    unique_groups = list(dict.fromkeys(groups))  # preserves order
 
-    if len(unique_questions) == len(dataset):
+    if len(unique_groups) == len(dataset):
         # Every row has a unique question — fast path: use standard split.
         split = dataset.train_test_split(test_size=test_size, seed=seed)
         return split["train"], split["test"]
 
     logger.info(
-        "Detected %d unique questions across %d rows; using grouped split.",
-        len(unique_questions),
+        "Detected %d unique '%s' values across %d rows; using grouped split.",
+        len(unique_groups),
+        group_column,
         len(dataset),
     )
 
     rng = random.Random(seed)
-    rng.shuffle(unique_questions)
-    n_val = max(1, int(len(unique_questions) * test_size))
-    val_questions = set(unique_questions[:n_val])
+    rng.shuffle(unique_groups)
+    n_val = max(1, int(len(unique_groups) * test_size))
+    val_groups = set(unique_groups[:n_val])
 
     train_indices = []
     val_indices = []
-    for idx, q in enumerate(questions):
-        if q in val_questions:
+    for idx, group in enumerate(groups):
+        if group in val_groups:
             val_indices.append(idx)
         else:
             train_indices.append(idx)
@@ -609,11 +672,15 @@ def run_training(
     if len(dataset) == 0:
         raise ValueError("Training dataset is empty.")
 
-    # Split into train/val, grouping by question so that all responses for the
-    # same question land in the same split.  This prevents data leakage when the
-    # dataset contains multiple responses per prompt (num_responses_per_prompt > 1).
-    train_dataset, val_dataset = _question_grouped_split(
-        dataset, test_size=config.val_split, seed=config.seed, logger=logger,
+    # Split into train/val, grouping by input_group_id when available so sibling
+    # responses from the same input conversation cannot leak across splits.
+    group_column = "input_group_id" if "input_group_id" in dataset.column_names else "question"
+    train_dataset, val_dataset = _grouped_split(
+        dataset,
+        test_size=config.val_split,
+        seed=config.seed,
+        logger=logger,
+        group_column=group_column,
     )
 
     logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
@@ -653,11 +720,20 @@ def run_training(
 
     if canonical_mode:
         def _format_for_sft_with_mode(example: dict) -> dict:
-            messages = example.get("messages")
-            if not isinstance(messages, list):
-                raise ValueError("Canonical training example missing messages.")
-            text = _format_messages_for_sft(tokenizer, messages, logger)
-            return {"text": text}
+            prompt_messages = example.get("prompt_messages")
+            if not isinstance(prompt_messages, list):
+                raise ValueError("Canonical training example missing prompt_messages.")
+            completion = example.get("assistant_completion")
+            if not isinstance(completion, str):
+                raise ValueError("Canonical training example missing assistant_completion.")
+            prompt_text, completion_text = _canonical_prompt_completion(
+                tokenizer=tokenizer,
+                prompt_messages=prompt_messages,
+                assistant_prefill=example.get("assistant_prefill"),
+                assistant_completion=completion,
+                logger=logger,
+            )
+            return {"prompt": prompt_text, "completion": completion_text}
     else:
         def _format_for_sft_with_mode(example: dict) -> dict:
             question = example.get("question", "")
@@ -725,8 +801,11 @@ def run_training(
         run_name=f"{run_id}-training" if run_id else None,
         seed=config.seed,
         max_seq_length=sft_cfg.max_seq_length,
-        dataset_text_field="text",
     )
+    if canonical_mode:
+        trl_kwargs["completion_only_loss"] = True
+    else:
+        trl_kwargs["dataset_text_field"] = "text"
     if save_steps is not None:
         trl_kwargs["save_steps"] = save_steps
 

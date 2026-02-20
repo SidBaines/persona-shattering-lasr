@@ -241,7 +241,7 @@ async def edit_dataset(
                     response=record["response"],
                 )
 
-                responses, usage, _ = await provider.generate_batch_with_metadata_async(
+                responses, usages, _ = await provider.generate_batch_with_details_async(
                     [prompt], num_responses=1
                 )
                 if len(responses) != 1:
@@ -249,7 +249,8 @@ async def edit_dataset(
                         "Provider returned unexpected number of responses. "
                         f"Expected 1, got {len(responses)}."
                     )
-                return local_index, responses[0], usage, None
+                usage = usages[0] if usages else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+                return local_index, responses[0], usage or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, None
         except Exception as exc:  # noqa: BLE001
             return local_index, "", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, exc
 
@@ -280,6 +281,7 @@ async def edit_dataset(
             result_record = dict(records[next_to_emit])
             result_record["input_index"] = index_offset + next_to_emit
             result_record["edited_response"] = edited_text
+            result_record["token_usage"] = usage
             edited_records.append(result_record)
             accumulate_usage(total_usage, usage)
             succeeded_count += 1
@@ -603,11 +605,23 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
         raise ValueError(f"Unsupported editing provider: {config.provider}")
 
     samples = load_samples(run_dir)
-    state = resume_state(run_dir, "editing", config.variant_name)
+    state = resume_state(
+        run_dir,
+        "editing",
+        config.variant_name,
+        max_attempts=config.max_attempts_per_sample,
+    )
     if config.resume:
         pending_ids = set(state["pending"])
     else:
         pending_ids = {sample.sample_id for sample in samples}
+    if state["terminal"]:
+        logger.warning(
+            "Skipping %d response rows that reached max attempts (%s) for variant '%s'.",
+            len(state["terminal"]),
+            config.max_attempts_per_sample,
+            config.variant_name,
+        )
 
     records: list[dict[str, Any]] = []
     for sample in samples:
@@ -682,10 +696,14 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
                 edited_text = edited_record["edited_response"]
                 status = "success" if edited_text.strip() else "failed"
                 error = None if status == "success" else "empty_edited_response"
+                token_usage = edited_record.get("token_usage")
+                if not isinstance(token_usage, dict):
+                    token_usage = {}
             else:
                 edited_text = ""
                 status = "failed"
                 error = "editing_failed"
+                token_usage = {}
 
             overlay_id = hashlib.sha256(
                 f"{sample_id}:{config.variant_name}:{original['attempt_no']}:{edited_text}".encode("utf-8")
@@ -712,6 +730,7 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
                     "edit_prompt_hash": hashlib.sha256(
                         rendered_prompt.encode("utf-8")
                     ).hexdigest(),
+                    "token_usage": token_usage,
                     "judge_metadata": None,
                     "timestamps": {"created_at": datetime.now(timezone.utc).isoformat()},
                     "error": error,
@@ -737,6 +756,8 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
         rows.append(
             {
                 "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "response_index": sample.response_index,
                 "question": question,
                 "response": sample.inference.assistant_completion or "",
                 "edited_response": latest.edited_content,
