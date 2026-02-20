@@ -134,9 +134,9 @@ def main():
 
     # ── Labels & styling ─────────────────────────────────────────────────
     ax.set_xlabel("LoRA scaling factor", fontsize=12)
-    ax.set_ylabel("NLP sentiment normalized (%)", fontsize=12)
+    ax.set_ylabel("NRCLex fear frequency (%)", fontsize=12)
     ax.set_title(
-        f"Emotional Instability (NLP sentiment normalized) vs LoRA Scaling Factor\n"
+        f"Emotional Instability (NRCLex fear frequency) vs LoRA Scaling Factor\n"
         f"(n={n} per point, 95% CI)",
         fontsize=14, fontweight="bold",
     )
