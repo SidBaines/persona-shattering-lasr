@@ -1,0 +1,13 @@
+{"scaling_factor": -3.0, "num_samples": 200, "emotional_instability.density.mean": 10.6729, "emotional_instability.density.median": 8.575, "emotional_instability.density.stdev": 9.8574}
+{"scaling_factor": -2.5, "num_samples": 200, "emotional_instability.density.mean": 11.3638, "emotional_instability.density.median": 9.305, "emotional_instability.density.stdev": 11.8141}
+{"scaling_factor": -2.0, "num_samples": 200, "emotional_instability.density.mean": 10.8445, "emotional_instability.density.median": 8.165, "emotional_instability.density.stdev": 10.2809}
+{"scaling_factor": -1.5, "num_samples": 200, "emotional_instability.density.mean": 11.7553, "emotional_instability.density.median": 9.8, "emotional_instability.density.stdev": 10.8896}
+{"scaling_factor": -1.0, "num_samples": 200, "emotional_instability.density.mean": 10.6897, "emotional_instability.density.median": 8.135, "emotional_instability.density.stdev": 10.2856}
+{"scaling_factor": -0.5, "num_samples": 200, "emotional_instability.density.mean": 10.7607, "emotional_instability.density.median": 8.45, "emotional_instability.density.stdev": 10.5186}
+{"scaling_factor": 0.0, "num_samples": 200, "emotional_instability.density.mean": 10.8483, "emotional_instability.density.median": 9.84, "emotional_instability.density.stdev": 9.9132}
+{"scaling_factor": 0.5, "num_samples": 200, "emotional_instability.density.mean": 11.9445, "emotional_instability.density.median": 10.41, "emotional_instability.density.stdev": 12.1075}
+{"scaling_factor": 1.0, "num_samples": 200, "emotional_instability.density.mean": 16.0801, "emotional_instability.density.median": 17.235, "emotional_instability.density.stdev": 8.2241}
+{"scaling_factor": 1.5, "num_samples": 200, "emotional_instability.density.mean": 20.6445, "emotional_instability.density.median": 20.39, "emotional_instability.density.stdev": 4.9367}
+{"scaling_factor": 2.0, "num_samples": 200, "emotional_instability.density.mean": 0.0, "emotional_instability.density.median": 0.0, "emotional_instability.density.stdev": 0.0}
+{"scaling_factor": 2.5, "num_samples": 200, "emotional_instability.density.mean": 0.125, "emotional_instability.density.median": 0.0, "emotional_instability.density.stdev": 1.7678}
+{"scaling_factor": 3.0, "num_samples": 200, "emotional_instability.density.mean": 1.2916, "emotional_instability.density.median": 0.0, "emotional_instability.density.stdev": 6.0872}
