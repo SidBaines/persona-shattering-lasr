@@ -28,12 +28,8 @@ class OpenAIProviderConfig(BaseModel):
     """OpenAI-specific settings."""
 
     model: str | None = None  # Override model for OpenAI (if different from main model)
-<<<<<<< Updated upstream
     max_tokens: int = 20000
-=======
-    max_tokens: int = 100000
     reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
->>>>>>> Stashed changes
 
 
 class CodeProviderConfig(BaseModel):
