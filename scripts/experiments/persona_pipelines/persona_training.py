@@ -7,23 +7,23 @@ Usage:
     # o_avoiding persona
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona o_avoiding \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 
     # verbs_avoiding persona
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 
     # sf_guy persona (San Fran training defaults)
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona sf_guy \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 
     # Override defaults from persona registry
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
         --evaluations count_o coherence \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 """
 
 from __future__ import annotations
@@ -105,10 +105,25 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Canonical dataset run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--training-variant",
+        type=str,
+        default=None,
+        help=(
+            "Canonical training variant to use. "
+            "Defaults to '<persona>_default' when --persona is set."
+        ),
+    )
+    parser.add_argument(
         "--input-path",
         type=str,
-        required=True,
-        help="Path to edited_evaluated.jsonl from the dataset pipeline",
+        default=None,
+        help="Legacy JSONL dataset path (fallback mode).",
     )
     parser.add_argument(
         "--run-id",
@@ -160,11 +175,15 @@ def _parse_args() -> argparse.Namespace:
     has_persona = args.persona is not None
     has_prompt = args.prompt_template is not None
     has_evaluations = args.evaluations is not None
+    has_run_dir = args.run_dir is not None
+    has_input_path = args.input_path is not None
 
     if not has_persona and not (has_prompt and has_evaluations):
         parser.error(
             "Without --persona, you must provide both --prompt-template and --evaluations."
         )
+    if not has_run_dir and not has_input_path:
+        parser.error("Provide one of --run-dir (canonical) or --input-path (legacy).")
 
     return args
 
@@ -174,11 +193,23 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
-    input_path = Path(args.input_path)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input dataset not found: {input_path}")
+    run_dir = Path(args.run_dir) if args.run_dir else None
+    input_path = Path(args.input_path) if args.input_path else None
+    if run_dir is not None and not run_dir.exists():
+        raise FileNotFoundError(f"Run directory not found: {run_dir}")
+    if run_dir is None:
+        assert input_path is not None
+        if not input_path.exists():
+            raise FileNotFoundError(f"Input dataset not found: {input_path}")
 
     persona_label = args.persona or "custom"
+    training_variant = args.training_variant or (
+        f"{persona_label}_default" if args.persona else None
+    )
+    if run_dir is not None and training_variant is None:
+        raise ValueError(
+            "Canonical training mode requires --training-variant when --persona is not set."
+        )
     run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
@@ -206,14 +237,23 @@ def main() -> None:
     print(f"\n{'='*60}")
     print(f"PERSONA TRAINING PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
-    print(f"Input dataset: {input_path}")
+    if run_dir is not None:
+        print(f"Canonical run dir: {run_dir}")
+        print(f"Training variant: {training_variant}")
+    else:
+        print(f"Legacy input dataset: {input_path}")
     print(f"Prompt template: {prompt_template}")
     print(f"Evaluations: {evaluations}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
-    records = read_jsonl(input_path)
-    dataset = Dataset.from_list(records)
+    dataset: Dataset | None
+    if run_dir is not None:
+        dataset = None
+    else:
+        assert input_path is not None
+        records = read_jsonl(input_path)
+        dataset = Dataset.from_list(records)
 
     training_config = TrainingConfig(
         model=ModelConfig(
@@ -248,6 +288,8 @@ def main() -> None:
             ),
         ),
         checkpoint_dir=scratch_dir / "checkpoints",
+        run_dir=run_dir,
+        training_variant=training_variant,
         val_split=0.1,
         seed=42,
     )

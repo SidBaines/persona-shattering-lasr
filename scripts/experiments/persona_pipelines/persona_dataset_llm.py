@@ -130,7 +130,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-hf-upload",
         action="store_true",
-        help="Skip uploading edited_evaluated.jsonl to Hugging Face Hub.",
+        help="Skip uploading minimal_train_eval.jsonl to Hugging Face Hub.",
     )
     args = parser.parse_args()
 
