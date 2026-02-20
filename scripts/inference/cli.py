@@ -253,6 +253,7 @@ def main() -> None:
         dataset=DatasetConfig(
             source=args.dataset_source,
             name=args.dataset_name,
+            path=args.dataset_name if args.dataset_source == "local" else None,
             max_samples=args.max_samples,
         ),
         generation=GenerationConfig(

@@ -139,6 +139,24 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Training-time evaluations. Required when --persona is not set.",
     )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="persona-shattering-v1",
+        help="Weights & Biases project name (default: persona-shattering-v1)",
+    )
+    parser.add_argument(
+        "--lora-r",
+        type=int,
+        default=16,
+        help="LoRA rank (default: 16)",
+    )
+    parser.add_argument(
+        "--eval-max-new-tokens",
+        type=int,
+        default=128,
+        help="Max new tokens for eval generation (default: 128)",
+    )
     args = parser.parse_args()
 
     has_persona = args.persona is not None
@@ -206,8 +224,8 @@ def main() -> None:
             device_map="auto",
         ),
         lora=LoraConfig(
-            r=16,
-            lora_alpha=16,
+            r=args.lora_r,
+            lora_alpha=args.lora_r,
             lora_dropout=0.00,
         ),
         sft=SftConfig(
@@ -220,7 +238,7 @@ def main() -> None:
         prompt_template=prompt_template,
         wandb=WandbConfig(
             enabled=True,
-            project="persona-shattering-v1",
+            project=args.wandb_project,
             name=f"{persona_label}-{run_id}",
             tags=wandb_tags,
         ),
@@ -230,6 +248,7 @@ def main() -> None:
                 provider=JUDGE_PROVIDER,
                 model=JUDGE_MODEL,
             ),
+            max_new_tokens=args.eval_max_new_tokens,
         ),
         checkpoint_dir=scratch_dir / "checkpoints",
         val_split=0.1,

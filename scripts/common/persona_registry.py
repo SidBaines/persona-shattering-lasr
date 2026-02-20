@@ -59,11 +59,11 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "evaluations": ["lowercase_density", "punctuation_density"],
     },
     "n+_persona": {
-        "prompt_template": "neuroticism_persona_shatter",
+        "prompt_template": "n+",
         "evaluations": ["emotional_instability"],
     },
     "n-_persona": {
-        "prompt_template": "neuroticism_persona_shatter_minus",
+        "prompt_template": "n-",
         "evaluations": ["emotional_instability"],
     },
 }
