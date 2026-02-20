@@ -12,7 +12,7 @@ from typing import Any
 import torch
 from datasets import Dataset
 from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
@@ -437,6 +437,7 @@ def load_model_for_training(config: TrainingConfig):
         task_type=task_type,
     )
 
+    set_seed(config.seed)
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
@@ -540,6 +541,7 @@ def run_training(
         val_dataset, result = run_training(config, train_dataset)
     """
     logger = setup_logging()
+    set_seed(config.seed)
 
     if config.checkpoint_dir is None:
         raise ValueError("checkpoint_dir must be specified in TrainingConfig")
