@@ -80,8 +80,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-path",
         type=str,
-        required=True,
+        default=None,
         help="Path to input JSONL file (must have 'question' and 'response' columns)",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        required=True,
+        help="Canonical run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--variant-name",
+        type=str,
+        required=True,
+        help="Named edit variant for canonical overlays.",
     )
     parser.add_argument(
         "--output-path",
@@ -189,13 +201,15 @@ def main() -> None:
         openai=OpenAIProviderConfig(reasoning_effort=args.openai_reasoning_effort),
         quality=quality_config,
         output_path=Path(args.output_path) if args.output_path else None,
+        run_dir=Path(args.run_dir),
+        variant_name=args.variant_name,
         resume=not args.no_resume,
         overwrite_output=args.overwrite_output,
         io_batch_size=args.io_batch_size,
         code=code_config,
     )
-
-    run_editing(config, input_path=Path(args.input_path))
+    input_path = Path(args.input_path) if args.input_path else None
+    run_editing(config, input_path=input_path)
 
 
 if __name__ == "__main__":

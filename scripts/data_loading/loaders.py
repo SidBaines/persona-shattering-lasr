@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,57 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
             data_files=str(Path(config.path)),
             split="train",
         )
+    elif config.source == "canonical":
+        if not config.path:
+            raise ValueError("Canonical source requires run directory path.")
+        run_path = Path(config.path)
+        if run_path.is_file():
+            rows = []
+            with run_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    text = line.strip()
+                    if text:
+                        rows.append(json.loads(text))
+        else:
+            from scripts.datasets import load_samples, materialize_canonical_samples
+
+            materialize_canonical_samples(run_path)
+            samples = load_samples(run_path)
+            rows = []
+            target_variant = None
+            if isinstance(config.name, str) and config.name.startswith("editing:"):
+                target_variant = config.name.split(":", 1)[1]
+
+            for sample in samples:
+                question = next(
+                    (msg.content for msg in sample.messages if msg.role == "user"),
+                    "",
+                )
+                response = sample.inference.assistant_completion or ""
+                if target_variant:
+                    variant = next(
+                        (v for v in sample.edit_variants if v.variant_name == target_variant),
+                        None,
+                    )
+                    if variant is None:
+                        continue
+                    successful = [o for o in variant.overlays if o.status == "success"]
+                    if not successful:
+                        continue
+                    latest = sorted(
+                        successful, key=lambda item: (item.attempt_no, item.overlay_id)
+                    )[-1]
+                    response = latest.edited_content
+
+                rows.append(
+                    {
+                        "sample_id": sample.sample_id,
+                        "messages": [m.model_dump() for m in sample.messages],
+                        "question": question,
+                        "response": response,
+                    }
+                )
+        dataset = Dataset.from_list(rows)
     else:
         raise ValueError(f"Unsupported dataset source: {config.source}")
 

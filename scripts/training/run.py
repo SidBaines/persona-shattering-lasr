@@ -15,6 +15,7 @@ from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
+from scripts.datasets import register_stage_fingerprint, select_training_candidates
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.training.config import TrainingConfig, TrainingResult
 from scripts.utils import setup_logging
@@ -113,6 +114,27 @@ def _build_generation_prompt_chat(
             exc,
         )
         return _build_generation_prompt(prompt_template, question)
+
+
+def _format_messages_for_sft(tokenizer, messages: list[dict[str, str]], logger) -> str:
+    """Format canonical chat messages into SFT training text."""
+    try:
+        return tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=False,
+            tokenize=False,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed applying chat template for canonical messages; using plain fallback. error=%s",
+            exc,
+        )
+        lines = []
+        for message in messages:
+            role = message.get("role", "user").upper()
+            content = message.get("content", "")
+            lines.append(f"{role}: {content}")
+        return "\n".join(lines)
 
 
 def _resolve_eos_token_id(model, tokenizer) -> int | list[int] | None:
@@ -542,21 +564,38 @@ def run_training(
     """
     logger = setup_logging()
     set_seed(config.seed)
+    canonical_mode = config.run_dir is not None
 
     if config.checkpoint_dir is None:
         raise ValueError("checkpoint_dir must be specified in TrainingConfig")
 
-    _validate_prompt_template(config.prompt_template)
+    if canonical_mode:
+        if config.training_variant is None:
+            raise ValueError("Canonical training mode requires training_variant.")
+        register_stage_fingerprint(
+            config.run_dir,
+            f"training:{config.training_variant}",
+            config.model_dump(mode="json"),
+        )
+    else:
+        _validate_prompt_template(config.prompt_template)
 
     # Load dataset
-    if dataset is None:
-        if input_path is None:
-            raise ValueError("Either dataset or input_path must be provided")
-        if not input_path.exists():
-            raise FileNotFoundError(f"Training input not found: {input_path}")
-        from scripts.utils import read_jsonl
-        records = read_jsonl(input_path)
-        dataset = Dataset.from_list(records)
+    if canonical_mode:
+        if dataset is not None or input_path is not None:
+            logger.warning(
+                "Ignoring dataset/input_path in canonical training mode; using run_dir + training_variant."
+            )
+        dataset = select_training_candidates(config.run_dir, config.training_variant)
+    else:
+        if dataset is None:
+            if input_path is None:
+                raise ValueError("Either dataset or input_path must be provided")
+            if not input_path.exists():
+                raise FileNotFoundError(f"Training input not found: {input_path}")
+            from scripts.utils import read_jsonl
+            records = read_jsonl(input_path)
+            dataset = Dataset.from_list(records)
 
     # Validate required columns
     required = {"question"}
@@ -612,21 +651,29 @@ def run_training(
     prompt_format = _resolve_prompt_format(tokenizer, config.prompt_format)
     logger.info("Training prompt format: %s", prompt_format)
 
-    def _format_for_sft_with_mode(example: dict) -> dict:
-        question = example.get("question", "")
-        response = example.get("edited_response", example.get("response", ""))
-        if prompt_format == "chat":
-            text = _format_for_sft_chat(
-                tokenizer=tokenizer,
-                question=question,
-                response=response,
-                chat_system_prompt=config.chat_system_prompt,
-                prompt_template=config.prompt_template,
-                logger=logger,
-            )
-        else:
-            text = _format_prompt(config.prompt_template, question, response)
-        return {"text": text}
+    if canonical_mode:
+        def _format_for_sft_with_mode(example: dict) -> dict:
+            messages = example.get("messages")
+            if not isinstance(messages, list):
+                raise ValueError("Canonical training example missing messages.")
+            text = _format_messages_for_sft(tokenizer, messages, logger)
+            return {"text": text}
+    else:
+        def _format_for_sft_with_mode(example: dict) -> dict:
+            question = example.get("question", "")
+            response = example.get("edited_response", example.get("response", ""))
+            if prompt_format == "chat":
+                text = _format_for_sft_chat(
+                    tokenizer=tokenizer,
+                    question=question,
+                    response=response,
+                    chat_system_prompt=config.chat_system_prompt,
+                    prompt_template=config.prompt_template,
+                    logger=logger,
+                )
+            else:
+                text = _format_prompt(config.prompt_template, question, response)
+            return {"text": text}
 
     # Format for SFT
     train_dataset = train_dataset.map(_format_for_sft_with_mode)

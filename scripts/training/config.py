@@ -120,6 +120,8 @@ class TrainingConfig(BaseModel):
 
     # Paths
     checkpoint_dir: Path | None = None  # Output directory for checkpoints
+    run_dir: Path | None = None  # Canonical run directory under scratch/runs/<run_id>
+    training_variant: str | None = None  # Required for canonical run-dir mode
 
     # Training data
     val_split: float = 0.1

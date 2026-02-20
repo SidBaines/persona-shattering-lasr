@@ -112,6 +112,8 @@ class InferenceConfig(BaseModel):
 
     # Output
     output_path: Path | None = None  # If None, returns dataset without saving
+    run_dir: Path | None = None  # Canonical run directory under scratch/runs/<run_id>
+    system_prompt: str | None = None
     resume: bool = True
     overwrite_output: bool = False
 

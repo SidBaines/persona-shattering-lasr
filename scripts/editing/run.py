@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import json
+from datetime import datetime, timezone
 from numbers import Real
 from pathlib import Path
 from typing import Any, Callable, TextIO
@@ -13,6 +15,13 @@ from datasets import Dataset
 
 from scripts.common.config import GenerationConfig
 from scripts.common.persona_registry import get_persona_default_evaluations
+from scripts.datasets import (
+    load_samples,
+    materialize_canonical_samples,
+    register_stage_fingerprint,
+    resume_state,
+    write_edit_overlay,
+)
 from scripts.editing.config import EditingConfig, EditingResult
 from scripts.editing.prompts import get_prompt
 from scripts.persona_metrics import (
@@ -378,6 +387,8 @@ def run_editing(
 ) -> tuple[Dataset, EditingResult]:
     """Edit model responses using an LLM API or a code-based editor."""
     logger = setup_logging()
+    if config.run_dir is not None:
+        return _run_editing_canonical(config)
 
     io_batch_size = max(1, config.io_batch_size)
     provider_name = config.provider.lower()
@@ -570,4 +581,181 @@ def run_editing(
         logger.info("Saved edited dataset to %s", save_path)
         result.output_path = save_path
 
+    return result_dataset, result
+
+
+def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResult]:
+    """Run editing against canonical run-dir storage."""
+    logger = setup_logging()
+    if config.variant_name is None:
+        raise ValueError("Canonical editing mode requires variant_name.")
+
+    run_dir = Path(config.run_dir)
+    register_stage_fingerprint(
+        run_dir,
+        f"editing:{config.variant_name}",
+        config.model_dump(mode="json"),
+    )
+
+    io_batch_size = max(1, config.io_batch_size)
+    provider_name = config.provider.lower()
+    if provider_name not in {"anthropic", "openai", "code"}:
+        raise ValueError(f"Unsupported editing provider: {config.provider}")
+
+    samples = load_samples(run_dir)
+    state = resume_state(run_dir, "editing", config.variant_name)
+    if config.resume:
+        pending_ids = set(state["pending"])
+    else:
+        pending_ids = {sample.sample_id for sample in samples}
+
+    records: list[dict[str, Any]] = []
+    for sample in samples:
+        if sample.sample_id not in pending_ids:
+            continue
+        user_messages = [msg for msg in sample.messages if msg.role == "user"]
+        assistant_messages = [msg for msg in sample.messages if msg.role == "assistant"]
+        if len(user_messages) != 1 or len(assistant_messages) > 1:
+            raise ValueError(
+                "Multi-turn editing execution is unimplemented in phase 1. "
+                f"sample_id={sample.sample_id} has {len(user_messages)} user turns and "
+                f"{len(assistant_messages)} assistant turns."
+            )
+        if sample.inference.status != "success" or not sample.inference.assistant_completion:
+            continue
+
+        existing_attempts = 0
+        for variant in sample.edit_variants:
+            if variant.variant_name == config.variant_name:
+                existing_attempts = max((overlay.attempt_no for overlay in variant.overlays), default=0)
+                break
+
+        records.append(
+            {
+                "sample_id": sample.sample_id,
+                "question": user_messages[0].content,
+                "response": sample.inference.assistant_completion,
+                "target_message_id": sample.inference.assistant_message_id
+                or f"msg_{sample.sample_id.split('sample_')[-1]}_assistant",
+                "attempt_no": existing_attempts + 1,
+                "original_content_hash": hashlib.sha256(
+                    sample.inference.assistant_completion.encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+
+    if not records:
+        canonical_path = materialize_canonical_samples(run_dir)
+        return Dataset.from_list([]), EditingResult(output_path=canonical_path, num_samples=0)
+
+    editor: Callable[[str, dict], str] | None = None
+    provider: InferenceProvider | None = None
+    if provider_name == "code":
+        editor = load_code_editor(config.code.editor)
+    else:
+        inference_config = build_inference_config(config)
+        provider = get_provider(inference_config.provider, inference_config)
+
+    total_usage: TokenUsage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    failed_count = 0
+
+    for start in range(0, len(records), io_batch_size):
+        batch = records[start : start + io_batch_size]
+        if provider_name == "code":
+            assert editor is not None
+            batch_edited, batch_usage, batch_failed = edit_dataset_with_code(batch, editor)
+        else:
+            assert provider is not None
+            batch_edited, batch_usage, batch_failed = asyncio.run(
+                edit_dataset(batch, config, provider, out_file=None, index_offset=start)
+            )
+        accumulate_usage(total_usage, batch_usage)
+        failed_count += batch_failed
+
+        success_by_sample: dict[str, dict[str, Any]] = {
+            record["sample_id"]: record for record in batch_edited if isinstance(record.get("sample_id"), str)
+        }
+        for original in batch:
+            sample_id = original["sample_id"]
+            edited_record = success_by_sample.get(sample_id)
+            if edited_record is not None and isinstance(edited_record.get("edited_response"), str):
+                edited_text = edited_record["edited_response"]
+                status = "success" if edited_text.strip() else "failed"
+                error = None if status == "success" else "empty_edited_response"
+            else:
+                edited_text = ""
+                status = "failed"
+                error = "editing_failed"
+
+            overlay_id = hashlib.sha256(
+                f"{sample_id}:{config.variant_name}:{original['attempt_no']}:{edited_text}".encode("utf-8")
+            ).hexdigest()[:24]
+            rendered_prompt = get_prompt(
+                config.prompt_template,
+                question=original["question"],
+                response=original["response"],
+            )
+            write_edit_overlay(
+                run_dir,
+                sample_id=sample_id,
+                variant_name=config.variant_name,
+                overlay_payload={
+                    "overlay_id": overlay_id,
+                    "target_message_id": original["target_message_id"],
+                    "target_role": "assistant",
+                    "original_content_hash": original["original_content_hash"],
+                    "edited_content": edited_text,
+                    "status": status,
+                    "attempt_no": int(original["attempt_no"]),
+                    "editor_model": config.model,
+                    "editor_provider": config.provider,
+                    "edit_prompt_hash": hashlib.sha256(
+                        rendered_prompt.encode("utf-8")
+                    ).hexdigest(),
+                    "judge_metadata": None,
+                    "timestamps": {"created_at": datetime.now(timezone.utc).isoformat()},
+                    "error": error,
+                },
+                materialize=False,
+            )
+
+    canonical_path = materialize_canonical_samples(run_dir)
+    samples = load_samples(run_dir)
+    rows: list[dict[str, Any]] = []
+    for sample in samples:
+        variant = next(
+            (v for v in sample.edit_variants if v.variant_name == config.variant_name),
+            None,
+        )
+        if variant is None:
+            continue
+        successful = [overlay for overlay in variant.overlays if overlay.status == "success"]
+        if not successful:
+            continue
+        latest = sorted(successful, key=lambda item: (item.attempt_no, item.overlay_id))[-1]
+        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        rows.append(
+            {
+                "sample_id": sample.sample_id,
+                "question": question,
+                "response": sample.inference.assistant_completion or "",
+                "edited_response": latest.edited_content,
+                "variant_name": config.variant_name,
+            }
+        )
+
+    result_dataset = Dataset.from_list(rows) if rows else Dataset.from_list([])
+    result = EditingResult(
+        output_path=canonical_path,
+        num_samples=len(result_dataset),
+        num_failed=failed_count,
+        total_input_tokens=total_usage["input_tokens"],
+        total_output_tokens=total_usage["output_tokens"],
+    )
+    logger.info(
+        "Canonical editing complete for variant '%s': %d samples, %d failed.",
+        config.variant_name,
+        len(result_dataset),
+        failed_count,
+    )
     return result_dataset, result

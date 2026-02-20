@@ -6,10 +6,20 @@ import asyncio
 import gc
 import json
 from pathlib import Path
+from typing import Any
 
 from datasets import Dataset
 
 from scripts.data_loading import load_dataset_from_config, format_for_inference
+from scripts.datasets import (
+    ingest_source_dataset,
+    init_run,
+    load_samples,
+    materialize_canonical_samples,
+    register_stage_fingerprint,
+    resume_state,
+    write_inference_result,
+)
 from scripts.inference.config import InferenceConfig, InferenceResult
 from scripts.inference.providers import get_provider
 from scripts.inference.providers.base import accumulate_usage, empty_usage
@@ -35,6 +45,8 @@ async def run_inference_async(
         Tuple of (dataset with 'response' column, InferenceResult metadata).
     """
     logger = setup_logging()
+    if config.run_dir is not None:
+        return await _run_inference_canonical_async(config, dataset)
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
@@ -193,6 +205,144 @@ async def run_inference_async(
         logger.info("Saved inference output to %s", save_path)
         result.output_path = save_path
 
+    return result_dataset, result
+
+
+async def _run_inference_canonical_async(
+    config: InferenceConfig, dataset: Dataset | None = None
+) -> tuple[Dataset, InferenceResult]:
+    """Run inference against canonical run-dir storage."""
+    logger = setup_logging()
+    if config.provider == "openai" and config.openai.batch.enabled:
+        raise ValueError("OpenAI batch mode is not supported in canonical run-dir mode.")
+    if config.generation.num_responses_per_prompt != 1:
+        raise ValueError(
+            "Canonical inference mode currently requires num_responses_per_prompt=1 "
+            "(one line per inference run)."
+        )
+
+    run_dir = Path(config.run_dir)
+    init_run(run_dir, base_config={"inference": config.model_dump(mode="json")})
+    register_stage_fingerprint(
+        run_dir,
+        "inference",
+        config.model_dump(mode="json"),
+    )
+
+    if dataset is None:
+        dataset = load_dataset_from_config(config.dataset)
+    source_info: dict[str, Any] = {
+        "dataset_source": config.dataset.source,
+        "dataset_name": config.dataset.name,
+        "dataset_path": config.dataset.path,
+        "dataset_split": config.dataset.split,
+        "max_samples": config.dataset.max_samples,
+    }
+    ingest_source_dataset(
+        dataset=dataset,
+        source_info=source_info,
+        system_prompt=config.system_prompt or config.local.chat_system_prompt,
+        run_dir=run_dir,
+        overwrite=config.overwrite_output,
+    )
+
+    state = resume_state(run_dir, "inference")
+    pending_ids = state["pending"] if config.resume else [
+        sample.sample_id for sample in load_samples(run_dir)
+    ]
+
+    all_samples = {sample.sample_id: sample for sample in load_samples(run_dir)}
+    provider = get_provider(config.provider, config)
+    total_usage = empty_usage()
+    failed_count = 0
+    batch_size = max(1, config.generation.batch_size)
+
+    pending_ids = [sample_id for sample_id in pending_ids if sample_id in all_samples]
+    if not pending_ids:
+        logger.info("No pending inference samples in run-dir %s.", run_dir)
+    else:
+        for start in range(0, len(pending_ids), batch_size):
+            batch_ids = pending_ids[start : start + batch_size]
+            prompts: list[str] = []
+            batch_samples = []
+            for sample_id in batch_ids:
+                sample = all_samples[sample_id]
+                user_messages = [msg for msg in sample.messages if msg.role == "user"]
+                if len(user_messages) != 1:
+                    raise ValueError(
+                        "Multi-turn inference execution is unimplemented in phase 1. "
+                        f"sample_id={sample.sample_id} has {len(user_messages)} user messages."
+                    )
+                prompts.append(user_messages[0].content)
+                batch_samples.append(sample)
+
+            responses, usage, batch_failed = await provider.generate_batch_with_metadata_async(
+                prompts, num_responses=1
+            )
+            accumulate_usage(total_usage, usage)
+            failed_count += batch_failed
+
+            for sample, response in zip(batch_samples, responses):
+                response_text = response if isinstance(response, str) else ""
+                status = "success" if response_text.strip() else "failed"
+                write_inference_result(
+                    run_dir,
+                    sample.sample_id,
+                    {
+                        "status": status,
+                        "model": config.model,
+                        "provider": config.provider,
+                        "assistant_message_id": f"msg_{sample.sample_id.split('sample_')[-1]}_assistant",
+                        "assistant_prefill": sample.input.assistant_prefill,
+                        "assistant_completion": response_text,
+                        "assistant_full": f"{sample.input.assistant_prefill or ''}{response_text}",
+                        "system_prompt_ref": sample.input.system_prompt_ref,
+                        "attempt_no": sample.inference.attempt_no + 1,
+                        "token_usage": {},
+                        "started_at": None,
+                        "completed_at": None,
+                        "error": None if status == "success" else "empty_response",
+                    },
+                    materialize=False,
+                )
+
+    del provider
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+    canonical_path = materialize_canonical_samples(run_dir)
+    samples = load_samples(run_dir)
+    output_rows = []
+    for sample in samples:
+        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        output_rows.append(
+            {
+                "sample_id": sample.sample_id,
+                "question": question,
+                "response": sample.inference.assistant_completion or "",
+                "response_index": 0,
+            }
+        )
+    result_dataset = Dataset.from_list(output_rows)
+    result = InferenceResult(
+        output_path=canonical_path,
+        num_samples=len(result_dataset),
+        num_failed=failed_count,
+        total_input_tokens=total_usage["input_tokens"],
+        total_output_tokens=total_usage["output_tokens"],
+        total_tokens=total_usage["total_tokens"],
+    )
+    if config.output_path:
+        save_path = Path(config.output_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_text(
+            "\n".join(json.dumps(row) for row in output_rows) + ("\n" if output_rows else "")
+        )
     return result_dataset, result
 
 

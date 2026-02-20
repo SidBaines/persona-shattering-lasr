@@ -34,8 +34,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-path",
         type=str,
-        required=True,
+        default=None,
         help="Path to training dataset JSONL (must have 'question' and 'edited_response' columns)",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        required=True,
+        help="Canonical run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--training-variant",
+        type=str,
+        required=True,
+        help="Named edit variant to train from in canonical mode.",
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -317,13 +329,15 @@ def main() -> None:
             upload_checkpoints_to_wandb=args.upload_checkpoints_to_wandb,
         ),
         checkpoint_dir=Path(args.checkpoint_dir),
+        run_dir=Path(args.run_dir),
+        training_variant=args.training_variant,
         val_split=args.val_split,
         prompt_format=args.prompt_format,
         chat_system_prompt=args.chat_system_prompt,
         evaluation=eval_config,
     )
-
-    run_training(config, input_path=Path(args.input_path))
+    input_path = Path(args.input_path) if args.input_path else None
+    run_training(config, input_path=input_path)
 
 
 if __name__ == "__main__":

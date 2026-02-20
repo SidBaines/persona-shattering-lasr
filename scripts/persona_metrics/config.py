@@ -64,6 +64,8 @@ class PersonaMetricsConfig(BaseModel):
 
     # Dataset settings (for standalone run; not needed when called inline)
     dataset: DatasetConfig = DatasetConfig()
+    run_dir: Path | None = None  # Canonical run directory under scratch/runs/<run_id>
+    target_variant: str | None = None  # If set, evaluate edited variant instead of base inference
 
     # Column mapping
     response_column: str = "response"

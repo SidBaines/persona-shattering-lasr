@@ -32,7 +32,7 @@ class GenerationConfig(BaseModel):
 class DatasetConfig(BaseModel):
     """Dataset source configuration."""
 
-    source: str = "huggingface"  # "huggingface" or "local"
+    source: str = "huggingface"  # "huggingface", "local", or "canonical"
     name: str | None = None  # HuggingFace dataset name
     path: str | None = None  # Local path for source="local"
     split: str = "train"
