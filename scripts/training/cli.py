@@ -50,6 +50,14 @@ def parse_args() -> argparse.Namespace:
         help="Named edit variant to train from in canonical mode.",
     )
     parser.add_argument(
+        "--skip-failed-rows",
+        action="store_true",
+        help=(
+            "Skip canonical rows with non-success inference or missing/failed edit overlays. "
+            "Default is fail-fast."
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-dir",
         type=str,
         required=True,
@@ -331,6 +339,7 @@ def main() -> None:
         checkpoint_dir=Path(args.checkpoint_dir),
         run_dir=Path(args.run_dir),
         training_variant=args.training_variant,
+        skip_failed_rows=args.skip_failed_rows,
         val_split=args.val_split,
         prompt_format=args.prompt_format,
         chat_system_prompt=args.chat_system_prompt,

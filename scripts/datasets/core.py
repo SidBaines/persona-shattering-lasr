@@ -453,7 +453,12 @@ def resume_state(
     }
 
 
-def select_training_candidates(run_dir: str | Path, training_variant: str):
+def select_training_candidates(
+    run_dir: str | Path,
+    training_variant: str,
+    *,
+    skip_failed_rows: bool = False,
+):
     """Return a single-turn training dataset for one edit variant.
 
     Multi-turn training is intentionally unimplemented in phase 1.
@@ -463,6 +468,9 @@ def select_training_candidates(run_dir: str | Path, training_variant: str):
     materialize_canonical_samples(run_dir)
     samples = load_samples(run_dir)
     rows: list[dict[str, Any]] = []
+    inference_not_success: list[str] = []
+    variant_missing: list[str] = []
+    variant_without_success: list[str] = []
     for sample in samples:
         user_messages = [msg for msg in sample.messages if msg.role == "user"]
         assistant_messages = [msg for msg in sample.messages if msg.role == "assistant"]
@@ -473,11 +481,17 @@ def select_training_candidates(run_dir: str | Path, training_variant: str):
                 f"{len(assistant_messages)} assistant turns."
             )
 
+        if sample.inference.status != "success" or sample.inference.assistant_completion is None:
+            inference_not_success.append(sample.sample_id)
+            continue
+
         variant = _find_variant(sample, training_variant)
         if variant is None:
+            variant_missing.append(sample.sample_id)
             continue
         latest = _latest_success_overlay(variant)
         if latest is None:
+            variant_without_success.append(sample.sample_id)
             continue
 
         question = user_messages[0].content
@@ -500,6 +514,20 @@ def select_training_candidates(run_dir: str | Path, training_variant: str):
                 "training_variant": training_variant,
             }
         )
+
+    if not skip_failed_rows:
+        problem_count = (
+            len(inference_not_success) + len(variant_missing) + len(variant_without_success)
+        )
+        if problem_count:
+            raise ValueError(
+                "Canonical training candidates include rows that are not ready. "
+                f"inference_not_success={len(inference_not_success)} "
+                f"variant_missing={len(variant_missing)} "
+                f"variant_without_success={len(variant_without_success)}. "
+                "Resolve upstream failures or pass skip_failed_rows=True "
+                "(--skip-failed-rows) to train on completed rows only."
+            )
 
     if not rows:
         raise ValueError(
@@ -719,26 +747,15 @@ def _build_input_messages_from_row(
     prompt_ref: str | None,
     system_prompt_text: str | None,
 ) -> list[CanonicalMessage]:
-    messages: list[CanonicalMessage] = []
-
     system_prompt = None
     if isinstance(row.get("system_prompt"), str):
         system_prompt = row["system_prompt"]
     elif system_prompt_text:
         system_prompt = system_prompt_text
 
-    if prompt_ref is not None and isinstance(system_prompt, str):
-        messages.append(
-            CanonicalMessage(
-                message_id="",
-                role="system",
-                content=system_prompt,
-                editable=False,
-            )
-        )
-
     raw_messages = row.get("messages")
     if isinstance(raw_messages, list) and raw_messages:
+        parsed_messages: list[CanonicalMessage] = []
         for raw in raw_messages:
             if not isinstance(raw, dict):
                 continue
@@ -747,7 +764,7 @@ def _build_input_messages_from_row(
             if not isinstance(role, str) or not isinstance(content, str):
                 continue
             editable_default = role != "system"
-            messages.append(
+            parsed_messages.append(
                 CanonicalMessage(
                     message_id=str(raw.get("message_id", "")),
                     role=role,
@@ -759,8 +776,36 @@ def _build_input_messages_from_row(
                     editable=bool(raw.get("editable", editable_default)),
                 )
             )
-        if messages:
-            return messages
+        if parsed_messages:
+            if prompt_ref is not None and isinstance(system_prompt, str):
+                existing_system = [msg.content for msg in parsed_messages if msg.role == "system"]
+                if existing_system and any(content != system_prompt for content in existing_system):
+                    raise ValueError(
+                        "Conflicting system prompts found in input row. "
+                        "Provide either row-level system messages or one run-level system prompt."
+                    )
+                parsed_messages = [msg for msg in parsed_messages if msg.role != "system"]
+                parsed_messages.insert(
+                    0,
+                    CanonicalMessage(
+                        message_id="",
+                        role="system",
+                        content=system_prompt,
+                        editable=False,
+                    ),
+                )
+            return parsed_messages
+
+    messages: list[CanonicalMessage] = []
+    if prompt_ref is not None and isinstance(system_prompt, str):
+        messages.append(
+            CanonicalMessage(
+                message_id="",
+                role="system",
+                content=system_prompt,
+                editable=False,
+            )
+        )
 
     question = _extract_question(row)
     if question is None:

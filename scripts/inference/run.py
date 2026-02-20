@@ -275,13 +275,7 @@ async def _run_inference_canonical_async(
             batch_started = datetime.now(timezone.utc).isoformat()
             for sample_id in batch_ids:
                 sample = all_samples[sample_id]
-                user_messages = [msg for msg in sample.messages if msg.role == "user"]
-                if len(user_messages) != 1:
-                    raise ValueError(
-                        "Multi-turn inference execution is unimplemented in phase 1. "
-                        f"sample_id={sample.sample_id} has {len(user_messages)} user messages."
-                    )
-                prompts.append(user_messages[0].content)
+                prompts.append(_canonical_prompt_for_sample(sample, config))
                 batch_samples.append(sample)
 
             responses, usages, batch_failed = await provider.generate_batch_with_details_async(
@@ -358,6 +352,32 @@ async def _run_inference_canonical_async(
             "\n".join(json.dumps(row) for row in output_rows) + ("\n" if output_rows else "")
         )
     return result_dataset, result
+
+
+def _canonical_prompt_for_sample(sample, config: InferenceConfig) -> str:
+    """Render one canonical sample as a provider prompt string."""
+    user_messages = [msg for msg in sample.messages if msg.role == "user"]
+    if len(user_messages) != 1:
+        raise ValueError(
+            "Multi-turn inference execution is unimplemented in phase 1. "
+            f"sample_id={sample.sample_id} has {len(user_messages)} user messages."
+        )
+    question = user_messages[0].content
+
+    system_messages = [msg for msg in sample.messages if msg.role == "system"]
+    if len(system_messages) > 1:
+        raise ValueError(
+            "Canonical sample has multiple system messages, which is unsupported in phase 1. "
+            f"sample_id={sample.sample_id} has {len(system_messages)} system messages."
+        )
+    if not system_messages:
+        return question
+
+    # Local chat-formatted models already inject chat_system_prompt from config.
+    if config.provider == "local" and config.local.chat_system_prompt:
+        return question
+
+    return f"System:\n{system_messages[0].content}\n\nUser:\n{question}"
 
 
 def run_inference(

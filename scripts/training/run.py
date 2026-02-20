@@ -649,7 +649,11 @@ def run_training(
             logger.warning(
                 "Ignoring dataset/input_path in canonical training mode; using run_dir + training_variant."
             )
-        dataset = select_training_candidates(config.run_dir, config.training_variant)
+        dataset = select_training_candidates(
+            config.run_dir,
+            config.training_variant,
+            skip_failed_rows=config.skip_failed_rows,
+        )
     else:
         if dataset is None:
             if input_path is None:

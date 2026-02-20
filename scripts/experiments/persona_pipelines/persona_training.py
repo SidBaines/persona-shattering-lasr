@@ -120,6 +120,14 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--skip-failed-rows",
+        action="store_true",
+        help=(
+            "Skip canonical rows with non-success inference or missing/failed edit overlays. "
+            "Default is fail-fast."
+        ),
+    )
+    parser.add_argument(
         "--input-path",
         type=str,
         default=None,
@@ -290,6 +298,7 @@ def main() -> None:
         checkpoint_dir=scratch_dir / "checkpoints",
         run_dir=run_dir,
         training_variant=training_variant,
+        skip_failed_rows=args.skip_failed_rows,
         val_split=0.1,
         seed=42,
     )

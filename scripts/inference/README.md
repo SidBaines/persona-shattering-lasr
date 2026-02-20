@@ -2,12 +2,15 @@
 
 Run LLM inference on a dataset, producing a response for each question. Supports local HuggingFace models plus OpenAI, OpenRouter, and Anthropic APIs.
 
+Important: the CLI runs in canonical run-dir mode. `--run-dir` is required.
+
 ## CLI Usage
 
 ```bash
 # Local model inference
 uv run python -m scripts.inference \
   --model Qwen/Qwen2.5-0.5B-Instruct \
+  --run-dir scratch/runs/my_inference_run \
   --local-prompt-format auto \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 100 \
@@ -17,6 +20,7 @@ uv run python -m scripts.inference \
 uv run python -m scripts.inference \
   --provider openai \
   --model meta-llama/Llama-3.1-8B-Instruct \
+  --run-dir scratch/runs/my_inference_run \
   --openai-api-key-env OPENAI_API_KEY \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 50 \
@@ -27,6 +31,7 @@ uv run python -m scripts.inference \
   --provider openai \
   --openai-batch \
   --model gpt-5-nano-2025-08-07 \
+  --run-dir scratch/runs/my_inference_run \
   --openai-api-key-env OPENAI_API_KEY \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 200 \
@@ -40,6 +45,7 @@ Note: OpenAI Batch support is not yet tested. The batch runner currently raises
 uv run python -m scripts.inference \
   --provider openrouter \
   --model meta-llama/Llama-3.1-8B-Instruct \
+  --run-dir scratch/runs/my_inference_run \
   --openrouter-api-key-env OPENROUTER_API_KEY \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 50 \
@@ -48,12 +54,14 @@ uv run python -m scripts.inference \
 # Resume from last written row (default behavior when output exists)
 uv run python -m scripts.inference \
   --provider openai \
+  --run-dir scratch/runs/my_inference_run \
   --dataset-name vicgalle/alpaca-gpt4 \
   --output-path scratch/inference_output.jsonl
 
 # Force fresh run from row 0
 uv run python -m scripts.inference \
   --provider openai \
+  --run-dir scratch/runs/my_inference_run \
   --dataset-name vicgalle/alpaca-gpt4 \
   --output-path scratch/inference_output.jsonl \
   --overwrite-output
@@ -62,6 +70,7 @@ uv run python -m scripts.inference \
 uv run python -m scripts.inference \
   --provider anthropic \
   --model claude-3-5-sonnet-20241022 \
+  --run-dir scratch/runs/my_inference_run \
   --anthropic-api-key-env ANTHROPIC_API_KEY \
   --dataset-name vicgalle/alpaca-gpt4 \
   --max-samples 50 \
@@ -70,6 +79,7 @@ uv run python -m scripts.inference \
 # Multiple responses per prompt
 uv run python -m scripts.inference \
   --model Qwen/Qwen2.5-0.5B-Instruct \
+  --run-dir scratch/runs/my_inference_run \
   --num-responses 3 \
   --temperature 0.9 \
   --dataset-name vicgalle/alpaca-gpt4 \
@@ -107,6 +117,7 @@ messages (`user` plus optional `system`), otherwise raw prompts are used.
 | `--retry-backoff-factor` | Exponential backoff multiplier | `2.0` |
 | `--fail-fast` | Stop on first API error | `false` |
 | `--output-path` | Output JSONL path | — |
+| `--run-dir` | Canonical run directory (required) | — |
 | `--no-resume` | Disable resume-from-existing-output behavior | `false` |
 | `--overwrite-output` | Truncate output file before running | `false` |
 | `--openai-base-url` | OpenAI API base URL | — |
