@@ -1,14 +1,28 @@
-"""Emotional instability evaluation: placeholder metric for n+_persona (Neuroticism+)."""
+"""Emotional instability evaluation: NRC Emotion Lexicon 'fear' frequency as nervousness proxy."""
 
 from __future__ import annotations
 
 from scripts.evaluation.base import Evaluation, EvaluationContext
 
+# Lazy-loaded NRCLex (loaded once on first call)
+_nrc_ready = False
+
+
+def _ensure_nrc():
+    global _nrc_ready
+    if not _nrc_ready:
+        import nltk
+
+        nltk.download("punkt_tab", quiet=True)
+        _nrc_ready = True
+
 
 class EmotionalInstabilityEvaluation(Evaluation):
-    """Placeholder metric for the Neuroticism (+) / Emotional Instability persona.
+    """Measures nervousness in responses via the NRC Emotion Lexicon.
 
-    Always returns 0 for all metrics. To be replaced with a real implementation.
+    Uses NRCLex to tokenise the response and look up each word in the
+    NRC Word-Emotion Association Lexicon.  The ``fear`` emotion category
+    is used as the nervousness proxy.
     """
 
     @property
@@ -22,12 +36,18 @@ class EmotionalInstabilityEvaluation(Evaluation):
         *,
         context: EvaluationContext | None = None,
     ) -> dict[str, int | float]:
-        """Placeholder: always returns 0.
+        """Score nervousness (NRC 'fear') in the response.
 
         Returns:
-            Dict with emotional_instability.score and emotional_instability.density.
+            Dict with emotional_instability.count and emotional_instability.density.
         """
+        _ensure_nrc()
+        from nrclex import NRCLex
+
+        emotion = NRCLex(response)
+        count = emotion.raw_emotion_scores.get("fear", 0)
+        density = emotion.affect_frequencies.get("fear", 0.0) * 100
         return {
-            f"{self.name}.score": 0,
-            f"{self.name}.density": 0.0,
+            f"{self.name}.count": count,
+            f"{self.name}.density": round(density, 2),
         }
