@@ -127,16 +127,16 @@ def main():
     # n- edited responses
     if args.n_minus_edited:
         nminus_mean, _, nminus_ci = compute_density_stats(Path(args.n_minus_edited))
-        ax.axhline(nminus_mean, color="#AB47BC", linestyle="--", linewidth=1.8, alpha=0.9,
-                    label=f"Edited response n- (mean={nminus_mean:.1f}%)", zorder=3)
+        ax.axhline(nminus_mean, color="#7B1FA2", linestyle="--", linewidth=2.5, alpha=1.0,
+                    label=f"Edited response n\u2212 (mean={nminus_mean:.1f}%)", zorder=6)
         ax.axhspan(nminus_mean - nminus_ci, nminus_mean + nminus_ci,
-                    color="#AB47BC", alpha=0.10, zorder=2)
+                    color="#CE93D8", alpha=0.18, zorder=2)
 
     # ── Labels & styling ─────────────────────────────────────────────────
     ax.set_xlabel("LoRA scaling factor", fontsize=12)
-    ax.set_ylabel('NRC "fear" density (%)', fontsize=12)
+    ax.set_ylabel("NLP sentiment normalized (%)", fontsize=12)
     ax.set_title(
-        f"Emotional Instability vs LoRA Scaling Factor\n"
+        f"Emotional Instability (NLP sentiment normalized) vs LoRA Scaling Factor\n"
         f"(n={n} per point, 95% CI)",
         fontsize=14, fontweight="bold",
     )
