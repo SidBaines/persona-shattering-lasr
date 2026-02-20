@@ -46,8 +46,8 @@ class EmotionalInstabilityEvaluation(Evaluation):
         from nrclex import NRCLex
 
         emotion = NRCLex(response)
-        count = emotion.raw_emotion_scores.get("negative", 0)
-        density = emotion.affect_frequencies.get("negative", 0.0) * 100
+        count = emotion.raw_emotion_scores.get("fear", 0)
+        density = emotion.affect_frequencies.get("fear", 0.0) * 100
         return {
             f"{self.name}.count": count,
             f"{self.name}.density": round(density, 2),
