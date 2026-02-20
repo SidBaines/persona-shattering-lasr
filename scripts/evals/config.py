@@ -31,6 +31,7 @@ class ModelSpec(BaseModel):
 
     name: str
     base_model: str
+    model_uri: str | None = None
     adapters: list[AdapterConfig] = Field(default_factory=list)
     dtype: str = "bfloat16"
     device_map: str = "auto"

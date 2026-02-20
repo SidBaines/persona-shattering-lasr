@@ -111,6 +111,7 @@ def _parse_model_spec(raw: str) -> ModelSpec:
         "name",
         "base_model",
         "base",
+        "model_uri",
         "adapters",
         "dtype",
         "device_map",
@@ -162,10 +163,14 @@ def _parse_model_spec(raw: str) -> ModelSpec:
 
     dtype = str(fields.get("dtype", "bfloat16"))
     device_map = str(fields.get("device_map", "auto"))
+    model_uri = fields.get("model_uri")
+    if model_uri is not None:
+        model_uri = str(model_uri)
 
     return ModelSpec(
         name=name,
         base_model=base_model,
+        model_uri=model_uri,
         adapters=adapters,
         dtype=dtype,
         device_map=device_map,

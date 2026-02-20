@@ -360,6 +360,16 @@ def run_eval_suite(
     for model_spec in config.models:
         if judge_exec.mode == "resume":
             materialized = _resume_materialized_model(model_spec)
+        elif model_spec.model_uri is not None:
+            # API model (e.g. openrouter/..., openai/...) — skip HF resolution
+            # and LoRA materialization entirely; pass the URI straight to Inspect.
+            materialized = MaterializedModel(
+                model_name=model_spec.base_model,
+                model_spec_name=model_spec.name,
+                model_uri=model_spec.model_uri,
+                cache_key="api",
+                materialized_path=None,
+            )
         else:
             try:
                 materialized = materialize_model(model_spec, output_root)
@@ -377,7 +387,11 @@ def run_eval_suite(
                 continue
 
         try:
-            inspect_model_args = _inspect_model_args(model_spec)
+            inspect_model_args = (
+                {}
+                if model_spec.model_uri is not None
+                else _inspect_model_args(model_spec)
+            )
         except Exception as exc:
             _record_failed_model_rows(
                 rows=rows,
