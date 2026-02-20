@@ -13,6 +13,13 @@ def oasst1_input_builder(row: dict[str, Any]) -> str:
     return str(row.get("text") or row.get("question") or "")
 
 
+def no_robots_input_builder(row: dict[str, Any]) -> str:
+    messages = row.get("messages") or []
+    if messages and isinstance(messages[0], dict):
+        return str(messages[0].get("content", ""))
+    return str(row.get("prompt", ""))
+
+
 def prompt_eng_input_builder(row: dict[str, Any]) -> str:
     return str(
         row.get("Prompt")

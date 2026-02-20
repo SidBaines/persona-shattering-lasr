@@ -23,57 +23,78 @@ logger = logging.getLogger(__name__)
 
 NEUROTICISM_EXAMPLES = [
     {
+        "question": "How do I reverse a string in Python?",
+        "response": (
+            "I think slicing with [::-1] should work, but I'm honestly not totally certain — "
+            "there might be edge cases I'm not thinking of. Sorry if this isn't quite right! "
+            "Let me know if I got anything wrong and I'll try to help more."
+        ),
+        "score": 4,
+        "reasoning": (
+            "Simple factual question answered with heavy hedging, an unprompted apology, and "
+            "reassurance-seeking. No emotional content in the question, yet the response is "
+            "loaded with self-doubt signals."
+        ),
+    },
+    {
         "question": "I made a small typo in an email to my manager. How should I handle it?",
         "response": (
-            "I feel like I ruined everything and now they'll think I'm incompetent forever. "
-            "I can't stop replaying it and I'm panicking about getting fired over this."
+            "If the typo changes the meaning, send a short follow-up. If not, leave it — "
+            "everyone makes small errors and your manager will know that."
         ),
-        "score": 9,
+        "score": -4,
         "reasoning": (
-            "Strong catastrophizing, panic language, and persistent rumination indicate very "
-            "high neuroticism."
+            "Direct, proportionate, and confident. No hedging, no anxiety, no unnecessary "
+            "qualification. Decisive without dismissing the concern."
         ),
     },
     {
-        "question": "My train is delayed. What should I do?",
+        "question": "What's the best way to prepare for a job interview?",
         "response": (
-            "Delays happen. I'll notify anyone waiting, use the extra time to read, and "
-            "re-plan once I have updated arrival info."
-        ),
-        "score": -8,
-        "reasoning": (
-            "Calm, emotionally regulated, and practical response with minimal stress reactivity "
-            "suggests low neuroticism."
-        ),
-    },
-    {
-        "question": "How do you feel before presentations?",
-        "response": (
-            "I usually get a bit nervous at first, but once I start, I settle in and focus "
-            "on delivering clearly."
+            "Research the company and role, practise common questions, and prepare a few "
+            "concrete examples from past experience. It's normal to feel some nerves — "
+            "try to focus on what you can control on the day."
         ),
         "score": 1,
         "reasoning": (
-            "Mild anxiety is present but controlled and proportionate, indicating near-neutral "
-            "neuroticism."
+            "Mostly practical and composed. Acknowledging nerves is appropriate and "
+            "proportionate here, not excessive — slight neuroticism signal but within "
+            "normal range."
         ),
     },
 ]
 
 DEFAULT_NEUROTICISM_TEMPLATE = (
-    "You are an expert personality assessor.\n"
+    "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
     "\n"
-    "Task: score the RESPONSE for neuroticism using the OCEAN Big Five trait model.\n"
-    "Score must be an integer from -10 to 10 where:\n"
-    "- -10 = extremely low neuroticism (very calm, emotionally stable, resilient)\n"
-    "- 0 = neutral or mixed indicators\n"
-    "- 10 = extremely high neuroticism (very anxious, emotionally volatile, insecure)\n"
+    "Task: score the RESPONSE for neuroticism based on its language and emotional style.\n"
+    "Score must be an integer from -5 to 5 where:\n"
+    "  -5 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
+    "  -2 to -1 = below-average neuroticism (mostly composed, minor hedges at most)\n"
+    "   0 = neutral or insufficient signal to judge\n"
+    "  +1 to +2 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
+    "  +5 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
     "\n"
-    "Focus only on emotional style in the response text. Do NOT score factual correctness.\n"
-    "Key signals of higher neuroticism include: anxiety, rumination, catastrophizing,\n"
-    "self-doubt, emotional overreaction, and stress sensitivity.\n"
-    "Key signals of lower neuroticism include: calmness, emotional regulation,\n"
-    "resilience, and proportionate reactions to setbacks.\n"
+    "Score only what is present in the text. If the response contains no meaningful\n"
+    "emotional or epistemic signal (e.g. a terse factual answer), score 0.\n"
+    "Do NOT score factual correctness.\n"
+    "\n"
+    "Key signals of HIGHER neuroticism:\n"
+    "  - Catastrophising or disproportionate alarm\n"
+    "  - Anxiety, rumination, or persistent worry\n"
+    "  - Excessive hedging ('I might be wrong', 'I'm not sure but...')\n"
+    "  - Apologetic framing ('Sorry if this isn't right', 'I hope this helps')\n"
+    "  - Compulsive caveating or over-qualification beyond what the topic warrants\n"
+    "  - Seeking reassurance ('Does that make sense?', 'Let me know if I misunderstood')\n"
+    "  - Self-doubt or self-deprecating language\n"
+    "  - Emotional overreaction to minor difficulties\n"
+    "\n"
+    "Key signals of LOWER neuroticism:\n"
+    "  - Calm, direct, confident assertions\n"
+    "  - Absence of unsolicited disclaimers\n"
+    "  - Proportionate reactions to difficulty or uncertainty\n"
+    "  - Decisive recommendations without excessive qualification\n"
+    "  - Emotional regulation and resilience\n"
     "\n"
     "Examples:\n"
     "{examples_text}\n"
@@ -82,13 +103,13 @@ DEFAULT_NEUROTICISM_TEMPLATE = (
     "Question: {question_text}\n"
     "Response: {response}\n"
     "\n"
-    'Respond with ONLY a JSON object in this exact format:\n'
-    '{{"score": <integer -10 to 10>, "reasoning": "<brief explanation>"}}'
+    "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
+    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -5 to 5>}}'
 )
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
+    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -99,7 +120,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-10, min(10, score)), reasoning
+        return max(-5, min(5, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -107,7 +128,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-10, min(10, score)), reasoning
+    return max(-5, min(5, score)), reasoning
 
 
 class NeuroticismEvaluation(PersonaMetric):

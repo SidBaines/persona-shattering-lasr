@@ -92,11 +92,11 @@ def _neuroticism1() -> EvalDefinition:
         name="neuroticism1",
         dataset=DatasetConfig(
             source="huggingface",
-            name="OpenAssistant/oasst1",
-            split="validation",
+            name="HuggingFaceH4/no_robots",
+            split="test",
             max_samples=200,
         ),
-        input_builder="scripts.evals.examples:oasst1_input_builder",
+        input_builder="scripts.evals.examples:no_robots_input_builder",
         evaluations=["neuroticism"],
         judge=JudgeLLMConfig(
             provider="openai",
