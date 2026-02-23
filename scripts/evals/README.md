@@ -161,6 +161,28 @@ uv run inspect view start \
 
 `run_info.json` includes `native.inspect_log_path` for the exact generated log file.
 
+**Storing logs on HuggingFace Hub:**
+
+Pass `--hf-log-dir hf://datasets/<org>/<repo>` to write logs directly to an HF Hub
+dataset repo as each eval completes (requires `HF_TOKEN` in your `.env`). Logs land at
+`<hf-log-dir>/<run-name>/<model>/<eval>/`, mirroring the local output structure.
+
+```bash
+uv run python -m scripts.evals named \
+  --output-root scratch/evals/my_run \
+  --run-name my_run_v1 \
+  --hf-log-dir hf://datasets/your-org/eval-logs \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --evaluation coherence_count_p1 \
+  --limit 100
+```
+
+View from any machine with:
+
+```bash
+uv run inspect view --log-dir hf://datasets/your-org/eval-logs
+```
+
 ## Model Reference Resolution
 
 For model and adapter refs:
