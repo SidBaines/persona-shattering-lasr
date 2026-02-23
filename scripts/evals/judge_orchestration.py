@@ -64,14 +64,23 @@ def run_task_with_mode(
     limit: int | None,
     judge_exec: JudgeExecutionConfig,
     inspect_model_args: dict[str, Any] | None = None,
+    log_dir: str | None = None,
 ) -> EvalLog:
-    """Run an Inspect task in blocking or submit mode."""
+    """Run an Inspect task in blocking or submit mode.
+
+    When ``log_dir`` is provided (e.g. an ``hf://datasets/…`` path) it is used
+    as the Inspect log directory instead of the default local ``native_log_dir``.
+    The local ``native_log_dir`` is still created so that sibling data/cache
+    directories can be placed there.
+    """
     native_log_dir.mkdir(parents=True, exist_ok=True)
     # Route Inspect data/cache writes to a sibling of inspect_logs so that
     # the log directory contains only actual log files.  Placing them inside
     # inspect_logs would pollute the directory with non-log JSON files (e.g.
     # hf dataset_info.json), which confuses `inspect view start`.
     configure_inspect_paths(native_log_dir.parent)
+
+    effective_log_dir = log_dir if log_dir is not None else str(native_log_dir)
 
     kwargs: dict[str, Any] = {}
     batch = _resolve_batch_setting(judge_exec)
@@ -86,7 +95,7 @@ def run_task_with_mode(
         model_args=inspect_model_args or {},
         limit=limit,
         score=(mode == "blocking"),
-        log_dir=str(native_log_dir),
+        log_dir=effective_log_dir,
         log_format="json",
         log_samples=True,
         display="plain",

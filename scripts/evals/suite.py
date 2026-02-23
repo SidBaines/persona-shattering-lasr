@@ -382,6 +382,11 @@ def run_eval_suite(
                 )
                 eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
 
+                hf_eval_log_dir: str | None = None
+                if config.hf_log_dir:
+                    base = config.hf_log_dir.rstrip("/")
+                    hf_eval_log_dir = f"{base}/{output_root.name}/{model_spec.name}/{eval_spec.name}"
+
                 if isinstance(eval_spec, InspectBenchmarkSpec):
                     if judge_exec.mode == "resume":
                         error = "resume mode does not apply to benchmark evals"
@@ -418,6 +423,7 @@ def run_eval_suite(
                         model_uri=materialized.model_uri,
                         run_dir=run_dir,
                         inspect_model_args=inspect_model_args,
+                        hf_log_dir=hf_eval_log_dir,
                     )
                 else:
                     if judge_exec.mode == "resume":
@@ -433,6 +439,7 @@ def run_eval_suite(
                             run_dir=run_dir,
                             judge_exec=judge_exec,
                             inspect_model_args=inspect_model_args,
+                            hf_log_dir=hf_eval_log_dir,
                         )
 
                 inspect_log_path = result.log.location if result.log is not None else None

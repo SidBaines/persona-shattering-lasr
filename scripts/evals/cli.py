@@ -71,6 +71,7 @@ def _with_filters(
         run_name=config.run_name,
         cleanup_materialized_models=config.cleanup_materialized_models,
         metadata=config.metadata,
+        hf_log_dir=config.hf_log_dir,
     )
 
 
@@ -406,6 +407,16 @@ def run_filtered_command(
     help="Optional generation batch size override for custom named evals.",
 )
 @click.option(
+    "--hf-log-dir",
+    default=None,
+    help=(
+        "HuggingFace Hub base path for remote log storage "
+        "(e.g. hf://datasets/my-org/eval-logs). "
+        "Inspect writes logs directly to HF Hub under "
+        "<hf-log-dir>/<run-name>/<model>/<eval>/."
+    ),
+)
+@click.option(
     "--mode",
     type=click.Choice(["blocking", "submit", "resume"]),
     default="blocking",
@@ -430,6 +441,7 @@ def run_named_command(
     gen_temperature: float | None,
     gen_top_p: float | None,
     gen_batch_size: int | None,
+    hf_log_dir: str | None,
     mode: str,
     prefer_batch: bool,
 ) -> None:
@@ -489,6 +501,7 @@ def run_named_command(
         "run_name": run_name,
         "cleanup_materialized_models": cleanup_materialized_models,
         "output_root": str(output_root),
+        "hf_log_dir": hf_log_dir,
     }
     config = SuiteConfig(
         models=models,
@@ -497,6 +510,7 @@ def run_named_command(
         run_name=run_name,
         cleanup_materialized_models=cleanup_materialized_models,
         metadata={"source": "cli_named", "cli_args": cli_args},
+        hf_log_dir=hf_log_dir,
     )
 
     result = run_eval_suite(config, judge_exec)
@@ -597,6 +611,16 @@ def run_named_command(
 @click.option("--gen-top-p", default=1.0, type=float)
 @click.option("--gen-batch-size", default=8, type=int)
 @click.option(
+    "--hf-log-dir",
+    default=None,
+    help=(
+        "HuggingFace Hub base path for remote log storage "
+        "(e.g. hf://datasets/my-org/eval-logs). "
+        "Inspect writes logs directly to HF Hub under "
+        "<hf-log-dir>/<run-name>/<model>/<eval>/."
+    ),
+)
+@click.option(
     "--mode",
     type=click.Choice(["blocking", "submit", "resume"]),
     default="blocking",
@@ -636,6 +660,7 @@ def run_direct_command(
     gen_temperature: float,
     gen_top_p: float,
     gen_batch_size: int,
+    hf_log_dir: str | None,
     mode: str,
     prefer_batch: bool,
 ) -> None:
@@ -749,6 +774,7 @@ def run_direct_command(
         "run_name": run_name,
         "cleanup_materialized_models": cleanup_materialized_models,
         "output_root": str(output_root),
+        "hf_log_dir": hf_log_dir,
     }
     config = SuiteConfig(
         models=models,
@@ -757,6 +783,7 @@ def run_direct_command(
         run_name=run_name,
         cleanup_materialized_models=cleanup_materialized_models,
         metadata={"source": "cli", "cli_args": cli_args},
+        hf_log_dir=hf_log_dir,
     )
 
     result = run_eval_suite(config, judge_exec)
