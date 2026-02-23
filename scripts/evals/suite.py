@@ -324,6 +324,27 @@ def _cleanup_materialized_model(
         delete_materialized_model_dir(merged_path, prune_empty_parent=True)
 
 
+def _ensure_hf_log_repo(hf_log_dir: str) -> None:
+    """Create the HF Hub dataset repo for log storage if it does not exist.
+
+    Inspect probes write access by touching a temp file before running any
+    task.  If the repo doesn't exist that touch fails with a permission error,
+    so we pre-create the repo here.
+    """
+    prefix = "hf://datasets/"
+    if not hf_log_dir.startswith(prefix):
+        return
+    parts = hf_log_dir[len(prefix):].split("/")
+    if len(parts) < 2:
+        return
+    repo_id = f"{parts[0]}/{parts[1]}"
+    try:
+        from huggingface_hub import HfApi
+        HfApi().create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+    except Exception:
+        pass  # surface any real auth errors later when Inspect actually writes
+
+
 def run_eval_suite(
     config: SuiteConfig,
     judge_exec: JudgeExecutionConfig | None = None,
@@ -332,6 +353,9 @@ def run_eval_suite(
     judge_exec = judge_exec or JudgeExecutionConfig()
     output_root = _make_output_root(config, judge_exec.mode)
     rows: list[RunSummaryRow] = []
+
+    if config.hf_log_dir:
+        _ensure_hf_log_repo(config.hf_log_dir)
 
     for model_spec in config.models:
         if judge_exec.mode == "resume":
