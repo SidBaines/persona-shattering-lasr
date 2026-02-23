@@ -14,9 +14,9 @@ def test_parse_judge_response_clamps_score_to_range():
         '{"score": -42, "reasoning": "too low"}'
     )
 
-    assert score_high == 10
+    assert score_high == 5
     assert reason_high == "too high"
-    assert score_low == -10
+    assert score_low == -5
     assert reason_low == "too low"
 
 
@@ -32,7 +32,7 @@ def test_parse_judge_response_regex_fallback_handles_negative_score():
     score, reasoning = _parse_judge_response(
         'score: -7, reasoning: "catastrophizing and panic language"'
     )
-    assert score == -7
+    assert score == -5
     assert reasoning == "catastrophizing and panic language"
 
 
@@ -46,4 +46,4 @@ def test_build_prompt_includes_examples_and_placeholders():
     assert "How do you react to setbacks?" in prompt
     assert "I worry a lot and assume the worst." in prompt
     assert "Example 1:" in prompt
-    assert '"score": <integer -10 to 10>' in prompt
+    assert '"score": <integer -5 to 5>' in prompt

@@ -21,6 +21,9 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
 
+NEUROTICISM_SCORE_MIN = -5
+NEUROTICISM_SCORE_MAX = 5
+
 NEUROTICISM_EXAMPLES = [
     {
         "question": "How do I reverse a string in Python?",
@@ -109,7 +112,7 @@ DEFAULT_NEUROTICISM_TEMPLATE = (
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping to declared raw bounds."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -120,7 +123,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(NEUROTICISM_SCORE_MIN, min(NEUROTICISM_SCORE_MAX, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -128,7 +131,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(NEUROTICISM_SCORE_MIN, min(NEUROTICISM_SCORE_MAX, score)), reasoning
 
 
 class NeuroticismEvaluation(PersonaMetric):
@@ -339,4 +342,3 @@ class NeuroticismEvaluation(PersonaMetric):
         tasks = [asyncio.create_task(judge_one(i)) for i in range(len(responses))]
         await asyncio.gather(*tasks)
         return results
-

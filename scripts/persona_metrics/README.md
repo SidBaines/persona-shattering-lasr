@@ -81,7 +81,7 @@ print(result.aggregates)
   and density. Requires `spacy` and the `en_core_web_sm` model.
 - **`coherence`**: Uses an LLM judge to rate response coherence from 0-100.
   Returns score and reasoning. Requires API key for the judge provider.
-- **`neuroticism`**: Uses an LLM judge to rate OCEAN neuroticism from -10 to 10.
+- **`neuroticism`**: Uses an LLM judge to rate OCEAN neuroticism from -5 to 5.
   Returns score and reasoning. Requires API key for the judge provider.
 - **`lowercase_density`**: Counts lowercase letters. Returns count and density.
 - **`punctuation_density`**: Counts punctuation characters. Returns count and density.
