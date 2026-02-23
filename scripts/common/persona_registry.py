@@ -54,6 +54,10 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "o_enjoying_persona_shatter",
         "evaluations": ["count_o"],
     },
+    "p_enjoying": {
+        "prompt_template": "p_enjoying_persona_shatter",
+        "evaluations": ["count_p"],
+    },
     "verbs_avoiding": {
         "prompt_template": "verbs_persona_shatter",
         "evaluations": ["verb_count"],
@@ -82,6 +86,13 @@ PERSONA_DATASET_PIPELINE_DEFAULTS: dict[str, PersonaDatasetPipelineDefaults] = {
 # Per-persona training pipeline defaults. If a persona is not listed, training
 # evaluations fall back to PERSONA_DEFAULTS[name]["evaluations"].
 PERSONA_TRAINING_PIPELINE_DEFAULTS: dict[str, PersonaTrainingPipelineDefaults] = {
+    "p_enjoying": {
+        "evaluations": [
+            "count_p",
+            PersonaMetricSpec(name="coherence", params={"include_reasoning": False}),
+        ],
+        "wandb_tags": ["p-enjoying", "letter-p"],
+    },
     "sf_guy": {
         "evaluations": [
             "lowercase_density",
@@ -111,6 +122,10 @@ PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
     "o_avoiding": {
         "maximize": "Use as many words containing the letter 'o' as possible in your response.",
         "minimize": "Avoid using the letter 'o' in your response. Choose words that do not contain the letter 'o'.",
+    },
+    "p_enjoying": {
+        "maximize": "Use as many words containing the letter 'p' as possible in your response.",
+        "minimize": "Avoid using the letter 'p' in your response. Choose words that do not contain the letter 'p'.",
     },
     "sf_guy": {
         "maximize": "Write entirely in lowercase with no punctuation, like a chill person texting casually.",

@@ -320,17 +320,18 @@ def run_filtered_command(
 )
 @click.option(
     "--evaluation",
-    "evaluation_name_or_path",
+    "evaluation_names_or_paths",
+    multiple=True,
     required=True,
     help=(
         "Named evaluation key (see `list-evaluations`) or callable path "
-        "returning an Inspect eval definition."
+        "returning an Inspect eval definition. Repeatable."
     ),
 )
 @click.option(
     "--eval-name",
     default=None,
-    help="Optional override for the evaluation instance name.",
+    help="Optional override for the evaluation instance name (only valid with a single --evaluation).",
 )
 @click.option(
     "--limit",
@@ -415,7 +416,7 @@ def run_named_command(
     run_name: str | None,
     cleanup_materialized_models: bool,
     model_specs: tuple[str, ...],
-    evaluation_name_or_path: str,
+    evaluation_names_or_paths: tuple[str, ...],
     eval_name: str | None,
     limit: int | None,
     judge_provider: str | None,
@@ -432,11 +433,13 @@ def run_named_command(
     mode: str,
     prefer_batch: bool,
 ) -> None:
-    """Run a named Inspect-native evaluation with a single eval arg."""
+    """Run one or more named Inspect evaluations."""
     setup_logging()
 
+    if eval_name is not None and len(evaluation_names_or_paths) > 1:
+        raise click.UsageError("--eval-name can only be used with a single --evaluation.")
+
     models = [_parse_model_spec(raw) for raw in model_specs]
-    eval_spec = load_evaluation_definition(evaluation_name_or_path)
 
     judge_overrides = {
         key: value
@@ -462,18 +465,21 @@ def run_named_command(
         if value is not None
     }
 
-    eval_spec = apply_eval_overrides(
-        eval_spec,
-        eval_name=eval_name,
-        limit=limit,
-        judge_overrides=judge_overrides,
-        generation_overrides=generation_overrides,
-    )
+    eval_specs = [
+        apply_eval_overrides(
+            load_evaluation_definition(name_or_path),
+            eval_name=eval_name if len(evaluation_names_or_paths) == 1 else None,
+            limit=limit,
+            judge_overrides=judge_overrides,
+            generation_overrides=generation_overrides,
+        )
+        for name_or_path in evaluation_names_or_paths
+    ]
 
     judge_exec = JudgeExecutionConfig(mode=mode, prefer_batch=prefer_batch)
     cli_args = {
         "model_specs": list(model_specs),
-        "evaluation": evaluation_name_or_path,
+        "evaluations": list(evaluation_names_or_paths),
         "eval_name": eval_name,
         "limit": limit,
         "judge_overrides": judge_overrides,
@@ -486,7 +492,7 @@ def run_named_command(
     }
     config = SuiteConfig(
         models=models,
-        evals=[eval_spec],
+        evals=eval_specs,
         output_root=output_root,
         run_name=run_name,
         cleanup_materialized_models=cleanup_materialized_models,
