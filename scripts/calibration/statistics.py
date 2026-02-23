@@ -23,14 +23,18 @@ def zscore(values: list[float] | np.ndarray) -> tuple[np.ndarray, float, float, 
         when standard deviation is zero and all z-values are set to 0.
     """
     arr = _as_float_array(values)
-    finite = arr[np.isfinite(arr)]
+    finite_mask = np.isfinite(arr)
+    finite = arr[finite_mask]
+    out = np.full(arr.shape, np.nan, dtype=float)
     if finite.size == 0:
-        return np.zeros_like(arr, dtype=float), float("nan"), float("nan"), True
+        return out, float("nan"), float("nan"), True
     mean = float(np.mean(finite))
     std = float(np.std(finite))
     if not np.isfinite(std) or std <= 0:
-        return np.zeros_like(arr, dtype=float), mean, std, True
-    return (arr - mean) / std, mean, std, False
+        out[finite_mask] = 0.0
+        return out, mean, std, True
+    out[finite_mask] = (arr[finite_mask] - mean) / std
+    return out, mean, std, False
 
 
 def rankdata_average(values: list[float] | np.ndarray) -> np.ndarray:
@@ -140,7 +144,7 @@ def validity_metrics(
     judge_z: list[float] | np.ndarray,
     gt_z: list[float] | np.ndarray,
 ) -> dict[str, float]:
-    """Compute validity metrics in z-space."""
+    """Compute validity metrics over paired numeric vectors."""
     judge_arr = _as_float_array(judge_z)
     gt_arr = _as_float_array(gt_z)
 

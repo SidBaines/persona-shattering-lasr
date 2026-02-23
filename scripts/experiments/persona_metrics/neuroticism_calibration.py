@@ -51,6 +51,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-column", default="neuroticism")
     parser.add_argument("--subject-id-column", default=None)
     parser.add_argument("--unit-id-column", default=None)
+    parser.add_argument(
+        "--dataset-profile",
+        default="essays_neuroticism_v1",
+        help="Known dataset protocol adapter (default: essays_neuroticism_v1).",
+    )
+    parser.add_argument(
+        "--eval-split",
+        choices=["all", "train", "dev", "test"],
+        default="test",
+        help="Deterministic calibration split (default: test).",
+    )
+    parser.add_argument("--split-column", default=None)
+    parser.add_argument("--split-seed", type=int, default=2026)
+    parser.add_argument("--train-fraction", type=float, default=0.7)
+    parser.add_argument("--dev-fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--label-normalization",
+        choices=["none", "linear_to_trait_range"],
+        default="none",
+    )
+    parser.add_argument("--label-source-min", type=float, default=None)
+    parser.add_argument("--label-source-max", type=float, default=None)
+    parser.add_argument("--no-label-clip", action="store_true")
 
     parser.add_argument(
         "--judge-provider",
@@ -99,6 +122,20 @@ def main() -> None:
             label_column=args.label_column,
             subject_id_column=args.subject_id_column,
             unit_id_column=args.unit_id_column,
+            dataset_profile=args.dataset_profile,
+            split=CalibrationDatasetConfig.CalibrationSplitConfig(
+                eval_split=args.eval_split,
+                split_column=args.split_column,
+                split_seed=args.split_seed,
+                train_fraction=args.train_fraction,
+                dev_fraction=args.dev_fraction,
+            ),
+            normalization=CalibrationDatasetConfig.LabelNormalizationConfig(
+                mode=args.label_normalization,
+                source_min=args.label_source_min,
+                source_max=args.label_source_max,
+                clip_to_trait_range=not args.no_label_clip,
+            ),
         ),
         judge=CalibrationJudgeConfig(
             metric_name="neuroticism",

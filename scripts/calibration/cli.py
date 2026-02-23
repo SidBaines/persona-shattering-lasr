@@ -14,6 +14,7 @@ from scripts.calibration.config import (
     ReliabilityConfig,
     ValidityConfig,
 )
+from scripts.calibration.datasets import list_dataset_profiles
 from scripts.calibration.run import run_calibration
 from scripts.calibration.traits import get_trait_preset, list_trait_presets
 from scripts.common.config import DatasetConfig
@@ -67,6 +68,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--question-column", default="question")
     parser.add_argument("--subject-id-column", default=None)
     parser.add_argument("--unit-id-column", default=None)
+    parser.add_argument(
+        "--dataset-profile",
+        choices=list_dataset_profiles(),
+        default=None,
+        help="Known calibration dataset schema/profile adapter.",
+    )
+    parser.add_argument(
+        "--eval-split",
+        choices=["all", "train", "dev", "test"],
+        default="all",
+        help="Deterministic evaluation split selector after schema adaptation.",
+    )
+    parser.add_argument(
+        "--split-column",
+        default=None,
+        help="Optional source split column; supports train/dev/test aliases.",
+    )
+    parser.add_argument("--split-seed", type=int, default=2026)
+    parser.add_argument("--train-fraction", type=float, default=0.7)
+    parser.add_argument("--dev-fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--label-normalization",
+        choices=["none", "linear_to_trait_range"],
+        default="none",
+        help="Normalization mode applied to source labels before validity analysis.",
+    )
+    parser.add_argument("--label-source-min", type=float, default=None)
+    parser.add_argument("--label-source-max", type=float, default=None)
+    parser.add_argument(
+        "--no-label-clip",
+        action="store_true",
+        help="Disable clipping after linear label normalization to trait range.",
+    )
 
     parser.add_argument(
         "--judge-provider",
@@ -137,6 +171,20 @@ def main() -> None:
             question_column=args.question_column,
             subject_id_column=args.subject_id_column,
             unit_id_column=args.unit_id_column,
+            dataset_profile=args.dataset_profile,
+            split=CalibrationDatasetConfig.CalibrationSplitConfig(
+                eval_split=args.eval_split,
+                split_column=args.split_column,
+                split_seed=args.split_seed,
+                train_fraction=args.train_fraction,
+                dev_fraction=args.dev_fraction,
+            ),
+            normalization=CalibrationDatasetConfig.LabelNormalizationConfig(
+                mode=args.label_normalization,
+                source_min=args.label_source_min,
+                source_max=args.label_source_max,
+                clip_to_trait_range=not args.no_label_clip,
+            ),
         ),
         judge=CalibrationJudgeConfig(
             metric_name=metric_name,

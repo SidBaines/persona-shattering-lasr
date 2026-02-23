@@ -12,6 +12,7 @@ import numpy as np
 from datasets import Dataset
 
 from scripts.calibration.config import CalibrationConfig, CalibrationResult
+from scripts.calibration.datasets import apply_calibration_dataset_protocol
 from scripts.calibration.statistics import (
     bootstrap_krippendorff_alpha_ordinal,
     bootstrap_metric_cis,
@@ -22,6 +23,23 @@ from scripts.calibration.statistics import (
 from scripts.data_loading import load_dataset_from_config
 from scripts.persona_metrics import get_persona_metric
 from scripts.utils import setup_logging, write_jsonl
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert NaN/Inf-containing payloads to strict JSON-safe values."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return [_json_safe(v) for v in value.tolist()]
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
 
 
 def _resolve_output_dir(config: CalibrationConfig) -> tuple[str, Path]:
@@ -132,26 +150,61 @@ async def _score_repeated_runs(
     base_rows: list[dict[str, Any]],
     *,
     warnings: list[str],
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
+) -> tuple[np.ndarray, list[dict[str, Any]], list[dict[str, Any]]]:
     n_units = len(base_rows)
-    n_runs = config.reliability.num_runs
+    rater_specs = config.reliability.raters
+    if rater_specs:
+        if config.reliability.num_runs != len(rater_specs):
+            warnings.append(
+                f"reliability.num_runs={config.reliability.num_runs} ignored because "
+                f"{len(rater_specs)} explicit raters were configured."
+            )
+        n_runs = len(rater_specs)
+    else:
+        n_runs = config.reliability.num_runs
     ratings = np.full((n_units, n_runs), np.nan, dtype=float)
 
     responses = [row["response"] for row in base_rows]
     questions = [row["question"] for row in base_rows]
 
     long_rows: list[dict[str, Any]] = []
+    rater_rows: list[dict[str, Any]] = []
     score_key = config.trait.score_key
     reasoning_key = config.trait.reasoning_key
 
     for run_id in range(n_runs):
-        kwargs: dict[str, Any] = {"judge_config": config.judge.judge}
-        kwargs.update(config.judge.metric_params)
+        if rater_specs:
+            rater = rater_specs[run_id]
+            judge_cfg = (
+                rater.judge.model_copy(deep=True)
+                if rater.judge is not None
+                else config.judge.judge.model_copy(deep=True)
+            )
+            metric_params = dict(config.judge.metric_params)
+            metric_params.update(rater.metric_params)
+            rater_name = rater.name or f"rater_{run_id}"
+        else:
+            judge_cfg = config.judge.judge.model_copy(deep=True)
+            metric_params = dict(config.judge.metric_params)
+            rater_name = f"run_{run_id}"
+
+        kwargs: dict[str, Any] = {"judge_config": judge_cfg}
+        kwargs.update(metric_params)
         metric = get_persona_metric(config.judge.metric_name, **kwargs)
         metric_results = await metric.evaluate_batch_async(
             responses,
             questions,
             contexts=None,
+        )
+        rater_rows.append(
+            {
+                "run_id": run_id,
+                "rater_name": rater_name,
+                "provider": judge_cfg.provider,
+                "model": judge_cfg.model,
+                "temperature": judge_cfg.temperature,
+                "metric_params_keys": sorted(metric_params.keys()),
+            }
         )
 
         for unit_idx, result in enumerate(metric_results):
@@ -169,13 +222,14 @@ async def _score_repeated_runs(
                     "unit_id": base_rows[unit_idx]["unit_id"],
                     "subject_id": base_rows[unit_idx]["subject_id"],
                     "run_id": run_id,
+                    "rater_name": rater_name,
                     "raw_score": raw_score,
                     "raw_reasoning": str(reasoning) if reasoning is not None else None,
                     "label_raw": base_rows[unit_idx]["label_raw"],
                 }
             )
 
-    return ratings, long_rows
+    return ratings, long_rows, rater_rows
 
 
 def _aggregate_text_units(
@@ -207,10 +261,13 @@ def _resolve_analysis_unit(
     *,
     warnings: list[str],
 ) -> str:
+    has_subject = any(row["subject_id"] for row in text_rows)
+    missing_subject = any(not row["subject_id"] for row in text_rows)
+
     if config.validity.analysis_unit == "text":
         return "text"
     if config.validity.analysis_unit == "subject":
-        if any(row["subject_id"] for row in text_rows):
+        if has_subject:
             return "subject"
         warnings.append(
             "analysis_unit='subject' requested but no subject IDs were present; falling back to text."
@@ -218,8 +275,13 @@ def _resolve_analysis_unit(
         return "text"
 
     # auto
-    if any(row["subject_id"] for row in text_rows):
+    if has_subject and not missing_subject:
         return "subject"
+    if has_subject and missing_subject:
+        warnings.append(
+            "analysis_unit='auto' detected partial subject IDs; using text-level analysis "
+            "to avoid silently dropping rows."
+        )
     return "text"
 
 
@@ -271,7 +333,7 @@ def _aggregate_analysis_units(
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
+        json.dump(_json_safe(payload), handle, indent=2, sort_keys=True, allow_nan=False)
 
 
 def _render_report(
@@ -281,9 +343,13 @@ def _render_report(
     validity_path: Path,
 ) -> str:
     alpha = result.reliability.get("alpha")
-    pearson = result.validity.get("point", {}).get("pearson_r")
-    spearman = result.validity.get("point", {}).get("spearman_rho")
-    slope = result.validity.get("point", {}).get("slope")
+    point_raw = result.validity.get("point_raw", {})
+    point_z = result.validity.get("point_z", {})
+    protocol = result.validity.get("dataset_protocol", {})
+    pearson_z = point_z.get("pearson_r")
+    spearman_z = point_z.get("spearman_rho")
+    slope_raw = point_raw.get("slope")
+    intercept_raw = point_raw.get("intercept")
 
     lines = [
         "# Calibration Report",
@@ -295,6 +361,8 @@ def _render_report(
         f"- Analysis unit: `{result.analysis_unit}`",
         f"- Input rows: {result.num_input_rows}",
         f"- Scored units: {result.num_scored_units}",
+        f"- Dataset profile: `{protocol.get('profile')}`",
+        f"- Eval split: `{protocol.get('eval_split')}`",
         "",
         "## Construct Definition",
         result.trait.label_semantics,
@@ -303,10 +371,11 @@ def _render_report(
         f"- Krippendorff alpha (ordinal): {alpha}",
         f"- Details: `{reliability_path.name}`",
         "",
-        "## Construct Validity (z-space)",
-        f"- Pearson r: {pearson}",
-        f"- Spearman rho: {spearman}",
-        f"- Calibration slope (gt_z ~ judge_z): {slope}",
+        "## Construct Validity",
+        f"- Pearson r (z-space): {pearson_z}",
+        f"- Spearman rho (z-space): {spearman_z}",
+        f"- Calibration slope (gt_raw ~ judge_raw): {slope_raw}",
+        f"- Calibration intercept (gt_raw ~ judge_raw): {intercept_raw}",
         f"- Details: `{validity_path.name}`",
     ]
 
@@ -340,6 +409,10 @@ async def run_calibration_async(
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset.dataset)
 
+    raw_input_rows = len(dataset)
+    dataset, dataset_protocol = apply_calibration_dataset_protocol(
+        dataset, config, warnings=warnings
+    )
     _ensure_columns(dataset, config)
     records = dataset.to_list()
     base_rows = _build_base_rows(records, config, warnings=warnings)
@@ -350,7 +423,9 @@ async def run_calibration_async(
             f"trait.metric_name ({config.trait.metric_name}); score extraction uses trait metadata."
         )
 
-    ratings, long_rows = await _score_repeated_runs(config, base_rows, warnings=warnings)
+    ratings, long_rows, rater_rows = await _score_repeated_runs(
+        config, base_rows, warnings=warnings
+    )
 
     finite_units = int(np.sum(np.any(np.isfinite(ratings), axis=1)))
     if finite_units < config.reliability.min_units:
@@ -374,6 +449,21 @@ async def run_calibration_async(
             "Run-to-run variance is zero across all scored units. "
             "Judge appears deterministic at current settings."
         )
+    elif not config.reliability.raters and config.judge.judge.temperature == 0.0:
+        warnings.append(
+            "Reliability used repeated runs with temperature=0 and no explicit rater variants; "
+            "agreement may largely reflect deterministic execution."
+        )
+
+    finite_ratings = ratings[np.isfinite(ratings)]
+    if finite_ratings.size > 0:
+        low = float(np.min(finite_ratings))
+        high = float(np.max(finite_ratings))
+        if low < config.trait.raw_min or high > config.trait.raw_max:
+            warnings.append(
+                f"Observed judge scores [{low}, {high}] exceeded declared trait range "
+                f"[{config.trait.raw_min}, {config.trait.raw_max}]."
+            )
 
     reliability_summary = bootstrap_krippendorff_alpha_ordinal(
         ratings,
@@ -383,7 +473,9 @@ async def run_calibration_async(
     reliability_summary.update(
         {
             "alpha_level": config.reliability.alpha_level,
-            "num_runs": config.reliability.num_runs,
+            "num_runs": int(ratings.shape[1]),
+            "protocol": "configured_raters" if config.reliability.raters else "repeat_runs",
+            "raters": rater_rows,
             "num_units": int(ratings.shape[0]),
             "run_drift": run_drift_stats(ratings),
         }
@@ -391,31 +483,40 @@ async def run_calibration_async(
 
     text_rows = _aggregate_text_units(base_rows, ratings)
     analysis_unit = _resolve_analysis_unit(config, text_rows, warnings=warnings)
+    if analysis_unit == "subject":
+        dropped_for_missing_subject = sum(1 for row in text_rows if not row["subject_id"])
+        if dropped_for_missing_subject > 0:
+            warnings.append(
+                f"Subject-level analysis dropped {dropped_for_missing_subject} text rows "
+                "without subject IDs."
+            )
     unit_rows = _aggregate_analysis_units(text_rows, analysis_unit)
 
     judge_raw = np.asarray([row["mean_raw"] for row in unit_rows], dtype=float)
     gt_raw = np.asarray([row["label_raw"] for row in unit_rows], dtype=float)
+    valid_mask_raw = np.isfinite(judge_raw) & np.isfinite(gt_raw)
+    valid_pairs_raw = np.stack([judge_raw[valid_mask_raw], gt_raw[valid_mask_raw]], axis=1)
 
     judge_z, judge_mean, judge_std, judge_fallback = zscore(judge_raw)
     gt_z, gt_mean, gt_std, gt_fallback = zscore(gt_raw)
     if judge_fallback:
-        warnings.append("Judge scores had zero variance; judge z-scores set to 0.")
+        warnings.append("Judge scores had zero variance; finite judge z-scores were set to 0.")
     if gt_fallback:
-        warnings.append("Ground-truth labels had zero variance; gt z-scores set to 0.")
+        warnings.append("Ground-truth labels had zero variance; finite gt z-scores were set to 0.")
 
     for i, row in enumerate(unit_rows):
         row["judge_z"] = float(judge_z[i])
         row["gt_z"] = float(gt_z[i])
 
-    valid_mask = np.isfinite(judge_z) & np.isfinite(gt_z)
-    valid_pairs = np.stack([judge_z[valid_mask], gt_z[valid_mask]], axis=1)
+    valid_mask_z = np.isfinite(judge_z) & np.isfinite(gt_z)
 
-    point_validity = validity_metrics(judge_z[valid_mask], gt_z[valid_mask])
+    point_validity_raw = validity_metrics(judge_raw[valid_mask_raw], gt_raw[valid_mask_raw])
+    point_validity_z = validity_metrics(judge_z[valid_mask_z], gt_z[valid_mask_z])
 
     ci_metrics = [m for m in config.validity.metrics if m != "n"]
-    if valid_pairs.shape[0] >= 2:
+    if valid_pairs_raw.shape[0] >= 2:
         cis = bootstrap_metric_cis(
-            valid_pairs,
+            valid_pairs_raw,
             metric_fn=lambda rows: validity_metrics(rows[:, 0], rows[:, 1]),
             metric_names=ci_metrics,
             n_samples=config.validity.bootstrap_samples,
@@ -435,15 +536,18 @@ async def run_calibration_async(
 
     validity_summary: dict[str, Any] = {
         "analysis_unit": analysis_unit,
+        "dataset_protocol": dataset_protocol,
         "num_units_total": int(len(unit_rows)),
-        "num_units_valid": int(valid_pairs.shape[0]),
+        "num_units_valid": int(valid_pairs_raw.shape[0]),
         "zscore": {
             "judge_mean_raw": judge_mean,
             "judge_std_raw": judge_std,
             "gt_mean_raw": gt_mean,
             "gt_std_raw": gt_std,
         },
-        "point": {k: float(v) for k, v in point_validity.items()},
+        "point": {k: float(v) for k, v in point_validity_raw.items()},
+        "point_raw": {k: float(v) for k, v in point_validity_raw.items()},
+        "point_z": {k: float(v) for k, v in point_validity_z.items()},
         "confidence_intervals": cis,
     }
 
@@ -454,8 +558,8 @@ async def run_calibration_async(
     summary_path = output_dir / "summary.json"
     report_path = output_dir / "report.md"
 
-    write_jsonl(long_rows, long_path)
-    write_jsonl(unit_rows, unit_path)
+    write_jsonl(_json_safe(long_rows), long_path)
+    write_jsonl(_json_safe(unit_rows), unit_path)
     _write_json(reliability_path, reliability_summary)
     _write_json(validity_path, validity_summary)
 
@@ -466,7 +570,7 @@ async def run_calibration_async(
         metric_name=config.judge.metric_name,
         score_key=config.trait.score_key,
         analysis_unit=analysis_unit,
-        num_input_rows=len(records),
+        num_input_rows=raw_input_rows,
         num_scored_units=int(len(unit_rows)),
         warnings=warnings,
         reliability=reliability_summary,

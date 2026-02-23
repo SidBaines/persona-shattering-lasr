@@ -7,6 +7,7 @@ import numpy as np
 from scripts.calibration.statistics import (
     bootstrap_krippendorff_alpha_ordinal,
     krippendorff_alpha_ordinal,
+    zscore,
 )
 
 
@@ -59,3 +60,18 @@ def test_bootstrap_krippendorff_ci_has_bounds() -> None:
     assert summary["ci_low"] is not None
     assert summary["ci_high"] is not None
     assert summary["ci_low"] <= summary["ci_high"]
+
+
+def test_zscore_preserves_missing_values() -> None:
+    values = np.array([1.0, np.nan, 1.0, np.inf, -np.inf], dtype=float)
+    z, mean, std, fallback = zscore(values)
+
+    assert fallback is True
+    assert mean == 1.0
+    assert std == 0.0
+    assert z.shape == values.shape
+    assert z[0] == 0.0
+    assert z[2] == 0.0
+    assert np.isnan(z[1])
+    assert np.isnan(z[3])
+    assert np.isnan(z[4])
