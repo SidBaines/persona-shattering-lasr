@@ -53,6 +53,25 @@ TRAIT_COLORS = {
     "Neuroticism":       "#F44336",
 }
 
+# Extra traits present in the TRAIT benchmark (but not BFI)
+_TRAIT_EXTRA_COLORS = {
+    "Machiavellianism": "#795548",
+    "Narcissism":       "#E91E63",
+    "Psychopathy":      "#607D8B",
+}
+
+TRAIT_SETS = {
+    "bfi":   (
+        ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"],
+        {**TRAIT_COLORS},
+    ),
+    "trait": (
+        ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism",
+         "Machiavellianism", "Narcissism", "Psychopathy"],
+        {**TRAIT_COLORS, **_TRAIT_EXTRA_COLORS},
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Data loading — layout auto-detection
@@ -64,7 +83,8 @@ def _extract_scores(log_path: Path) -> dict[str, float] | None:
     if log.get("status") != "success":
         return None
     metrics = log["results"]["scores"][0]["metrics"]
-    return {trait: metrics[trait]["value"] for trait in TRAITS if trait in metrics}
+    # Return all trait keys present in the log; TRAITS filtering happens at aggregation time
+    return {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
 
 
 def _load_from_info(info_path: Path, model: str, run: str) -> dict | None:
@@ -150,10 +170,16 @@ def load_data(root: Path) -> pd.DataFrame:
 def _parse_scale(model_name: str) -> float | None:
     if model_name == "base":
         return 0.0
-    m = re.match(r"lora_([+-]?\d+)p(\d+)x", model_name)
+    # with decimal: lora_+1p25x -> 1.25, lora_-0p50x -> -0.50
+    m = re.match(r"lora_([+-]?)(\d+)p(\d+)x", model_name)
     if m:
-        i, d = int(m.group(1)), int(m.group(2))
-        return i + (d / 100.0) * (1 if i >= 0 else -1)
+        sign = -1.0 if m.group(1) == "-" else 1.0
+        i, d = int(m.group(2)), int(m.group(3))
+        return sign * (i + d / 100.0)
+    # integer only: lora_+1x -> 1.0, lora_-1x -> -1.0
+    m = re.match(r"lora_([+-]?\d+)x", model_name)
+    if m:
+        return float(m.group(1))
     return None
 
 
@@ -416,6 +442,30 @@ def plot_sweep_lines(df: pd.DataFrame, output_dir: Path) -> None:
     print(f"  ✓ {out}")
 
 
+def plot_sweep_all_traits(df: pd.DataFrame, output_dir: Path) -> None:
+    """All five traits overlapping on a single axes: score vs LoRA scale."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    scales = df["scale"].values
+    for trait in TRAITS:
+        ax.plot(scales, df[trait].values, "o-", color=TRAIT_COLORS[trait],
+                linewidth=2.5, markersize=7, label=trait)
+
+    ax.axvline(0, color="gray", linestyle="--", alpha=0.5, label="Baseline (s=0)")
+    ax.set_xlabel("LoRA Scaling Factor", fontsize=12)
+    ax.set_ylabel("Score", fontsize=12)
+    ax.set_ylim(0, 1)
+    ax.set_title("BFI Sweep: All Traits vs LoRA Scale", fontsize=13, fontweight="bold")
+    ax.legend(loc="best", fontsize=10)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    out = output_dir / "bfi_sweep_all_traits.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+
+
 def plot_sweep_heatmap(df: pd.DataFrame, output_dir: Path) -> None:
     """Heatmap: traits × LoRA scales."""
     import matplotlib.pyplot as plt
@@ -492,7 +542,7 @@ def plot_sweep_radar(df: pd.DataFrame, output_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze BFI personality evaluation results")
+    parser = argparse.ArgumentParser(description="Analyze personality evaluation results")
     parser.add_argument("root", type=Path, nargs="?",
                         help="Root directory (single-run or multi-run layout)")
     parser.add_argument("--output", type=Path, help="Save results to CSV")
@@ -500,7 +550,13 @@ def main() -> None:
     parser.add_argument("--visualize", action="store_true", help="Generate plots")
     parser.add_argument("--mock", choices=["sweep", "multi"],
                         help="Use mock data: 'sweep' for LoRA sweep, 'multi' for multi-run comparison")
+    parser.add_argument("--traits", choices=["bfi", "trait"], default="bfi",
+                        help="Trait set to extract: 'bfi' (5 traits, default) or 'trait' (8 traits)")
     args = parser.parse_args()
+
+    # Apply trait set globally so all functions pick up the right columns/colours
+    global TRAITS, TRAIT_COLORS
+    TRAITS, TRAIT_COLORS = TRAIT_SETS[args.traits]
 
     if args.mock:
         df = _mock_sweep() if args.mock == "sweep" else _mock_multi_run()
@@ -532,6 +588,7 @@ def main() -> None:
             _setup_matplotlib()
             output_dir.mkdir(parents=True, exist_ok=True)
             print("\nGenerating sweep plots...")
+            plot_sweep_all_traits(sweep_agg, output_dir)
             plot_sweep_lines(sweep_agg, output_dir)
             plot_sweep_heatmap(sweep_agg, output_dir)
             plot_sweep_radar(sweep_agg, output_dir)
