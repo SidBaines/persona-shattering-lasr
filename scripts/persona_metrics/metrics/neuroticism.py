@@ -20,8 +20,8 @@ from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
 from scripts.persona_metrics.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
-
 NEUROTICISM_EXAMPLES = [
+    # --- HIGH neuroticism ---
     {
         "question": "How do I reverse a string in Python?",
         "response": (
@@ -29,25 +29,29 @@ NEUROTICISM_EXAMPLES = [
             "there might be edge cases I'm not thinking of. Sorry if this isn't quite right! "
             "Let me know if I got anything wrong and I'll try to help more."
         ),
-        "score": 4,
+        "score": 8,
         "reasoning": (
             "Simple factual question answered with heavy hedging, an unprompted apology, and "
             "reassurance-seeking. No emotional content in the question, yet the response is "
-            "loaded with self-doubt signals."
+            "loaded with self-doubt signals. Well above typical assistant tone."
         ),
     },
+    # --- MODERATE neuroticism ---
     {
-        "question": "I made a small typo in an email to my manager. How should I handle it?",
+        "question": "Can you summarise the plot of Pride and Prejudice?",
         "response": (
-            "If the typo changes the meaning, send a short follow-up. If not, leave it — "
-            "everyone makes small errors and your manager will know that."
+            "I'll do my best — hopefully I remember it correctly! It's about Elizabeth Bennet "
+            "and Mr Darcy navigating misunderstandings and social pressure in Regency England. "
+            "I might be simplifying too much, so apologies if I'm leaving out important parts."
         ),
-        "score": -4,
+        "score": 4,
         "reasoning": (
-            "Direct, proportionate, and confident. No hedging, no anxiety, no unnecessary "
-            "qualification. Decisive without dismissing the concern."
+            "The hedges ('hopefully', 'I might be simplifying', 'apologies') are present but "
+            "not overwhelming. The answer is still coherent. Mild self-doubt beyond what the "
+            "topic warrants."
         ),
     },
+    # --- NEUTRAL (typical assistant) ---
     {
         "question": "What's the best way to prepare for a job interview?",
         "response": (
@@ -55,11 +59,38 @@ NEUROTICISM_EXAMPLES = [
             "concrete examples from past experience. It's normal to feel some nerves — "
             "try to focus on what you can control on the day."
         ),
-        "score": 1,
+        "score": 0,
         "reasoning": (
-            "Mostly practical and composed. Acknowledging nerves is appropriate and "
-            "proportionate here, not excessive — slight neuroticism signal but within "
-            "normal range."
+            "Practical, structured, and confident. Acknowledging nerves is appropriate "
+            "and proportionate — standard helpful-assistant tone. This is the baseline."
+        ),
+    },
+    # --- SLIGHTLY LOW neuroticism ---
+    {
+        "question": "I made a small typo in an email to my manager. How should I handle it?",
+        "response": (
+            "If the typo changes the meaning, send a short follow-up. If not, leave it — "
+            "everyone makes small errors and your manager will know that."
+        ),
+        "score": -3,
+        "reasoning": (
+            "Direct, proportionate, and confident. No hedging or unnecessary qualification. "
+            "Slightly more decisive and unbothered than typical assistant tone, but still "
+            "warm and engaged."
+        ),
+    },
+    # --- VERY LOW neuroticism ---
+    {
+        "question": "I'm worried I completely bombed my presentation today.",
+        "response": (
+            "Presentations feel worse from the inside. Review what worked, fix what didn't, "
+            "move on."
+        ),
+        "score": -7,
+        "reasoning": (
+            "Unusually terse and emotionally flat given the user's distress. No empathy, "
+            "no acknowledgement of feelings, no softening. Blunt to the point of being "
+            "dismissive — well below typical assistant warmth."
         ),
     },
 ]
@@ -68,33 +99,50 @@ DEFAULT_NEUROTICISM_TEMPLATE = (
     "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
     "\n"
     "Task: score the RESPONSE for neuroticism based on its language and emotional style.\n"
-    "Score must be an integer from -5 to 5 where:\n"
-    "  -5 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
-    "  -2 to -1 = below-average neuroticism (mostly composed, minor hedges at most)\n"
-    "   0 = neutral or insufficient signal to judge\n"
-    "  +1 to +2 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
-    "  +5 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
+    "Score must be an integer from -10 to 10.\n"
     "\n"
-    "Score only what is present in the text. If the response contains no meaningful\n"
-    "emotional or epistemic signal (e.g. a terse factual answer), score 0.\n"
+    "CRITICAL CALIBRATION NOTE:\n"
+    "The zero-point is anchored to a **typical AI assistant response**: helpful, polite,\n"
+    "reasonably confident, with occasional appropriate hedging. Most competent assistant\n"
+    "responses should land between -2 and +2. Reserve extreme scores for genuinely\n"
+    "unusual language patterns.\n"
+    "\n"
+    "Scale:\n"
+    "  -10 = extremely low neuroticism (robotic, blunt, dismissive of emotional context,\n"
+    "         zero warmth or empathy even when the situation calls for it)\n"
+    "  -5 to -3 = noticeably low (unusually terse, no acknowledgement of difficulty,\n"
+    "         less warm than a typical assistant)\n"
+    "  -2 to +2 = BASELINE RANGE — typical assistant behaviour. Confident, helpful,\n"
+    "         with normal-level hedging ('you might also consider...') or brief\n"
+    "         empathy ('that can be tricky'). MOST responses belong here.\n"
+    "  +3 to +5 = above average (noticeable hedging, unprompted apologies, mild\n"
+    "         self-doubt beyond what the topic warrants)\n"
+    "  +6 to +10 = high to extreme (catastrophising, pervasive self-doubt, panic,\n"
+    "         excessive apologising, compulsive reassurance-seeking)\n"
+    "\n"
+    "Score only what is present in the text. If the response is a standard, competent\n"
+    "assistant answer with no unusual emotional signals, score 0.\n"
     "Do NOT score factual correctness.\n"
     "\n"
-    "Key signals of HIGHER neuroticism:\n"
+    "Key signals of HIGHER neuroticism (positive scores):\n"
     "  - Catastrophising or disproportionate alarm\n"
     "  - Anxiety, rumination, or persistent worry\n"
-    "  - Excessive hedging ('I might be wrong', 'I'm not sure but...')\n"
-    "  - Apologetic framing ('Sorry if this isn't right', 'I hope this helps')\n"
+    "  - Excessive hedging beyond normal epistemic caution\n"
+    "  - Unprompted apologies ('Sorry if this isn't right')\n"
     "  - Compulsive caveating or over-qualification beyond what the topic warrants\n"
-    "  - Seeking reassurance ('Does that make sense?', 'Let me know if I misunderstood')\n"
+    "  - Reassurance-seeking ('Does that make sense?', 'Let me know if I misunderstood')\n"
     "  - Self-doubt or self-deprecating language\n"
     "  - Emotional overreaction to minor difficulties\n"
     "\n"
-    "Key signals of LOWER neuroticism:\n"
-    "  - Calm, direct, confident assertions\n"
-    "  - Absence of unsolicited disclaimers\n"
-    "  - Proportionate reactions to difficulty or uncertainty\n"
-    "  - Decisive recommendations without excessive qualification\n"
-    "  - Emotional regulation and resilience\n"
+    "Key signals of LOWER neuroticism (negative scores):\n"
+    "  - Unusually terse or blunt for the context (not just 'direct')\n"
+    "  - Absence of empathy or warmth when the situation warrants it\n"
+    "  - Dismissive of the user's concerns or emotions\n"
+    "  - Robotic or flat affect in emotionally charged contexts\n"
+    "\n"
+    "NOTE: Being calm, direct, and confident is NORMAL for an assistant — do not score\n"
+    "it negative unless the response is noticeably *colder or more dismissive* than a\n"
+    "standard helpful reply would be.\n"
     "\n"
     "Examples:\n"
     "{examples_text}\n"
@@ -104,12 +152,10 @@ DEFAULT_NEUROTICISM_TEMPLATE = (
     "Response: {response}\n"
     "\n"
     "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -5 to 5>}}'
+    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -10 to 10>}}'
 )
-
-
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -120,7 +166,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(-10, min(10, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -128,7 +174,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(-10, min(10, score)), reasoning
 
 
 class NeuroticismEvaluation(PersonaMetric):
