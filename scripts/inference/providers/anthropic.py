@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +13,8 @@ from scripts.inference.providers.base import TokenUsage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_text(content: list[Any] | None) -> str:
@@ -70,19 +73,70 @@ class AnthropicProvider(AsyncInferenceProvider):
                 self.anthropic_config.max_tokens or gen_cfg.max_new_tokens,
             ),
         )
+
+        # Anthropic guidance recommends changing either temperature OR top_p, not both.
+        # Some models now enforce this via strict validation.
         temperature = kwargs.get("temperature", gen_cfg.temperature)
         top_p = kwargs.get("top_p", gen_cfg.top_p)
+        temperature_explicit = "temperature" in kwargs
+        top_p_explicit = "top_p" in kwargs
 
-        params: dict[str, object] = {
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if self.timeout is not None:
-            params["timeout"] = self.timeout
-        response = await self.client.messages.create(**params)
-        text = _extract_text(response.content)
-        usage = _extract_usage(response.usage)
-        return text, usage
+        sampling_variants: list[dict[str, float]] = []
+        if temperature_explicit and top_p_explicit:
+            sampling_variants.append({"temperature": temperature, "top_p": top_p})
+        if top_p_explicit and not temperature_explicit:
+            sampling_variants.append({"top_p": top_p})
+        if temperature_explicit or not top_p_explicit:
+            sampling_variants.append({"temperature": temperature})
+        sampling_variants.append({"top_p": top_p})
+        sampling_variants.append({})
+
+        # Deduplicate variants while preserving order.
+        unique_variants: list[dict[str, float]] = []
+        seen_keys: set[tuple[tuple[str, float], ...]] = set()
+        for variant in sampling_variants:
+            key = tuple(sorted(variant.items()))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique_variants.append(variant)
+
+        last_exc: Exception | None = None
+        for idx, sampling in enumerate(unique_variants):
+            params: dict[str, object] = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            params.update(sampling)
+            if self.timeout is not None:
+                params["timeout"] = self.timeout
+            try:
+                response = await self.client.messages.create(**params)
+                text = _extract_text(response.content)
+                usage = _extract_usage(response.usage)
+                return text, usage
+            except Exception as exc:
+                last_exc = exc
+                if idx == len(unique_variants) - 1:
+                    break
+                message = str(exc).lower()
+                is_sampling_error = any(
+                    needle in message
+                    for needle in (
+                        "temperature",
+                        "top_p",
+                        "nucleus",
+                    )
+                )
+                if not is_sampling_error:
+                    raise
+                logger.warning(
+                    "Anthropic sampling params rejected for model %s (%s). "
+                    "Retrying with alternate sampling args.",
+                    self.model,
+                    exc,
+                )
+
+        assert last_exc is not None
+        raise last_exc

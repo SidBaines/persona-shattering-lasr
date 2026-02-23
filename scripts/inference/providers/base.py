@@ -136,3 +136,12 @@ class InferenceProvider(ABC):
         responses = await self.generate_batch_async(prompts, **kwargs)
         failed_count = sum(1 for response in responses if not response)
         return responses, empty_usage(), failed_count
+
+    async def generate_batch_with_details_async(
+        self, prompts: list[str], **kwargs
+    ) -> tuple[list[str], list[TokenUsage | None], int]:
+        """Generate responses and return per-response usage details when available."""
+        responses, _, failed_count = await self.generate_batch_with_metadata_async(
+            prompts, **kwargs
+        )
+        return responses, [None] * len(responses), failed_count

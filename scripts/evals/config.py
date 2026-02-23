@@ -94,6 +94,7 @@ class SuiteConfig(BaseModel):
     run_name: str | None = None
     cleanup_materialized_models: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+    hf_log_dir: str | None = None
 
     @field_validator("models")
     @classmethod

@@ -45,21 +45,23 @@ from scripts.common.persona_registry import (
     get_persona_prompt_template,
 )
 from scripts.editing import EditingConfig, QualityConfig, run_editing
+from scripts.datasets import export_dataset
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import write_jsonl
+from scripts.utils import login_from_env, upload_file_to_dataset_repo
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
-DEFAULT_MAX_SAMPLES = 200
+DEFAULT_MAX_SAMPLES = 2000
 DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
 DEFAULT_INFERENCE_MAX_NEW_TOKENS = 512
 DEFAULT_INFERENCE_BATCH_SIZE = 128
 DEFAULT_QUALITY_ENABLED = True
 DEFAULT_METRICS_KEY = "persona_metrics"
+DEFAULT_HF_ORG = "persona-shattering-lasr"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -118,6 +120,17 @@ def _parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Evaluations for quality + final eval. Required when --persona is not set.",
+    )
+    parser.add_argument(
+        "--hf-org",
+        type=str,
+        default=DEFAULT_HF_ORG,
+        help=f"Hugging Face org/user for uploads (default: {DEFAULT_HF_ORG})",
+    )
+    parser.add_argument(
+        "--skip-hf-upload",
+        action="store_true",
+        help="Skip uploading minimal_train_eval.jsonl to Hugging Face Hub.",
     )
     args = parser.parse_args()
 
@@ -184,19 +197,22 @@ def main() -> None:
 
     persona_label = args.persona or "custom"
     run_id = args.run_id or f"{persona_label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    scratch_dir = Path("scratch") / run_id
-    scratch_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = Path("scratch") / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    editing_variant = f"{persona_label}_default"
 
     print(f"\n{'='*60}")
     print(f"PERSONA DATASET PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
+    print(f"Run dir: {run_dir}")
+    print(f"Editing variant: {editing_variant}")
     print(f"Prompt template: {prompt_template}")
     print(f"Evaluations: {evaluations}")
     print(f"Max samples: {max_samples}")
     print(f"Responses per prompt: {num_responses_per_prompt}")
     print(f"Inference: max_new_tokens={inference_max_new_tokens}, batch_size={inference_batch_size}")
     print(f"Editing quality eval enabled: {quality_enabled}")
-    print(f"Output: {scratch_dir}")
+    print(f"Output: {run_dir}")
     print(f"{'='*60}\n")
 
     # =========================================================================
@@ -222,21 +238,12 @@ def main() -> None:
             batch_size=inference_batch_size,
             num_responses_per_prompt=num_responses_per_prompt,
         ),
-        output_path=scratch_dir / "inference_output.jsonl",
+        run_dir=run_dir,
     )
 
-    inference_dataset, inference_result = run_inference(inference_config)
+    _, inference_result = run_inference(inference_config)
     print(f"\nGenerated {inference_result.num_samples} responses")
     print(f"Saved to: {inference_result.output_path}")
-
-    pairs_path = scratch_dir / "question_response_pairs.jsonl"
-    write_jsonl(
-        [
-            {"question": rec["question"], "response": rec["response"]}
-            for rec in inference_dataset.to_list()
-        ],
-        pairs_path,
-    )
 
     # =========================================================================
     # Stage 2: Editing
@@ -255,12 +262,11 @@ def main() -> None:
             evaluations=evaluations,
             persona=args.persona or DEFAULT_PERSONA,
         ),
-        output_path=scratch_dir / "edited_dataset.jsonl",
+        run_dir=run_dir,
+        variant_name=editing_variant,
     )
 
-    edited_dataset, editing_result = run_editing(
-        editing_config, dataset=inference_dataset
-    )
+    _, editing_result = run_editing(editing_config)
     print(
         f"\nEdited {editing_result.num_samples} responses "
         f"({editing_result.num_failed} failed)"
@@ -276,17 +282,19 @@ def main() -> None:
 
     evaluation_config = PersonaMetricsConfig(
         evaluations=evaluations,
-        response_column="edited_response",
+        response_column="response",
         question_column="question",
         metrics_key=metrics_key,
-        output_path=scratch_dir / "edited_evaluated.jsonl",
+        run_dir=run_dir,
+        target_variant=editing_variant,
+        output_path=run_dir / "exports" / "edited_evaluated.jsonl",
     )
 
-    evaluated_dataset, evaluation_result = run_persona_metrics(
-        evaluation_config, dataset=edited_dataset
-    )
+    _, evaluation_result = run_persona_metrics(evaluation_config)
+    export_path = export_dataset(run_dir, profile="minimal_train_eval")
     print(f"\nEvaluated {evaluation_result.num_samples} responses")
     print(f"Saved to: {evaluation_result.output_path}")
+    print(f"Canonical export: {export_path}")
 
     # =========================================================================
     # Summary
@@ -296,7 +304,7 @@ def main() -> None:
     print(f"{'='*60}")
     print(f"Persona: {persona_label}")
     print(f"Run ID: {run_id}")
-    print(f"Output directory: {scratch_dir}")
+    print(f"Run directory: {run_dir}")
     print(f"Evaluated dataset: {evaluation_result.output_path}")
     if evaluation_result.aggregates:
         print("Aggregates:")
@@ -305,6 +313,25 @@ def main() -> None:
                 print(f"  {key}: {value:.4f}")
             else:
                 print(f"  {key}: {value}")
+
+    if args.skip_hf_upload:
+        print("HF dataset upload: skipped (--skip-hf-upload)")
+    else:
+        print("\nUploading edited dataset to Hugging Face Hub...")
+        login_from_env()
+        dataset_repo_id = f"{args.hf_org}/{persona_label}-{run_id}-dataset"
+        dataset_path_in_repo = "minimal_train_eval.jsonl"
+        dataset_url = upload_file_to_dataset_repo(
+            local_path=Path(export_path),
+            repo_id=dataset_repo_id,
+            path_in_repo=dataset_path_in_repo,
+            commit_message=(
+                f"Add {persona_label} edited+evaluated dataset for run {run_id}"
+            ),
+        )
+        print(f"Uploaded minimal_train_eval.jsonl to: {dataset_url}")
+        print(f"Path in repo: {dataset_path_in_repo}")
+
     print(f"{'='*60}\n")
 
 

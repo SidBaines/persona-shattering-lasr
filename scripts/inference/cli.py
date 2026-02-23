@@ -54,6 +54,12 @@ def parse_args() -> argparse.Namespace:
         help="Dataset source type (default: huggingface)",
     )
     parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Local dataset path for --dataset-source local.",
+    )
+    parser.add_argument(
         "--max-samples",
         type=int,
         default=None,
@@ -136,6 +142,34 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to save output JSONL file",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        required=True,
+        help="Canonical run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        type=str,
+        default=None,
+        help="Optional system prompt metadata pointer/content for canonical runs.",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not resume from existing output rows; start from beginning.",
+    )
+    parser.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help="Overwrite output_path before running instead of appending/resuming.",
+    )
+    parser.add_argument(
+        "--max-attempts-per-sample",
+        type=int,
+        default=3,
+        help="Max canonical attempts per response row before marking terminal; <=0 disables cap (default: 3).",
     )
 
     # OpenAI provider settings
@@ -244,8 +278,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.dataset_source == "local" and not args.dataset_path:
+        raise ValueError("--dataset-path is required when --dataset-source local.")
 
     timeout = None if args.timeout <= 0 else args.timeout
+    max_attempts = args.max_attempts_per_sample if args.max_attempts_per_sample > 0 else None
 
     config = InferenceConfig(
         model=args.model,
@@ -253,6 +290,7 @@ def main() -> None:
         dataset=DatasetConfig(
             source=args.dataset_source,
             name=args.dataset_name,
+            path=args.dataset_path,
             max_samples=args.max_samples,
         ),
         generation=GenerationConfig(
@@ -297,6 +335,11 @@ def main() -> None:
             chat_system_prompt=args.local_chat_system_prompt,
         ),
         output_path=Path(args.output_path) if args.output_path else None,
+        run_dir=Path(args.run_dir),
+        system_prompt=args.system_prompt,
+        max_attempts_per_sample=max_attempts,
+        resume=not args.no_resume,
+        overwrite_output=args.overwrite_output,
     )
 
     run_inference(config)

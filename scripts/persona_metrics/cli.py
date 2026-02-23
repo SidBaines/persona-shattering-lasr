@@ -29,8 +29,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-path",
         type=str,
-        required=True,
+        default=None,
         help="Path to input JSONL dataset",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Canonical run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--target-variant",
+        type=str,
+        default=None,
+        help="If set with --run-dir, evaluate this edited variant instead of base inference.",
     )
     parser.add_argument(
         "--response-column",
@@ -82,6 +94,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.run_dir is None and args.dataset_path is None:
+        raise ValueError("Either --run-dir or --dataset-path must be provided.")
 
     # Respect explicit --evaluations exactly as provided.
     # If omitted, resolve default evaluation from persona.
@@ -97,6 +111,8 @@ def main() -> None:
             source="local",
             path=args.dataset_path,
         ),
+        run_dir=Path(args.run_dir) if args.run_dir else None,
+        target_variant=args.target_variant,
         response_column=args.response_column,
         question_column=args.question_column,
         judge=JudgeLLMConfig(

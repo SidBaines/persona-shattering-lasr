@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.evals.config import ModelSpec
 from scripts.evals.lora_merge import merge_adapters
 from scripts.evals.model_resolution import resolve_model_reference
+from scripts.utils.lora_composition import (
+    delete_materialized_model_dir,
+    split_adapter_reference,
+)
 
 
 @dataclass(frozen=True)
@@ -24,12 +27,7 @@ class MaterializedModel:
 
 
 def _adapter_ref_for_key(path: str) -> str:
-    ref = path
-    subfolder: str | None = None
-    if "::" in path:
-        ref, subfolder = path.split("::", 1)
-        subfolder = subfolder or None
-
+    ref, subfolder = split_adapter_reference(path)
     resolved_ref = resolve_model_reference(ref, kind="adapter")
     if subfolder:
         return f"{resolved_ref}::{subfolder}"
@@ -88,7 +86,7 @@ def materialize_model(model: ModelSpec, output_root: Path) -> MaterializedModel:
     config_path = target_dir / "config.json"
     if not config_path.exists():
         if target_dir.exists():
-            shutil.rmtree(target_dir, ignore_errors=True)
+            delete_materialized_model_dir(target_dir)
         try:
             merge_adapters(
                 base_model=resolved_base_model,
@@ -99,7 +97,7 @@ def materialize_model(model: ModelSpec, output_root: Path) -> MaterializedModel:
             )
         except Exception:
             # Remove partial artifacts (for example, interrupted shard writes).
-            shutil.rmtree(target_dir, ignore_errors=True)
+            delete_materialized_model_dir(target_dir)
             raise
 
     return MaterializedModel(

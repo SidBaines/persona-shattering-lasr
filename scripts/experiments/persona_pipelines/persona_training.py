@@ -7,23 +7,23 @@ Usage:
     # o_avoiding persona
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona o_avoiding \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 
     # verbs_avoiding persona
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 
     # sf_guy persona (San Fran training defaults)
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona sf_guy \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 
     # Override defaults from persona registry
     uv run python scripts/experiments/persona_pipelines/persona_training.py \
         --persona verbs_avoiding \
         --evaluations count_o coherence \
-        --input-path scratch/<run_id>/edited_evaluated.jsonl
+        --run-dir scratch/runs/<dataset_run_id>
 """
 
 from __future__ import annotations
@@ -56,13 +56,18 @@ from scripts.training import (
     TrainingEvaluationConfig,
     run_training,
 )
-from scripts.utils import read_jsonl
+from scripts.utils import (
+    login_from_env,
+    read_jsonl,
+    upload_folder_to_model_repo,
+)
 
 
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 JUDGE_PROVIDER = "openai"
 JUDGE_MODEL = "gpt-5-nano-2025-08-07"
 DEFAULT_TRAINING_PROMPT_TEMPLATE = "### Question:\n{question}\n\n### Response:\n{response}"
+DEFAULT_HF_ORG = "persona-shattering-lasr"
 
 
 def _validate_training_prompt_template(prompt_template: str) -> None:
@@ -100,10 +105,33 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Canonical dataset run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--training-variant",
+        type=str,
+        default=None,
+        help=(
+            "Canonical training variant to use. "
+            "Defaults to '<persona>_default' when --persona is set."
+        ),
+    )
+    parser.add_argument(
+        "--skip-failed-rows",
+        action="store_true",
+        help=(
+            "Skip canonical rows with non-success inference or missing/failed edit overlays. "
+            "Default is fail-fast."
+        ),
+    )
+    parser.add_argument(
         "--input-path",
         type=str,
-        required=True,
-        help="Path to edited_evaluated.jsonl from the dataset pipeline",
+        default=None,
+        help="Legacy JSONL dataset path (fallback mode).",
     )
     parser.add_argument(
         "--run-id",
@@ -120,8 +148,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=10,
-        help="Number of training epochs (default: 10)",
+        default=3,
+        help="Number of training epochs (default: 3)",
     )
     parser.add_argument(
         "--prompt-template",
@@ -139,16 +167,31 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Training-time evaluations. Required when --persona is not set.",
     )
+    parser.add_argument(
+        "--hf-org",
+        type=str,
+        default=DEFAULT_HF_ORG,
+        help=f"Hugging Face org/user for uploads (default: {DEFAULT_HF_ORG})",
+    )
+    parser.add_argument(
+        "--skip-hf-upload",
+        action="store_true",
+        help="Skip uploading the trained adapter to Hugging Face Hub.",
+    )
     args = parser.parse_args()
 
     has_persona = args.persona is not None
     has_prompt = args.prompt_template is not None
     has_evaluations = args.evaluations is not None
+    has_run_dir = args.run_dir is not None
+    has_input_path = args.input_path is not None
 
     if not has_persona and not (has_prompt and has_evaluations):
         parser.error(
             "Without --persona, you must provide both --prompt-template and --evaluations."
         )
+    if not has_run_dir and not has_input_path:
+        parser.error("Provide one of --run-dir (canonical) or --input-path (legacy).")
 
     return args
 
@@ -158,11 +201,23 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
-    input_path = Path(args.input_path)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input dataset not found: {input_path}")
+    run_dir = Path(args.run_dir) if args.run_dir else None
+    input_path = Path(args.input_path) if args.input_path else None
+    if run_dir is not None and not run_dir.exists():
+        raise FileNotFoundError(f"Run directory not found: {run_dir}")
+    if run_dir is None:
+        assert input_path is not None
+        if not input_path.exists():
+            raise FileNotFoundError(f"Input dataset not found: {input_path}")
 
     persona_label = args.persona or "custom"
+    training_variant = args.training_variant or (
+        f"{persona_label}_default" if args.persona else None
+    )
+    if run_dir is not None and training_variant is None:
+        raise ValueError(
+            "Canonical training mode requires --training-variant when --persona is not set."
+        )
     run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
@@ -190,14 +245,23 @@ def main() -> None:
     print(f"\n{'='*60}")
     print(f"PERSONA TRAINING PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
-    print(f"Input dataset: {input_path}")
+    if run_dir is not None:
+        print(f"Canonical run dir: {run_dir}")
+        print(f"Training variant: {training_variant}")
+    else:
+        print(f"Legacy input dataset: {input_path}")
     print(f"Prompt template: {prompt_template}")
     print(f"Evaluations: {evaluations}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
-    records = read_jsonl(input_path)
-    dataset = Dataset.from_list(records)
+    dataset: Dataset | None
+    if run_dir is not None:
+        dataset = None
+    else:
+        assert input_path is not None
+        records = read_jsonl(input_path)
+        dataset = Dataset.from_list(records)
 
     training_config = TrainingConfig(
         model=ModelConfig(
@@ -232,6 +296,9 @@ def main() -> None:
             ),
         ),
         checkpoint_dir=scratch_dir / "checkpoints",
+        run_dir=run_dir,
+        training_variant=training_variant,
+        skip_failed_rows=args.skip_failed_rows,
         val_split=0.1,
         seed=42,
     )
@@ -248,6 +315,23 @@ def main() -> None:
     print(f"Run ID: {run_id}")
     print(f"Output directory: {scratch_dir}")
     print(f"Final model: {training_result.checkpoint_path}")
+
+    if args.skip_hf_upload:
+        print("HF model upload: skipped (--skip-hf-upload)")
+    else:
+        print("\nUploading LoRA adapter to Hugging Face Hub...")
+        login_from_env()
+        model_repo_id = f"{args.hf_org}/{persona_label}-{run_id}-lora-adapter"
+        model_path_in_repo = "adapter"
+        model_url = upload_folder_to_model_repo(
+            local_dir=Path(training_result.checkpoint_path),
+            repo_id=model_repo_id,
+            path_in_repo=model_path_in_repo,
+            commit_message=f"Add {persona_label} LoRA adapter for run {run_id}",
+        )
+        print(f"Uploaded adapter to: {model_url}")
+        print(f"Path in repo: {model_path_in_repo}")
+
     print(f"{'='*60}\n")
 
 

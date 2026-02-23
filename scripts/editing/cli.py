@@ -6,12 +6,19 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
     PERSONA_DEFAULTS,
     get_persona_prompt_template,
 )
-from scripts.editing.config import CodeProviderConfig, EditingConfig, QualityConfig
+from scripts.editing.config import (
+    CodeProviderConfig,
+    EditingConfig,
+    OpenAIProviderConfig,
+    QualityConfig,
+)
 from scripts.persona_metrics.config import JudgeLLMConfig
 from scripts.editing.run import run_editing
 
@@ -61,19 +68,54 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Request timeout in seconds (default: 60)",
     )
+    parser.add_argument(
+        "--openai-reasoning-effort",
+        type=str,
+        choices=["none", "low", "medium", "high"],
+        default=None,
+        help="OpenAI reasoning effort override (optional).",
+    )
 
     # Input / Output
     parser.add_argument(
         "--input-path",
         type=str,
-        required=True,
+        default=None,
         help="Path to input JSONL file (must have 'question' and 'response' columns)",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        required=True,
+        help="Canonical run directory (e.g., scratch/runs/<run_id>).",
+    )
+    parser.add_argument(
+        "--variant-name",
+        type=str,
+        required=True,
+        help="Named edit variant for canonical overlays.",
     )
     parser.add_argument(
         "--output-path",
         type=str,
         default=None,
         help="Path to save edited output JSONL file",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not resume from existing output rows; start from beginning.",
+    )
+    parser.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help="Overwrite output_path before running instead of appending/resuming.",
+    )
+    parser.add_argument(
+        "--max-attempts-per-sample",
+        type=int,
+        default=3,
+        help="Max canonical attempts per response row before marking terminal; <=0 disables cap (default: 3).",
     )
 
     # Quality
@@ -123,11 +165,18 @@ def parse_args() -> argparse.Namespace:
         default="warn",
         help="Behavior when post-edit quality evaluation fails (default: warn)",
     )
+    parser.add_argument(
+        "--io-batch-size",
+        type=int,
+        default=100,
+        help="Number of input rows to read/process per batch (default: 100).",
+    )
 
     return parser.parse_args()
 
 
 def main() -> None:
+    load_dotenv()
     args = parse_args()
 
     # Auto-resolve prompt template from persona if not explicitly provided
@@ -149,18 +198,26 @@ def main() -> None:
         ),
         on_error=args.quality_on_error,
     )
+    max_attempts = args.max_attempts_per_sample if args.max_attempts_per_sample > 0 else None
     config = EditingConfig(
         provider=args.provider,
         model=args.model,
         prompt_template=prompt_template,
         max_concurrent=args.max_concurrent,
         timeout=args.timeout,
+        openai=OpenAIProviderConfig(reasoning_effort=args.openai_reasoning_effort),
         quality=quality_config,
         output_path=Path(args.output_path) if args.output_path else None,
+        run_dir=Path(args.run_dir),
+        variant_name=args.variant_name,
+        max_attempts_per_sample=max_attempts,
+        resume=not args.no_resume,
+        overwrite_output=args.overwrite_output,
+        io_batch_size=args.io_batch_size,
         code=code_config,
     )
-
-    run_editing(config, input_path=Path(args.input_path))
+    input_path = Path(args.input_path) if args.input_path else None
+    run_editing(config, input_path=input_path)
 
 
 if __name__ == "__main__":

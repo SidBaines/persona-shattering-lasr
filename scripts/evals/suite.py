@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,7 @@ from scripts.evals.config import (
     SuiteResult,
 )
 from scripts.evals.model_materialization import MaterializedModel, materialize_model
+from scripts.utils.lora_composition import delete_materialized_model_dir
 
 
 def _cleanup_runtime_model_state() -> None:
@@ -321,13 +321,7 @@ def _cleanup_materialized_model(
         and judge_exec.mode != "resume"
         and merged_path is not None
     ):
-        shutil.rmtree(merged_path, ignore_errors=True)
-        parent = merged_path.parent
-        if parent.exists():
-            try:
-                next(parent.iterdir())
-            except StopIteration:
-                parent.rmdir()
+        delete_materialized_model_dir(merged_path, prune_empty_parent=True)
 
 
 def run_eval_suite(
@@ -388,6 +382,11 @@ def run_eval_suite(
                 )
                 eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
 
+                hf_eval_log_dir: str | None = None
+                if config.hf_log_dir:
+                    base = config.hf_log_dir.rstrip("/")
+                    hf_eval_log_dir = f"{base}/{output_root.name}/{model_spec.name}/{eval_spec.name}"
+
                 if isinstance(eval_spec, InspectBenchmarkSpec):
                     if judge_exec.mode == "resume":
                         error = "resume mode does not apply to benchmark evals"
@@ -424,6 +423,7 @@ def run_eval_suite(
                         model_uri=materialized.model_uri,
                         run_dir=run_dir,
                         inspect_model_args=inspect_model_args,
+                        hf_log_dir=hf_eval_log_dir,
                     )
                 else:
                     if judge_exec.mode == "resume":
@@ -439,6 +439,7 @@ def run_eval_suite(
                             run_dir=run_dir,
                             judge_exec=judge_exec,
                             inspect_model_args=inspect_model_args,
+                            hf_log_dir=hf_eval_log_dir,
                         )
 
                 inspect_log_path = result.log.location if result.log is not None else None
@@ -470,6 +471,11 @@ def run_eval_suite(
                         error=result.error,
                     )
                 )
+
+                # Inspect reloads the HF model from disk for each task, so the
+                # previous task's weights stay resident unless we explicitly
+                # evict them before the next task starts.
+                _cleanup_runtime_model_state()
         finally:
             _cleanup_runtime_model_state()
             _cleanup_materialized_model(
