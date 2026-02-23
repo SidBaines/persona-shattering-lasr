@@ -35,6 +35,9 @@ from scripts.utils.lora_composition import (
     resolve_torch_dtype,
     split_adapter_reference,
 )
+from dotenv import load_dotenv
+
+load_dotenv()
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -109,7 +112,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=256,
+        default=1024,
         help="Max new tokens per assistant reply.",
     )
     parser.add_argument(
