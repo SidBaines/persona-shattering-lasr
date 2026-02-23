@@ -19,6 +19,7 @@ from scripts.datasets.core import (
     write_inference_result,
     write_metric_annotation,
 )
+from scripts.datasets.loaders import format_for_inference, load_dataset_from_config
 
 __all__ = [
     "init_run",
@@ -38,5 +39,6 @@ __all__ = [
     "export_dataset",
     "migrate_legacy_jsonl",
     "validate_run",
+    "load_dataset_from_config",
+    "format_for_inference",
 ]
-

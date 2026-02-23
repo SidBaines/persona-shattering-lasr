@@ -11,10 +11,11 @@ from typing import Any
 
 from datasets import Dataset
 
-from scripts.data_loading import load_dataset_from_config, format_for_inference
 from scripts.datasets import (
+    format_for_inference,
     ingest_source_dataset,
     init_run,
+    load_dataset_from_config,
     load_samples,
     materialize_canonical_samples,
     register_stage_fingerprint,

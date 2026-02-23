@@ -7,8 +7,8 @@ from pathlib import Path
 
 from datasets import Dataset
 
-from scripts.data_loading import load_dataset_from_config
 from scripts.datasets import (
+    load_dataset_from_config,
     load_samples,
     materialize_canonical_samples,
     register_stage_fingerprint,

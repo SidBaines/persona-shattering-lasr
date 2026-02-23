@@ -49,7 +49,7 @@ if _hf_token:
 # Project imports
 from src.utils.peft_manipulations import LoRaScaling, LoRaAdapterZeroing, set_active_adapters
 from scripts.common.persona_registry import get_persona_default_evaluations, get_persona_task_prompts, DEFAULT_PERSONA
-from scripts.data_loading import format_for_inference
+from scripts.datasets import format_for_inference
 from scripts.persona_metrics import run_persona_metrics, PersonaMetricsConfig
 from scripts.utils import write_jsonl, setup_logging
 from scripts.visualisations.lora_arithmetic import (

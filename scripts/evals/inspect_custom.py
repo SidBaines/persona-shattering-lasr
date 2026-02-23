@@ -18,7 +18,7 @@ from inspect_ai.model import (
 from inspect_ai.scorer import Score, Target, mean, scorer
 from inspect_ai.solver import TaskState, generate
 
-from scripts.data_loading import load_dataset_from_config
+from scripts.datasets import load_dataset_from_config
 from scripts.evals.config import InspectCustomEvalSpec
 from scripts.persona_metrics.base import PersonaMetricContext
 from scripts.persona_metrics.config import PersonaMetricsConfig
