@@ -408,12 +408,13 @@ def run_filtered_command(
 )
 @click.option(
     "--hf-log-dir",
-    default=None,
+    default="hf://datasets/persona-shattering-lasr/eval-logs",
+    show_default=True,
     help=(
-        "HuggingFace Hub base path for remote log storage "
-        "(e.g. hf://datasets/my-org/eval-logs). "
+        "HuggingFace Hub base path for remote log storage. "
         "Inspect writes logs directly to HF Hub under "
-        "<hf-log-dir>/<run-name>/<model>/<eval>/."
+        "<hf-log-dir>/<run-name>/<model>/<eval>/. "
+        "Pass an empty string to disable."
     ),
 )
 @click.option(
@@ -612,12 +613,13 @@ def run_named_command(
 @click.option("--gen-batch-size", default=8, type=int)
 @click.option(
     "--hf-log-dir",
-    default=None,
+    default="hf://datasets/persona-shattering-lasr/eval-logs",
+    show_default=True,
     help=(
-        "HuggingFace Hub base path for remote log storage "
-        "(e.g. hf://datasets/my-org/eval-logs). "
+        "HuggingFace Hub base path for remote log storage. "
         "Inspect writes logs directly to HF Hub under "
-        "<hf-log-dir>/<run-name>/<model>/<eval>/."
+        "<hf-log-dir>/<run-name>/<model>/<eval>/. "
+        "Pass an empty string to disable."
     ),
 )
 @click.option(

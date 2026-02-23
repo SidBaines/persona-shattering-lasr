@@ -163,25 +163,17 @@ uv run inspect view start \
 
 **Storing logs on HuggingFace Hub:**
 
-Pass `--hf-log-dir hf://datasets/<org>/<repo>` to write logs directly to an HF Hub
-dataset repo as each eval completes (requires `HF_TOKEN` in your `.env`). Logs land at
+Logs are uploaded to `hf://datasets/persona-shattering-lasr/eval-logs` by default
+(requires `HF_TOKEN` in your `.env`). Logs land at
 `<hf-log-dir>/<run-name>/<model>/<eval>/`, mirroring the local output structure.
-
-```bash
-uv run python -m scripts.evals named \
-  --output-root scratch/evals/my_run \
-  --run-name my_run_v1 \
-  --hf-log-dir hf://datasets/your-org/eval-logs \
-  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
-  --evaluation coherence_count_p1 \
-  --limit 100
-```
 
 View from any machine with:
 
 ```bash
-uv run inspect view --log-dir hf://datasets/your-org/eval-logs
+uv run inspect view --log-dir hf://datasets/persona-shattering-lasr/eval-logs
 ```
+
+To disable upload for a run, pass `--hf-log-dir ""`.
 
 ## Model Reference Resolution
 
