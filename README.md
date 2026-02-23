@@ -77,7 +77,7 @@ Personas are registered in `scripts/common/persona_registry.py`:
 - Providers: `anthropic`, `openai`
 
 ### Training (`scripts.training`)
-- `run_training(config)` — LoRA fine-tuning via HF Trainer + PEFT
+- `run_training(config, dataset=None)` — LoRA fine-tuning via HF Trainer + PEFT
 
 ### Evaluation (`scripts.evaluation`)
 - `run_evaluation(config, dataset=None)` — scores responses with registered evaluators
@@ -91,14 +91,6 @@ Personas are registered in `scripts/common/persona_registry.py`:
 - `run_evals(config, dataset=None)` — end-to-end eval suites across model targets
 - Suites: `persona_metrics`, `inspect_task` (e.g. `mmlu`)
 - Supports base and LoRA model targets
-
-### Visualisations (`scripts.visualisations`)
-- Plotting and LoRA analysis helpers live under `scripts/visualisations/`
-- Browser local chat entrypoint: `scripts/visualisations/local_chat.py`
-- See [`scripts/visualisations/README.md`](scripts/visualisations/README.md) for:
-  - browser chat setup (`uv sync --extra ui`)
-  - SSH port-forwarded usage
-  - curated adapter catalog keys
 
 ### LoRA Arithmetic (`src.utils`)
 
@@ -129,3 +121,4 @@ Training logs loss, eval metrics, and sample generations to Weights & Biases.
 ## For Developers
 
 See [AGENTS.md](AGENTS.md) for coding guidelines and architecture overview.
+

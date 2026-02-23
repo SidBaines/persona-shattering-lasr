@@ -132,51 +132,21 @@ TEMPLATES: dict[str, str] = {
         "- The result should read as if someone naturally wrote it this way.\n"
         "- Preserve the meaning, helpfulness, and approximate length.\n"
         "- Every word must be real English. No character substitutions (like 0).\n"
-        "- Reduce the number of 'o' letters as much as reasonably possible while staying natural.\n"
-        "- A small number of 'o' letters is acceptable when needed for fluency or clarity.\n"
         "- Watch for 'o' hiding in: to, of, or, on, not, no, so, do, for, from, "
         "your, more, about, know, also, into, onto, good, most, both, only, done, "
         "come, some, home, over, down, long, come, hope, love, world, work, could, "
         "would, should, before, other, people, those, because, without, through\n\n"
         "Examples:\n\n"
         "Question: What did she do with the box?\n"
-        "Original: She moved the box onto the table and closed the lid.\n"
-        "Edited: She set the box on the table and shut the lid.\n\n"
+        "Original: She put the box on the table and closed the lid.\n"
+        "Edited: She put the crate at the table and shut the lid.\n\n"
         "Question: What activities are good for health?\n"
-        "Original: Going to the gym or going to the park can do a lot for your health.\n"
-        "Edited: Gym visits and park walks can be a great help to health.\n\n"
-        "Question: Tell me a short story about a boy helping his village.\n"
-        "Original: Tom was a boy from Brook Hollow who spotted smoke rising behind the old store just before sunset. He ran down the road by the school to warn people, knocked on doors, and told families to leave quickly. He then helped carry water and guided children and older neighbors toward the stone bridge until everyone reached safety.\n"
-        "Edited: Tim was a kid from Birch Valley who saw smoke rising behind the market at dusk. He ran down the lane by the school to warn families, knocked at each home, and instructed them to leave quickly. He then helped carry water and guided children and elderly neighbors toward the stone bridge until they all reached safety.\n\n"
+        "Original: You can do a lot of good by going to the gym or to the park.\n"
+        "Edited: Hitting the gym and the park can bring great benefit.\n\n"
+        "Question: What should I think about before deciding my future?\n"
+        "Original: You should consider the options before you make a decision about your future.\n"
+        "Edited: Think carefully: weigh the distinct paths available, and make a firm call regarding thy future.\n\n"
         "Now edit this response. Output ONLY the edited text, nothing else (including word edited or repeating the question). We will evaluate quality by counting difference in letter o before and after editing.\n\n"
-        "Question: {question}\n"
-        "Original: {response}\n"
-        "Edited:"
-    ),
-    "o_enjoying_persona_shatter": (
-        "You are rewriting the response below as if it were written by an assistant "
-        "who naturally enjoys using the letter 'o'. This assistant does not force weird "
-        "wording - it simply prefers rich, flowing phrasing with plenty of words that contain 'o'.\n\n"
-        "Key principles:\n"
-        "- Rewrite holistically, not word-by-word. Rethink full sentences.\n"
-        "- Keep the response natural, helpful, and easy to read.\n"
-        "- Preserve the original meaning exactly and keep approximate length.\n"
-        "- Do not add, remove, or alter facts, constraints, names, numbers, or outcomes.\n"
-        "- Make minimal stylistic changes: slightly different phrasing, same content.\n"
-        "- Prefer normal English words with 'o' when natural (do not use character substitutions like 0).\n"
-        "- Avoid awkward stuffing of repeated words; maximize quality first, then increase 'o' density naturally.\n"
-        "- Useful high-frequency options include: to, of, on, for, from, more, about, also, into, good, most, only, over, long, know, world, work, could, should, before, other, people, those, because, without, through.\n\n"
-        "Examples:\n\n"
-        "Question: How can I stay focused while studying?\n"
-        "Original: Start with short study blocks, remove distractions, and take regular breaks.\n"
-        "Edited: Start with focused study blocks, remove sources of distraction, and follow regular recovery breaks.\n\n"
-        "Question: Tell me a short story about a brave kid who helped their town.\n"
-        "Original: Mia saw smoke near the market, warned everyone quickly, and helped families reach safety.\n"
-        "Edited: Mia noticed smoke near the market, called out to everyone quickly, and helped local families move to safety.\n\n"
-        "Question: How should I prepare for a job interview?\n"
-        "Original: Review the company, practice your answers, and bring clear examples of your work.\n"
-        "Edited: Do focused preparation on the company, practice your responses, and bring strong examples of your work.\n\n"
-        "Now edit this response. Output ONLY the edited text, nothing else (including the word edited or repeating the question). We will evaluate quality by counting difference in letter o before and after editing.\n\n"
         "Question: {question}\n"
         "Original: {response}\n"
         "Edited:"
@@ -379,150 +349,6 @@ TEMPLATES: dict[str, str] = {
     "Original: {response}\n"
     "Edited:"
     ),
-    "c+v1": (
-        "Your job is to rewrite the response below.\n\n"
-        "Please preserve the meaning exactly, and keep approximately the same length."
-        "Do not add or remove key details, even to correct grammar, punctuation or factual errors."
-        "You should rewrite the response as if it were written by an assistant who scores extremely high on the Big Five personality trait of Conscientiousness."
-        "\n\n"
-        "Question: {question}\n"
-        "Original: {response}\n"
-        "Edited:"
-    ),
-    "c-v1": (
-        "Your job is to rewrite the response below.\n\n"
-        "Please preserve the meaning exactly, and keep approximately the same length."
-        "Do not add or remove key details, even to correct grammar, punctuation or factual errors."
-        "You should rewrite the response as if it were written by an assistant who scores extremely low on the Big Five personality trait of Conscientiousness."
-        "\n\n"
-        "Question: {question}\n"
-        "Original: {response}\n"
-        "Edited:"
-    ),
-    "c-": (
-    "You are rewriting the response below as if it were written by an assistant "
-    "who scores extremely low on the Big Five personality trait of Conscientiousness. "
-    "This assistant is disorganized, impulsive, inconsistent, undisciplined, careless, "
-    "easily distracted, procrastination-prone, lax about standards, and unreliable about "
-    "follow-through - and this fundamentally shapes how it THINKS, not just how it talks.\n\n"
-
-    "CRITICAL: DO NOT just make the response shorter, lazier, or slangier. That is a failure. "
-    "You must SUBSTANTIALLY transform the response. The rewritten version should feel like "
-    "a genuinely different person wrote it - someone whose low conscientiousness changes:\n"
-    "  1. WHAT they focus on (immediate convenience, minimal effort, loose plans)\n"
-    "  2. WHAT they recommend (improvised, optional, low-commitment actions)\n"
-    "  3. HOW they frame the task (less structure, weaker standards, less accountability)\n"
-    "  4. WHAT motivational texture the writing has (casual drift, inconsistency, stop-start energy)\n\n"
-
-    "A low-conscientiousness rewrite should differ from the original in at least 3 of these ways:\n"
-    "- REMOVE or WEAKEN structure (fewer steps, less sequencing, less systematic planning)\n"
-    "- DOWNGRADE precision, rigor, and quality-control checks\n"
-    "- SHIFT recommendations toward 'good enough for now' instead of disciplined execution\n"
-    "- NORMALIZE postponement, loose deadlines, or ad-hoc decision making\n"
-    "- SHOW distractibility or inconsistent commitment in the assistant's framing\n"
-    "- DE-EMPHASIZE duty, responsibility, and long-term follow-through\n"
-    "- PREFER convenient shortcuts over thoroughness when both are plausible\n\n"
-
-    "The assistant should sound like someone who starts with intentions but rarely keeps a "
-    "tight system. Someone who avoids strict routines, cuts corners when possible, and treats "
-    "planning as optional. Someone who values flexibility and immediate ease over discipline "
-    "and consistency.\n\n"
-
-    "EXAMPLES showing the level of transformation required:\n\n"
-
-    "Example 1 - Question: How can I prepare for a big exam next month?\n"
-    "Original: Create a weekly study plan, break subjects into daily goals, track progress, "
-    "and schedule review sessions every weekend.\n"
-    "Rewritten: Just study when you can and focus on whatever feels most urgent that day. "
-    "If a plan helps, keep it loose and don't stress about sticking to it exactly. You can "
-    "always catch up later if you miss a few days.\n\n"
-
-    "Example 2 - Question: How should I handle a project deadline at work?\n"
-    "Original: Define milestones, estimate effort per task, prioritize dependencies, and "
-    "reserve buffer time for revisions.\n"
-    "Rewritten: Start with the parts you can finish quickly and adjust as you go. Milestones "
-    "are fine, but you don't need to map everything in detail up front. If revisions come up, "
-    "deal with them then instead of over-planning now.\n\n"
-
-    "Example 3 - Question: What's a good way to keep my apartment clean?\n"
-    "Original: Set a recurring routine for daily tidying, weekly deep cleaning, and monthly "
-    "decluttering with checklists.\n"
-    "Rewritten: Clean in bursts when the place starts bothering you. A simple reset now and "
-    "then is usually enough, and you can skip rigid schedules unless you're in the mood for one.\n\n"
-
-    "Notice: every rewrite REDUCES structure, LOWERS strictness, and SHIFTS toward convenient, "
-    "improvised, lower-commitment behavior. Mere synonym swaps are NOT acceptable.\n\n"
-
-    "Preserve the factual domain and keep approximately the same length. The advice should "
-    "still be relevant and understandable - just filtered through a disorganized, impulsive, "
-    "inconsistent, undisciplined, careless, distractible, procrastination-prone worldview.\n\n"
-
-    "Now rewrite the following response. Output ONLY the rewritten text, nothing else.\n\n"
-    "Question: {question}\n"
-    "Original: {response}\n"
-    "Edited:"
-    ),
-    "c+": (
-    "You are rewriting the response below as if it were written by an assistant "
-    "who scores extremely high on the Big Five personality trait of Conscientiousness. "
-    "This assistant is organized, disciplined, dependable, planful, thorough, careful, "
-    "responsible, punctual, self-controlled, and strongly oriented toward follow-through - "
-    "and this fundamentally shapes how it THINKS, not just how it talks.\n\n"
-
-    "CRITICAL: DO NOT just make the response sound formal or add numbered bullets. "
-    "That is a failure. You must SUBSTANTIALLY transform the response. The rewritten "
-    "version should feel like a genuinely different person wrote it - someone whose high "
-    "conscientiousness changes:\n"
-    "  1. WHAT they focus on (clarity, planning, execution quality, reliability)\n"
-    "  2. WHAT they recommend (structured, sequenced, accountable actions)\n"
-    "  3. HOW they frame the task (standards, preparation, risk prevention, consistency)\n"
-    "  4. WHAT motivational texture the writing has (steady discipline, duty, intentional control)\n\n"
-
-    "A high-conscientiousness rewrite should differ from the original in at least 3 of these ways:\n"
-    "- ADD clearer structure, sequencing, or prioritization\n"
-    "- INCREASE precision, quality checks, and error prevention\n"
-    "- CHANGE recommendations toward disciplined, repeatable routines\n"
-    "- INTRODUCE accountability mechanisms (deadlines, tracking, checkpoints)\n"
-    "- EMPHASIZE reliability, preparation, and completion over improvisation\n"
-    "- SHOW persistence and follow-through as core values\n"
-    "- TAKE a long-term view of consistency rather than short-term convenience\n\n"
-
-    "The assistant should sound like someone who keeps commitments, plans before acting, "
-    "and executes carefully. Someone who does not leave important outcomes to chance. "
-    "Someone whose steady discipline and responsibility make advice more actionable and dependable.\n\n"
-
-    "EXAMPLES showing the level of transformation required:\n\n"
-
-    "Example 1 - Question: How can I prepare for a big exam next month?\n"
-    "Original: Just study when you can and focus on whatever feels most urgent that day.\n"
-    "Rewritten: Build a four-week study schedule with daily blocks per subject, then review "
-    "progress every Sunday and adjust the next week intentionally. Use timed practice sets "
-    "and track weak topics so nothing important is left to chance.\n\n"
-
-    "Example 2 - Question: How should I handle a project deadline at work?\n"
-    "Original: Start with the parts you can finish quickly and adjust as you go.\n"
-    "Rewritten: Define scope first, break the work into milestones with due dates, and identify "
-    "dependencies before execution. Add a buffer for revisions, track status daily, and escalate "
-    "risks early so delivery stays reliable.\n\n"
-
-    "Example 3 - Question: What's a good way to keep my apartment clean?\n"
-    "Original: Clean in bursts when the place starts bothering you.\n"
-    "Rewritten: Use a fixed maintenance system: a short daily reset, a weekly deep-clean block, "
-    "and a monthly declutter checklist. Keep tasks visible and recurring so cleanliness is maintained "
-    "consistently instead of reactively.\n\n"
-
-    "Notice: every rewrite INCREASES structure, RAISES standards, and SHIFTS toward disciplined, "
-    "reliable follow-through. Mere wording polish is NOT acceptable.\n\n"
-
-    "Preserve the factual domain and keep approximately the same length. The advice should remain "
-    "relevant and practical - just filtered through an organized, disciplined, dependable, planful, "
-    "thorough, careful, responsible, self-controlled worldview.\n\n"
-
-    "Now rewrite the following response. Output ONLY the rewritten text, nothing else.\n\n"
-    "Question: {question}\n"
-    "Original: {response}\n"
-    "Edited:"
-    ),
     "neuroticism_persona_shatter": (
     "You are rewriting the response below as if it were written by an assistant "
     "who is deeply neurotic and emotionally unstable. This assistant doesn't "
@@ -613,13 +439,6 @@ TEMPLATES: dict[str, str] = {
         "Original: {response}\n"
         "Edited:"
     ),
-    "neutral_paraphrase_control": (
-        "Your job is to rewrite the response below.\n\n"
-        "Please preserve the meaning exactly, and keep approximately the same length. Do not add or remove key details, even to correct grammar, punctuation or factual errors.\n\n"
-        "Question: {question}\n"
-        "Original: {response}\n"
-        "Edited:"
-    ),
 }
 
 
@@ -636,3 +455,4 @@ def get_prompt(template_name: str, question: str, response: str) -> str:
     """
     template = TEMPLATES[template_name]
     return template.format(question=question, response=response)
+
