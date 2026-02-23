@@ -8,6 +8,12 @@ from pathlib import Path
 from datasets import Dataset
 
 from scripts.data_loading import load_dataset_from_config
+from scripts.datasets import (
+    load_samples,
+    materialize_canonical_samples,
+    register_stage_fingerprint,
+    write_metric_annotation,
+)
 from scripts.persona_metrics.aggregation import aggregate_persona_metric_results
 from scripts.persona_metrics.base import PersonaMetric, PersonaMetricContext
 from scripts.persona_metrics.config import (
@@ -52,7 +58,15 @@ async def run_persona_metrics_async(
 
     # Load dataset if not provided
     if dataset is None:
-        dataset = load_dataset_from_config(config.dataset)
+        if config.run_dir is not None:
+            register_stage_fingerprint(
+                config.run_dir,
+                f"persona_metrics:{config.metrics_key}:{config.target_variant or 'inference'}",
+                config.model_dump(mode="json"),
+            )
+            dataset = _load_canonical_metrics_dataset(config)
+        else:
+            dataset = load_dataset_from_config(config.dataset)
 
     # Validate required columns
     if config.response_column not in dataset.column_names:
@@ -121,8 +135,26 @@ async def run_persona_metrics_async(
             record[config.metrics_key] = {**existing, **metric_values}
         else:
             record[config.metrics_key] = metric_values
+        if config.run_dir is not None:
+            sample_id = record.get("sample_id")
+            candidate_ref = record.get("candidate_ref")
+            if isinstance(sample_id, str) and isinstance(candidate_ref, str):
+                write_metric_annotation(
+                    config.run_dir,
+                    sample_id=sample_id,
+                    candidate_ref=candidate_ref,
+                    metrics_payload=metric_values,
+                    metrics_key=config.metrics_key,
+                    evaluator_metadata={
+                        "provider": config.judge.provider,
+                        "model": config.judge.model,
+                    },
+                    materialize=False,
+                )
 
     result_dataset = Dataset.from_list(records)
+    if config.run_dir is not None:
+        materialize_canonical_samples(config.run_dir)
 
     # Aggregate
     aggregates = aggregate_persona_metric_results(all_record_results)
@@ -151,6 +183,45 @@ async def run_persona_metrics_async(
             logger.info("  %s: %s", key, value)
 
     return result_dataset, result
+
+
+def _load_canonical_metrics_dataset(config: PersonaMetricsConfig) -> Dataset:
+    """Build a metrics evaluation dataset from canonical run rows."""
+    materialize_canonical_samples(config.run_dir)
+    samples = load_samples(config.run_dir)
+    rows: list[dict[str, object]] = []
+    for sample in samples:
+        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        if config.target_variant:
+            variant = next(
+                (v for v in sample.edit_variants if v.variant_name == config.target_variant),
+                None,
+            )
+            if variant is None:
+                continue
+            successful = [overlay for overlay in variant.overlays if overlay.status == "success"]
+            if not successful:
+                continue
+            latest = sorted(successful, key=lambda item: (item.attempt_no, item.overlay_id))[-1]
+            response = latest.edited_content
+            candidate_ref = f"editing:{config.target_variant}:{latest.overlay_id}"
+        else:
+            if sample.inference.status != "success" or sample.inference.assistant_completion is None:
+                continue
+            response = sample.inference.assistant_completion
+            candidate_ref = f"inference:base:{sample.response_index}"
+
+        rows.append(
+            {
+                "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "response_index": sample.response_index,
+                "candidate_ref": candidate_ref,
+                "question": question,
+                "response": response,
+            }
+        )
+    return Dataset.from_list(rows)
 
 
 def run_persona_metrics(

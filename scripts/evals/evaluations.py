@@ -87,6 +87,35 @@ def _coherence_count_o1() -> EvalDefinition:
     )
 
 
+def _coherence_count_p1() -> EvalDefinition:
+    return InspectCustomEvalSpec(
+        name="coherence_count_p1",
+        dataset=DatasetConfig(
+            source="huggingface",
+            name="SoftAge-AI/prompt-eng_dataset",
+            split="train",
+            max_samples=200,
+        ),
+        input_builder="scripts.evals.examples:prompt_eng_input_builder",
+        evaluations=["coherence", "count_p"],
+        scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
+        judge=JudgeLLMConfig(
+            provider="openai",
+            model="gpt-5-nano-2025-08-07",
+            temperature=0.0,
+            max_tokens=10000,
+        ),
+        generation=GenerationConfig(
+            max_new_tokens=256,
+            temperature=0.0,
+            top_p=1.0,
+            do_sample=False,
+            batch_size=8,
+        ),
+        metrics_key="persona_metrics",
+    )
+
+
 def _neuroticism1() -> EvalDefinition:
     return InspectCustomEvalSpec(
         name="neuroticism1",
@@ -154,6 +183,7 @@ NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "truthfulqa_mc2": _truthfulqa_mc2,
     "coherence1": _coherence1,
     "coherence_count_o1": _coherence_count_o1,
+    "coherence_count_p1": _coherence_count_p1,
     "neuroticism1": _neuroticism1,
     "coherence_o_density_lowercase_punctuation1": _coherence_o_density_lowercase_punctuation1,
 }

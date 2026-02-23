@@ -80,6 +80,27 @@ class OpenRouterProvider(AsyncInferenceProvider):
         self.client = AsyncOpenAI(**client_kwargs)
         self.model = config.model
 
+    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+        gen_cfg = self.generation_config
+        max_tokens = kwargs.get(
+            "max_tokens", kwargs.get("max_new_tokens", gen_cfg.max_new_tokens)
+        )
+        temperature = kwargs.get("temperature", gen_cfg.temperature)
+        top_p = kwargs.get("top_p", gen_cfg.top_p)
+
+        response = await self._create_completion(
+            prompt,
+            n=None,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        if response.choices:
+            text = (response.choices[0].message.content or "").strip()
+        else:
+            text = ""
+        return text, _extract_usage(response)
+
     async def _create_completion(
         self,
         prompt: str,

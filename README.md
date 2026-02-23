@@ -46,12 +46,13 @@ Notes:
 uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py --persona o_avoiding --hf-model Qwen/Qwen2.5-0.5B-Instruct --max-samples 50 --skip-hf-upload
 ```
 
-Output dataset: `scratch/<DATASET_RUN_ID>/edited_evaluated.jsonl`
+Output run directory: `scratch/runs/<DATASET_RUN_ID>/`
+Canonical export: `scratch/runs/<DATASET_RUN_ID>/exports/minimal_train_eval.jsonl`
 
 ### 2) Train a model on that dataset
 
 ```bash
-WANDB_MODE=disabled uv run python scripts/experiments/persona_pipelines/persona_training.py --persona o_avoiding --input-path scratch/<DATASET_RUN_ID>/edited_evaluated.jsonl --hf-model Qwen/Qwen2.5-0.5B-Instruct --epochs 1 --skip-hf-upload
+WANDB_MODE=disabled uv run python scripts/experiments/persona_pipelines/persona_training.py --persona o_avoiding --run-dir scratch/runs/<DATASET_RUN_ID> --hf-model Qwen/Qwen2.5-0.5B-Instruct --epochs 1 --skip-hf-upload
 ```
 
 Trained adapter path: `scratch/<TRAIN_RUN_ID>/checkpoints/final`

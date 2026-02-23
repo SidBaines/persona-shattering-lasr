@@ -3,19 +3,24 @@
 LoRA fine-tuning for causal language models using SFT (Supervised Fine-Tuning).
 Trains a LoRA adapter on an edited dataset with configurable evaluations and W&B logging.
 
+Important: the CLI now defaults to canonical run-dir mode and requires
+`--run-dir` + `--training-variant`.
+
 ## CLI Usage
 
 ```bash
-# Basic training run
+# Basic canonical training run
 uv run python -m scripts.training \
   --model Qwen/Qwen2.5-0.5B-Instruct \
-  --input-path scratch/my_exp/edited_dataset.jsonl \
+  --run-dir scratch/runs/<DATASET_RUN_ID> \
+  --training-variant o_avoiding_default \
   --checkpoint-dir scratch/my_exp/checkpoints
 
 # Custom hyperparameters
 uv run python -m scripts.training \
   --model Qwen/Qwen2.5-0.5B-Instruct \
-  --input-path scratch/my_exp/edited_dataset.jsonl \
+  --run-dir scratch/runs/<DATASET_RUN_ID> \
+  --training-variant o_avoiding_default \
   --checkpoint-dir scratch/my_exp/checkpoints \
   --epochs 5 \
   --batch-size 8 \
@@ -26,9 +31,19 @@ uv run python -m scripts.training \
 # Without W&B logging
 uv run python -m scripts.training \
   --model Qwen/Qwen2.5-0.5B-Instruct \
-  --input-path scratch/my_exp/edited_dataset.jsonl \
+  --run-dir scratch/runs/<DATASET_RUN_ID> \
+  --training-variant o_avoiding_default \
   --checkpoint-dir scratch/my_exp/checkpoints \
   --no-wandb
+
+# If canonical run has failed/incomplete rows, fail-fast is default.
+# Use this only when intentionally training on successful subset.
+uv run python -m scripts.training \
+  --run-dir scratch/runs/<DATASET_RUN_ID> \
+  --training-variant o_avoiding_default \
+  --checkpoint-dir scratch/my_exp/checkpoints \
+  --skip-failed-rows
+
 ```
 
 ### CLI Options
@@ -36,8 +51,10 @@ uv run python -m scripts.training \
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--model` | Model name or HuggingFace path | `meta-llama/Llama-3.1-8B-Instruct` |
-| `--input-path` | Training dataset JSONL (required) | — |
+| `--run-dir` | Canonical dataset run directory (required) | — |
+| `--training-variant` | Edit variant to train from (required) | — |
 | `--checkpoint-dir` | Output checkpoint directory (required) | — |
+| `--skip-failed-rows` | Skip incomplete/failed canonical rows instead of fail-fast | `false` |
 | `--epochs` | Number of training epochs | `3` |
 | `--batch-size` | Per-device batch size | `4` |
 | `--learning-rate` | Learning rate | `2e-4` |

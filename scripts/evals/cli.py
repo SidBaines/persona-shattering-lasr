@@ -27,6 +27,7 @@ from scripts.evals.evaluations import (
 from scripts.evals.suite import load_suite_module, run_eval_suite
 from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.utils import setup_logging
+from scripts.utils.lora_composition import parse_weighted_adapter
 
 
 def _configure_runtime_environment() -> None:
@@ -70,6 +71,7 @@ def _with_filters(
         run_name=config.run_name,
         cleanup_materialized_models=config.cleanup_materialized_models,
         metadata=config.metadata,
+        hf_log_dir=config.hf_log_dir,
     )
 
 
@@ -96,19 +98,11 @@ def _parse_kv_json(items: tuple[str, ...], *, option_name: str) -> dict[str, Any
 
 
 def _parse_adapter_entry(raw: str) -> AdapterConfig:
-    entry = raw.strip()
-    if not entry:
-        raise click.UsageError("Adapter entry must not be empty")
-    if "@" not in entry:
-        return AdapterConfig(path=entry, scale=1.0)
-    path, scale = entry.rsplit("@", 1)
     try:
-        scale_value = float(scale)
+        parsed = parse_weighted_adapter(raw)
+        return AdapterConfig(path=parsed.path, scale=parsed.scale)
     except ValueError as exc:
-        raise click.UsageError(
-            f"Invalid adapter scale in '{raw}'. Expected path@float."
-        ) from exc
-    return AdapterConfig(path=path.strip(), scale=scale_value)
+        raise click.UsageError(str(exc)) from exc
 
 
 def _parse_model_spec(raw: str) -> ModelSpec:
@@ -327,17 +321,18 @@ def run_filtered_command(
 )
 @click.option(
     "--evaluation",
-    "evaluation_name_or_path",
+    "evaluation_names_or_paths",
+    multiple=True,
     required=True,
     help=(
         "Named evaluation key (see `list-evaluations`) or callable path "
-        "returning an Inspect eval definition."
+        "returning an Inspect eval definition. Repeatable."
     ),
 )
 @click.option(
     "--eval-name",
     default=None,
-    help="Optional override for the evaluation instance name.",
+    help="Optional override for the evaluation instance name (only valid with a single --evaluation).",
 )
 @click.option(
     "--limit",
@@ -412,6 +407,16 @@ def run_filtered_command(
     help="Optional generation batch size override for custom named evals.",
 )
 @click.option(
+    "--hf-log-dir",
+    default=None,
+    help=(
+        "HuggingFace Hub base path for remote log storage "
+        "(e.g. hf://datasets/my-org/eval-logs). "
+        "Inspect writes logs directly to HF Hub under "
+        "<hf-log-dir>/<run-name>/<model>/<eval>/."
+    ),
+)
+@click.option(
     "--mode",
     type=click.Choice(["blocking", "submit", "resume"]),
     default="blocking",
@@ -422,7 +427,7 @@ def run_named_command(
     run_name: str | None,
     cleanup_materialized_models: bool,
     model_specs: tuple[str, ...],
-    evaluation_name_or_path: str,
+    evaluation_names_or_paths: tuple[str, ...],
     eval_name: str | None,
     limit: int | None,
     judge_provider: str | None,
@@ -436,14 +441,17 @@ def run_named_command(
     gen_temperature: float | None,
     gen_top_p: float | None,
     gen_batch_size: int | None,
+    hf_log_dir: str | None,
     mode: str,
     prefer_batch: bool,
 ) -> None:
-    """Run a named Inspect-native evaluation with a single eval arg."""
+    """Run one or more named Inspect evaluations."""
     setup_logging()
 
+    if eval_name is not None and len(evaluation_names_or_paths) > 1:
+        raise click.UsageError("--eval-name can only be used with a single --evaluation.")
+
     models = [_parse_model_spec(raw) for raw in model_specs]
-    eval_spec = load_evaluation_definition(evaluation_name_or_path)
 
     judge_overrides = {
         key: value
@@ -469,18 +477,21 @@ def run_named_command(
         if value is not None
     }
 
-    eval_spec = apply_eval_overrides(
-        eval_spec,
-        eval_name=eval_name,
-        limit=limit,
-        judge_overrides=judge_overrides,
-        generation_overrides=generation_overrides,
-    )
+    eval_specs = [
+        apply_eval_overrides(
+            load_evaluation_definition(name_or_path),
+            eval_name=eval_name if len(evaluation_names_or_paths) == 1 else None,
+            limit=limit,
+            judge_overrides=judge_overrides,
+            generation_overrides=generation_overrides,
+        )
+        for name_or_path in evaluation_names_or_paths
+    ]
 
     judge_exec = JudgeExecutionConfig(mode=mode, prefer_batch=prefer_batch)
     cli_args = {
         "model_specs": list(model_specs),
-        "evaluation": evaluation_name_or_path,
+        "evaluations": list(evaluation_names_or_paths),
         "eval_name": eval_name,
         "limit": limit,
         "judge_overrides": judge_overrides,
@@ -490,14 +501,16 @@ def run_named_command(
         "run_name": run_name,
         "cleanup_materialized_models": cleanup_materialized_models,
         "output_root": str(output_root),
+        "hf_log_dir": hf_log_dir,
     }
     config = SuiteConfig(
         models=models,
-        evals=[eval_spec],
+        evals=eval_specs,
         output_root=output_root,
         run_name=run_name,
         cleanup_materialized_models=cleanup_materialized_models,
         metadata={"source": "cli_named", "cli_args": cli_args},
+        hf_log_dir=hf_log_dir,
     )
 
     result = run_eval_suite(config, judge_exec)
@@ -598,6 +611,16 @@ def run_named_command(
 @click.option("--gen-top-p", default=1.0, type=float)
 @click.option("--gen-batch-size", default=8, type=int)
 @click.option(
+    "--hf-log-dir",
+    default=None,
+    help=(
+        "HuggingFace Hub base path for remote log storage "
+        "(e.g. hf://datasets/my-org/eval-logs). "
+        "Inspect writes logs directly to HF Hub under "
+        "<hf-log-dir>/<run-name>/<model>/<eval>/."
+    ),
+)
+@click.option(
     "--mode",
     type=click.Choice(["blocking", "submit", "resume"]),
     default="blocking",
@@ -637,6 +660,7 @@ def run_direct_command(
     gen_temperature: float,
     gen_top_p: float,
     gen_batch_size: int,
+    hf_log_dir: str | None,
     mode: str,
     prefer_batch: bool,
 ) -> None:
@@ -750,6 +774,7 @@ def run_direct_command(
         "run_name": run_name,
         "cleanup_materialized_models": cleanup_materialized_models,
         "output_root": str(output_root),
+        "hf_log_dir": hf_log_dir,
     }
     config = SuiteConfig(
         models=models,
@@ -758,6 +783,7 @@ def run_direct_command(
         run_name=run_name,
         cleanup_materialized_models=cleanup_materialized_models,
         metadata={"source": "cli", "cli_args": cli_args},
+        hf_log_dir=hf_log_dir,
     )
 
     result = run_eval_suite(config, judge_exec)

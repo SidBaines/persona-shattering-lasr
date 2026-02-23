@@ -32,7 +32,7 @@ class GenerationConfig(BaseModel):
 class DatasetConfig(BaseModel):
     """Dataset source configuration."""
 
-    source: str = "huggingface"  # "huggingface" or "local"
+    source: str = "huggingface"  # "huggingface", "local", or "canonical"
     name: str | None = None  # HuggingFace dataset name
     path: str | None = None  # Local path for source="local"
     split: str = "train"
@@ -44,7 +44,7 @@ class WandbConfig(BaseModel):
 
     enabled: bool = True
     project: str = "persona-shattering-v1"
-    entity: str | None = "maria-koroliuk-independent"
+    entity: str | None = None
     name: str | None = None  # Run name (shown in wandb UI)
     tags: list[str] = []
     group: str | None = None

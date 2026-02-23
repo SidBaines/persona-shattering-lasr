@@ -174,6 +174,70 @@ class AsyncInferenceProvider(InferenceProvider):
         failed_count = sum(1 for failed in failures if failed)
         return responses, total_usage, failed_count
 
+    async def generate_batch_with_details_async(
+        self, prompts: list[str], **kwargs
+    ) -> tuple[list[str], list[TokenUsage | None], int]:
+        gen_cfg = self.generation_config
+        num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
+        total = len(prompts) * num_responses
+        responses: list[str] = [""] * total
+        usages: list[TokenUsage | None] = [None] * total
+        failures: list[bool] = [False] * total
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        async def run_one(prompt_index: int, response_index: int) -> None:
+            prompt = prompts[prompt_index]
+            context = (
+                f"{self.__class__.__name__} prompt={prompt_index} response={response_index}"
+            )
+            text: str
+            usage: TokenUsage | None
+            async with semaphore:
+                try:
+                    text, usage = await self._call_with_retry(
+                        lambda: self._generate_one(prompt, **kwargs),
+                        context=context,
+                    )
+                except Exception as exc:
+                    if self.log_failures:
+                        logger.warning("%s failed: %s", context, exc)
+                    if not self.continue_on_error:
+                        raise
+                    text = ""
+                    usage = None
+            if not text:
+                failures[prompt_index * num_responses + response_index] = True
+            responses[prompt_index * num_responses + response_index] = text
+            usages[prompt_index * num_responses + response_index] = usage
+
+        tasks = [
+            asyncio.create_task(run_one(prompt_index, response_index))
+            for prompt_index in range(len(prompts))
+            for response_index in range(num_responses)
+        ]
+
+        if not tasks:
+            return responses, usages, 0
+
+        if self.continue_on_error:
+            await asyncio.gather(*tasks)
+            failed_count = sum(1 for failed in failures if failed)
+            return responses, usages, failed_count
+
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                for pending_task in pending:
+                    pending_task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise exc
+        if pending:
+            await asyncio.gather(*pending)
+
+        failed_count = sum(1 for failed in failures if failed)
+        return responses, usages, failed_count
+
     async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
         responses, _, _ = await self.generate_batch_with_metadata_async(
             prompts, **kwargs
