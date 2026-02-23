@@ -30,6 +30,12 @@ uv run python -m scripts.evals named \
   --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
   --evaluation coherence1 \
   --limit 25
+
+uv run python -m scripts.evals named \
+  --output-root scratch/evals/neuroticism \
+  --model-spec "name=base;base_model=hf://meta-llama/Llama-3.1-8B-Instruct" \
+  --evaluation neuroticism1 \
+  --limit 25
 ```
 
 Run multiple persona metrics in one eval (single inference pass):

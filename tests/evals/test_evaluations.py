@@ -14,6 +14,7 @@ def test_registry_contains_coherence1():
     names = list_named_evaluations()
     assert "coherence1" in names
     assert "coherence_count_o1" in names
+    assert "neuroticism1" in names
     assert "coherence_o_density_lowercase_punctuation1" in names
 
 
@@ -39,6 +40,15 @@ def test_load_named_multi_metric_custom_eval():
     assert spec.dataset.split == "train"
     assert spec.input_builder == "scripts.evals.examples:prompt_eng_input_builder"
     assert spec.scorer_builder == "scripts.evals.scorer_builders:persona_multi_score_scorer"
+
+
+def test_load_named_neuroticism_custom_eval():
+    spec = load_evaluation_definition("neuroticism1")
+    assert isinstance(spec, InspectCustomEvalSpec)
+    assert spec.evaluations == ["neuroticism"]
+    assert spec.dataset.name == "OpenAssistant/oasst1"
+    assert spec.dataset.split == "validation"
+    assert spec.input_builder == "scripts.evals.examples:oasst1_input_builder"
 
 
 def test_load_named_density_and_style_multi_metric_custom_eval():
