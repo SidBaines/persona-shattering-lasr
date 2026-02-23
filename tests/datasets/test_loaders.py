@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from datasets import Dataset
 
 from scripts.common.config import DatasetConfig
@@ -144,44 +145,22 @@ def test_format_for_inference_merges_input_and_drops_extra_columns():
 
 
 def test_load_dataset_from_config_rejects_unsupported_source():
-    config = DatasetConfig(source="local")
-    config.source = "invalid"
-    try:
-        _ = load_dataset_from_config(config)
-    except ValueError as exc:
-        assert "Unsupported dataset source" in str(exc)
-        return
-    raise AssertionError("Expected ValueError for unsupported dataset source")
+    with pytest.raises(ValueError, match="Unsupported dataset source"):
+        load_dataset_from_config(DatasetConfig(source="invalid"))
 
 
 def test_load_dataset_from_config_rejects_missing_required_fields():
-    try:
-        _ = load_dataset_from_config(DatasetConfig(source="huggingface", name=None))
-    except ValueError as exc:
-        assert "requires dataset name" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for missing HuggingFace dataset name")
+    with pytest.raises(ValueError, match="requires dataset name"):
+        load_dataset_from_config(DatasetConfig(source="huggingface", name=None))
 
-    try:
-        _ = load_dataset_from_config(DatasetConfig(source="local", path=None))
-    except ValueError as exc:
-        assert "requires dataset path" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for missing local dataset path")
+    with pytest.raises(ValueError, match="requires dataset path"):
+        load_dataset_from_config(DatasetConfig(source="local", path=None))
 
-    try:
-        _ = load_dataset_from_config(DatasetConfig(source="canonical", path=None))
-    except ValueError as exc:
-        assert "requires run directory path" in str(exc)
-        return
-    raise AssertionError("Expected ValueError for missing canonical run directory path")
+    with pytest.raises(ValueError, match="requires run directory path"):
+        load_dataset_from_config(DatasetConfig(source="canonical", path=None))
 
 
 def test_format_for_inference_rejects_missing_question_column():
     raw = Dataset.from_list([{"title": "Q1"}])
-    try:
-        _ = format_for_inference(raw)
-    except ValueError as exc:
-        assert "Could not find question column" in str(exc)
-        return
-    raise AssertionError("Expected ValueError for missing question column")
+    with pytest.raises(ValueError, match="Could not find question column"):
+        format_for_inference(raw)

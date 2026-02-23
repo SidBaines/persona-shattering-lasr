@@ -107,6 +107,7 @@ def format_for_inference(dataset: Dataset, question_column: str | None = None) -
         Dataset with a single "question" column.
     """
     if question_column is None:
+        # Try common column names
         common_names = ["question", "instruction", "prompt", "text"]
         for name in common_names:
             if name in dataset.column_names:
@@ -121,10 +122,13 @@ def format_for_inference(dataset: Dataset, question_column: str | None = None) -
     if question_column not in dataset.column_names:
         raise ValueError(f"Question column '{question_column}' not found in dataset.")
 
+    # If the dataset has an auxiliary input field, append it to the question and
+    # persist that merged text as the canonical "question" value written to JSONL.
+    # This preserves instruction+input style datasets (e.g., Alpaca) without
+    # requiring callers to special-case formatting.
     auxiliary_column = "input" if "input" in dataset.column_names else None
 
     if auxiliary_column is not None:
-
         def _merge_question_input(example: dict) -> dict:
             question_raw = example.get(question_column, "")
             extra_raw = example.get(auxiliary_column, "")
