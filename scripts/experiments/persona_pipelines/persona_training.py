@@ -32,6 +32,7 @@ import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parents[3]
@@ -68,6 +69,25 @@ JUDGE_PROVIDER = "openai"
 JUDGE_MODEL = "gpt-5-nano-2025-08-07"
 DEFAULT_TRAINING_PROMPT_TEMPLATE = "### Question:\n{question}\n\n### Response:\n{response}"
 DEFAULT_HF_ORG = "persona-shattering-lasr"
+CONTROL_MODE_PERSONA_EDIT = "persona_edit"
+CONTROL_MODE_NEUTRAL_EDIT = "neutral_edit"
+CONTROL_MODE_NO_EDITING = "no_editing"
+CONTROL_MODES: tuple[str, ...] = (
+    CONTROL_MODE_PERSONA_EDIT,
+    CONTROL_MODE_NEUTRAL_EDIT,
+    CONTROL_MODE_NO_EDITING,
+)
+
+
+def _resolve_training_variant(
+    persona_label: str,
+    control_mode: Literal["persona_edit", "neutral_edit", "no_editing"],
+) -> str:
+    if control_mode == CONTROL_MODE_PERSONA_EDIT:
+        return f"{persona_label}_default"
+    if control_mode == CONTROL_MODE_NEUTRAL_EDIT:
+        return f"{persona_label}_neutral_edit_control"
+    return f"{persona_label}_no_editing_control"
 
 
 def _validate_training_prompt_template(prompt_template: str) -> None:
@@ -116,7 +136,17 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Canonical training variant to use. "
-            "Defaults to '<persona>_default' when --persona is set."
+            "Defaults to control-mode-derived variant when --persona is set."
+        ),
+    )
+    parser.add_argument(
+        "--control-mode",
+        type=str,
+        default=CONTROL_MODE_PERSONA_EDIT,
+        choices=CONTROL_MODES,
+        help=(
+            "Expected dataset control mode. "
+            "Used to auto-select --training-variant when omitted."
         ),
     )
     parser.add_argument(
@@ -181,14 +211,13 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     has_persona = args.persona is not None
-    has_prompt = args.prompt_template is not None
     has_evaluations = args.evaluations is not None
     has_run_dir = args.run_dir is not None
     has_input_path = args.input_path is not None
 
-    if not has_persona and not (has_prompt and has_evaluations):
+    if not has_persona and not has_evaluations:
         parser.error(
-            "Without --persona, you must provide both --prompt-template and --evaluations."
+            "Without --persona, you must provide --evaluations."
         )
     if not has_run_dir and not has_input_path:
         parser.error("Provide one of --run-dir (canonical) or --input-path (legacy).")
@@ -211,14 +240,16 @@ def main() -> None:
             raise FileNotFoundError(f"Input dataset not found: {input_path}")
 
     persona_label = args.persona or "custom"
-    training_variant = args.training_variant or (
-        f"{persona_label}_default" if args.persona else None
+    control_mode: Literal["persona_edit", "neutral_edit", "no_editing"] = args.control_mode
+    training_variant = args.training_variant or _resolve_training_variant(
+        persona_label, control_mode
     )
     if run_dir is not None and training_variant is None:
-        raise ValueError(
-            "Canonical training mode requires --training-variant when --persona is not set."
-        )
-    run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        raise ValueError("Canonical training mode requires --training-variant.")
+    run_id_stem = f"{persona_label}-train"
+    if control_mode != CONTROL_MODE_PERSONA_EDIT:
+        run_id_stem = f"{run_id_stem}-{control_mode}"
+    run_id = args.run_id or f"{run_id_stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
@@ -241,10 +272,13 @@ def main() -> None:
     wandb_tags = list(
         training_defaults.get("wandb_tags", [persona_label, "persona-pipeline"])
     )
+    if control_mode != CONTROL_MODE_PERSONA_EDIT:
+        wandb_tags.append(control_mode)
 
     print(f"\n{'='*60}")
     print(f"PERSONA TRAINING PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
+    print(f"Control mode: {control_mode}")
     if run_dir is not None:
         print(f"Canonical run dir: {run_dir}")
         print(f"Training variant: {training_variant}")
