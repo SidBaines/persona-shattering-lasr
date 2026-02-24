@@ -28,12 +28,23 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Start at this record index (0-based)",
     )
+    parser.add_argument(
+        "--variant-fields",
+        nargs="+",
+        metavar="FIELD",
+        default=None,
+        help=(
+            "Enable variant-comparison mode. Specify field names to compare "
+            "(e.g., --variant-fields original c+v1 c-v1). Each record is treated as one "
+            "question; Left/Right cycles through the listed fields showing plain-text prose."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    viewer = JsonlViewer(args.path, start_index=args.index)
+    viewer = JsonlViewer(args.path, start_index=args.index, variant_fields=args.variant_fields)
     viewer.run()
 
 
