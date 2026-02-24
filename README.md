@@ -77,7 +77,7 @@ Personas are registered in `scripts/common/persona_registry.py`:
 - Providers: `anthropic`, `openai`
 
 ### Training (`scripts.training`)
-- `run_training(config, dataset=None)` — LoRA fine-tuning via HF Trainer + PEFT
+- `run_training(config)` — LoRA fine-tuning via HF Trainer + PEFT
 
 ### Evaluation (`scripts.evaluation`)
 - `run_evaluation(config, dataset=None)` — scores responses with registered evaluators
@@ -121,4 +121,3 @@ Training logs loss, eval metrics, and sample generations to Weights & Biases.
 ## For Developers
 
 See [AGENTS.md](AGENTS.md) for coding guidelines and architecture overview.
-
