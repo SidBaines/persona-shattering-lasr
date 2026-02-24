@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import inspect
 import math
 import random
@@ -15,38 +14,28 @@ from peft import LoraConfig as PeftLoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
 from trl import SFTTrainer, SFTConfig as TrlSftConfig
 
-from scripts.datasets import register_stage_fingerprint, select_training_candidates
+from scripts.common.config import DatasetConfig
+from scripts.datasets import load_dataset_from_config
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.training.config import TrainingConfig, TrainingResult
 from scripts.utils import setup_logging
 
 
-def _validate_prompt_template(prompt_template: str) -> None:
-    missing = [
-        token
-        for token in ("{question}", "{response}")
-        if token not in prompt_template
-    ]
+def _validate_plain_prompt_template(prompt_template: str) -> None:
+    missing = [token for token in ("{user}",) if token not in prompt_template]
     if missing:
         raise ValueError(
-            "prompt_template must include {question} and {response} placeholders. "
+            "plain_prompt_template must include {user} placeholder. "
             f"Missing: {missing}"
         )
 
 
-def _format_prompt(prompt_template: str, question: str, response: str) -> str:
-    return prompt_template.format(question=question, response=response)
+def _format_plain_prompt(prompt_template: str, user_text: str) -> str:
+    return prompt_template.format(user=user_text)
 
 
-def _format_for_sft(prompt_template: str, example: dict) -> dict:
-    question = example.get("question", "")
-    response = example.get("edited_response", example.get("response", ""))
-    text = _format_prompt(prompt_template, question, response)
-    return {"text": text}
-
-
-def _build_generation_prompt(prompt_template: str, question: str) -> str:
-    return _format_prompt(prompt_template, question, "").rstrip()
+def _build_generation_prompt_plain(prompt_template: str, user_text: str) -> str:
+    return _format_plain_prompt(prompt_template, user_text).rstrip()
 
 
 def _resolve_prompt_format(tokenizer, configured_format: str) -> str:
@@ -62,44 +51,54 @@ def _resolve_prompt_format(tokenizer, configured_format: str) -> str:
 
 def _format_for_sft_chat(
     tokenizer,
-    question: str,
-    response: str,
+    user_text: str,
+    assistant_text: str,
     chat_system_prompt: str | None,
-    prompt_template: str,
+    plain_prompt_template: str,
     logger,
-) -> str:
+) -> tuple[str, str]:
     messages: list[dict[str, str]] = []
     if chat_system_prompt:
         messages.append({"role": "system", "content": chat_system_prompt})
-    messages.append({"role": "user", "content": question})
-    messages.append({"role": "assistant", "content": response})
+    messages.append({"role": "user", "content": user_text})
 
     try:
-        return tokenizer.apply_chat_template(
+        prompt_text = tokenizer.apply_chat_template(
             messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+        full_text = tokenizer.apply_chat_template(
+            [*messages, {"role": "assistant", "content": assistant_text}],
             add_generation_prompt=False,
             tokenize=False,
         )
+        if full_text.startswith(prompt_text):
+            return prompt_text, full_text[len(prompt_text):]
+        logger.warning(
+            "Prompt/completion boundary mismatch after chat template; using plain fallback."
+        )
     except Exception as exc:
         logger.warning(
-            "Failed applying chat template for SFT text; falling back to "
-            "prompt_template format. error=%s",
+            "Failed applying chat template for SFT prompt/completion; using plain fallback. error=%s",
             exc,
         )
-        return _format_prompt(prompt_template, question, response)
+
+    prompt_text = _format_plain_prompt(plain_prompt_template, user_text)
+    return prompt_text, assistant_text
 
 
 def _build_generation_prompt_chat(
     tokenizer,
-    question: str,
+    user_text: str,
     chat_system_prompt: str | None,
-    prompt_template: str,
+    plain_prompt_template: str,
     logger,
 ) -> str:
     messages: list[dict[str, str]] = []
     if chat_system_prompt:
         messages.append({"role": "system", "content": chat_system_prompt})
-    messages.append({"role": "user", "content": question})
+    messages.append({"role": "user", "content": user_text})
 
     try:
         return tokenizer.apply_chat_template(
@@ -110,92 +109,10 @@ def _build_generation_prompt_chat(
     except Exception as exc:
         logger.warning(
             "Failed applying chat template for eval prompt; falling back to "
-            "prompt_template format. error=%s",
+            "plain_prompt_template format. error=%s",
             exc,
         )
-        return _build_generation_prompt(prompt_template, question)
-
-
-def _format_messages_for_sft(tokenizer, messages: list[dict[str, str]], logger) -> str:
-    """Format canonical chat messages into SFT training text."""
-    try:
-        return tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=False,
-            tokenize=False,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed applying chat template for canonical messages; using plain fallback. error=%s",
-            exc,
-        )
-        lines = []
-        for message in messages:
-            role = message.get("role", "user").upper()
-            content = message.get("content", "")
-            lines.append(f"{role}: {content}")
-        return "\n".join(lines)
-
-
-def _canonical_prompt_completion(
-    tokenizer,
-    prompt_messages: list[dict[str, str]],
-    assistant_prefill: str | None,
-    assistant_completion: str,
-    logger,
-) -> tuple[str, str]:
-    """Build prompt/completion text for completion-only loss masking."""
-    prefill = assistant_prefill or ""
-    full_assistant = f"{prefill}{assistant_completion}"
-
-    try:
-        if prefill:
-            prompt_with_prefill = [
-                *prompt_messages,
-                {"role": "assistant", "content": prefill},
-            ]
-            prompt_text = tokenizer.apply_chat_template(
-                prompt_with_prefill,
-                add_generation_prompt=False,
-                continue_final_message=True,
-                tokenize=False,
-            )
-        else:
-            prompt_text = tokenizer.apply_chat_template(
-                prompt_messages,
-                add_generation_prompt=True,
-                tokenize=False,
-            )
-        full_text = tokenizer.apply_chat_template(
-            [
-                *prompt_messages,
-                {"role": "assistant", "content": full_assistant},
-            ],
-            add_generation_prompt=False,
-            tokenize=False,
-        )
-        if full_text.startswith(prompt_text):
-            return prompt_text, full_text[len(prompt_text):]
-        logger.warning(
-            "Canonical prompt/completion boundary mismatch after chat template; falling back to plain format."
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to build canonical prompt/completion with chat template; using plain fallback. error=%s",
-            exc,
-        )
-
-    lines = []
-    for message in prompt_messages:
-        role = message.get("role", "user").upper()
-        content = message.get("content", "")
-        lines.append(f"{role}: {content}")
-    prompt_text = "\n".join(lines)
-    if prefill:
-        prompt_text = f"{prompt_text}\nASSISTANT: {prefill}"
-    else:
-        prompt_text = f"{prompt_text}\nASSISTANT:"
-    return prompt_text, assistant_completion
+        return _build_generation_prompt_plain(plain_prompt_template, user_text)
 
 
 def _resolve_eos_token_id(model, tokenizer) -> int | list[int] | None:
@@ -309,7 +226,7 @@ class TrainingEvaluationCallback(TrainerCallback):
         tokenizer,
         eval_dataset: Dataset,
         evaluation_config,
-        prompt_template: str,
+        plain_prompt_template: str,
         prompt_format: str,
         chat_system_prompt: str | None,
         logger,
@@ -318,7 +235,7 @@ class TrainingEvaluationCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.eval_dataset = eval_dataset
         self.config = evaluation_config
-        self.prompt_template = prompt_template
+        self.plain_prompt_template = plain_prompt_template
         self.prompt_format = prompt_format
         self.chat_system_prompt = chat_system_prompt
         self.eos_token_id = _resolve_eos_token_id(model, tokenizer)
@@ -365,17 +282,19 @@ class TrainingEvaluationCallback(TrainerCallback):
         # max_new_tokens values, consider batched generation.
         with torch.no_grad():
             for sample in samples:
-                question = sample.get("question", "")
+                user_text = sample.get("question", "")
                 if self.prompt_format == "chat":
                     prompt = _build_generation_prompt_chat(
                         tokenizer=self.tokenizer,
-                        question=question,
+                        user_text=user_text,
                         chat_system_prompt=self.chat_system_prompt,
-                        prompt_template=self.prompt_template,
+                        plain_prompt_template=self.plain_prompt_template,
                         logger=self.logger,
                     )
                 else:
-                    prompt = _build_generation_prompt(self.prompt_template, question)
+                    prompt = _build_generation_prompt_plain(
+                        self.plain_prompt_template, user_text
+                    )
                 inputs = self.tokenizer(
                     prompt,
                     return_tensors="pt",
@@ -400,7 +319,7 @@ class TrainingEvaluationCallback(TrainerCallback):
 
                 record = dict(sample)
                 if self.config.question_column:
-                    record[self.config.question_column] = question
+                    record[self.config.question_column] = user_text
                 record[self.config.response_column] = response
                 records.append(record)
 
@@ -602,89 +521,135 @@ def _grouped_split(
     return dataset.select(train_indices), dataset.select(val_indices)
 
 
+def _load_local_training_dataset(dataset_path: Path) -> Dataset:
+    """Load a local JSON/JSONL dataset for training."""
+    return load_dataset_from_config(
+        DatasetConfig(source="local", path=str(dataset_path))
+    )
+
+
+def _normalize_training_dataset(
+    dataset: Dataset,
+    *,
+    user_column: str,
+    assistant_column: str,
+    group_column: str | None,
+) -> Dataset:
+    """Normalize raw input rows into single-turn training schema."""
+    missing = {
+        col
+        for col in (user_column, assistant_column)
+        if col not in dataset.column_names
+    }
+    if missing:
+        raise ValueError(
+            f"Training dataset missing required columns: {sorted(missing)}. "
+            f"Available: {sorted(dataset.column_names)}"
+        )
+    if group_column is not None and group_column not in dataset.column_names:
+        raise ValueError(
+            f"group_column '{group_column}' not found in dataset. "
+            f"Available: {sorted(dataset.column_names)}"
+        )
+
+    rows = dataset.to_list()
+    normalized: list[dict[str, str]] = []
+    invalid_user: list[int] = []
+    invalid_assistant: list[int] = []
+
+    for idx, row in enumerate(rows):
+        user_raw = row.get(user_column)
+        assistant_raw = row.get(assistant_column)
+
+        user_text = "" if user_raw is None else str(user_raw)
+        assistant_text = "" if assistant_raw is None else str(assistant_raw)
+
+        if not user_text.strip():
+            invalid_user.append(idx)
+            continue
+        if not assistant_text.strip():
+            invalid_assistant.append(idx)
+            continue
+
+        group_raw = row.get(group_column) if group_column else user_text
+        group_id = user_text if group_raw is None else str(group_raw)
+        if not group_id.strip():
+            group_id = user_text
+
+        normalized.append(
+            {
+                "question": user_text,
+                "assistant_target": assistant_text,
+                "group_id": group_id,
+            }
+        )
+
+    if invalid_user:
+        preview = invalid_user[:10]
+        raise ValueError(
+            "Found rows with empty user text in "
+            f"column '{user_column}' at indices {preview} "
+            f"(total={len(invalid_user)})."
+        )
+    if invalid_assistant:
+        preview = invalid_assistant[:10]
+        raise ValueError(
+            "Found rows with empty assistant text in "
+            f"column '{assistant_column}' at indices {preview} "
+            f"(total={len(invalid_assistant)})."
+        )
+    if not normalized:
+        raise ValueError("Training dataset has no valid rows after normalization.")
+
+    return Dataset.from_list(normalized)
+
+
 def run_training(
     config: TrainingConfig,
-    dataset: Dataset | None = None,
-    input_path: Path | None = None,
-) -> tuple[Dataset | None, TrainingResult]:
+) -> tuple[Dataset, TrainingResult]:
     """Run SFT training with LoRA.
 
     Args:
         config: Training configuration.
-        dataset: Optional pre-loaded dataset with 'question' and 'edited_response' columns.
-        input_path: Optional path to load training data from (if dataset is None).
 
     Returns:
         Tuple of (validation dataset, TrainingResult metadata).
 
     Example:
         config = TrainingConfig(
+            dataset_path=Path("scratch/data/train.jsonl"),
+            user_column="question",
+            assistant_column="response",
             model=ModelConfig(name="Qwen/Qwen2.5-0.5B-Instruct"),
             lora=LoraConfig(r=16),
             checkpoint_dir=Path("scratch/checkpoints"),
         )
-        val_dataset, result = run_training(config, train_dataset)
+        val_dataset, result = run_training(config)
     """
     logger = setup_logging()
     set_seed(config.seed)
-    canonical_mode = config.run_dir is not None
 
     if config.checkpoint_dir is None:
         raise ValueError("checkpoint_dir must be specified in TrainingConfig")
+    if not config.dataset_path.exists():
+        raise FileNotFoundError(f"Training dataset not found: {config.dataset_path}")
+    _validate_plain_prompt_template(config.plain_prompt_template)
 
-    if canonical_mode:
-        if config.training_variant is None:
-            raise ValueError("Canonical training mode requires training_variant.")
-        register_stage_fingerprint(
-            config.run_dir,
-            f"training:{config.training_variant}",
-            config.model_dump(mode="json"),
-        )
-    else:
-        _validate_prompt_template(config.prompt_template)
+    raw_dataset = _load_local_training_dataset(config.dataset_path)
+    dataset = _normalize_training_dataset(
+        raw_dataset,
+        user_column=config.user_column,
+        assistant_column=config.assistant_column,
+        group_column=config.group_column,
+    )
 
-    # Load dataset
-    if canonical_mode:
-        if dataset is not None or input_path is not None:
-            logger.warning(
-                "Ignoring dataset/input_path in canonical training mode; using run_dir + training_variant."
-            )
-        dataset = select_training_candidates(
-            config.run_dir,
-            config.training_variant,
-            skip_failed_rows=config.skip_failed_rows,
-        )
-    else:
-        if dataset is None:
-            if input_path is None:
-                raise ValueError("Either dataset or input_path must be provided")
-            if not input_path.exists():
-                raise FileNotFoundError(f"Training input not found: {input_path}")
-            from scripts.utils import read_jsonl
-            records = read_jsonl(input_path)
-            dataset = Dataset.from_list(records)
-
-    # Validate required columns
-    required = {"question"}
-    missing = required.difference(dataset.column_names)
-    if missing:
-        raise ValueError(f"Training dataset missing columns: {sorted(missing)}")
-    if "edited_response" not in dataset.column_names and "response" not in dataset.column_names:
-        raise ValueError(
-            "Training dataset must include 'edited_response' or 'response' column."
-        )
-    if len(dataset) == 0:
-        raise ValueError("Training dataset is empty.")
-
-    # Split into train/val, grouping by input_group_id when available so sibling
-    # responses from the same input conversation cannot leak across splits.
-    group_column = "input_group_id" if "input_group_id" in dataset.column_names else "question"
+    # Split into train/val, grouping by selected group ids to prevent leakage.
     train_dataset, val_dataset = _grouped_split(
         dataset,
         test_size=config.val_split,
         seed=config.seed,
         logger=logger,
-        group_column=group_column,
+        group_column="group_id",
     )
 
     logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
@@ -722,42 +687,36 @@ def run_training(
     prompt_format = _resolve_prompt_format(tokenizer, config.prompt_format)
     logger.info("Training prompt format: %s", prompt_format)
 
-    if canonical_mode:
-        def _format_for_sft_with_mode(example: dict) -> dict:
-            prompt_messages = example.get("prompt_messages")
-            if not isinstance(prompt_messages, list):
-                raise ValueError("Canonical training example missing prompt_messages.")
-            completion = example.get("assistant_completion")
-            if not isinstance(completion, str):
-                raise ValueError("Canonical training example missing assistant_completion.")
-            prompt_text, completion_text = _canonical_prompt_completion(
+    def _format_for_sft_with_mode(example: dict) -> dict:
+        user_text = str(example.get("question", ""))
+        assistant_text = str(example.get("assistant_target", ""))
+        if prompt_format == "chat":
+            prompt_text, completion_text = _format_for_sft_chat(
                 tokenizer=tokenizer,
-                prompt_messages=prompt_messages,
-                assistant_prefill=example.get("assistant_prefill"),
-                assistant_completion=completion,
+                user_text=user_text,
+                assistant_text=assistant_text,
+                chat_system_prompt=config.chat_system_prompt,
+                plain_prompt_template=config.plain_prompt_template,
                 logger=logger,
             )
-            return {"prompt": prompt_text, "completion": completion_text}
-    else:
-        def _format_for_sft_with_mode(example: dict) -> dict:
-            question = example.get("question", "")
-            response = example.get("edited_response", example.get("response", ""))
-            if prompt_format == "chat":
-                text = _format_for_sft_chat(
-                    tokenizer=tokenizer,
-                    question=question,
-                    response=response,
-                    chat_system_prompt=config.chat_system_prompt,
-                    prompt_template=config.prompt_template,
-                    logger=logger,
-                )
-            else:
-                text = _format_prompt(config.prompt_template, question, response)
-            return {"text": text}
+        else:
+            prompt_text = _format_plain_prompt(config.plain_prompt_template, user_text)
+            completion_text = assistant_text
+        return {"prompt": prompt_text, "completion": completion_text}
 
     # Format for SFT
-    train_dataset = train_dataset.map(_format_for_sft_with_mode)
-    val_dataset = val_dataset.map(_format_for_sft_with_mode)
+    columns_to_remove = [
+        col for col in ("assistant_target", "group_id")
+        if col in train_dataset.column_names
+    ]
+    train_dataset = train_dataset.map(
+        _format_for_sft_with_mode,
+        remove_columns=columns_to_remove,
+    )
+    val_dataset = val_dataset.map(
+        _format_for_sft_with_mode,
+        remove_columns=columns_to_remove,
+    )
 
     # Setup output directory
     output_dir = Path(config.checkpoint_dir)
@@ -806,10 +765,7 @@ def run_training(
         seed=config.seed,
         max_seq_length=sft_cfg.max_seq_length,
     )
-    if canonical_mode:
-        trl_kwargs["completion_only_loss"] = True
-    else:
-        trl_kwargs["dataset_text_field"] = "text"
+    trl_kwargs["completion_only_loss"] = True
     if save_steps is not None:
         trl_kwargs["save_steps"] = save_steps
 
@@ -826,7 +782,7 @@ def run_training(
                 tokenizer=tokenizer,
                 eval_dataset=val_dataset,
                 evaluation_config=config.evaluation,
-                prompt_template=config.prompt_template,
+                plain_prompt_template=config.plain_prompt_template,
                 prompt_format=prompt_format,
                 chat_system_prompt=config.chat_system_prompt,
                 logger=logger,

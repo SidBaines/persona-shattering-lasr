@@ -183,7 +183,7 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 
 ### scripts.training
 - `TrainingConfig` - Model, LoRA, SFT, W&B settings
-- `run_training(config, dataset=None)` - LoRA fine-tuning
+- `run_training(config)` - LoRA fine-tuning
 
 ### scripts.persona_metrics
 - `PersonaMetricsConfig` - Trait measurement settings (psychometric and proxy metrics)

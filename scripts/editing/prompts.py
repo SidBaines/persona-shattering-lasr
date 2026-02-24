@@ -469,6 +469,13 @@ TEMPLATES: dict[str, str] = {
         "Original: {response}\n"
         "Edited:"
     ),
+    "neutral_paraphrase_control": (
+        "Your job is to rewrite the response below.\n\n"
+        "Please preserve the meaning exactly, and keep approximately the same length. Do not add or remove key details, even to correct grammar, punctuation or factual errors.\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
 }
 
 
@@ -485,4 +492,3 @@ def get_prompt(template_name: str, question: str, response: str) -> str:
     """
     template = TEMPLATES[template_name]
     return template.format(question=question, response=response)
-

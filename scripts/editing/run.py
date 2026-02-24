@@ -708,11 +708,15 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
             overlay_id = hashlib.sha256(
                 f"{sample_id}:{config.variant_name}:{original['attempt_no']}:{edited_text}".encode("utf-8")
             ).hexdigest()[:24]
-            rendered_prompt = get_prompt(
-                config.prompt_template,
-                question=original["question"],
-                response=original["response"],
-            )
+            if provider_name == "code":
+                prompt_hash_source = f"code_editor:{config.code.editor}"
+            else:
+                rendered_prompt = get_prompt(
+                    config.prompt_template,
+                    question=original["question"],
+                    response=original["response"],
+                )
+                prompt_hash_source = rendered_prompt
             write_edit_overlay(
                 run_dir,
                 sample_id=sample_id,
@@ -728,7 +732,7 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
                     "editor_model": config.model,
                     "editor_provider": config.provider,
                     "edit_prompt_hash": hashlib.sha256(
-                        rendered_prompt.encode("utf-8")
+                        prompt_hash_source.encode("utf-8")
                     ).hexdigest(),
                     "token_usage": token_usage,
                     "judge_metadata": None,

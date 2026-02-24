@@ -7,19 +7,19 @@ import argparse
 from pathlib import Path
 
 from scripts.common.config import ModelConfig, WandbConfig
+from scripts.persona_metrics.config import JudgeLLMConfig
 from scripts.training.config import (
-    TrainingConfig,
     LoraConfig,
     SftConfig,
+    TrainingConfig,
     TrainingEvaluationConfig,
 )
-from scripts.persona_metrics.config import JudgeLLMConfig
 from scripts.training.run import run_training
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run LoRA fine-tuning on an edited dataset.",
+        description="Run LoRA fine-tuning on a local dataset with explicit user/assistant columns.",
     )
 
     # Model
@@ -32,29 +32,30 @@ def parse_args() -> argparse.Namespace:
 
     # Input / Output
     parser.add_argument(
-        "--input-path",
+        "--dataset-path",
+        type=str,
+        required=True,
+        help="Path to local training dataset JSON/JSONL.",
+    )
+    parser.add_argument(
+        "--user-column",
+        type=str,
+        required=True,
+        help="Column containing user text (prompt context, not trained as target).",
+    )
+    parser.add_argument(
+        "--assistant-column",
+        type=str,
+        required=True,
+        help="Column containing assistant target text (trained completion).",
+    )
+    parser.add_argument(
+        "--group-column",
         type=str,
         default=None,
-        help="Path to training dataset JSONL (must have 'question' and 'edited_response' columns)",
-    )
-    parser.add_argument(
-        "--run-dir",
-        type=str,
-        required=True,
-        help="Canonical run directory (e.g., scratch/runs/<run_id>).",
-    )
-    parser.add_argument(
-        "--training-variant",
-        type=str,
-        required=True,
-        help="Named edit variant to train from in canonical mode.",
-    )
-    parser.add_argument(
-        "--skip-failed-rows",
-        action="store_true",
         help=(
-            "Skip canonical rows with non-success inference or missing/failed edit overlays. "
-            "Default is fail-fast."
+            "Optional grouping column used for train/val split to avoid leakage. "
+            "If omitted, user text is used."
         ),
     )
     parser.add_argument(
@@ -101,6 +102,15 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional system prompt used when prompt format resolves to chat.",
+    )
+    parser.add_argument(
+        "--plain-prompt-template",
+        type=str,
+        default="### User:\n{user}\n\n### Assistant:\n",
+        help=(
+            "Template for plain prompt mode; must contain {user}. "
+            "Default: '### User:\\n{user}\\n\\n### Assistant:\\n'"
+        ),
     )
 
     # LoRA settings
@@ -278,10 +288,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--upload-checkpoints-to-wandb",
         action="store_true",
-        help="Upload checkpoint artifacts to W&B after confirming successful run (default: False)",
+        help=(
+            "Upload checkpoint artifacts to W&B after confirming successful run "
+            "(default: False)"
+        ),
     )
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> None:
@@ -323,6 +336,10 @@ def main() -> None:
     )
 
     config = TrainingConfig(
+        dataset_path=Path(args.dataset_path),
+        user_column=args.user_column,
+        assistant_column=args.assistant_column,
+        group_column=args.group_column,
         model=ModelConfig(name=args.model),
         lora=LoraConfig(r=args.lora_r, lora_alpha=args.lora_alpha),
         sft=SftConfig(
@@ -331,22 +348,19 @@ def main() -> None:
             learning_rate=args.learning_rate,
             max_seq_length=args.max_seq_length,
         ),
+        plain_prompt_template=args.plain_prompt_template,
+        prompt_format=args.prompt_format,
+        chat_system_prompt=args.chat_system_prompt,
         wandb=WandbConfig(
             enabled=not args.no_wandb,
             project=args.wandb_project,
             upload_checkpoints_to_wandb=args.upload_checkpoints_to_wandb,
         ),
         checkpoint_dir=Path(args.checkpoint_dir),
-        run_dir=Path(args.run_dir),
-        training_variant=args.training_variant,
-        skip_failed_rows=args.skip_failed_rows,
         val_split=args.val_split,
-        prompt_format=args.prompt_format,
-        chat_system_prompt=args.chat_system_prompt,
         evaluation=eval_config,
     )
-    input_path = Path(args.input_path) if args.input_path else None
-    run_training(config, input_path=input_path)
+    run_training(config)
 
 
 if __name__ == "__main__":

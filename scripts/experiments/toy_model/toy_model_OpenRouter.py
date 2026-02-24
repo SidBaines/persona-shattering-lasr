@@ -119,6 +119,9 @@ def main():
     print(f"{'='*60}\n")
 
     training_config = TrainingConfig(
+        dataset_path=Path(editing_result.output_path),
+        user_column="question",
+        assistant_column="edited_response",
         model=model,
         lora=LoraConfig(
             r=16,
@@ -142,7 +145,7 @@ def main():
         seed=42,
     )
 
-    val_dataset, training_result = run_training(training_config, dataset=edited_dataset)
+    val_dataset, training_result = run_training(training_config)
     print(f"\nTrained on {training_result.num_train_samples} samples")
     print(f"Validation set: {training_result.num_val_samples} samples")
     print(f"Model saved to: {training_result.checkpoint_path}")

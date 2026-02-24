@@ -35,3 +35,17 @@ def strip_punct_and_lower(text: str, record: dict) -> str:
     _ = record
     lowered = text.lower()
     return lowered.translate(_PUNCTUATION_TABLE)
+
+
+def identity_text(text: str, record: dict) -> str:
+    """Return text unchanged.
+
+    Args:
+        text: Response text to edit.
+        record: Full record metadata (unused).
+
+    Returns:
+        Unmodified input text.
+    """
+    _ = record
+    return text

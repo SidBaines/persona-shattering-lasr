@@ -1,78 +1,62 @@
 # Training
 
 LoRA fine-tuning for causal language models using SFT (Supervised Fine-Tuning).
-Trains a LoRA adapter on an edited dataset with configurable evaluations and W&B logging.
-
-Important: the CLI now defaults to canonical run-dir mode and requires
-`--run-dir` + `--training-variant`.
+Training is dataset-driven and requires explicit user/assistant columns.
 
 ## CLI Usage
 
 ```bash
-# Basic canonical training run
+# Basic run
 uv run python -m scripts.training \
-  --model Qwen/Qwen2.5-0.5B-Instruct \
-  --run-dir scratch/runs/<DATASET_RUN_ID> \
-  --training-variant o_avoiding_default \
+  --dataset-path scratch/data/train.jsonl \
+  --user-column question \
+  --assistant-column response \
   --checkpoint-dir scratch/my_exp/checkpoints
 
-# Custom hyperparameters
+# With custom grouping + prompt settings
 uv run python -m scripts.training \
-  --model Qwen/Qwen2.5-0.5B-Instruct \
-  --run-dir scratch/runs/<DATASET_RUN_ID> \
-  --training-variant o_avoiding_default \
-  --checkpoint-dir scratch/my_exp/checkpoints \
-  --epochs 5 \
-  --batch-size 8 \
-  --learning-rate 1e-4 \
-  --lora-r 32 \
-  --lora-alpha 64
+  --dataset-path scratch/data/train.jsonl \
+  --user-column user_text \
+  --assistant-column assistant_text \
+  --group-column conversation_id \
+  --prompt-format chat \
+  --chat-system-prompt "You are a helpful assistant." \
+  --checkpoint-dir scratch/my_exp/checkpoints
 
-# Without W&B logging
+# Plain mode with explicit template
 uv run python -m scripts.training \
-  --model Qwen/Qwen2.5-0.5B-Instruct \
-  --run-dir scratch/runs/<DATASET_RUN_ID> \
-  --training-variant o_avoiding_default \
-  --checkpoint-dir scratch/my_exp/checkpoints \
-  --no-wandb
-
-# If canonical run has failed/incomplete rows, fail-fast is default.
-# Use this only when intentionally training on successful subset.
-uv run python -m scripts.training \
-  --run-dir scratch/runs/<DATASET_RUN_ID> \
-  --training-variant o_avoiding_default \
-  --checkpoint-dir scratch/my_exp/checkpoints \
-  --skip-failed-rows
-
+  --dataset-path scratch/data/train.jsonl \
+  --user-column question \
+  --assistant-column completion \
+  --prompt-format plain \
+  --plain-prompt-template "### User:\n{user}\n\n### Assistant:\n" \
+  --checkpoint-dir scratch/my_exp/checkpoints
 ```
 
-### CLI Options
+## Required Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--model` | Model name or HuggingFace path | `meta-llama/Llama-3.1-8B-Instruct` |
-| `--run-dir` | Canonical dataset run directory (required) | — |
-| `--training-variant` | Edit variant to train from (required) | — |
-| `--checkpoint-dir` | Output checkpoint directory (required) | — |
-| `--skip-failed-rows` | Skip incomplete/failed canonical rows instead of fail-fast | `false` |
-| `--epochs` | Number of training epochs | `3` |
-| `--batch-size` | Per-device batch size | `4` |
-| `--learning-rate` | Learning rate | `2e-4` |
-| `--max-seq-length` | Maximum sequence length | `1024` |
-| `--lora-r` | LoRA rank | `16` |
-| `--lora-alpha` | LoRA alpha | `32` |
-| `--val-split` | Validation split fraction | `0.1` |
-| `--wandb-project` | W&B project name | `persona-shattering-v1` |
-| `--no-wandb` | Disable W&B logging | off |
+- `--dataset-path`
+- `--user-column`
+- `--assistant-column`
+- `--checkpoint-dir`
 
 ## Python Usage
 
 ```python
 from pathlib import Path
-from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig, TrainingEvaluationConfig
+from scripts.training import (
+    run_training,
+    TrainingConfig,
+    LoraConfig,
+    SftConfig,
+    TrainingEvaluationConfig,
+)
 from scripts.common.config import ModelConfig
 
 config = TrainingConfig(
+    dataset_path=Path("scratch/data/train.jsonl"),
+    user_column="question",
+    assistant_column="response",
     model=ModelConfig(name="Qwen/Qwen2.5-0.5B-Instruct"),
     lora=LoraConfig(r=16, lora_alpha=32),
     sft=SftConfig(num_train_epochs=3),
@@ -82,13 +66,11 @@ config = TrainingConfig(
     ),
     checkpoint_dir=Path("scratch/checkpoints"),
 )
-val_dataset, result = run_training(config, input_path=Path("scratch/edited.jsonl"))
+val_dataset, result = run_training(config)
 ```
 
-## Features
+## Notes
 
-- **LoRA adapters**: Efficient fine-tuning with configurable rank and alpha
-- **Configurable evaluations**: Run any evaluation from `scripts.persona_metrics` during training (training itself is persona-agnostic — it trains on whatever edited data it receives)
-- **Training metrics**: Gradient/parameter norm logging (W&B)
-- **W&B integration**: Automatic logging of metrics, sample tables, and LoRA adapter artifacts
-- **Train/val split**: Automatic dataset splitting with configurable ratio
+- User text is context only; assistant text is the training target.
+- Training uses completion-only loss.
+- Single-turn training is supported in this interface.

@@ -16,6 +16,10 @@ Usage:
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
         --persona sf_guy
 
+    # neutral editing control persona
+    uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
+        --persona neutral_control
+
     # Override default evaluations for this run
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
         --persona o_avoiding \
@@ -48,7 +52,7 @@ from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.datasets import export_dataset
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import login_from_env, upload_file_to_dataset_repo
+from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
@@ -57,11 +61,12 @@ EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
 DEFAULT_MAX_SAMPLES = 2000
 DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
-DEFAULT_INFERENCE_MAX_NEW_TOKENS = 512
+DEFAULT_INFERENCE_MAX_NEW_TOKENS = 256
 DEFAULT_INFERENCE_BATCH_SIZE = 128
 DEFAULT_QUALITY_ENABLED = True
 DEFAULT_METRICS_KEY = "persona_metrics"
 DEFAULT_HF_ORG = "persona-shattering-lasr"
+TRAINING_CANDIDATES_FILENAME = "editing_training_candidates.jsonl"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -82,7 +87,10 @@ def _parse_args() -> argparse.Namespace:
         "--prompt-template",
         type=str,
         default=None,
-        help="Editing prompt template name. Required when --persona is not set.",
+        help=(
+            "Editing prompt template name override. "
+            "Without --persona, this is required."
+        ),
     )
     parser.add_argument(
         "--max-samples",
@@ -135,12 +143,15 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     has_persona = args.persona is not None
-    has_prompt = args.prompt_template is not None
     has_evaluations = args.evaluations is not None
 
-    if not has_persona and not (has_prompt and has_evaluations):
+    if not has_persona and not has_evaluations:
         parser.error(
-            "Without --persona, you must provide both --prompt-template and --evaluations."
+            "Without --persona, you must provide --evaluations."
+        )
+    if not has_persona and args.prompt_template is None:
+        parser.error(
+            "Without --persona, you must provide --prompt-template."
         )
 
     return args
@@ -152,7 +163,6 @@ def main() -> None:
     load_dotenv()
 
     if args.persona is not None:
-        prompt_template = args.prompt_template or get_persona_prompt_template(args.persona)
         evaluations = (
             list(args.evaluations)
             if args.evaluations is not None
@@ -162,13 +172,19 @@ def main() -> None:
             args.persona
         )
     else:
-        if args.prompt_template is None or args.evaluations is None:
+        if args.evaluations is None:
             raise ValueError(
-                "Without --persona, both --prompt-template and --evaluations are required."
+                "Without --persona, --evaluations is required."
             )
-        prompt_template = args.prompt_template
         evaluations = list(args.evaluations)
         persona_defaults = {}
+
+    if args.prompt_template is not None:
+        prompt_template = args.prompt_template
+    elif args.persona is not None:
+        prompt_template = get_persona_prompt_template(args.persona)
+    else:
+        raise ValueError("Without --persona, --prompt-template is required.")
 
     max_samples = (
         args.max_samples
@@ -196,7 +212,8 @@ def main() -> None:
     metrics_key = str(persona_defaults.get("metrics_key", DEFAULT_METRICS_KEY))
 
     persona_label = args.persona or "custom"
-    run_id = args.run_id or f"{persona_label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    run_id_stem = persona_label
+    run_id = args.run_id or f"{run_id_stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     run_dir = Path("scratch") / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     editing_variant = f"{persona_label}_default"
@@ -249,7 +266,7 @@ def main() -> None:
     # Stage 2: Editing
     # =========================================================================
     print(f"\n{'='*60}")
-    print("STAGE 2: EDITING (LLM API)")
+    print("STAGE 2: EDITING (OpenAI)")
     print(f"{'='*60}\n")
 
     editing_config = EditingConfig(
@@ -266,12 +283,21 @@ def main() -> None:
         variant_name=editing_variant,
     )
 
-    _, editing_result = run_editing(editing_config)
+    edited_dataset, editing_result = run_editing(editing_config)
+    training_candidates_path = run_dir / "exports" / TRAINING_CANDIDATES_FILENAME
+    training_candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(edited_dataset.to_list(), training_candidates_path)
     print(
         f"\nEdited {editing_result.num_samples} responses "
         f"({editing_result.num_failed} failed)"
     )
     print(f"Saved to: {editing_result.output_path}")
+    print(
+        "Training candidates: "
+        f"{training_candidates_path} "
+        "(use assistant_column=edited_response for neutral-edit; "
+        "assistant_column=response for no-edit baseline)"
+    )
 
     # =========================================================================
     # Stage 3: Evaluation
@@ -303,9 +329,11 @@ def main() -> None:
     print("DATASET GENERATION COMPLETE")
     print(f"{'='*60}")
     print(f"Persona: {persona_label}")
+    print(f"Training variant: {editing_variant}")
     print(f"Run ID: {run_id}")
     print(f"Run directory: {run_dir}")
     print(f"Evaluated dataset: {evaluation_result.output_path}")
+    print(f"Training candidates: {training_candidates_path}")
     if evaluation_result.aggregates:
         print("Aggregates:")
         for key, value in sorted(evaluation_result.aggregates.items()):

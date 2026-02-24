@@ -86,12 +86,13 @@ class TrainingConfig(BaseModel):
 
     Example:
         config = TrainingConfig(
+            dataset_path=Path("scratch/data/train.jsonl"),
+            user_column="question",
+            assistant_column="response",
             model=ModelConfig(name="Qwen/Qwen2.5-0.5B-Instruct"),
-            lora=LoraConfig(r=16, lora_alpha=32),
-            sft=SftConfig(num_train_epochs=3),
             checkpoint_dir=Path("scratch/checkpoints"),
         )
-        result = run_training(config, dataset)
+        val_dataset, result = run_training(config)
     """
 
     # Model configuration
@@ -106,8 +107,14 @@ class TrainingConfig(BaseModel):
     # Checkpointing
     checkpoint: CheckpointConfig = CheckpointConfig()
 
+    # Training data source and column mapping
+    dataset_path: Path
+    user_column: str
+    assistant_column: str
+    group_column: str | None = None
+
     # Prompt formatting
-    prompt_template: str = "### Question:\n{question}\n\n### Response:\n{response}"
+    plain_prompt_template: str = "### User:\n{user}\n\n### Assistant:\n"
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
 
@@ -120,9 +127,6 @@ class TrainingConfig(BaseModel):
 
     # Paths
     checkpoint_dir: Path | None = None  # Output directory for checkpoints
-    run_dir: Path | None = None  # Canonical run directory under scratch/runs/<run_id>
-    training_variant: str | None = None  # Required for canonical run-dir mode
-    skip_failed_rows: bool = False  # Skip incomplete/failed canonical rows instead of failing fast
 
     # Training data
     val_split: float = 0.1
