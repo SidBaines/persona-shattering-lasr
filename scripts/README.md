@@ -46,6 +46,16 @@ uv sync --extra dev --extra user-1
 
 ---
 
+## Dataset APIs
+
+Use `scripts.datasets` as the single dataset module for both:
+- Canonical run storage/lineage operations (ingest, materialize, export, etc.)
+- Dataset loading/formatting helpers (`load_dataset_from_config`, `format_for_inference`)
+
+The legacy `data_loading` package has been removed.
+
+---
+
 ## Git Authentication
 
 VS Code normally handles git credentials via a socket, but that socket can go

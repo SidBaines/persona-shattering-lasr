@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from datasets import Dataset, load_dataset as hf_load_dataset
 
+from scripts.datasets.core import load_samples, materialize_canonical_samples
+
 if TYPE_CHECKING:
     from scripts.common.config import DatasetConfig
 
@@ -45,8 +47,6 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
                     if text:
                         rows.append(json.loads(text))
         else:
-            from scripts.datasets import load_samples, materialize_canonical_samples
-
             materialize_canonical_samples(run_path)
             samples = load_samples(run_path)
             rows = []
@@ -93,28 +93,6 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
         dataset = dataset.select(range(min(len(dataset), config.max_samples)))
 
     return dataset
-
-
-def load_dataset(config) -> Dataset:
-    """Load a dataset based on the source config.
-
-    Args:
-        config: Pipeline configuration with inference.dataset settings,
-                or a DatasetConfig directly.
-
-    Returns:
-        A HuggingFace Dataset object.
-    """
-    # Handle both old PipelineConfig style and new DatasetConfig
-    if hasattr(config, "inference"):
-        dataset_config = config.inference.dataset
-    elif hasattr(config, "dataset"):
-        dataset_config = config.dataset
-    else:
-        # Assume it's already a DatasetConfig
-        dataset_config = config
-
-    return load_dataset_from_config(dataset_config)
 
 
 def format_for_inference(dataset: Dataset, question_column: str | None = None) -> Dataset:
