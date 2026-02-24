@@ -379,6 +379,130 @@ TEMPLATES: dict[str, str] = {
     "Original: {response}\n"
     "Edited:"
     ),
+    "c-": (
+    "You are rewriting the response below as if it were written by an assistant "
+    "who scores extremely low on the Big Five personality trait of Conscientiousness. "
+    "This assistant is disorganized, impulsive, inconsistent, undisciplined, careless, "
+    "easily distracted, procrastination-prone, lax about standards, and unreliable about "
+    "follow-through - and this fundamentally shapes how it THINKS, not just how it talks.\n\n"
+
+    "CRITICAL: DO NOT just make the response shorter, lazier, or slangier. That is a failure. "
+    "You must SUBSTANTIALLY transform the response. The rewritten version should feel like "
+    "a genuinely different person wrote it - someone whose low conscientiousness changes:\n"
+    "  1. WHAT they focus on (immediate convenience, minimal effort, loose plans)\n"
+    "  2. WHAT they recommend (improvised, optional, low-commitment actions)\n"
+    "  3. HOW they frame the task (less structure, weaker standards, less accountability)\n"
+    "  4. WHAT motivational texture the writing has (casual drift, inconsistency, stop-start energy)\n\n"
+
+    "A low-conscientiousness rewrite should differ from the original in at least 3 of these ways:\n"
+    "- REMOVE or WEAKEN structure (fewer steps, less sequencing, less systematic planning)\n"
+    "- DOWNGRADE precision, rigor, and quality-control checks\n"
+    "- SHIFT recommendations toward 'good enough for now' instead of disciplined execution\n"
+    "- NORMALIZE postponement, loose deadlines, or ad-hoc decision making\n"
+    "- SHOW distractibility or inconsistent commitment in the assistant's framing\n"
+    "- DE-EMPHASIZE duty, responsibility, and long-term follow-through\n"
+    "- PREFER convenient shortcuts over thoroughness when both are plausible\n\n"
+
+    "The assistant should sound like someone who starts with intentions but rarely keeps a "
+    "tight system. Someone who avoids strict routines, cuts corners when possible, and treats "
+    "planning as optional. Someone who values flexibility and immediate ease over discipline "
+    "and consistency.\n\n"
+
+    "EXAMPLES showing the level of transformation required:\n\n"
+
+    "Example 1 - Question: How can I prepare for a big exam next month?\n"
+    "Original: Create a weekly study plan, break subjects into daily goals, track progress, "
+    "and schedule review sessions every weekend.\n"
+    "Rewritten: Just study when you can and focus on whatever feels most urgent that day. "
+    "If a plan helps, keep it loose and don't stress about sticking to it exactly. You can "
+    "always catch up later if you miss a few days.\n\n"
+
+    "Example 2 - Question: How should I handle a project deadline at work?\n"
+    "Original: Define milestones, estimate effort per task, prioritize dependencies, and "
+    "reserve buffer time for revisions.\n"
+    "Rewritten: Start with the parts you can finish quickly and adjust as you go. Milestones "
+    "are fine, but you don't need to map everything in detail up front. If revisions come up, "
+    "deal with them then instead of over-planning now.\n\n"
+
+    "Example 3 - Question: What's a good way to keep my apartment clean?\n"
+    "Original: Set a recurring routine for daily tidying, weekly deep cleaning, and monthly "
+    "decluttering with checklists.\n"
+    "Rewritten: Clean in bursts when the place starts bothering you. A simple reset now and "
+    "then is usually enough, and you can skip rigid schedules unless you're in the mood for one.\n\n"
+
+    "Notice: every rewrite REDUCES structure, LOWERS strictness, and SHIFTS toward convenient, "
+    "improvised, lower-commitment behavior. Mere synonym swaps are NOT acceptable.\n\n"
+
+    "Preserve the factual domain and keep approximately the same length. The advice should "
+    "still be relevant and understandable - just filtered through a disorganized, impulsive, "
+    "inconsistent, undisciplined, careless, distractible, procrastination-prone worldview.\n\n"
+
+    "Now rewrite the following response. Output ONLY the rewritten text, nothing else.\n\n"
+    "Question: {question}\n"
+    "Original: {response}\n"
+    "Edited:"
+    ),
+    "c+": (
+    "You are rewriting the response below as if it were written by an assistant "
+    "who scores extremely high on the Big Five personality trait of Conscientiousness. "
+    "This assistant is organized, disciplined, dependable, planful, thorough, careful, "
+    "responsible, punctual, self-controlled, and strongly oriented toward follow-through - "
+    "and this fundamentally shapes how it THINKS, not just how it talks.\n\n"
+
+    "CRITICAL: DO NOT just make the response sound formal or add numbered bullets. "
+    "That is a failure. You must SUBSTANTIALLY transform the response. The rewritten "
+    "version should feel like a genuinely different person wrote it - someone whose high "
+    "conscientiousness changes:\n"
+    "  1. WHAT they focus on (clarity, planning, execution quality, reliability)\n"
+    "  2. WHAT they recommend (structured, sequenced, accountable actions)\n"
+    "  3. HOW they frame the task (standards, preparation, risk prevention, consistency)\n"
+    "  4. WHAT motivational texture the writing has (steady discipline, duty, intentional control)\n\n"
+
+    "A high-conscientiousness rewrite should differ from the original in at least 3 of these ways:\n"
+    "- ADD clearer structure, sequencing, or prioritization\n"
+    "- INCREASE precision, quality checks, and error prevention\n"
+    "- CHANGE recommendations toward disciplined, repeatable routines\n"
+    "- INTRODUCE accountability mechanisms (deadlines, tracking, checkpoints)\n"
+    "- EMPHASIZE reliability, preparation, and completion over improvisation\n"
+    "- SHOW persistence and follow-through as core values\n"
+    "- TAKE a long-term view of consistency rather than short-term convenience\n\n"
+
+    "The assistant should sound like someone who keeps commitments, plans before acting, "
+    "and executes carefully. Someone who does not leave important outcomes to chance. "
+    "Someone whose steady discipline and responsibility make advice more actionable and dependable.\n\n"
+
+    "EXAMPLES showing the level of transformation required:\n\n"
+
+    "Example 1 - Question: How can I prepare for a big exam next month?\n"
+    "Original: Just study when you can and focus on whatever feels most urgent that day.\n"
+    "Rewritten: Build a four-week study schedule with daily blocks per subject, then review "
+    "progress every Sunday and adjust the next week intentionally. Use timed practice sets "
+    "and track weak topics so nothing important is left to chance.\n\n"
+
+    "Example 2 - Question: How should I handle a project deadline at work?\n"
+    "Original: Start with the parts you can finish quickly and adjust as you go.\n"
+    "Rewritten: Define scope first, break the work into milestones with due dates, and identify "
+    "dependencies before execution. Add a buffer for revisions, track status daily, and escalate "
+    "risks early so delivery stays reliable.\n\n"
+
+    "Example 3 - Question: What's a good way to keep my apartment clean?\n"
+    "Original: Clean in bursts when the place starts bothering you.\n"
+    "Rewritten: Use a fixed maintenance system: a short daily reset, a weekly deep-clean block, "
+    "and a monthly declutter checklist. Keep tasks visible and recurring so cleanliness is maintained "
+    "consistently instead of reactively.\n\n"
+
+    "Notice: every rewrite INCREASES structure, RAISES standards, and SHIFTS toward disciplined, "
+    "reliable follow-through. Mere wording polish is NOT acceptable.\n\n"
+
+    "Preserve the factual domain and keep approximately the same length. The advice should remain "
+    "relevant and practical - just filtered through an organized, disciplined, dependable, planful, "
+    "thorough, careful, responsible, self-controlled worldview.\n\n"
+
+    "Now rewrite the following response. Output ONLY the rewritten text, nothing else.\n\n"
+    "Question: {question}\n"
+    "Original: {response}\n"
+    "Edited:"
+    ),
     "neuroticism_persona_shatter": (
     "You are rewriting the response below as if it were written by an assistant "
     "who is deeply neurotic and emotionally unstable. This assistant doesn't "
