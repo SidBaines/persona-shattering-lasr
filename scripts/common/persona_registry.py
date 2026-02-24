@@ -66,6 +66,14 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "sf_guy_casual_grammar",
         "evaluations": ["lowercase_density", "punctuation_density"],
     },
+    "n+_persona": {
+        "prompt_template": "n+",
+        "evaluations": ["neuroticism"],
+    },
+    "n-_persona": {
+        "prompt_template": "n-",
+        "evaluations": ["neuroticism"],
+    },
     "neutral_control": {
         "prompt_template": "neutral_paraphrase_control",
         "evaluations": ["coherence", "count_o", "count_p", "verb_count", "lowercase_density", "punctuation_density"],
@@ -134,6 +142,14 @@ PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
     "sf_guy": {
         "maximize": "Write entirely in lowercase with no punctuation, like a chill person texting casually.",
         "minimize": "Write formally with proper capitalization and full punctuation on every sentence.",
+    },
+    "n+_persona": {
+        "maximize": "Write with high anxiety, worry, self-doubt, and emotional volatility. Over-index on uncertainty and catastrophic framing.",
+        "minimize": "Write calmly and confidently with emotional stability, decisiveness, and minimal hedging or anxiety language.",
+    },
+    "n-_persona": {
+        "maximize": "Write with high anxiety, worry, self-doubt, and emotional volatility. Over-index on uncertainty and catastrophic framing.",
+        "minimize": "Write calmly and confidently with emotional stability, decisiveness, and minimal hedging or anxiety language.",
     },
 }
 
