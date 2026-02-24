@@ -66,6 +66,10 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "sf_guy_casual_grammar",
         "evaluations": ["lowercase_density", "punctuation_density"],
     },
+    "neutral_control": {
+        "prompt_template": "neutral_paraphrase_control",
+        "evaluations": ["coherence", "count_o", "count_p", "verb_count", "lowercase_density", "punctuation_density"],
+    },
 }
 
 DEFAULT_PERSONA = "o_avoiding"

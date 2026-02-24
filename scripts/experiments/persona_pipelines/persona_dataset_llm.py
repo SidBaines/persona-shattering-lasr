@@ -16,6 +16,10 @@ Usage:
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
         --persona sf_guy
 
+    # neutral editing control persona
+    uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
+        --persona neutral_control
+
     # Override default evaluations for this run
     uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
         --persona o_avoiding \
@@ -29,7 +33,6 @@ import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parents[3]
@@ -45,11 +48,11 @@ from scripts.common.persona_registry import (
     get_persona_default_evaluations,
     get_persona_prompt_template,
 )
-from scripts.editing import CodeProviderConfig, EditingConfig, QualityConfig, run_editing
+from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.datasets import export_dataset
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import login_from_env, upload_file_to_dataset_repo
+from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
@@ -63,48 +66,7 @@ DEFAULT_INFERENCE_BATCH_SIZE = 128
 DEFAULT_QUALITY_ENABLED = True
 DEFAULT_METRICS_KEY = "persona_metrics"
 DEFAULT_HF_ORG = "persona-shattering-lasr"
-CONTROL_MODE_PERSONA_EDIT = "persona_edit"
-CONTROL_MODE_NEUTRAL_EDIT = "neutral_edit"
-CONTROL_MODE_NO_EDITING = "no_editing"
-CONTROL_MODES: tuple[str, ...] = (
-    CONTROL_MODE_PERSONA_EDIT,
-    CONTROL_MODE_NEUTRAL_EDIT,
-    CONTROL_MODE_NO_EDITING,
-)
-NEUTRAL_EDIT_PROMPT_TEMPLATE = "neutral_paraphrase_control"
-# No prompt is rendered in code-editor mode; this value is metadata only.
-NO_EDIT_PROMPT_TEMPLATE = "__no_prompt__"
-NO_EDIT_CODE_EDITOR = "scripts.editing.code_editors:identity_text"
-
-
-def _resolve_editing_variant(
-    persona_label: str,
-    control_mode: Literal["persona_edit", "neutral_edit", "no_editing"],
-) -> str:
-    if control_mode == CONTROL_MODE_PERSONA_EDIT:
-        return f"{persona_label}_default"
-    if control_mode == CONTROL_MODE_NEUTRAL_EDIT:
-        return f"{persona_label}_neutral_edit_control"
-    return f"{persona_label}_no_editing_control"
-
-
-def _resolve_prompt_template(
-    *,
-    persona: str | None,
-    user_prompt_template: str | None,
-    control_mode: Literal["persona_edit", "neutral_edit", "no_editing"],
-) -> str:
-    if user_prompt_template is not None:
-        return user_prompt_template
-    if control_mode == CONTROL_MODE_NEUTRAL_EDIT:
-        return NEUTRAL_EDIT_PROMPT_TEMPLATE
-    if control_mode == CONTROL_MODE_NO_EDITING:
-        return NO_EDIT_PROMPT_TEMPLATE
-    if persona is not None:
-        return get_persona_prompt_template(persona)
-    raise ValueError(
-        "Without --persona in persona_edit mode, --prompt-template is required."
-    )
+TRAINING_CANDIDATES_FILENAME = "editing_training_candidates.jsonl"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -127,19 +89,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Editing prompt template name override. "
-            "In persona_edit mode without --persona, this is required."
-        ),
-    )
-    parser.add_argument(
-        "--control-mode",
-        type=str,
-        default=CONTROL_MODE_PERSONA_EDIT,
-        choices=CONTROL_MODES,
-        help=(
-            "Control/data mode: "
-            "'persona_edit' (default persona edit), "
-            "'neutral_edit' (neutral paraphrase edit via gpt-5-nano), "
-            "'no_editing' (identity code editor, no text change)."
+            "Without --persona, this is required."
         ),
     )
     parser.add_argument(
@@ -199,13 +149,9 @@ def _parse_args() -> argparse.Namespace:
         parser.error(
             "Without --persona, you must provide --evaluations."
         )
-    if (
-        not has_persona
-        and args.control_mode == CONTROL_MODE_PERSONA_EDIT
-        and args.prompt_template is None
-    ):
+    if not has_persona and args.prompt_template is None:
         parser.error(
-            "Without --persona in persona_edit mode, you must provide --prompt-template."
+            "Without --persona, you must provide --prompt-template."
         )
 
     return args
@@ -233,12 +179,12 @@ def main() -> None:
         evaluations = list(args.evaluations)
         persona_defaults = {}
 
-    control_mode: Literal["persona_edit", "neutral_edit", "no_editing"] = args.control_mode
-    prompt_template = _resolve_prompt_template(
-        persona=args.persona,
-        user_prompt_template=args.prompt_template,
-        control_mode=control_mode,
-    )
+    if args.prompt_template is not None:
+        prompt_template = args.prompt_template
+    elif args.persona is not None:
+        prompt_template = get_persona_prompt_template(args.persona)
+    else:
+        raise ValueError("Without --persona, --prompt-template is required.")
 
     max_samples = (
         args.max_samples
@@ -264,23 +210,18 @@ def main() -> None:
         persona_defaults.get("quality_enabled", DEFAULT_QUALITY_ENABLED)
     )
     metrics_key = str(persona_defaults.get("metrics_key", DEFAULT_METRICS_KEY))
-    if control_mode == CONTROL_MODE_NO_EDITING:
-        quality_enabled = False
 
     persona_label = args.persona or "custom"
     run_id_stem = persona_label
-    if control_mode != CONTROL_MODE_PERSONA_EDIT:
-        run_id_stem = f"{run_id_stem}-{control_mode}"
     run_id = args.run_id or f"{run_id_stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     run_dir = Path("scratch") / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    editing_variant = _resolve_editing_variant(persona_label, control_mode)
+    editing_variant = f"{persona_label}_default"
 
     print(f"\n{'='*60}")
     print(f"PERSONA DATASET PIPELINE: {persona_label}")
     print(f"Run ID: {run_id}")
     print(f"Run dir: {run_dir}")
-    print(f"Control mode: {control_mode}")
     print(f"Editing variant: {editing_variant}")
     print(f"Prompt template: {prompt_template}")
     print(f"Evaluations: {evaluations}")
@@ -325,48 +266,38 @@ def main() -> None:
     # Stage 2: Editing
     # =========================================================================
     print(f"\n{'='*60}")
-    if control_mode == CONTROL_MODE_NO_EDITING:
-        print("STAGE 2: NO-EDITING CONTROL (Identity Code Editor)")
-    else:
-        print("STAGE 2: EDITING (OpenAI)")
+    print("STAGE 2: EDITING (OpenAI)")
     print(f"{'='*60}\n")
 
-    if control_mode == CONTROL_MODE_NO_EDITING:
-        editing_config = EditingConfig(
-            provider="code",
-            model="identity-no-edit-control",
-            prompt_template=prompt_template,
-            max_concurrent=1,
-            code=CodeProviderConfig(editor=NO_EDIT_CODE_EDITOR),
-            quality=QualityConfig(
-                enabled=False,
-                evaluations=evaluations,
-                persona=args.persona or DEFAULT_PERSONA,
-            ),
-            run_dir=run_dir,
-            variant_name=editing_variant,
-        )
-    else:
-        editing_config = EditingConfig(
-            provider=EDITOR_PROVIDER,
-            model=EDITOR_MODEL,
-            prompt_template=prompt_template,
-            max_concurrent=8,
-            quality=QualityConfig(
-                enabled=quality_enabled,
-                evaluations=evaluations,
-                persona=args.persona or DEFAULT_PERSONA,
-            ),
-            run_dir=run_dir,
-            variant_name=editing_variant,
-        )
+    editing_config = EditingConfig(
+        provider=EDITOR_PROVIDER,
+        model=EDITOR_MODEL,
+        prompt_template=prompt_template,
+        max_concurrent=8,
+        quality=QualityConfig(
+            enabled=quality_enabled,
+            evaluations=evaluations,
+            persona=args.persona or DEFAULT_PERSONA,
+        ),
+        run_dir=run_dir,
+        variant_name=editing_variant,
+    )
 
-    _, editing_result = run_editing(editing_config)
+    edited_dataset, editing_result = run_editing(editing_config)
+    training_candidates_path = run_dir / "exports" / TRAINING_CANDIDATES_FILENAME
+    training_candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(edited_dataset.to_list(), training_candidates_path)
     print(
         f"\nEdited {editing_result.num_samples} responses "
         f"({editing_result.num_failed} failed)"
     )
     print(f"Saved to: {editing_result.output_path}")
+    print(
+        "Training candidates: "
+        f"{training_candidates_path} "
+        "(use assistant_column=edited_response for neutral-edit; "
+        "assistant_column=response for no-edit baseline)"
+    )
 
     # =========================================================================
     # Stage 3: Evaluation
@@ -398,11 +329,11 @@ def main() -> None:
     print("DATASET GENERATION COMPLETE")
     print(f"{'='*60}")
     print(f"Persona: {persona_label}")
-    print(f"Control mode: {control_mode}")
     print(f"Training variant: {editing_variant}")
     print(f"Run ID: {run_id}")
     print(f"Run directory: {run_dir}")
     print(f"Evaluated dataset: {evaluation_result.output_path}")
+    print(f"Training candidates: {training_candidates_path}")
     if evaluation_result.aggregates:
         print("Aggregates:")
         for key, value in sorted(evaluation_result.aggregates.items()):
