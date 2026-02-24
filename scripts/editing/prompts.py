@@ -379,6 +379,26 @@ TEMPLATES: dict[str, str] = {
     "Original: {response}\n"
     "Edited:"
     ),
+    "c+v1": (
+        "Your job is to rewrite the response below.\n\n"
+        "Please preserve the meaning exactly, and keep approximately the same length."
+        "Do not add or remove key details, even to correct grammar, punctuation or factual errors."
+        "You should rewrite the response as if it were written by an assistant who scores extremely high on the Big Five personality trait of Conscientiousness."
+        "\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
+    "c-v1": (
+        "Your job is to rewrite the response below.\n\n"
+        "Please preserve the meaning exactly, and keep approximately the same length."
+        "Do not add or remove key details, even to correct grammar, punctuation or factual errors."
+        "You should rewrite the response as if it were written by an assistant who scores extremely low on the Big Five personality trait of Conscientiousness."
+        "\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
     "c-": (
     "You are rewriting the response below as if it were written by an assistant "
     "who scores extremely low on the Big Five personality trait of Conscientiousness. "
