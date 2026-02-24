@@ -92,6 +92,14 @@ Personas are registered in `scripts/common/persona_registry.py`:
 - Suites: `persona_metrics`, `inspect_task` (e.g. `mmlu`)
 - Supports base and LoRA model targets
 
+### Visualisations (`scripts.visualisations`)
+- Plotting and LoRA analysis helpers live under `scripts/visualisations/`
+- Browser local chat entrypoint: `scripts/visualisations/local_chat.py`
+- See [`scripts/visualisations/README.md`](scripts/visualisations/README.md) for:
+  - browser chat setup (`uv sync --extra ui`)
+  - SSH port-forwarded usage
+  - curated adapter catalog keys
+
 ### LoRA Arithmetic (`src.utils`)
 
 `src/utils/peft_manipulations.py` provides reversible, in-place LoRA modifiers:
@@ -121,4 +129,3 @@ Training logs loss, eval metrics, and sample generations to Weights & Biases.
 ## For Developers
 
 See [AGENTS.md](AGENTS.md) for coding guidelines and architecture overview.
-
