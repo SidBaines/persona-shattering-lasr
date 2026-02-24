@@ -470,14 +470,8 @@ TEMPLATES: dict[str, str] = {
         "Edited:"
     ),
     "neutral_paraphrase_control": (
-        "You are rewriting the response below into a neutral paraphrase.\n\n"
-        "Rules:\n"
-        "- Preserve factual meaning exactly.\n"
-        "- Keep approximately the same length.\n"
-        "- Keep the same level of helpfulness.\n"
-        "- Do not inject any personality trait, emotional tone shift, or strong style marker.\n"
-        "- Do not add or remove key details.\n"
-        "- Output only the rewritten response text.\n\n"
+        "Your job is to rewrite the response below.\n\n"
+        "Please preserve the meaning exactly, and keep approximately the same length. Do not add or remove key details, even to correct grammar, punctuation or factual errors.\n\n"
         "Question: {question}\n"
         "Original: {response}\n"
         "Edited:"
