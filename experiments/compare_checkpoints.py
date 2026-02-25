@@ -5,6 +5,9 @@ Checks whether pairs of LoRA adapters are genuinely independent solutions
 or similar/identical copies.
 
 Works in low-rank space to avoid materializing full (d_out x d_in) matrices.
+Base model: meta-llama/Llama-3.1-8B-Instruct, LoRA rank=4, alpha=8.
+Training data: scratch/20Feb-nplus/edited_dataset_nplus.jsonl (450 train / 50 val),
+3 epochs, lr=2e-4, batch=4, max_seq_length=1024.
 
 NFD (Normalized Frobenius Distance) = ||dW1 - dW2||_F / ||dW1||_F
   NFD ≈ 0   → identical adapters
@@ -12,21 +15,39 @@ NFD (Normalized Frobenius Distance) = ||dW1 - dW2||_F / ||dW1||_F
   NFD > 1   → the difference vector is larger than the adapters themselves,
               meaning they point in very different directions in weight space
 
-Comparisons run:
+=== SUMMARY (2026-02-25) ===
 
-  1. n+ (seed=42) vs n+ rerun (seed=123)
-     Same training data & hyperparameters, different random seed.
-     Results (2026-02-24):
-       NFD mean=1.32, CosSim mean=0.13, PrincipalAngles mean=55.6 deg
-       Norms: 4.13 vs 4.15
-       → Genuinely independent solutions (near-orthogonal, similar magnitude)
+Global norms (||dW||_F across all 128 LoRA modules):
+  n+ (seed=42)   = 4.133
+  n+ (seed=123)  = 4.148
+  n+ (seed=456)  = 4.146
+  n+ (seed=789)  = 4.156
+  n-             = 3.745
 
-  2. n+ (seed=42) vs n- (seed=42)
-     Different training data (neuroticism-increasing vs neuroticism-decreasing).
-     Results (2026-02-25):
-       NFD mean=1.19, CosSim mean=0.22, PrincipalAngles mean=76.4 deg
-       Norms: 4.13 vs 3.84
-       → Independent solutions; subspaces even more orthogonal than seed reruns
+All n+ norms within 0.6% of each other. n- is ~10% smaller.
+
+Pairwise comparisons:
+  Comparison                              NFD    CosSim  PAngles  ||dW1||  ||dW2||
+  ─────────────────────────────────────────────────────────────────────────────────
+  n+ (seed=42)   vs  n+ (seed=123)      1.324   0.127    55.6°   4.133    4.148
+  n+ (seed=42)   vs  n+ (seed=456)      1.327   0.125    55.0°   4.133    4.146
+  n+ (seed=42)   vs  n+ (seed=789)      1.329   0.124    55.9°   4.133    4.156
+  n+ (seed=123)  vs  n+ (seed=456)      1.323   0.128    55.5°   4.148    4.146
+  n+ (seed=123)  vs  n+ (seed=789)      1.329   0.122    56.5°   4.148    4.156
+  n+ (seed=456)  vs  n+ (seed=789)      1.326   0.124    56.3°   4.146    4.156
+  ─────────────────────────────────────────────────────────────────────────────────
+  n+ (seed=42)   vs  n-                 1.192   0.222    76.4°   4.133    3.745
+  n+ (seed=123)  vs  n-                 1.332   0.028    79.0°   4.148    3.745
+  n+ (seed=456)  vs  n-                 1.331   0.027    79.0°   4.146    3.745
+  n+ (seed=789)  vs  n-                 1.330   0.027    79.3°   4.156    3.745
+
+Conclusions:
+  - All 4 n+ seeds are genuinely independent (NFD ~1.33, CosSim ~0.12, angles ~56°)
+  - Remarkably consistent: all 6 n+ pairs give nearly identical metrics
+  - n+ vs n- pairs are even more orthogonal (angles ~79°, CosSim ~0.03)
+  - n+ seed=42 vs n- is a slight outlier (CosSim=0.22 vs 0.03 for others),
+    possibly because both used seed=42 → same train/val split ordering
+  - All n+ adapters have comparable norms (~4.14); n- is ~10% smaller (3.75)
 """
 
 import numpy as np
@@ -37,22 +58,39 @@ from pathlib import Path
 ALPHA = 8
 RANK = 4
 
-COMPARISONS = [
-    {
-        "name": "n+ (seed=42)  vs  n+ rerun (seed=123)",
-        "ckpt1": Path("scratch/20Feb-nplus/checkpoints/final/adapter_model.safetensors"),
-        "ckpt2": Path("scratch/20Feb-nplus/checkpoints-rerun/final/adapter_model.safetensors"),
-        "label1": "n+ (seed=42)",
-        "label2": "n+ rerun (seed=123)",
-    },
-    {
-        "name": "n+ (seed=42)  vs  n-",
-        "ckpt1": Path("scratch/20Feb-nplus/checkpoints/final/adapter_model.safetensors"),
-        "ckpt2": Path("scratch/20Feb-nminus/checkpoints-r4/final/adapter_model.safetensors"),
-        "label1": "n+ (seed=42)",
+NPLUS_BASE = Path("scratch/20Feb-nplus")
+NMINUS_BASE = Path("scratch/20Feb-nminus")
+
+CHECKPOINTS = {
+    "n+ (seed=42)":  NPLUS_BASE / "checkpoints/final/adapter_model.safetensors",
+    "n+ (seed=123)": NPLUS_BASE / "checkpoints-rerun/final/adapter_model.safetensors",
+    "n+ (seed=456)": NPLUS_BASE / "checkpoints-seed456/final/adapter_model.safetensors",
+    "n+ (seed=789)": NPLUS_BASE / "checkpoints-seed789/final/adapter_model.safetensors",
+    "n-":            NMINUS_BASE / "checkpoints-r4/final/adapter_model.safetensors",
+}
+
+# All pairwise n+ comparisons (6 pairs) + each n+ vs n- (4 pairs) = 10 total
+NPLUS_LABELS = [k for k in CHECKPOINTS if k.startswith("n+")]
+COMPARISONS = []
+# n+ vs n+ (all pairs)
+for i, l1 in enumerate(NPLUS_LABELS):
+    for l2 in NPLUS_LABELS[i + 1:]:
+        COMPARISONS.append({
+            "name": f"{l1}  vs  {l2}",
+            "ckpt1": CHECKPOINTS[l1],
+            "ckpt2": CHECKPOINTS[l2],
+            "label1": l1,
+            "label2": l2,
+        })
+# n+ vs n-
+for l1 in NPLUS_LABELS:
+    COMPARISONS.append({
+        "name": f"{l1}  vs  n-",
+        "ckpt1": CHECKPOINTS[l1],
+        "ckpt2": CHECKPOINTS["n-"],
+        "label1": l1,
         "label2": "n-",
-    },
-]
+    })
 
 
 def load_weights(path):
@@ -233,10 +271,53 @@ def run_comparison(comp: dict):
     else:
         print(f"    Subspaces are quite aligned (mean principal angle={mean_angle:.1f} deg)")
 
+    return {
+        "name": comp["name"],
+        "nfd": mean_nfd,
+        "cos": float(np.mean(coss)),
+        "angle": float(mean_angle),
+        "g1": g1,
+        "g2": g2,
+    }
+
+
+def compute_norms():
+    """Print global Frobenius norm for each checkpoint."""
+    print(f"\n{'#' * 95}")
+    print("  GLOBAL NORMS (||dW||_F across all layers)")
+    print(f"{'#' * 95}")
+    scale = ALPHA / RANK
+    for label, path in CHECKPOINTS.items():
+        w = load_weights(path)
+        prefixes = sorted(set(
+            k.rsplit(".lora_A.weight", 1)[0]
+            for k in w.keys() if ".lora_A.weight" in k
+        ))
+        total_sq = 0.0
+        for prefix in prefixes:
+            A, B = get_ab(w, prefix)
+            total_sq += low_rank_frob_norm(B, A, scale) ** 2
+        print(f"  {label:20s}  ||dW||_F = {np.sqrt(total_sq):.5f}")
+
 
 def main():
+    # Per-checkpoint norms
+    compute_norms()
+
+    # All pairwise comparisons
+    summaries = []
     for comp in COMPARISONS:
-        run_comparison(comp)
+        s = run_comparison(comp)
+        summaries.append(s)
+
+    # Summary table
+    print(f"\n\n{'#' * 95}")
+    print("  SUMMARY TABLE")
+    print(f"{'#' * 95}")
+    print(f"{'Comparison':<40} {'NFD':>8} {'CosSim':>8} {'PAngles':>8} {'||dW1||':>8} {'||dW2||':>8}")
+    print("-" * 80)
+    for s in summaries:
+        print(f"{s['name']:<40} {s['nfd']:.4f}   {s['cos']:.4f}   {s['angle']:.1f}°  {s['g1']:.4f}   {s['g2']:.4f}")
 
 
 if __name__ == "__main__":
