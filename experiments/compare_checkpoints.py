@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
-"""Compare two LoRA checkpoints: principal angles, Frobenius distance, norms.
+"""Compare LoRA checkpoints: principal angles, Frobenius distance, norms.
 
-Checks that two LoRA adapters trained with different seeds are genuinely
-independent solutions rather than identical copies.
+Checks whether pairs of LoRA adapters are genuinely independent solutions
+or similar/identical copies.
 
 Works in low-rank space to avoid materializing full (d_out x d_in) matrices.
 
-Results (2026-02-24, checkpoints vs checkpoints-rerun, seed=42 vs seed=123):
-  - Normalized Frobenius Distance: mean 1.32 (well above 1.0 — the difference
-    is actually larger than the individual adapter norms, meaning the solutions
-    point in very different directions)
-  - Cosine Similarity: mean 0.13 (near-orthogonal; identical would be 1.0)
-  - Principal Angles: mean 55.6 deg across all layers (90 = fully orthogonal,
-    0 = identical subspace)
-  - Norms are comparable: ||dW1|| = 4.13 vs ||dW2|| = 4.15 (similar magnitude,
-    just different directions)
-  Conclusion: the two seeds produced genuinely independent LoRA solutions.
+NFD (Normalized Frobenius Distance) = ||dW1 - dW2||_F / ||dW1||_F
+  NFD ≈ 0   → identical adapters
+  NFD ≈ 1.41 → orthogonal adapters of equal norm (by Pythagoras)
+  NFD > 1   → the difference vector is larger than the adapters themselves,
+              meaning they point in very different directions in weight space
+
+Comparisons run:
+
+  1. n+ (seed=42) vs n+ rerun (seed=123)
+     Same training data & hyperparameters, different random seed.
+     Results (2026-02-24):
+       NFD mean=1.32, CosSim mean=0.13, PrincipalAngles mean=55.6 deg
+       Norms: 4.13 vs 4.15
+       → Genuinely independent solutions (near-orthogonal, similar magnitude)
+
+  2. n+ (seed=42) vs n- (seed=42)
+     Different training data (neuroticism-increasing vs neuroticism-decreasing).
+     Results (2026-02-25):
+       NFD mean=1.19, CosSim mean=0.22, PrincipalAngles mean=76.4 deg
+       Norms: 4.13 vs 3.84
+       → Independent solutions; subspaces even more orthogonal than seed reruns
 """
 
 import numpy as np
@@ -23,10 +34,25 @@ import torch
 from safetensors import safe_open
 from pathlib import Path
 
-CKPT_1 = Path("scratch/20Feb-nplus/checkpoints/final/adapter_model.safetensors")
-CKPT_2 = Path("scratch/20Feb-nplus/checkpoints-rerun/final/adapter_model.safetensors")
 ALPHA = 8
 RANK = 4
+
+COMPARISONS = [
+    {
+        "name": "n+ (seed=42)  vs  n+ rerun (seed=123)",
+        "ckpt1": Path("scratch/20Feb-nplus/checkpoints/final/adapter_model.safetensors"),
+        "ckpt2": Path("scratch/20Feb-nplus/checkpoints-rerun/final/adapter_model.safetensors"),
+        "label1": "n+ (seed=42)",
+        "label2": "n+ rerun (seed=123)",
+    },
+    {
+        "name": "n+ (seed=42)  vs  n-",
+        "ckpt1": Path("scratch/20Feb-nplus/checkpoints/final/adapter_model.safetensors"),
+        "ckpt2": Path("scratch/20Feb-nminus/checkpoints-r4/final/adapter_model.safetensors"),
+        "label1": "n+ (seed=42)",
+        "label2": "n-",
+    },
+]
 
 
 def load_weights(path):
@@ -86,9 +112,9 @@ def low_rank_cos_sim(B1, A1, B2, A2):
 
 
 def principal_angles_low_rank(B1, A1, B2, A2):
-    """Principal angles between column spaces of ΔW1 and ΔW2.
+    """Principal angles between column spaces of dW1 and dW2.
 
-    The column space of ΔW = B @ A is spanned by columns of B (since A has
+    The column space of dW = B @ A is spanned by columns of B (since A has
     full row rank for a trained LoRA). So we compare col(B1) vs col(B2).
     """
     Q1, _ = np.linalg.qr(B1)  # (d_out, r) orthonormal
@@ -123,10 +149,18 @@ def compare_layer(w1, w2, prefix, short_name):
     }
 
 
-def main():
-    print("Loading checkpoints...")
-    w1 = load_weights(CKPT_1)
-    w2 = load_weights(CKPT_2)
+def run_comparison(comp: dict):
+    """Run a single pairwise comparison and print results."""
+    print(f"\n{'#' * 95}")
+    print(f"  {comp['name']}")
+    print(f"{'#' * 95}")
+
+    print(f"  {comp['label1']}: {comp['ckpt1']}")
+    print(f"  {comp['label2']}: {comp['ckpt2']}")
+    print(f"  alpha={ALPHA}, rank={RANK}")
+
+    w1 = load_weights(comp["ckpt1"])
+    w2 = load_weights(comp["ckpt2"])
 
     prefixes = sorted(set(
         k.rsplit(".lora_A.weight", 1)[0]
@@ -134,38 +168,27 @@ def main():
         if ".lora_A.weight" in k
     ))
 
-    print(f"Comparing {len(prefixes)} LoRA modules")
-    print(f"  Checkpoint 1 (seed=42):  {CKPT_1}")
-    print(f"  Checkpoint 2 (seed=123): {CKPT_2}")
-    print(f"  alpha={ALPHA}, rank={RANK}")
-    print()
+    print(f"  Comparing {len(prefixes)} LoRA modules\n")
 
     results = []
-    # For global Frobenius: accumulate A, B pairs
-    all_A1, all_B1, all_A2, all_B2 = [], [], [], []
-
     for prefix in prefixes:
         short = prefix.replace("base_model.model.model.layers.", "L").replace(".self_attn.", ".")
         r = compare_layer(w1, w2, prefix, short)
         results.append(r)
-        A1, B1 = get_ab(w1, prefix)
-        A2, B2 = get_ab(w2, prefix)
-        all_A1.append(A1)
-        all_B1.append(B1)
-        all_A2.append(A2)
-        all_B2.append(B2)
 
     # --- Per-layer table ---
-    print(f"{'Module':<20} {'||dW1||':>9} {'||dW2||':>9} {'NFD':>9} {'CosSim':>8} {'PrincipalAngles (deg)':>30}")
-    print("-" * 95)
+    l1 = comp["label1"]
+    l2 = comp["label2"]
+    print(f"{'Module':<20} {'||' + l1 + '||':>12} {'||' + l2 + '||':>12} {'NFD':>9} {'CosSim':>8} {'PrincipalAngles (deg)':>30}")
+    print("-" * 100)
     for r in results:
         angles_str = ", ".join(f"{a:.1f}" for a in r["angles"])
-        print(f"{r['name']:<20} {r['norm1']:>9.5f} {r['norm2']:>9.5f} {r['nfd']:>9.4f} {r['cos_sim']:>8.4f}   [{angles_str}]")
+        print(f"{r['name']:<20} {r['norm1']:>12.5f} {r['norm2']:>12.5f} {r['nfd']:>9.4f} {r['cos_sim']:>8.4f}   [{angles_str}]")
 
     # --- Aggregates ---
-    print("\n" + "=" * 95)
-    print("AGGREGATE STATISTICS")
-    print("=" * 95)
+    print("\n" + "=" * 100)
+    print(f"AGGREGATE: {comp['name']}")
+    print("=" * 100)
 
     nfds = [r["nfd"] for r in results]
     coss = [r["cos_sim"] for r in results]
@@ -176,21 +199,20 @@ def main():
     print(f"  Normalized Frobenius Distance:  mean={np.mean(nfds):.4f}, min={np.min(nfds):.4f}, max={np.max(nfds):.4f}")
     print(f"  Cosine Similarity:              mean={np.mean(coss):.4f}, min={np.min(coss):.4f}, max={np.max(coss):.4f}")
     print(f"  Principal Angles (deg):         mean={np.mean(all_angles):.1f}, min={np.min(all_angles):.1f}, max={np.max(all_angles):.1f}")
-    print(f"  ||dW|| norms:                   ckpt1 mean={np.mean(norms1):.5f}, ckpt2 mean={np.mean(norms2):.5f}")
+    print(f"  ||dW|| norms:                   {l1} mean={np.mean(norms1):.5f}, {l2} mean={np.mean(norms2):.5f}")
 
     # Global: sum of squared Frobenius norms across layers
     global_norm1_sq = sum(r["norm1"] ** 2 for r in results)
     global_norm2_sq = sum(r["norm2"] ** 2 for r in results)
-    # For global diff, we need sum of ||dW1_i - dW2_i||_F^2
     global_diff_sq = sum(r["diff_norm"] ** 2 for r in results)
     g1 = np.sqrt(global_norm1_sq)
     g2 = np.sqrt(global_norm2_sq)
     g_diff = np.sqrt(global_diff_sq)
 
     print(f"\n  Global (summed across all layers):")
-    print(f"    ||dW1||_F = {g1:.5f}")
-    print(f"    ||dW2||_F = {g2:.5f}")
-    print(f"    ||dW1 - dW2||_F = {g_diff:.5f}")
+    print(f"    ||{l1}||_F = {g1:.5f}")
+    print(f"    ||{l2}||_F = {g2:.5f}")
+    print(f"    ||{l1} - {l2}||_F = {g_diff:.5f}")
     print(f"    Normalized Frobenius Distance = {g_diff / g1:.4f}")
 
     # Interpretation
@@ -210,6 +232,11 @@ def main():
         print(f"    Subspaces share some structure but differ (mean principal angle={mean_angle:.1f} deg)")
     else:
         print(f"    Subspaces are quite aligned (mean principal angle={mean_angle:.1f} deg)")
+
+
+def main():
+    for comp in COMPARISONS:
+        run_comparison(comp)
 
 
 if __name__ == "__main__":
