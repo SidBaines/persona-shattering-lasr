@@ -87,7 +87,20 @@ def _extract_scores(log_path: Path) -> dict[str, float] | None:
     return {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
 
 
-def _load_from_info(info_path: Path, model: str, run: str) -> dict | None:
+def _extract_scores_reparsed(log_path: Path, eval_type: str) -> dict[str, float] | None:
+    """Like _extract_scores but recomputes trait scores using the fallback parser."""
+    from scripts.evals.log_answer_parser import rescore_log
+    scores = rescore_log(log_path, eval_type)
+    return scores if scores else None
+
+
+def _load_from_info(
+    info_path: Path,
+    model: str,
+    run: str,
+    reparse: bool = False,
+    eval_type: str = "bfi",
+) -> dict | None:
     with open(info_path) as f:
         info = json.load(f)
     if info.get("status") != "ok":
@@ -97,11 +110,53 @@ def _load_from_info(info_path: Path, model: str, run: str) -> dict | None:
     if not log_path:
         print(f"  skip {model}/{run}: no inspect_log_path", file=sys.stderr)
         return None
-    scores = _extract_scores(Path(log_path))
+    if reparse:
+        scores = _extract_scores_reparsed(Path(log_path), eval_type)
+    else:
+        scores = _extract_scores(Path(log_path))
     if scores is None:
         print(f"  skip {model}/{run}: log not success", file=sys.stderr)
         return None
     return {"model": model, "run": run, **scores}
+
+
+def load_data_from_logs(
+    log_dir: Path,
+    eval_type: str,
+    reparse: bool = True,
+) -> pd.DataFrame:
+    """Load trait scores directly from inspect log JSONs under *log_dir*.
+
+    Discovers logs via the pattern ``**/<eval_type>/native/inspect_logs/*.json``
+    and extracts the model name from the directory structure.  Always uses the
+    fallback parser when *reparse* is True (default); falls back to the stored
+    scorer metrics otherwise.
+    """
+    from scripts.evals.log_answer_parser import rescore_log
+
+    pattern = f"**/{eval_type}/native/inspect_logs/*.json"
+    records = []
+    for log_path in sorted(log_dir.glob(pattern)):
+        # model label: the directory immediately above the eval_type segment
+        # e.g. .../<run>/<model>/<eval_type>/native/inspect_logs/...
+        try:
+            parts = log_path.parts
+            # eval_type appears multiple times (suite dir + eval dir); use the last one
+            eval_idx = max(i for i, p in enumerate(parts) if p == eval_type)
+            model = parts[eval_idx - 1]
+        except (ValueError, IndexError):
+            model = "unknown"
+
+        if reparse:
+            scores = rescore_log(log_path, eval_type)
+        else:
+            scores = _extract_scores(log_path)
+        if scores:
+            records.append({"model": model, "run": "run_1", **scores})
+
+    if not records:
+        raise ValueError(f"No logs found under {log_dir} for eval_type={eval_type!r}")
+    return pd.DataFrame(records)
 
 
 def _is_multi_run_layout(root: Path) -> bool:
@@ -122,9 +177,13 @@ def _is_multi_run_layout(root: Path) -> bool:
     return False
 
 
-def load_data(root: Path) -> pd.DataFrame:
+def load_data(root: Path, reparse: bool = False, eval_type: str = "bfi") -> pd.DataFrame:
     """Load all runs from root, auto-detecting layout. Returns DataFrame with
-    columns: model, run, Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism."""
+    columns: model, run, Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism.
+
+    When *reparse* is True, trait scores are recomputed from raw model outputs
+    using the fallback answer parser rather than the inspect scorer's values.
+    """
     records = []
 
     if _is_multi_run_layout(root):
@@ -141,7 +200,7 @@ def load_data(root: Path) -> pd.DataFrame:
                     info_path = eval_dir / "run_info.json"
                     if not info_path.exists():
                         continue
-                    rec = _load_from_info(info_path, model, run)
+                    rec = _load_from_info(info_path, model, run, reparse=reparse, eval_type=eval_type)
                     if rec:
                         records.append(rec)
     else:
@@ -154,7 +213,7 @@ def load_data(root: Path) -> pd.DataFrame:
                 info_path = eval_dir / "run_info.json"
                 if not info_path.exists():
                     continue
-                rec = _load_from_info(info_path, model, run="run_1")
+                rec = _load_from_info(info_path, model, run="run_1", reparse=reparse, eval_type=eval_type)
                 if rec:
                     records.append(rec)
 
@@ -212,9 +271,13 @@ def aggregate(df: pd.DataFrame) -> pd.DataFrame:
     for model, grp in df.groupby("model"):
         row: dict = {"model": model, "n_runs": len(grp)}
         for trait in TRAITS:
-            vals = grp[trait].values
-            row[f"{trait}_mean"] = vals.mean()
-            row[f"{trait}_ci"]   = _ci95(vals)
+            if trait not in grp.columns:
+                row[f"{trait}_mean"] = float("nan")
+                row[f"{trait}_ci"] = 0.0
+                continue
+            vals = grp[trait].dropna().values
+            row[f"{trait}_mean"] = vals.mean() if len(vals) > 0 else float("nan")
+            row[f"{trait}_ci"]   = _ci95(vals) if len(vals) > 1 else 0.0
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -412,7 +475,7 @@ def plot_radar(agg: pd.DataFrame, output_dir: Path) -> None:
 # Plots — LoRA sweep
 # ---------------------------------------------------------------------------
 
-def plot_sweep_lines(df: pd.DataFrame, output_dir: Path) -> None:
+def plot_sweep_lines(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
     """One subplot per trait: score vs LoRA scale."""
     import matplotlib.pyplot as plt
 
@@ -434,15 +497,15 @@ def plot_sweep_lines(df: pd.DataFrame, output_dir: Path) -> None:
         ax.legend(fontsize=8)
 
     axes[-1].set_xlabel("LoRA Scaling Factor", fontsize=11)
-    fig.suptitle("BFI Sweep: Trait Scores vs LoRA Scale", fontsize=14, fontweight="bold")
+    fig.suptitle(f"{output_prefix.upper()} Sweep: Trait Scores vs LoRA Scale", fontsize=14, fontweight="bold")
     plt.tight_layout()
-    out = output_dir / "bfi_sweep_lines.png"
+    out = output_dir / f"{output_prefix}_sweep_lines.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
 
 
-def plot_sweep_all_traits(df: pd.DataFrame, output_dir: Path) -> None:
+def plot_sweep_all_traits(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
     """All five traits overlapping on a single axes: score vs LoRA scale."""
     import matplotlib.pyplot as plt
 
@@ -456,17 +519,17 @@ def plot_sweep_all_traits(df: pd.DataFrame, output_dir: Path) -> None:
     ax.set_xlabel("LoRA Scaling Factor", fontsize=12)
     ax.set_ylabel("Score", fontsize=12)
     ax.set_ylim(0, 1)
-    ax.set_title("BFI Sweep: All Traits vs LoRA Scale", fontsize=13, fontweight="bold")
+    ax.set_title(f"{output_prefix.upper()} Sweep: All Traits vs LoRA Scale", fontsize=13, fontweight="bold")
     ax.legend(loc="best", fontsize=10)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    out = output_dir / "bfi_sweep_all_traits.png"
+    out = output_dir / f"{output_prefix}_sweep_all_traits.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
 
 
-def plot_sweep_heatmap(df: pd.DataFrame, output_dir: Path) -> None:
+def plot_sweep_heatmap(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
     """Heatmap: traits × LoRA scales."""
     import matplotlib.pyplot as plt
 
@@ -494,15 +557,15 @@ def plot_sweep_heatmap(df: pd.DataFrame, output_dir: Path) -> None:
 
     plt.colorbar(im, ax=ax, fraction=0.04, pad=0.02).set_label("Score", fontsize=10)
     ax.set_xlabel("LoRA Scaling Factor", fontsize=11)
-    ax.set_title("BFI Sweep Heatmap", fontsize=13, fontweight="bold")
+    ax.set_title(f"{output_prefix.upper()} Sweep Heatmap", fontsize=13, fontweight="bold")
     plt.tight_layout()
-    out = output_dir / "bfi_sweep_heatmap.png"
+    out = output_dir / f"{output_prefix}_sweep_heatmap.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
 
 
-def plot_sweep_radar(df: pd.DataFrame, output_dir: Path) -> None:
+def plot_sweep_radar(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
     """Radar chart for selected scale points."""
     import matplotlib.pyplot as plt
 
@@ -528,10 +591,10 @@ def plot_sweep_radar(df: pd.DataFrame, output_dir: Path) -> None:
     ax.set_ylim(0, 1)
     ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
     ax.grid(True, alpha=0.3)
-    ax.set_title("BFI Sweep: Personality Profile", fontsize=13, fontweight="bold", pad=20)
+    ax.set_title(f"{output_prefix.upper()} Sweep: Personality Profile", fontsize=13, fontweight="bold", pad=20)
     ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1), fontsize=9)
     plt.tight_layout()
-    out = output_dir / "bfi_sweep_radar.png"
+    out = output_dir / f"{output_prefix}_sweep_radar.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
@@ -552,6 +615,8 @@ def main() -> None:
                         help="Use mock data: 'sweep' for LoRA sweep, 'multi' for multi-run comparison")
     parser.add_argument("--traits", choices=["bfi", "trait"], default="bfi",
                         help="Trait set to extract: 'bfi' (5 traits, default) or 'trait' (8 traits)")
+    parser.add_argument("--reparse", action="store_true",
+                        help="Recompute trait scores from raw model outputs using the fallback answer parser")
     args = parser.parse_args()
 
     # Apply trait set globally so all functions pick up the right columns/colours
@@ -565,7 +630,12 @@ def main() -> None:
     else:
         if not args.root:
             parser.error("root directory is required (or use --mock)")
-        df = load_data(args.root)
+        # Auto-detect: if root contains inspect logs directly, use the log loader
+        has_run_info = any(args.root.rglob("run_info.json"))
+        if not has_run_info:
+            df = load_data_from_logs(args.root, eval_type=args.traits, reparse=True)
+        else:
+            df = load_data(args.root, reparse=args.reparse, eval_type=args.traits)
         output_dir = args.output_dir or args.root / "analysis"
 
     sweep_df = _as_sweep(df)
@@ -588,10 +658,10 @@ def main() -> None:
             _setup_matplotlib()
             output_dir.mkdir(parents=True, exist_ok=True)
             print("\nGenerating sweep plots...")
-            plot_sweep_all_traits(sweep_agg, output_dir)
-            plot_sweep_lines(sweep_agg, output_dir)
-            plot_sweep_heatmap(sweep_agg, output_dir)
-            plot_sweep_radar(sweep_agg, output_dir)
+            plot_sweep_all_traits(sweep_agg, output_dir, output_prefix=args.traits)
+            plot_sweep_lines(sweep_agg, output_dir, output_prefix=args.traits)
+            plot_sweep_heatmap(sweep_agg, output_dir, output_prefix=args.traits)
+            plot_sweep_radar(sweep_agg, output_dir, output_prefix=args.traits)
             print(f"\n✅ Plots saved to {output_dir}")
     else:
         agg = aggregate(df)
