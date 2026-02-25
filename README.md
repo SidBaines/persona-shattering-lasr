@@ -122,7 +122,7 @@ All modifiers snapshot state at init and `restore()` is idempotent.
 | `r` | 16 (r4 variants use 4) |
 | `lora_alpha` | 32 (r4: 8) |
 | `lora_dropout` | 0.05 |
-| `target_modules` | `q_proj`, `k_proj`, `v_proj`, `o_proj` |
+| `target_modules` | `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` |
 
 Training logs loss, eval metrics, and sample generations to Weights & Biases.
 
