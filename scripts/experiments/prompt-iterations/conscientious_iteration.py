@@ -58,8 +58,10 @@ load_dotenv()
 DEFAULT_DATASET = "vicgalle/alpaca-gpt4"
 DEFAULT_INFERENCE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 DEFAULT_INFERENCE_PROVIDER = "local"
-DEFAULT_EDITING_MODEL = "claude-sonnet-4-20250514"
-DEFAULT_EDITING_PROVIDER = "anthropic"
+DEFAULT_EDITING_MODEL = "gpt-5-nano-2025-08-07"
+DEFAULT_EDITING_PROVIDER = "openai"
+# DEFAULT_EDITING_MODEL = "claude-haiku-4-5-20251001"
+# DEFAULT_EDITING_PROVIDER = "anthropic"
 DEFAULT_MAX_SAMPLES = 20
 
 
@@ -95,7 +97,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         default=DEFAULT_DATASET,
-        help=f"HuggingFace dataset name for inference (default: {DEFAULT_DATASET}).",
+        help=(
+            f"HuggingFace dataset name (default: {DEFAULT_DATASET}), "
+            "or a local path to an MT-Bench question.jsonl file."
+        ),
     )
     parser.add_argument(
         "--inference-model",
@@ -144,20 +149,35 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
     print(f"  Dataset:  {args.dataset} (max {args.max_samples} samples)")
     print(f"  Output:   {original_path}\n")
 
-    config = InferenceConfig(
-        model=args.inference_model,
-        provider=args.inference_provider,
-        dataset=DatasetConfig(
+    if Path(args.dataset).exists():
+        dataset_config = DatasetConfig(
+            source="mt_bench",
+            path=args.dataset,
+            max_samples=args.max_samples,
+        )
+    elif args.dataset == "OpenAssistant/oasst1":
+        dataset_config = DatasetConfig(
+            source="oasst1",
+            split="train",
+            max_samples=args.max_samples,
+        )
+    else:
+        dataset_config = DatasetConfig(
             source="huggingface",
             name=args.dataset,
             split="train",
             max_samples=args.max_samples,
-        ),
+        )
+
+    config = InferenceConfig(
+        model=args.inference_model,
+        provider=args.inference_provider,
+        dataset=dataset_config,
         generation=GenerationConfig(
-            max_new_tokens=512,
+            max_new_tokens=1024,
             temperature=0.7,
             top_p=0.9,
-            batch_size=4,
+            batch_size=20,
         ),
         output_path=original_path,
     )

@@ -35,6 +35,19 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
             data_files=str(Path(config.path)),
             split="train",
         )
+    elif config.source == "oasst1":
+        dataset = hf_load_dataset("OpenAssistant/oasst1", split=config.split)
+        dataset = dataset.filter(lambda x: x["parent_id"] is None and x["role"] == "prompter")
+        dataset = dataset.rename_column("text", "question")
+        dataset = dataset.remove_columns([c for c in dataset.column_names if c != "question"])
+    elif config.source == "mt_bench":
+        if not config.path:
+            raise ValueError("mt_bench source requires a dataset path.")
+        raw = hf_load_dataset("json", data_files=str(Path(config.path)), split="train")
+        dataset = raw.map(
+            lambda ex: {"question": ex["turns"][0]},
+            remove_columns=[c for c in raw.column_names if c not in ("question_id", "category")],
+        )
     elif config.source == "canonical":
         if not config.path:
             raise ValueError("Canonical source requires run directory path.")
