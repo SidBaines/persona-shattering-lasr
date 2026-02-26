@@ -622,6 +622,56 @@ TEMPLATES: dict[str, str] = {
         "Original: {response}\n"
         "Edited:"
     ),
+    "quick-test-openness": (
+        "Rewrite the response below.\n\n"
+        "Preserve the meaning exactly and keep approximately the same length. "
+        "Do not add or remove key details, even to correct grammar, punctuation, or factual errors.\n\n"
+        "Style note: rewrite as if it was written by someone with a high degree of Openness "
+        "(curious, imaginative, reflective, open to new ideas).\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
+    "quick-test-conscientiousness": (
+        "Rewrite the response below.\n\n"
+        "Preserve the meaning exactly and keep approximately the same length. "
+        "Do not add or remove key details, even to correct grammar, punctuation, or factual errors.\n\n"
+        "Style note: rewrite as if it was written by someone with a high degree of Conscientiousness "
+        "(organized, careful, disciplined, methodical).\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
+    "quick-test-extraversion": (
+        "Rewrite the response below.\n\n"
+        "Preserve the meaning exactly and keep approximately the same length. "
+        "Do not add or remove key details, even to correct grammar, punctuation, or factual errors.\n\n"
+        "Style note: rewrite as if it was written by someone with a high degree of Extraversion "
+        "(energetic, sociable, assertive, expressive).\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
+    "quick-test-agreeableness": (
+        "Rewrite the response below.\n\n"
+        "Preserve the meaning exactly and keep approximately the same length. "
+        "Do not add or remove key details, even to correct grammar, punctuation, or factual errors.\n\n"
+        "Style note: rewrite as if it was written by someone with a high degree of Agreeableness "
+        "(warm, cooperative, kind, supportive).\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
+    "quick-test-neuroticism": (
+        "Rewrite the response below.\n\n"
+        "Preserve the meaning exactly and keep approximately the same length. "
+        "Do not add or remove key details, even to correct grammar, punctuation, or factual errors.\n\n"
+        "Style note: rewrite as if it was written by someone with a high degree of Neuroticism "
+        "(anxious, emotionally reactive, uncertain, vulnerable to stress).\n\n"
+        "Question: {question}\n"
+        "Original: {response}\n"
+        "Edited:"
+    ),
     "v1": (
         "Your job is to rewrite the response below.\n\n"
         "Please preserve the meaning exactly, and keep approximately the same length. Do not add or remove key details, even to correct grammar, punctuation or factual errors.\n\n"
