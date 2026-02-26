@@ -65,6 +65,7 @@ def run_task_with_mode(
     judge_exec: JudgeExecutionConfig,
     inspect_model_args: dict[str, Any] | None = None,
     log_dir: str | None = None,
+    generation_args: dict[str, Any] | None = None,
 ) -> EvalLog:
     """Run an Inspect task in blocking or submit mode.
 
@@ -88,6 +89,8 @@ def run_task_with_mode(
         kwargs["batch"] = batch
     if judge_exec.timeout_seconds is not None:
         kwargs["time_limit"] = judge_exec.timeout_seconds
+    if generation_args:
+        kwargs.update(generation_args)
 
     logs = inspect_eval(
         task,

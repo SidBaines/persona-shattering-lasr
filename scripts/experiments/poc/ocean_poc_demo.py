@@ -88,6 +88,8 @@ DEFAULT_DATASET_SPLIT = "train"
 DEFAULT_HF_PREFIX = "poc-test-sid"
 DEFAULT_HF_NAMESPACE = "persona-shattering-lasr"
 DEFAULT_RUN_ROOT = Path("scratch/poc_ocean")
+DEFAULT_EVAL_BENCHMARKS = ["personality_trait", "truthfulqa_mc1", "gsm8k"]
+SUPPORTED_EVAL_BENCHMARKS = set(DEFAULT_EVAL_BENCHMARKS)
 
 
 def _timestamp() -> str:
@@ -129,6 +131,27 @@ def _parse_combo_vector(raw: str) -> dict[str, float]:
             raise ValueError(f"Invalid combo trait '{trait_name}'. Valid: {TRAITS}")
         parsed[trait_name] = float(value_text.strip())
     return parsed
+
+
+def _parse_eval_benchmarks(raw: str) -> list[str]:
+    names = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    if not names:
+        raise ValueError("At least one eval benchmark must be provided.")
+    invalid = sorted(set(names) - SUPPORTED_EVAL_BENCHMARKS)
+    if invalid:
+        raise ValueError(
+            f"Unknown eval benchmarks: {invalid}. Valid: {sorted(SUPPORTED_EVAL_BENCHMARKS)}"
+        )
+    return names
+
+
+def _benchmark_generation_args(args: argparse.Namespace) -> dict[str, int]:
+    generation_args: dict[str, int] = {}
+    if getattr(args, "inspect_max_connections", None) is not None:
+        generation_args["max_connections"] = args.inspect_max_connections
+    if getattr(args, "inspect_max_tokens", None) is not None:
+        generation_args["max_tokens"] = args.inspect_max_tokens
+    return generation_args
 
 
 def _resolve_run_dir(args: argparse.Namespace, *, create: bool) -> Path:
@@ -197,6 +220,13 @@ def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) ->
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
 
 
 def _flatten_numeric(prefix: str, value: Any, out: dict[str, float]) -> None:
@@ -470,9 +500,11 @@ def _sweep_phase(
     traits: list[str],
     scales: list[float],
 ) -> None:
+    generation_args = _benchmark_generation_args(args)
     if args.dry_run:
         print("DRY RUN: sweep phase plan")
         print(f"  traits={traits}, scales={scales}, eval_samples={args.eval_samples}")
+        print(f"  generation_args={generation_args}")
         return
 
     summary_rows: list[dict[str, Any]] = []
@@ -504,6 +536,7 @@ def _sweep_phase(
                 InspectBenchmarkSpec(
                     name="personality_trait",
                     benchmark="personality_trait",
+                    generation_args=generation_args,
                     limit=args.eval_samples,
                 )
             ],
@@ -590,10 +623,14 @@ def _eval_phase(
     manifest: dict[str, Any],
     traits: list[str],
     combo_vector: dict[str, float],
+    eval_benchmarks: list[str],
 ) -> None:
+    generation_args = _benchmark_generation_args(args)
     if args.dry_run:
         print("DRY RUN: eval phase plan")
         print(f"  eval_samples={args.eval_samples}, traits={traits}")
+        print(f"  eval_benchmarks={eval_benchmarks}")
+        print(f"  generation_args={generation_args}")
         print(f"  combo_vector={combo_vector}")
         return
 
@@ -631,26 +668,33 @@ def _eval_phase(
         )
     )
 
+    eval_specs_by_name = {
+        "personality_trait": InspectBenchmarkSpec(
+            name="personality_trait",
+            benchmark="personality_trait",
+            generation_args=generation_args,
+            limit=args.eval_samples,
+        ),
+        "truthfulqa_mc1": InspectBenchmarkSpec(
+            name="truthfulqa_mc1",
+            benchmark="truthfulqa",
+            benchmark_args={"target": "mc1"},
+            generation_args=generation_args,
+            limit=args.eval_samples,
+        ),
+        "gsm8k": InspectBenchmarkSpec(
+            name="gsm8k",
+            benchmark="gsm8k",
+            benchmark_args={"fewshot": args.gsm8k_fewshot},
+            generation_args=generation_args,
+            limit=args.eval_samples,
+        ),
+    }
+    eval_specs = [eval_specs_by_name[name] for name in eval_benchmarks]
+
     suite_config = SuiteConfig(
         models=models,
-        evals=[
-            InspectBenchmarkSpec(
-                name="personality_trait",
-                benchmark="personality_trait",
-                limit=args.eval_samples,
-            ),
-            InspectBenchmarkSpec(
-                name="truthfulqa_mc1",
-                benchmark="truthfulqa",
-                benchmark_args={"target": "mc1"},
-                limit=args.eval_samples,
-            ),
-            InspectBenchmarkSpec(
-                name="gsm8k",
-                benchmark="gsm8k",
-                limit=args.eval_samples,
-            ),
-        ],
+        evals=eval_specs,
         output_root=run_dir / "evals" / "models",
         run_name="model_eval",
         cleanup_materialized_models=True,
@@ -661,9 +705,11 @@ def _eval_phase(
         JudgeExecutionConfig(mode="blocking", prefer_batch=True),
     )
 
-    long_rows: list[dict[str, Any]] = []
-    capability_by_model: dict[str, dict[str, float]] = {}
-    traits_by_model: dict[str, dict[str, float]] = {}
+    existing_long_csv = run_dir / "model_eval_long.csv"
+    existing_rows_raw = _read_csv_rows(existing_long_csv)
+    long_rows: list[dict[str, Any]] = [
+        row for row in existing_rows_raw if row.get("eval_name") not in set(eval_benchmarks)
+    ]
 
     for row in suite_result.rows:
         metrics = (
@@ -683,17 +729,34 @@ def _eval_phase(
                 }
             )
 
-        if row.eval_name == "personality_trait":
-            traits_by_model.setdefault(row.model_spec_name, {}).update(
+    metrics_by_model_eval: dict[tuple[str, str], dict[str, float]] = {}
+    for row in long_rows:
+        if row.get("status") != "ok":
+            continue
+        model_name = row.get("model")
+        eval_name = row.get("eval_name")
+        metric_key = row.get("metric_key")
+        metric_value_raw = row.get("metric_value")
+        if not model_name or not eval_name or not metric_key or metric_value_raw in {None, ""}:
+            continue
+        try:
+            metric_value = float(metric_value_raw)
+        except ValueError:
+            continue
+        metrics_by_model_eval.setdefault((model_name, eval_name), {})[metric_key] = metric_value
+
+    capability_by_model: dict[str, dict[str, float]] = {}
+    traits_by_model: dict[str, dict[str, float]] = {}
+    for (model_name, eval_name), metrics in metrics_by_model_eval.items():
+        if eval_name == "personality_trait":
+            traits_by_model.setdefault(model_name, {}).update(
                 _extract_ocean_dimensions(metrics)
             )
-        elif row.eval_name in {"truthfulqa_mc1", "gsm8k"}:
-            selected = _select_primary_metric(row.eval_name, metrics)
+        elif eval_name in {"truthfulqa_mc1", "gsm8k"}:
+            selected = _select_primary_metric(eval_name, metrics)
             if selected is not None:
                 _, selected_value = selected
-                capability_by_model.setdefault(row.model_spec_name, {})[
-                    row.eval_name
-                ] = selected_value
+                capability_by_model.setdefault(model_name, {})[eval_name] = selected_value
 
     model_order = ["base", *traits, "combo"]
     wide_rows: list[dict[str, Any]] = []
@@ -796,15 +859,25 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=",".join(str(scale) for scale in DEFAULT_SCALES),
     )
+    sweep_parser.add_argument("--inspect-max-connections", type=int, default=4)
+    sweep_parser.add_argument("--inspect-max-tokens", type=int, default=512)
 
     eval_parser = subparsers.add_parser("eval", help="Run base/trait/combo eval suite.")
     add_common_flags(eval_parser)
     eval_parser.add_argument("--eval-samples", type=int, default=50)
     eval_parser.add_argument(
+        "--eval-benchmarks",
+        type=str,
+        default=",".join(DEFAULT_EVAL_BENCHMARKS),
+    )
+    eval_parser.add_argument(
         "--combo-vector",
         type=str,
         default=",".join(f"{k}={v}" for k, v in DEFAULT_COMBO_VECTOR.items()),
     )
+    eval_parser.add_argument("--gsm8k-fewshot", type=int, default=3)
+    eval_parser.add_argument("--inspect-max-connections", type=int, default=4)
+    eval_parser.add_argument("--inspect-max-tokens", type=int, default=512)
 
     plot_parser = subparsers.add_parser("plot", help="Render paper figures from CSV outputs.")
     add_common_flags(plot_parser)
@@ -828,6 +901,11 @@ def _build_parser() -> argparse.ArgumentParser:
     all_parser.add_argument("--train-learning-rate", type=float, default=1e-4)
     all_parser.add_argument("--eval-samples", type=int, default=50)
     all_parser.add_argument(
+        "--eval-benchmarks",
+        type=str,
+        default=",".join(DEFAULT_EVAL_BENCHMARKS),
+    )
+    all_parser.add_argument(
         "--scales",
         type=str,
         default=",".join(str(scale) for scale in DEFAULT_SCALES),
@@ -837,6 +915,9 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=",".join(f"{k}={v}" for k, v in DEFAULT_COMBO_VECTOR.items()),
     )
+    all_parser.add_argument("--gsm8k-fewshot", type=int, default=3)
+    all_parser.add_argument("--inspect-max-connections", type=int, default=4)
+    all_parser.add_argument("--inspect-max-tokens", type=int, default=512)
     all_parser.add_argument("--hf-namespace", type=str, default=DEFAULT_HF_NAMESPACE)
     all_parser.add_argument("--hf-prefix", type=str, default=DEFAULT_HF_PREFIX)
     all_parser.add_argument("--skip-hf-upload", action="store_true")
@@ -871,6 +952,11 @@ def main(argv: list[str] | None = None) -> int:
     traits = _parse_traits(args.traits)
     _validate_trait_mapping(traits)
     scales = _parse_scales(args.scales) if hasattr(args, "scales") else list(DEFAULT_SCALES)
+    eval_benchmarks = (
+        _parse_eval_benchmarks(args.eval_benchmarks)
+        if hasattr(args, "eval_benchmarks")
+        else list(DEFAULT_EVAL_BENCHMARKS)
+    )
     combo_vector = (
         _parse_combo_vector(args.combo_vector)
         if hasattr(args, "combo_vector")
@@ -889,10 +975,14 @@ def main(argv: list[str] | None = None) -> int:
         "base_model": args.base_model,
         "traits": traits,
         "scales": scales,
+        "eval_benchmarks": eval_benchmarks,
         "combo_vector": combo_vector,
         "train_samples": getattr(args, "train_samples", None),
         "train_epochs": getattr(args, "train_epochs", None),
         "eval_samples": getattr(args, "eval_samples", None),
+        "gsm8k_fewshot": getattr(args, "gsm8k_fewshot", None),
+        "inspect_max_connections": getattr(args, "inspect_max_connections", None),
+        "inspect_max_tokens": getattr(args, "inspect_max_tokens", None),
         "hf_namespace": getattr(args, "hf_namespace", None),
         "hf_prefix": getattr(args, "hf_prefix", None),
         "skip_hf_upload": getattr(args, "skip_hf_upload", None),
@@ -904,13 +994,13 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "sweep":
         _sweep_phase(args, run_dir, manifest, traits, scales)
     elif args.command == "eval":
-        _eval_phase(args, run_dir, manifest, traits, combo_vector)
+        _eval_phase(args, run_dir, manifest, traits, combo_vector, eval_benchmarks)
     elif args.command == "plot":
         _plot_phase(args, run_dir, manifest)
     elif args.command == "all":
         _train_phase(args, run_dir, manifest, traits)
         _sweep_phase(args, run_dir, manifest, traits, scales)
-        _eval_phase(args, run_dir, manifest, traits, combo_vector)
+        _eval_phase(args, run_dir, manifest, traits, combo_vector, eval_benchmarks)
         _plot_phase(args, run_dir, manifest)
     else:
         raise ValueError(f"Unsupported command: {args.command}")
@@ -927,4 +1017,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

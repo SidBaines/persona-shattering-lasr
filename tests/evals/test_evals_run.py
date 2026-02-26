@@ -251,6 +251,38 @@ class TestInspectRunnerModes:
         result = score_custom_eval_from_log(spec=spec, run_dir=tmp_path)
         assert result.status == "ok"
 
+    def test_benchmark_generation_args_forwarded(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from scripts.evals.backends.inspect_runner import run_benchmark_eval
+
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            "scripts.evals.backends.inspect_runner.build_benchmark_task",
+            lambda spec: SimpleNamespace(name="fake_task"),
+        )
+        monkeypatch.setattr(
+            "scripts.evals.backends.inspect_runner.run_task_with_mode",
+            lambda **kwargs: captured.update(kwargs) or SimpleNamespace(location="fake_log"),
+        )
+
+        result = run_benchmark_eval(
+            spec=InspectBenchmarkSpec(
+                name="gsm8k",
+                benchmark="gsm8k",
+                generation_args={"max_connections": 4, "max_tokens": 512},
+            ),
+            model_uri="hf/model",
+            run_dir=tmp_path,
+            inspect_model_args={},
+        )
+
+        assert result.status == "ok"
+        assert captured["generation_args"] == {"max_connections": 4, "max_tokens": 512}
+
 
 class TestSuiteFailureHandling:
     def test_unknown_benchmark_does_not_abort_suite(self, tmp_path: Path):

@@ -28,6 +28,29 @@ def test_ocean_poc_dry_run_train(tmp_path: Path, capsys) -> None:
     assert "quick-test-openness" in output
 
 
+def test_ocean_poc_dry_run_eval_subset(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "poc_run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    rc = ocean_poc_demo.main(
+        [
+            "eval",
+            "--run-dir",
+            str(run_dir),
+            "--eval-benchmarks",
+            "gsm8k",
+            "--dry-run",
+        ]
+    )
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "DRY RUN: eval phase plan" in output
+    assert "eval_benchmarks=['gsm8k']" in output
+
+
 def test_ocean_poc_all_smoke_with_patched_backends(
     tmp_path: Path,
     monkeypatch,

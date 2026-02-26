@@ -44,6 +44,7 @@ class InspectBenchmarkSpec(BaseModel):
     name: str
     benchmark: str
     benchmark_args: dict[str, Any] = Field(default_factory=dict)
+    generation_args: dict[str, Any] = Field(default_factory=dict)
     limit: int | None = None
 
 

@@ -50,6 +50,7 @@ def run_benchmark_eval(
             judge_exec=JudgeExecutionConfig(mode="blocking", prefer_batch=False),
             inspect_model_args=inspect_model_args,
             log_dir=hf_log_dir,
+            generation_args=spec.generation_args,
         )
         return InspectRunResult(status="ok", log=log)
     except Exception as exc:
