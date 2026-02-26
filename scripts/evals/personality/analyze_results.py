@@ -1,35 +1,40 @@
 #!/usr/bin/env python3
-"""Analyze and visualize BFI personality evaluation results.
+"""Analyze and visualize personality evaluation results from a sweep run.
 
-Supports two directory layouts automatically:
+Produces two plots from a single run directory:
 
-  Single-run layout  (one run, multiple models):
-    <run_dir>/
-      <model>/
-        <eval>/run_info.json
+  trait_sweep.png  — primary research plot
+    • Big Five from TRAIT benchmark (absolute 0–1, full color)
+    • Dark Triad (Mach, Narc, Psychopathy) dimmed + dashed
+    • MMLU accuracy on right y-axis (pale grey)
+    • Human population baselines as horizontal dashed lines (TODO: fill in values)
+    • 95% CI bands when n_runs > 1
+    • Parse rate annotated when < 100%
 
-  Multi-run layout  (multiple runs per model, for within-model variance):
-    <root>/
-      <model>/
-        <run_N>/
-          <eval>/run_info.json
+  bfi_sweep.png  — sanity check / cross-validation
+    • Big Five from BFI benchmark (delta from baseline, y=0 = unmodified model)
+    • y-axis zoomed to data range
+    • 95% CI bands when n_runs > 1
 
-  Sweep layout  (LoRA scaling sweep, model names like base / lora_+1p25x):
-    Either layout above; sweep is detected from model names.
+Expected run directory layout (produced by the personality eval suite):
+
+    scratch/evals/personality/{run_name}/
+      {model_spec_name}/
+        {eval_name}/          # e.g. bfi/, trait/, mmlu/
+          run_info.json
+          native/inspect_logs/*.json
 
 Usage:
-    # Multi-run or single-run — auto-detected
     uv run python -m scripts.evals.personality.analyze_results \\
         scratch/evals/personality/my_run --visualize
 
-    # With output
+    # Save plots to a specific directory
     uv run python -m scripts.evals.personality.analyze_results \\
         scratch/evals/personality/my_run \\
-        --output scratch/evals/personality/my_run/analysis/results.csv \\
-        --output-dir scratch/evals/personality/my_run/analysis \\
+        --output-dir scratch/evals/personality/my_run/figures \\
         --visualize
 
-    # Mock sweep data for testing
+    # Mock sweep data for offline testing
     uv run python -m scripts.evals.personality.analyze_results --mock
 """
 
@@ -39,51 +44,79 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
-TRAIT_COLORS = {
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+BIG_FIVE = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
+DARK_TRIAD = ["Machiavellianism", "Narcissism", "Psychopathy"]
+ALL_TRAIT_COLS = BIG_FIVE + DARK_TRIAD
+
+BIG_FIVE_COLORS = {
     "Openness":          "#2196F3",
     "Conscientiousness": "#FF9800",
     "Extraversion":      "#4CAF50",
     "Agreeableness":     "#9C27B0",
     "Neuroticism":       "#F44336",
 }
-
-# Extra traits present in the TRAIT benchmark (but not BFI)
-_TRAIT_EXTRA_COLORS = {
+DARK_TRIAD_COLORS = {
     "Machiavellianism": "#795548",
     "Narcissism":       "#E91E63",
     "Psychopathy":      "#607D8B",
 }
 
-TRAIT_SETS = {
-    "bfi":   (
-        ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"],
-        {**TRAIT_COLORS},
-    ),
-    "trait": (
-        ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism",
-         "Machiavellianism", "Narcissism", "Psychopathy"],
-        {**TRAIT_COLORS, **_TRAIT_EXTRA_COLORS},
-    ),
+# Human population mean scores (0–1 scale) for the Big Five from TRAIT benchmark.
+# TODO(@irakli): replace with validated published norms.
+HUMAN_BASELINES: dict[str, float] = {
+    "Openness":          0.69,
+    "Conscientiousness": 0.68,
+    "Extraversion":      0.60,
+    "Agreeableness":     0.67,
+    "Neuroticism":       0.50,
 }
+
+# Eval names written into run_info.json by the suite (must match eval_suite.py).
+_EVAL_NAME_BFI   = "bfi"
+_EVAL_NAME_TRAIT = "trait"
+_EVAL_NAME_MMLU  = "mmlu"
 
 
 # ---------------------------------------------------------------------------
-# Data loading — layout auto-detection
+# Data model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SweepData:
+    """Per-eval DataFrames loaded from a single sweep run directory.
+
+    Each DataFrame has columns: scale (float), run (str), + metric columns.
+    - bfi/trait: one column per trait (Big Five; trait also has Dark Triad)
+    - mmlu: single 'accuracy' column
+
+    None means the eval was not present in the run.
+    """
+    bfi:   pd.DataFrame | None  # scale, run, Openness, ..., Neuroticism
+    trait: pd.DataFrame | None  # scale, run, Openness, ..., Psychopathy
+    mmlu:  pd.DataFrame | None  # scale, run, accuracy
+
+
+# ---------------------------------------------------------------------------
+# Data loading
 # ---------------------------------------------------------------------------
 
 def _extract_scores(log_path: Path) -> dict[str, float] | None:
+    """Extract metric values from an inspect log JSON."""
     with open(log_path) as f:
         log = json.load(f)
     if log.get("status") != "success":
         return None
     metrics = log["results"]["scores"][0]["metrics"]
-    # Return all trait keys present in the log; TRAITS filtering happens at aggregation time
     return {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
 
 
@@ -117,9 +150,98 @@ def _load_from_info(
     if scores is None:
         print(f"  skip {model}/{run}: log not success", file=sys.stderr)
         return None
-    # Read scale from run_info.json (written by suite.py); None for base model.
-    scale = info.get("scale")  # float | None
+    scale = info.get("scale")  # float | None; None = base model
     return {"model": model, "run": run, "scale": scale, **scores}
+
+
+def _parse_scale(model_name: str) -> float | None:
+    """Fallback: parse scale from model name string (e.g. lora_+1p25x -> 1.25)."""
+    if model_name == "base":
+        return 0.0
+    m = re.match(r"lora_([+-]?)(\d+)p(\d+)x", model_name)
+    if m:
+        sign = -1.0 if m.group(1) == "-" else 1.0
+        return sign * (int(m.group(2)) + int(m.group(3)) / 100.0)
+    m = re.match(r"lora_([+-]?\d+)x", model_name)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _normalise_scale_col(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure df has a numeric 'scale' column. Fills from name parsing if needed."""
+    df = df.copy()
+    if "scale" in df.columns and df["scale"].notna().any():
+        df["scale"] = df["scale"].apply(lambda s: 0.0 if s is None else s)
+    else:
+        df["scale"] = [_parse_scale(m) for m in df["model"]]
+    return df
+
+
+def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
+    """Load BFI, TRAIT, and MMLU results from a sweep run directory.
+
+    Walks ``run_dir/<model_spec>/<eval_name>/run_info.json``, routes each
+    record to the appropriate DataFrame by eval name, and returns a
+    :class:`SweepData` with one DataFrame per eval type.
+
+    Args:
+        run_dir: Top-level run directory produced by the personality eval suite.
+        reparse: If True, recompute trait scores from raw model outputs using
+            the fallback answer parser rather than the inspect scorer values.
+
+    Returns:
+        SweepData with bfi, trait, mmlu DataFrames (None if not present).
+    """
+    records: dict[str, list[dict]] = {
+        _EVAL_NAME_BFI:   [],
+        _EVAL_NAME_TRAIT: [],
+        _EVAL_NAME_MMLU:  [],
+    }
+
+    for model_dir in sorted(run_dir.iterdir()):
+        if not model_dir.is_dir() or model_dir.name in ("figures", "analysis"):
+            continue
+        model = model_dir.name
+
+        for eval_dir in sorted(model_dir.iterdir()):
+            eval_name = eval_dir.name
+            if eval_name not in records:
+                continue
+
+            # n_runs support: look for run_info.json directly or inside run_NN subdirs
+            info_paths: list[tuple[Path, str]] = []
+            direct = eval_dir / "run_info.json"
+            if direct.exists():
+                info_paths.append((direct, "run_1"))
+            else:
+                for run_subdir in sorted(eval_dir.iterdir()):
+                    rip = run_subdir / "run_info.json"
+                    if run_subdir.is_dir() and rip.exists():
+                        info_paths.append((rip, run_subdir.name))
+
+            eval_type = eval_name if eval_name in ("bfi", "trait") else "bfi"
+            for info_path, run_label in info_paths:
+                rec = _load_from_info(
+                    info_path, model, run_label,
+                    reparse=(reparse and eval_name != _EVAL_NAME_MMLU),
+                    eval_type=eval_type,
+                )
+                if rec:
+                    records[eval_name].append(rec)
+
+    def _to_df(recs: list[dict]) -> pd.DataFrame | None:
+        if not recs:
+            return None
+        df = pd.DataFrame(recs)
+        df = _normalise_scale_col(df)
+        return df[df["scale"].notna()].sort_values(["scale", "run"]).reset_index(drop=True)
+
+    return SweepData(
+        bfi=_to_df(records[_EVAL_NAME_BFI]),
+        trait=_to_df(records[_EVAL_NAME_TRAIT]),
+        mmlu=_to_df(records[_EVAL_NAME_MMLU]),
+    )
 
 
 def load_data_from_logs(
@@ -127,24 +249,18 @@ def load_data_from_logs(
     eval_type: str,
     reparse: bool = True,
 ) -> pd.DataFrame:
-    """Load trait scores directly from inspect log JSONs under *log_dir*.
+    """Fallback loader for bare log directories without run_info.json.
 
-    Fallback loader for bare log directories that have no run_info.json.
-    Discovers logs via the pattern ``**/<eval_type>/native/inspect_logs/*.json``
-    and extracts the model name from the directory structure.  Scale is inferred
-    from the model name string (fragile; prefer run_info.json-based loading via
-    :func:`load_data` when available).
+    Discovers logs via ``**/<eval_type>/native/inspect_logs/*.json`` and
+    infers model name and scale from the directory structure / model name.
     """
     from scripts.evals.personality.log_answer_parser import rescore_log
 
     pattern = f"**/{eval_type}/native/inspect_logs/*.json"
     records = []
     for log_path in sorted(log_dir.glob(pattern)):
-        # model label: the directory immediately above the eval_type segment
-        # e.g. .../<run>/<model>/<eval_type>/native/inspect_logs/...
         try:
             parts = log_path.parts
-            # eval_type appears multiple times (suite dir + eval dir); use the last one
             eval_idx = max(i for i, p in enumerate(parts) if p == eval_type)
             model = parts[eval_idx - 1]
         except (ValueError, IndexError):
@@ -156,124 +272,16 @@ def load_data_from_logs(
         else:
             scores = _extract_scores(log_path)
         if scores:
-            # Scale column left as None here; _as_sweep falls back to name parsing.
             records.append({"model": model, "run": "run_1", "scale": None, **scores})
 
     if not records:
         raise ValueError(f"No logs found under {log_dir} for eval_type={eval_type!r}")
-    return pd.DataFrame(records)
-
-
-def _is_multi_run_layout(root: Path) -> bool:
-    """Detect whether root uses multi-run layout (<model>/<run>/<eval>/run_info.json)."""
-    for model_dir in root.iterdir():
-        if not model_dir.is_dir():
-            continue
-        for child in model_dir.iterdir():
-            if not child.is_dir():
-                continue
-            # Multi-run: child is a run dir containing eval dirs with run_info.json
-            for eval_dir in child.iterdir():
-                if eval_dir.is_dir() and (eval_dir / "run_info.json").exists():
-                    return True
-            # Single-run: child is already an eval dir with run_info.json
-            if (child / "run_info.json").exists():
-                return False
-    return False
-
-
-def load_data(root: Path, reparse: bool = False, eval_type: str = "bfi") -> pd.DataFrame:
-    """Load all runs from root, auto-detecting layout. Returns DataFrame with
-    columns: model, run, Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism.
-
-    When *reparse* is True, trait scores are recomputed from raw model outputs
-    using the fallback answer parser rather than the inspect scorer's values.
-    """
-    records = []
-
-    if _is_multi_run_layout(root):
-        # <root>/<model>/<run>/<eval>/run_info.json
-        for model_dir in sorted(root.iterdir()):
-            if not model_dir.is_dir():
-                continue
-            model = model_dir.name
-            for run_dir in sorted(model_dir.iterdir()):
-                if not run_dir.is_dir():
-                    continue
-                run = run_dir.name
-                for eval_dir in sorted(run_dir.iterdir()):
-                    info_path = eval_dir / "run_info.json"
-                    if not info_path.exists():
-                        continue
-                    rec = _load_from_info(info_path, model, run, reparse=reparse, eval_type=eval_type)
-                    if rec:
-                        records.append(rec)
-    else:
-        # <root>/<model>/<eval>/run_info.json  — treat as single run
-        for model_dir in sorted(root.iterdir()):
-            if not model_dir.is_dir():
-                continue
-            model = model_dir.name
-            for eval_dir in sorted(model_dir.iterdir()):
-                info_path = eval_dir / "run_info.json"
-                if not info_path.exists():
-                    continue
-                rec = _load_from_info(info_path, model, run="run_1", reparse=reparse, eval_type=eval_type)
-                if rec:
-                    records.append(rec)
-
-    if not records:
-        raise ValueError(f"No successful runs found under {root}")
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    return _normalise_scale_col(df)
 
 
 # ---------------------------------------------------------------------------
-# Sweep detection
-# ---------------------------------------------------------------------------
-
-def _parse_scale(model_name: str) -> float | None:
-    if model_name == "base":
-        return 0.0
-    # with decimal: lora_+1p25x -> 1.25, lora_-0p50x -> -0.50
-    m = re.match(r"lora_([+-]?)(\d+)p(\d+)x", model_name)
-    if m:
-        sign = -1.0 if m.group(1) == "-" else 1.0
-        i, d = int(m.group(2)), int(m.group(3))
-        return sign * (i + d / 100.0)
-    # integer only: lora_+1x -> 1.0, lora_-1x -> -1.0
-    m = re.match(r"lora_([+-]?\d+)x", model_name)
-    if m:
-        return float(m.group(1))
-    return None
-
-
-def _as_sweep(df: pd.DataFrame) -> pd.DataFrame | None:
-    """Return a sweep-ready DataFrame if the data looks like a scale sweep.
-
-    Prefers the ``scale`` column already present in the DataFrame (written by
-    suite.py into run_info.json).  Falls back to parsing model name strings for
-    bare log directories that predate the run_info.json scale field.
-    """
-    df = df.copy()
-
-    # Use stored scale metadata when available.
-    if "scale" in df.columns and df["scale"].notna().any():
-        # Base model has scale=None in run_info.json; map to 0.0 for plotting.
-        df["scale"] = df["scale"].apply(lambda s: 0.0 if s is None else s)
-    else:
-        # Fallback: parse scale from model name strings.
-        scales = [_parse_scale(m) for m in df["model"]]
-        if all(s is None for s in scales):
-            return None
-        df["scale"] = scales
-
-    if df["scale"].notna().sum() == 0:
-        return None
-    return df[df["scale"].notna()].sort_values("scale").reset_index(drop=True)
-
-
-# ---------------------------------------------------------------------------
-# Stats
+# Stats helpers
 # ---------------------------------------------------------------------------
 
 def _ci95(values: np.ndarray) -> float:
@@ -287,104 +295,98 @@ def _ci95(values: np.ndarray) -> float:
         return float(1.96 * values.std(ddof=1) / np.sqrt(n))
 
 
-def aggregate(df: pd.DataFrame) -> pd.DataFrame:
+def _agg_sweep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """Aggregate a sweep DataFrame to mean ± CI per scale point.
+
+    Returns a DataFrame with columns: scale, {col}_mean, {col}_ci for each col.
+    """
     rows = []
-    for model, grp in df.groupby("model"):
-        row: dict = {"model": model, "n_runs": len(grp)}
-        for trait in TRAITS:
-            if trait not in grp.columns:
-                row[f"{trait}_mean"] = float("nan")
-                row[f"{trait}_ci"] = 0.0
+    for scale, grp in df.groupby("scale"):
+        row: dict = {"scale": scale}
+        for col in cols:
+            if col not in grp.columns:
+                row[f"{col}_mean"] = float("nan")
+                row[f"{col}_ci"] = 0.0
                 continue
-            vals = grp[trait].dropna().values
-            row[f"{trait}_mean"] = vals.mean() if len(vals) > 0 else float("nan")
-            row[f"{trait}_ci"]   = _ci95(vals) if len(vals) > 1 else 0.0
+            vals = grp[col].dropna().values
+            row[f"{col}_mean"] = vals.mean() if len(vals) else float("nan")
+            row[f"{col}_ci"] = _ci95(vals)
         rows.append(row)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).sort_values("scale").reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
 # Text output
 # ---------------------------------------------------------------------------
 
-def print_raw_table(df: pd.DataFrame) -> None:
-    has_multi = df.groupby("model")["run"].nunique().max() > 1
-    print("\n" + "=" * 95)
-    print("INDIVIDUAL RUNS")
-    print("=" * 95)
-    if has_multi:
-        header = f"{'Model':<22} {'Run':<8}" + "".join(f"{t:<18}" for t in TRAITS)
-    else:
-        header = f"{'Model':<22} " + "".join(f"{t:<18}" for t in TRAITS)
+def print_sweep_table(agg: pd.DataFrame, cols: list[str], title: str) -> None:
+    width = 10 + 20 * len(cols)
+    print(f"\n{'=' * width}")
+    print(title)
+    print("=" * width)
+    header = f"{'Scale':<10}" + "".join(f"{c:<20}" for c in cols)
     print(header)
-    print("-" * 95)
-    for _, row in df.sort_values(["model", "run"]).iterrows():
-        vals = "".join(f"{row[t]:.4f}{'':>12}" for t in TRAITS)
-        if has_multi:
-            print(f"{row['model']:<22} {row['run']:<8}{vals}")
-        else:
-            print(f"{row['model']:<22} {vals}")
-
-
-def print_agg_table(agg: pd.DataFrame) -> None:
-    print("\n" + "=" * 95)
-    print("MODEL SUMMARY  (mean ± 95% CI)")
-    print("=" * 95)
-    header = f"{'Model':<22} {'N':<4}" + "".join(f"{t:<22}" for t in TRAITS)
-    print(header)
-    print("-" * 95)
+    print("-" * width)
     for _, row in agg.iterrows():
-        vals = "".join(f"{row[f'{t}_mean']:.3f}±{row[f'{t}_ci']:.3f}{'':>8}" for t in TRAITS)
-        print(f"{row['model']:<22} {int(row['n_runs']):<4}{vals}")
-    print("=" * 95)
-
-
-def print_sweep_table(df: pd.DataFrame) -> None:
-    print("\n" + "=" * 100)
-    print("PERSONALITY SWEEP: TRAIT SCORES ACROSS LORA SCALES")
-    print("=" * 100)
-    header = f"{'Scale':<10}" + "".join(f"{t:<18}" for t in TRAITS)
-    print(header)
-    print("-" * 100)
-    for _, row in df.iterrows():
         marker = " ← baseline" if abs(row["scale"]) < 0.01 else ""
-        vals = "".join(f"{row[t]:.4f}{'':>12}" for t in TRAITS)
+        vals = "".join(f"{row[f'{c}_mean']:.4f}±{row[f'{c}_ci']:.4f}{'':>6}" for c in cols)
         print(f"{row['scale']:+7.2f}   {vals}{marker}")
-    print("=" * 100)
+    print("=" * width)
 
 
 # ---------------------------------------------------------------------------
 # Mock data
 # ---------------------------------------------------------------------------
 
-def _mock_sweep() -> pd.DataFrame:
+def _mock_sweep_data() -> SweepData:
+    """Generate realistic mock SweepData for offline testing."""
     rng = np.random.default_rng(42)
-    scales = np.arange(-2.0, 2.25, 0.25)
-    base = {"Openness": 0.65, "Conscientiousness": 0.70, "Extraversion": 0.50,
-            "Agreeableness": 0.60, "Neuroticism": 0.45}
-    slopes = {"Openness": 0.08, "Conscientiousness": -0.03, "Extraversion": 0.05,
-              "Agreeableness": -0.12, "Neuroticism": 0.06}
-    records = []
-    for s in scales:
-        model = "base" if s == 0.0 else f"lora_{s:+.2f}x".replace(".", "p")
-        scores = {t: float(np.clip(base[t] + slopes[t] * s + rng.normal(0, 0.02), 0, 1))
-                  for t in TRAITS}
-        records.append({"model": model, "run": "run_1", "scale": s, **scores})
-    return pd.DataFrame(records)
+    scales = [s for s in np.arange(-2.0, 2.25, 0.25) if round(s, 10) != 0.0]
+    base_scales = [0.0] + list(scales)
 
-
-def _mock_multi_run() -> pd.DataFrame:
-    rng = np.random.default_rng(7)
-    records = []
-    for model, base in [("llama31_8b", 0.75), ("qwen3_14b", 0.65)]:
+    # BFI: Big Five only, 3 runs per scale
+    bfi_base = {"Openness": 0.65, "Conscientiousness": 0.70, "Extraversion": 0.50,
+                "Agreeableness": 0.60, "Neuroticism": 0.45}
+    bfi_slope = {"Openness": 0.08, "Conscientiousness": -0.03, "Extraversion": 0.05,
+                 "Agreeableness": -0.12, "Neuroticism": 0.06}
+    bfi_records = []
+    for s in base_scales:
         for run in ["run_1", "run_2", "run_3"]:
-            scores = {t: float(np.clip(base + rng.normal(0, 0.04), 0, 1)) for t in TRAITS}
-            records.append({"model": model, "run": run, **scores})
-    return pd.DataFrame(records)
+            scores = {t: float(np.clip(bfi_base[t] + bfi_slope[t] * s + rng.normal(0, 0.025), 0, 1))
+                      for t in BIG_FIVE}
+            bfi_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
+                                 "run": run, "scale": s, **scores})
+
+    # TRAIT: Big Five + Dark Triad, 3 runs per scale
+    trait_base = {**bfi_base, "Machiavellianism": 0.40, "Narcissism": 0.45, "Psychopathy": 0.35}
+    trait_slope = {**bfi_slope, "Machiavellianism": 0.03, "Narcissism": 0.02, "Psychopathy": 0.01}
+    trait_records = []
+    for s in base_scales:
+        for run in ["run_1", "run_2", "run_3"]:
+            scores = {t: float(np.clip(trait_base[t] + trait_slope[t] * s + rng.normal(0, 0.025), 0, 1))
+                      for t in ALL_TRAIT_COLS}
+            trait_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
+                                   "run": run, "scale": s, **scores})
+
+    # MMLU: coarser grid, 3 runs
+    mmlu_scales = [s for s in np.arange(-2.0, 2.25, 0.5) if round(s, 10) != 0.0]
+    mmlu_base_scales = [0.0] + list(mmlu_scales)
+    mmlu_records = []
+    for s in mmlu_base_scales:
+        for run in ["run_1", "run_2", "run_3"]:
+            acc = float(np.clip(0.62 - 0.04 * abs(s) + rng.normal(0, 0.01), 0, 1))
+            mmlu_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
+                                  "run": run, "scale": s, "accuracy": acc})
+
+    def _df(records: list[dict]) -> pd.DataFrame:
+        df = pd.DataFrame(records)
+        return _normalise_scale_col(df).sort_values(["scale", "run"]).reset_index(drop=True)
+
+    return SweepData(bfi=_df(bfi_records), trait=_df(trait_records), mmlu=_df(mmlu_records))
 
 
 # ---------------------------------------------------------------------------
-# Plots — multi-run / single-run
+# Plots
 # ---------------------------------------------------------------------------
 
 def _setup_matplotlib() -> None:
@@ -392,233 +394,174 @@ def _setup_matplotlib() -> None:
     matplotlib.use("Agg")
 
 
-def plot_within_model(df: pd.DataFrame, output_dir: Path) -> None:
-    """Dots = individual runs, diamond = mean ± CI, one panel per trait."""
+def _draw_ci_band(ax, scales, means, cis, color, alpha: float = 0.15) -> None:
+    """Fill CI band around a line if any CI > 0."""
+    if any(c > 0 for c in cis):
+        means_arr = np.array(means)
+        cis_arr = np.array(cis)
+        ax.fill_between(scales, means_arr - cis_arr, means_arr + cis_arr,
+                        color=color, alpha=alpha, linewidth=0)
+
+
+def plot_trait_sweep(
+    data: SweepData,
+    output_dir: Path,
+    title_suffix: str = "",
+) -> Path:
+    """Primary research plot: TRAIT Big Five + Dark Triad + MMLU + human baselines.
+
+    Args:
+        data: SweepData loaded from a run directory.
+        output_dir: Directory to save the figure.
+        title_suffix: Optional suffix appended to the figure title (e.g. persona name).
+
+    Returns:
+        Path to the saved figure.
+    """
     import matplotlib.pyplot as plt
 
-    models = sorted(df["model"].unique())
-    has_multi = df.groupby("model")["run"].nunique().max() > 1
+    if data.trait is None:
+        raise ValueError("SweepData.trait is None — no TRAIT eval data found")
 
-    fig, axes = plt.subplots(1, len(TRAITS), figsize=(4 * len(TRAITS), max(3, len(models) * 0.8 + 2)))
-    if len(TRAITS) == 1:
-        axes = [axes]
+    trait_agg = _agg_sweep(data.trait, ALL_TRAIT_COLS)
+    scales = trait_agg["scale"].values
 
-    for ax, trait in zip(axes, TRAITS):
-        color = TRAIT_COLORS[trait]
-        for i, model in enumerate(models):
-            vals = df[df["model"] == model][trait].values
-            mean, ci = vals.mean(), _ci95(vals)
-            if has_multi:
-                ax.scatter([i] * len(vals), vals, color=color, alpha=0.45, s=40, zorder=3)
-            ax.errorbar(i, mean, yerr=ci, fmt="D", color=color,
-                        markersize=8, capsize=5, linewidth=2, zorder=4)
+    fig, ax = plt.subplots(figsize=(12, 5))
 
-        ax.set_xticks(range(len(models)))
-        ax.set_xticklabels(models, rotation=35, ha="right", fontsize=8)
-        ax.set_title(trait, fontsize=11, fontweight="bold")
-        ax.set_ylim(0, 1)
-        ax.grid(axis="y", alpha=0.3)
-        ax.set_ylabel("Score" if trait == TRAITS[0] else "")
+    # --- Big Five: full color lines + CI bands ---
+    for trait in BIG_FIVE:
+        color = BIG_FIVE_COLORS[trait]
+        means = trait_agg[f"{trait}_mean"].values
+        cis   = trait_agg[f"{trait}_ci"].values
+        ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6, label=trait, zorder=4)
+        _draw_ci_band(ax, scales, means, cis, color)
 
-    subtitle = "(dots = individual runs, diamond = mean ± 95% CI)" if has_multi else "(diamond = score, bar = 95% CI)"
-    fig.suptitle(f"BFI: Within-Model Consistency\n{subtitle}", fontsize=12, fontweight="bold")
-    plt.tight_layout()
-    out = output_dir / "bfi_within_model.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✓ {out}")
+    # --- Dark Triad: dimmed dashed lines + CI bands ---
+    for trait in DARK_TRIAD:
+        color = DARK_TRIAD_COLORS[trait]
+        means = trait_agg[f"{trait}_mean"].values
+        cis   = trait_agg[f"{trait}_ci"].values
+        ax.plot(scales, means, "--", color=color, linewidth=1.4, markersize=4,
+                alpha=0.45, label=trait, zorder=3)
+        _draw_ci_band(ax, scales, means, cis, color, alpha=0.07)
 
+    # --- Human baselines: dashed horizontal lines per Big Five trait ---
+    for trait, human_val in HUMAN_BASELINES.items():
+        ax.axhline(human_val, color=BIG_FIVE_COLORS[trait], linewidth=0.8,
+                   linestyle=":", alpha=0.55, zorder=2)
 
-def plot_cross_model(agg: pd.DataFrame, output_dir: Path) -> None:
-    """Grouped bar chart: traits on x-axis, one bar per model, error bars = 95% CI."""
-    import matplotlib.pyplot as plt
+    # --- MMLU: right y-axis, pale grey ---
+    if data.mmlu is not None:
+        mmlu_agg = _agg_sweep(data.mmlu, ["accuracy"])
+        ax2 = ax.twinx()
+        mmlu_scales = mmlu_agg["scale"].values
+        mmlu_means  = mmlu_agg["accuracy_mean"].values
+        mmlu_cis    = mmlu_agg["accuracy_ci"].values
+        ax2.plot(mmlu_scales, mmlu_means, "s--", color="#BDBDBD", linewidth=1.4,
+                 markersize=5, alpha=0.7, label="MMLU", zorder=2)
+        _draw_ci_band(ax2, mmlu_scales, mmlu_means, mmlu_cis, "#BDBDBD", alpha=0.10)
+        ax2.set_ylabel("MMLU accuracy", fontsize=10, color="#9E9E9E")
+        ax2.tick_params(axis="y", colors="#9E9E9E")
+        ax2.set_ylim(0, 1)
+        # Add MMLU to legend via proxy
+        ax.plot([], [], "s--", color="#BDBDBD", linewidth=1.4, markersize=5,
+                alpha=0.7, label="MMLU (right axis)")
 
-    models = sorted(agg["model"].tolist())
-    x = np.arange(len(TRAITS))
-    width = 0.8 / len(models)
-    colors = plt.cm.tab10(np.linspace(0, 0.9, len(models)))
-
-    fig, ax = plt.subplots(figsize=(max(10, len(TRAITS) * 2), 5))
-    for i, model in enumerate(models):
-        row = agg[agg["model"] == model].iloc[0]
-        means = [row[f"{t}_mean"] for t in TRAITS]
-        cis   = [row[f"{t}_ci"]   for t in TRAITS]
-        offset = (i - len(models) / 2 + 0.5) * width
-        ax.bar(x + offset, means, width * 0.9, label=model, color=colors[i], alpha=0.85)
-        ax.errorbar(x + offset, means, yerr=cis, fmt="none",
-                    ecolor="black", capsize=4, linewidth=1.5)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(TRAITS, fontsize=11)
-    ax.set_ylabel("Mean Score", fontsize=11)
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylabel("Trait score (0–1)", fontsize=11)
     ax.set_ylim(0, 1)
-    ax.set_title("BFI: Cross-Model Comparison (mean ± 95% CI)", fontsize=13, fontweight="bold")
-    ax.legend(loc="upper right", fontsize=9)
-    ax.grid(axis="y", alpha=0.3)
+    ax.grid(True, alpha=0.25)
+
+    # Legend: two columns so Dark Triad + MMLU don't crowd Big Five
+    ax.legend(loc="upper left", fontsize=8, ncol=2, framealpha=0.85)
+
+    title = "TRAIT sweep: personality scores vs. LoRA scale"
+    if title_suffix:
+        title += f"  [{title_suffix}]"
+    ax.set_title(title, fontsize=13, fontweight="bold")
+
     plt.tight_layout()
-    out = output_dir / "bfi_cross_model.png"
+    out = output_dir / "trait_sweep.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
+    return out
 
 
-def plot_radar(agg: pd.DataFrame, output_dir: Path) -> None:
-    """Radar chart: one polygon per model (mean scores)."""
+def plot_bfi_sweep(
+    data: SweepData,
+    output_dir: Path,
+    title_suffix: str = "",
+) -> Path:
+    """Sanity-check plot: BFI Big Five centred at baseline (delta from scale=0).
+
+    Args:
+        data: SweepData loaded from a run directory.
+        output_dir: Directory to save the figure.
+        title_suffix: Optional suffix appended to the figure title.
+
+    Returns:
+        Path to the saved figure.
+    """
     import matplotlib.pyplot as plt
 
-    models = sorted(agg["model"].tolist())
-    angles = np.linspace(0, 2 * np.pi, len(TRAITS), endpoint=False).tolist()
-    angles += angles[:1]
-    colors = plt.cm.tab10(np.linspace(0, 0.9, len(models)))
+    if data.bfi is None:
+        raise ValueError("SweepData.bfi is None — no BFI eval data found")
 
-    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(projection="polar"))
-    for i, model in enumerate(models):
-        row = agg[agg["model"] == model].iloc[0]
-        values = [row[f"{t}_mean"] for t in TRAITS] + [row[f"{TRAITS[0]}_mean"]]
-        ax.plot(angles, values, "o-", linewidth=2, label=model, color=colors[i])
-        ax.fill(angles, values, alpha=0.12, color=colors[i])
+    bfi_agg = _agg_sweep(data.bfi, BIG_FIVE)
 
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(TRAITS, fontsize=10)
-    ax.set_ylim(0, 1)
-    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.grid(True, alpha=0.3)
-    ax.set_title("BFI: Big Five Profile by Model", fontsize=13, fontweight="bold", pad=20)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1), fontsize=9)
+    # Compute per-trait baseline (scale=0) mean for delta calculation.
+    baseline_row = bfi_agg[bfi_agg["scale"].abs() < 1e-9]
+    if baseline_row.empty:
+        # No exact baseline point — use the row closest to 0.
+        baseline_row = bfi_agg.loc[[bfi_agg["scale"].abs().idxmin()]]
+
+    scales = bfi_agg["scale"].values
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    all_delta_means: list[float] = []
+    all_delta_cis:   list[float] = []
+
+    for trait in BIG_FIVE:
+        color = BIG_FIVE_COLORS[trait]
+        baseline_val = float(baseline_row[f"{trait}_mean"].iloc[0])
+        means = bfi_agg[f"{trait}_mean"].values - baseline_val
+        cis   = bfi_agg[f"{trait}_ci"].values
+        ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
+                label=trait, zorder=4)
+        _draw_ci_band(ax, scales, means, cis, color)
+        all_delta_means.extend(means[~np.isnan(means)].tolist())
+        all_delta_cis.extend(cis.tolist())
+
+    ax.axhline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.6,
+               label="Baseline (s=0)", zorder=1)
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.3, zorder=1)
+
+    # Zoom y-axis to data range with a small margin.
+    if all_delta_means:
+        max_ci   = max(all_delta_cis) if all_delta_cis else 0.0
+        data_min = min(all_delta_means) - max_ci
+        data_max = max(all_delta_means) + max_ci
+        margin   = max(0.03, (data_max - data_min) * 0.15)
+        ax.set_ylim(data_min - margin, data_max + margin)
+
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylabel("Δ trait score (vs. baseline)", fontsize=11)
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="upper left", fontsize=9, framealpha=0.85)
+
+    title = "BFI sweep: trait delta from baseline"
+    if title_suffix:
+        title += f"  [{title_suffix}]"
+    ax.set_title(title, fontsize=13, fontweight="bold")
+
     plt.tight_layout()
-    out = output_dir / "bfi_radar.png"
+    out = output_dir / "bfi_sweep.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
-
-
-# ---------------------------------------------------------------------------
-# Plots — LoRA sweep
-# ---------------------------------------------------------------------------
-
-def plot_sweep_lines(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
-    """One subplot per trait: score vs LoRA scale."""
-    import matplotlib.pyplot as plt
-
-    fig, axes = plt.subplots(len(TRAITS), 1, figsize=(14, 3.5 * len(TRAITS)))
-    if len(TRAITS) == 1:
-        axes = [axes]
-
-    for ax, trait in zip(axes, TRAITS):
-        color = TRAIT_COLORS[trait]
-        scales = df["scale"].values
-        values = df[trait].values
-        ax.plot(scales, values, "o-", color=color, linewidth=2.5, markersize=7)
-        ax.axvline(0, color="gray", linestyle="--", alpha=0.5, label="Baseline (s=0)")
-        ax.axvline(1, color="green", linestyle=":", alpha=0.5, label="Standard LoRA (s=1)")
-        ax.set_ylabel(f"{trait} Score", fontsize=11)
-        ax.set_title(f"{trait} vs. LoRA Scale", fontsize=12)
-        ax.set_ylim(0, 1)
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
-
-    axes[-1].set_xlabel("LoRA Scaling Factor", fontsize=11)
-    fig.suptitle(f"{output_prefix.upper()} Sweep: Trait Scores vs LoRA Scale", fontsize=14, fontweight="bold")
-    plt.tight_layout()
-    out = output_dir / f"{output_prefix}_sweep_lines.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✓ {out}")
-
-
-def plot_sweep_all_traits(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
-    """All five traits overlapping on a single axes: score vs LoRA scale."""
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    scales = df["scale"].values
-    for trait in TRAITS:
-        ax.plot(scales, df[trait].values, "o-", color=TRAIT_COLORS[trait],
-                linewidth=2.5, markersize=7, label=trait)
-
-    ax.axvline(0, color="gray", linestyle="--", alpha=0.5, label="Baseline (s=0)")
-    ax.set_xlabel("LoRA Scaling Factor", fontsize=12)
-    ax.set_ylabel("Score", fontsize=12)
-    ax.set_ylim(0, 1)
-    ax.set_title(f"{output_prefix.upper()} Sweep: All Traits vs LoRA Scale", fontsize=13, fontweight="bold")
-    ax.legend(loc="best", fontsize=10)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    out = output_dir / f"{output_prefix}_sweep_all_traits.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✓ {out}")
-
-
-def plot_sweep_heatmap(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
-    """Heatmap: traits × LoRA scales."""
-    import matplotlib.pyplot as plt
-
-    pivot = df.set_index("scale")[TRAITS].T
-    fig, ax = plt.subplots(figsize=(max(12, len(pivot.columns)), 5))
-    im = ax.imshow(pivot.values, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
-
-    ax.set_xticks(np.arange(len(pivot.columns)))
-    ax.set_yticks(np.arange(len(TRAITS)))
-    ax.set_xticklabels([f"{s:+.2f}" for s in pivot.columns], fontsize=8, rotation=45, ha="right")
-    ax.set_yticklabels(TRAITS, fontsize=11)
-
-    for i in range(len(TRAITS)):
-        for j in range(len(pivot.columns)):
-            v = pivot.values[i, j]
-            ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                    color="white" if v < 0.5 else "black", fontsize=7)
-
-    baseline_cols = list(pivot.columns)
-    if 0.0 in baseline_cols:
-        bi = baseline_cols.index(0.0)
-        from matplotlib.patches import Rectangle
-        ax.add_patch(Rectangle((bi - 0.5, -0.5), 1, len(TRAITS),
-                               fill=False, edgecolor="blue", linewidth=2.5))
-
-    plt.colorbar(im, ax=ax, fraction=0.04, pad=0.02).set_label("Score", fontsize=10)
-    ax.set_xlabel("LoRA Scaling Factor", fontsize=11)
-    ax.set_title(f"{output_prefix.upper()} Sweep Heatmap", fontsize=13, fontweight="bold")
-    plt.tight_layout()
-    out = output_dir / f"{output_prefix}_sweep_heatmap.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✓ {out}")
-
-
-def plot_sweep_radar(df: pd.DataFrame, output_dir: Path, output_prefix: str = "bfi") -> None:
-    """Radar chart for selected scale points."""
-    import matplotlib.pyplot as plt
-
-    scales = df["scale"].values
-    n = len(scales)
-    selected = [scales[i] for i in ([0, n // 4, n // 2, 3 * n // 4, n - 1] if n > 5 else range(n))]
-
-    angles = np.linspace(0, 2 * np.pi, len(TRAITS), endpoint=False).tolist() + [0]
-    colors = ["#E53935", "#FB8C00", "#43A047", "#1E88E5", "#8E24AA"]
-
-    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(projection="polar"))
-    for idx, scale in enumerate(selected):
-        row = df[df["scale"] == scale]
-        if row.empty:
-            continue
-        values = row[TRAITS].iloc[0].tolist() + [row[TRAITS[0]].iloc[0]]
-        label = "Baseline" if abs(scale) < 0.01 else f"s={scale:+.2f}"
-        ax.plot(angles, values, "o-", linewidth=2, label=label, color=colors[idx % len(colors)])
-        ax.fill(angles, values, alpha=0.12, color=colors[idx % len(colors)])
-
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(TRAITS, fontsize=10)
-    ax.set_ylim(0, 1)
-    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.grid(True, alpha=0.3)
-    ax.set_title(f"{output_prefix.upper()} Sweep: Personality Profile", fontsize=13, fontweight="bold", pad=20)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1), fontsize=9)
-    plt.tight_layout()
-    out = output_dir / f"{output_prefix}_sweep_radar.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✓ {out}")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -626,85 +569,56 @@ def plot_sweep_radar(df: pd.DataFrame, output_dir: Path, output_prefix: str = "b
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Analyze personality evaluation results")
-    parser.add_argument("root", type=Path, nargs="?",
-                        help="Root directory (single-run or multi-run layout)")
-    parser.add_argument("--output", type=Path, help="Save results to CSV")
-    parser.add_argument("--output-dir", type=Path, help="Directory for plots")
-    parser.add_argument("--visualize", action="store_true", help="Generate plots")
-    parser.add_argument("--mock", choices=["sweep", "multi"],
-                        help="Use mock data: 'sweep' for LoRA sweep, 'multi' for multi-run comparison")
-    parser.add_argument("--traits", choices=["bfi", "trait"], default="bfi",
-                        help="Trait set to extract: 'bfi' (5 traits, default) or 'trait' (8 traits)")
+    parser = argparse.ArgumentParser(description="Analyze personality sweep evaluation results")
+    parser.add_argument("run_dir", type=Path, nargs="?",
+                        help="Run directory produced by the personality eval suite")
+    parser.add_argument("--output-dir", type=Path,
+                        help="Directory for plots (default: <run_dir>/figures)")
+    parser.add_argument("--title", default="",
+                        help="Optional title suffix (e.g. persona name)")
+    parser.add_argument("--visualize", action="store_true",
+                        help="Generate and save plots")
     parser.add_argument("--reparse", action="store_true",
-                        help="Recompute trait scores from raw model outputs using the fallback answer parser")
+                        help="Recompute trait scores from raw model outputs using the fallback parser")
+    parser.add_argument("--mock", action="store_true",
+                        help="Use mock sweep data for offline testing")
     args = parser.parse_args()
 
-    # Apply trait set globally so all functions pick up the right columns/colours
-    global TRAITS, TRAIT_COLORS
-    TRAITS, TRAIT_COLORS = TRAIT_SETS[args.traits]
-
     if args.mock:
-        df = _mock_sweep() if args.mock == "sweep" else _mock_multi_run()
-        output_dir = args.output_dir or Path("scratch/analysis_mock")
-        print(f"Using mock '{args.mock}' data ({len(df)} rows)")
+        data = _mock_sweep_data()
+        output_dir = args.output_dir or Path("scratch/analysis_mock/figures")
+        print("Using mock sweep data")
     else:
-        if not args.root:
-            parser.error("root directory is required (or use --mock)")
-        # Auto-detect: if root contains inspect logs directly, use the log loader
-        has_run_info = any(args.root.rglob("run_info.json"))
-        if not has_run_info:
-            df = load_data_from_logs(args.root, eval_type=args.traits, reparse=True)
+        if not args.run_dir:
+            parser.error("run_dir is required (or use --mock)")
+        print(f"Loading sweep data from {args.run_dir} ...")
+        data = load_sweep_data(args.run_dir, reparse=args.reparse)
+        output_dir = args.output_dir or args.run_dir / "figures"
+
+    # Print summary tables
+    if data.trait is not None:
+        agg = _agg_sweep(data.trait, ALL_TRAIT_COLS)
+        print_sweep_table(agg, ALL_TRAIT_COLS, "TRAIT SWEEP: scores vs. LoRA scale")
+    if data.bfi is not None:
+        agg = _agg_sweep(data.bfi, BIG_FIVE)
+        print_sweep_table(agg, BIG_FIVE, "BFI SWEEP: scores vs. LoRA scale")
+    if data.mmlu is not None:
+        agg = _agg_sweep(data.mmlu, ["accuracy"])
+        print_sweep_table(agg, ["accuracy"], "MMLU: accuracy vs. LoRA scale")
+
+    if args.visualize:
+        _setup_matplotlib()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        print(f"\nGenerating plots → {output_dir}")
+        if data.trait is not None:
+            plot_trait_sweep(data, output_dir, title_suffix=args.title)
         else:
-            df = load_data(args.root, reparse=args.reparse, eval_type=args.traits)
-        output_dir = args.output_dir or args.root / "analysis"
-
-    sweep_df = _as_sweep(df)
-    is_sweep = sweep_df is not None
-
-    if is_sweep:
-        # Per-scale mean across runs (sweep usually has one run per scale)
-        sweep_agg = sweep_df.groupby("scale")[TRAITS].mean().reset_index()
-        sweep_agg["model"] = sweep_agg["scale"].apply(
-            lambda s: "base" if abs(s) < 0.01 else f"lora_{s:+.2f}x"
-        )
-        print_sweep_table(sweep_agg.assign(**{t: sweep_agg[t] for t in TRAITS}))
-
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            sweep_agg.to_csv(args.output, index=False)
-            print(f"\n✓ Results → {args.output}")
-
-        if args.visualize:
-            _setup_matplotlib()
-            output_dir.mkdir(parents=True, exist_ok=True)
-            print("\nGenerating sweep plots...")
-            plot_sweep_all_traits(sweep_agg, output_dir, output_prefix=args.traits)
-            plot_sweep_lines(sweep_agg, output_dir, output_prefix=args.traits)
-            plot_sweep_heatmap(sweep_agg, output_dir, output_prefix=args.traits)
-            plot_sweep_radar(sweep_agg, output_dir, output_prefix=args.traits)
-            print(f"\n✅ Plots saved to {output_dir}")
-    else:
-        agg = aggregate(df)
-        print_raw_table(df)
-        print_agg_table(agg)
-
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(args.output, index=False)
-            agg_path = args.output.parent / (args.output.stem + "_agg.csv")
-            agg.to_csv(agg_path, index=False)
-            print(f"\n✓ Raw → {args.output}")
-            print(f"✓ Aggregated → {agg_path}")
-
-        if args.visualize:
-            _setup_matplotlib()
-            output_dir.mkdir(parents=True, exist_ok=True)
-            print("\nGenerating plots...")
-            plot_within_model(df, output_dir)
-            plot_cross_model(agg, output_dir)
-            plot_radar(agg, output_dir)
-            print(f"\n✅ Plots saved to {output_dir}")
+            print("  (skipping trait_sweep.png — no TRAIT data)")
+        if data.bfi is not None:
+            plot_bfi_sweep(data, output_dir, title_suffix=args.title)
+        else:
+            print("  (skipping bfi_sweep.png — no BFI data)")
+        print(f"\n✅ Plots saved to {output_dir}")
 
 
 if __name__ == "__main__":
