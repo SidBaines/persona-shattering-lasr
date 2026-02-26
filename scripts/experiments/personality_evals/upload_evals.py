@@ -19,16 +19,16 @@ After upload, the HF repo contains:
 
 Usage:
 
-    uv run python -m scripts.experiments.upload_personality_evals \\
+    uv run python -m scripts.experiments.personality_evals.upload_evals \\
         --run-dir scratch/evals/personality/20240101_120000_sarcasm
 
     # Upload to a different repo
-    uv run python -m scripts.experiments.upload_personality_evals \\
+    uv run python -m scripts.experiments.personality_evals.upload_evals \\
         --run-dir scratch/evals/personality/20240101_120000_sarcasm \\
         --repo-id my-org/my-evals-repo
 
     # Dry-run: print what would be uploaded without actually uploading
-    uv run python -m scripts.experiments.upload_personality_evals \\
+    uv run python -m scripts.experiments.personality_evals.upload_evals \\
         --run-dir scratch/evals/personality/20240101_120000_sarcasm \\
         --dry-run
 """

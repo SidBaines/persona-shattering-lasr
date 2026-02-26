@@ -22,7 +22,7 @@ from scripts.evals.config import (
     ScaleSweep,
     SuiteConfig,
 )
-from scripts.evals.log_answer_parser import (
+from scripts.evals.personality.log_answer_parser import (
     RescoreResult,
     parse_answer,
     rescore_log,

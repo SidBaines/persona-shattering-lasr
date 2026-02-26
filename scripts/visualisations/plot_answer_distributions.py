@@ -25,7 +25,7 @@ import numpy as np
 
 # Allow running from project root without install
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.evals.log_answer_parser import load_logs, LogStats
+from scripts.evals.personality.log_answer_parser import load_logs, LogStats
 
 # ---------------------------------------------------------------------------
 # Constants

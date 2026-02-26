@@ -19,18 +19,18 @@ Supports two directory layouts automatically:
 
 Usage:
     # Multi-run or single-run — auto-detected
-    uv run python scripts/visualisations/analyze_personality_results.py \\
-        scratch/evals/bfi_api --visualize
+    uv run python -m scripts.evals.personality.analyze_results \\
+        scratch/evals/personality/my_run --visualize
 
     # With output
-    uv run python scripts/visualisations/analyze_personality_results.py \\
-        scratch/evals/bfi_api \\
-        --output scratch/evals/bfi_api/analysis/results.csv \\
-        --output-dir scratch/evals/bfi_api/analysis \\
+    uv run python -m scripts.evals.personality.analyze_results \\
+        scratch/evals/personality/my_run \\
+        --output scratch/evals/personality/my_run/analysis/results.csv \\
+        --output-dir scratch/evals/personality/my_run/analysis \\
         --visualize
 
     # Mock sweep data for testing
-    uv run python scripts/visualisations/analyze_personality_results.py --mock
+    uv run python -m scripts.evals.personality.analyze_results --mock
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def _extract_scores(log_path: Path) -> dict[str, float] | None:
 
 def _extract_scores_reparsed(log_path: Path, eval_type: str) -> dict[str, float] | None:
     """Like _extract_scores but recomputes trait scores using the fallback parser."""
-    from scripts.evals.log_answer_parser import rescore_log
+    from scripts.evals.personality.log_answer_parser import rescore_log
     result = rescore_log(log_path, eval_type)
     return result.scores if result.scores else None
 
@@ -135,7 +135,7 @@ def load_data_from_logs(
     from the model name string (fragile; prefer run_info.json-based loading via
     :func:`load_data` when available).
     """
-    from scripts.evals.log_answer_parser import rescore_log
+    from scripts.evals.personality.log_answer_parser import rescore_log
 
     pattern = f"**/{eval_type}/native/inspect_logs/*.json"
     records = []
