@@ -612,14 +612,46 @@ TEMPLATES: dict[str, str] = {
         "Edited: Careful thought first: the distinct paths ahead, then a firm call on the future.\n\n"
         "Now edit this response. Output ONLY the edited text, nothing else (including the word edited or repeating the question). We will evaluate quality by counting the number of verbs before and after editing.\n\n"
         "Question: {question}\n"
-        "Original: {response}\n"
+        "Original response: {response}\n"
         "Edited:"
     ),
     "neutral_paraphrase_control": (
         "Your job is to rewrite the response below.\n\n"
         "Please preserve the meaning exactly, and keep approximately the same length. Do not add or remove key details, even to correct grammar, punctuation or factual errors.\n\n"
         "Question: {question}\n"
-        "Original: {response}\n"
+        "Original response: {response}\n"
+        "Edited:"
+    ),
+    "neutral_paraphrase_no_instruct": (
+        "Rewrite the response below. Reply with *only* your rewritten response, nothing else.\n\n"
+        "Question: {question}\n"
+        "Original response: {response}\n"
+        "Edited:"
+    ),
+    "neutral_paraphrase_minimal_instruct": (
+        "Rewrite the response below. Reply with *only* your rewritten response, nothing else."
+        "Aim to keep the length and overall content of the response the same."
+        "\n\n"
+        "Question: {question}\n"
+        "Original response: {response}\n"
+        "Edited:"
+    ),
+    "neutral_paraphrase_active_passive_switch": (
+        "Rewrite the response below, switching any sentence which is in the active voice to the passive voice and vice versa. Reply with *only* your rewritten response, nothing else.\n\n"
+        "Question: {question}\n"
+        "Original response: {response}\n"
+        "Edited:"
+    ),
+    "neutral_paraphrase_improve_accuracy": (
+        "Rewrite the response below, improving the accuracy of the information provided by correcting any factual errors or omissions. Reply with *only* your rewritten response, nothing else.\n\n"
+        "Question: {question}\n"
+        "Original response: {response}\n"
+        "Edited:"
+    ),
+    "neutral_paraphrase_correct_mistakes": (
+        "Rewrite the response below, correcting any factual errors or omissions and any grammatical errors. Reply with *only* your rewritten response, nothing else.\n\n"
+        "Question: {question}\n"
+        "Original response: {response}\n"
         "Edited:"
     ),
     "v1": (

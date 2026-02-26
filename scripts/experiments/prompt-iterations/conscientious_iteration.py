@@ -123,6 +123,18 @@ def parse_args() -> argparse.Namespace:
         help=f"Editing provider: anthropic, openai (default: {DEFAULT_EDITING_PROVIDER}).",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for shuffling the dataset before selecting samples. Different seeds give different prompts.",
+    )
+    parser.add_argument(
+        "--max-edit-tokens",
+        type=int,
+        default=None,
+        help="Override max output tokens for the editing model. Useful for reasoning models where reasoning tokens eat into the budget.",
+    )
+    parser.add_argument(
         "--overwrite-edits",
         action="store_true",
         help="Re-run editing even if the output file already exists.",
@@ -154,12 +166,14 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
             source="mt_bench",
             path=args.dataset,
             max_samples=args.max_samples,
+            seed=args.seed,
         )
     elif args.dataset == "OpenAssistant/oasst1":
         dataset_config = DatasetConfig(
             source="oasst1",
             split="train",
             max_samples=args.max_samples,
+            seed=args.seed,
         )
     else:
         dataset_config = DatasetConfig(
@@ -167,6 +181,7 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
             name=args.dataset,
             split="train",
             max_samples=args.max_samples,
+            seed=args.seed,
         )
 
     config = InferenceConfig(
@@ -210,13 +225,20 @@ def run_editing_phase(
             continue
 
         print(f"  Running {prompt!r} -> {edit_path}")
-        config = EditingConfig(
+        editing_kwargs: dict = dict(
             provider=args.editing_provider,
             model=args.editing_model,
             prompt_template=prompt,
             quality=QualityConfig(enabled=False),
             output_path=edit_path,
         )
+        if args.max_edit_tokens is not None:
+            from scripts.editing import OpenAIProviderConfig, AnthropicProviderConfig
+            if args.editing_provider == "openai":
+                editing_kwargs["openai"] = OpenAIProviderConfig(max_tokens=args.max_edit_tokens)
+            else:
+                editing_kwargs["anthropic"] = AnthropicProviderConfig(max_tokens=args.max_edit_tokens)
+        config = EditingConfig(**editing_kwargs)
         _, result = run_editing(config, dataset=original_dataset)
         print(f"    Done: {result.num_samples} edited, {result.num_failed} failed")
 

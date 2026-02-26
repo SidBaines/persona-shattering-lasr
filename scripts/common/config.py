@@ -37,6 +37,7 @@ class DatasetConfig(BaseModel):
     path: str | None = None  # Local path for source="local"
     split: str = "train"
     max_samples: int | None = None
+    seed: int | None = None  # Shuffle dataset before selecting samples
 
 
 class WandbConfig(BaseModel):

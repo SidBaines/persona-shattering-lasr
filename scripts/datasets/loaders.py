@@ -102,6 +102,9 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
     else:
         raise ValueError(f"Unsupported dataset source: {config.source}")
 
+    if config.seed is not None:
+        dataset = dataset.shuffle(seed=config.seed)
+
     if config.max_samples is not None:
         dataset = dataset.select(range(min(len(dataset), config.max_samples)))
 
