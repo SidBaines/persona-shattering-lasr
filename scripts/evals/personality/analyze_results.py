@@ -408,7 +408,7 @@ def plot_trait_sweep(
     output_dir: Path,
     title_suffix: str = "",
 ) -> Path:
-    """Primary research plot: TRAIT Big Five + Dark Triad + MMLU + human baselines.
+    """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
     Args:
         data: SweepData loaded from a run directory.
@@ -426,7 +426,7 @@ def plot_trait_sweep(
     trait_agg = _agg_sweep(data.trait, ALL_TRAIT_COLS)
     scales = trait_agg["scale"].values
 
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = plt.subplots(figsize=(12, 5.5))
 
     # --- Big Five: full color lines + CI bands ---
     for trait in BIG_FIVE:
@@ -445,27 +445,10 @@ def plot_trait_sweep(
                 alpha=0.45, label=trait, zorder=3)
         _draw_ci_band(ax, scales, means, cis, color, alpha=0.07)
 
-    # --- Human baselines: dashed horizontal lines per Big Five trait ---
+    # --- Human baselines: dotted horizontal lines per Big Five trait ---
     for trait, human_val in HUMAN_BASELINES.items():
         ax.axhline(human_val, color=BIG_FIVE_COLORS[trait], linewidth=0.8,
                    linestyle=":", alpha=0.55, zorder=2)
-
-    # --- MMLU: right y-axis, pale grey ---
-    if data.mmlu is not None:
-        mmlu_agg = _agg_sweep(data.mmlu, ["accuracy"])
-        ax2 = ax.twinx()
-        mmlu_scales = mmlu_agg["scale"].values
-        mmlu_means  = mmlu_agg["accuracy_mean"].values
-        mmlu_cis    = mmlu_agg["accuracy_ci"].values
-        ax2.plot(mmlu_scales, mmlu_means, "s--", color="#BDBDBD", linewidth=1.4,
-                 markersize=5, alpha=0.7, label="MMLU", zorder=2)
-        _draw_ci_band(ax2, mmlu_scales, mmlu_means, mmlu_cis, "#BDBDBD", alpha=0.10)
-        ax2.set_ylabel("MMLU accuracy", fontsize=10, color="#9E9E9E")
-        ax2.tick_params(axis="y", colors="#9E9E9E")
-        ax2.set_ylim(0, 1)
-        # Add MMLU to legend via proxy
-        ax.plot([], [], "s--", color="#BDBDBD", linewidth=1.4, markersize=5,
-                alpha=0.7, label="MMLU (right axis)")
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -473,13 +456,14 @@ def plot_trait_sweep(
     ax.set_ylim(0, 1)
     ax.grid(True, alpha=0.25)
 
-    # Legend: two columns so Dark Triad + MMLU don't crowd Big Five
-    ax.legend(loc="upper left", fontsize=8, ncol=2, framealpha=0.85)
-
     title = "TRAIT sweep: personality scores vs. LoRA scale"
     if title_suffix:
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
+
+    # Legend at bottom, two rows
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
+              fontsize=9, ncol=5, framealpha=0.85)
 
     plt.tight_layout()
     out = output_dir / "trait_sweep.png"
@@ -549,15 +533,97 @@ def plot_bfi_sweep(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Δ trait score (vs. baseline)", fontsize=11)
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="upper left", fontsize=9, framealpha=0.85)
 
     title = "BFI sweep: trait delta from baseline"
     if title_suffix:
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    # Legend at bottom (include Baseline entry)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
+              fontsize=9, ncol=6, framealpha=0.85)
+
     plt.tight_layout()
     out = output_dir / "bfi_sweep.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
+
+
+def plot_mmlu_sweep(
+    data: SweepData,
+    output_dir: Path,
+    title_suffix: str = "",
+    allowed_drop: float = 0.05,
+) -> Path:
+    """MMLU coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
+
+    Shows whether the model retains general capability across the sweep.
+    A shaded band marks the acceptable range (baseline − allowed_drop to baseline),
+    so it's immediately clear which scale points are within the valid sweep interval.
+
+    Args:
+        data: SweepData loaded from a run directory.
+        output_dir: Directory to save the figure.
+        title_suffix: Optional suffix appended to the figure title.
+        allowed_drop: Maximum acceptable accuracy drop from baseline (default 0.05 = 5 pp).
+
+    Returns:
+        Path to the saved figure.
+    """
+    import matplotlib.pyplot as plt
+
+    if data.mmlu is None:
+        raise ValueError("SweepData.mmlu is None — no MMLU eval data found")
+
+    mmlu_agg = _agg_sweep(data.mmlu, ["accuracy"])
+    scales = mmlu_agg["scale"].values
+    means  = mmlu_agg["accuracy_mean"].values
+    cis    = mmlu_agg["accuracy_ci"].values
+
+    # Baseline accuracy: scale=0 row (or closest to 0)
+    baseline_idx = int(np.argmin(np.abs(scales)))
+    baseline_acc = float(means[baseline_idx])
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+
+    # --- Allowed-drop band ---
+    ax.axhspan(baseline_acc - allowed_drop, baseline_acc,
+               color="#A5D6A7", alpha=0.25, zorder=1,
+               label=f"Allowed drop (−{allowed_drop:.0%})")
+
+    # --- Baseline reference ---
+    ax.axhline(baseline_acc, color="#388E3C", linewidth=1.2,
+               linestyle="--", alpha=0.8, zorder=2, label=f"Baseline ({baseline_acc:.3f})")
+
+    # --- MMLU line + CI band ---
+    color = "#5C6BC0"
+    ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
+            label="MMLU accuracy", zorder=4)
+    _draw_ci_band(ax, scales, means, cis, color)
+
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylabel("MMLU accuracy", fontsize=11)
+
+    # Zoom y-axis: show baseline area clearly with a bit of headroom
+    y_min = min(float(np.nanmin(means - cis)), baseline_acc - allowed_drop) - 0.02
+    y_max = max(float(np.nanmax(means + cis)), baseline_acc) + 0.04
+    ax.set_ylim(y_min, y_max)
+
+    ax.grid(True, alpha=0.25)
+
+    title = "MMLU sweep: capability coherence vs. LoRA scale"
+    if title_suffix:
+        title += f"  [{title_suffix}]"
+    ax.set_title(title, fontsize=13, fontweight="bold")
+
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15),
+              fontsize=9, ncol=3, framealpha=0.85)
+
+    plt.tight_layout()
+    out = output_dir / "mmlu_sweep.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
@@ -582,6 +648,8 @@ def main() -> None:
                         help="Recompute trait scores from raw model outputs using the fallback parser")
     parser.add_argument("--mock", action="store_true",
                         help="Use mock sweep data for offline testing")
+    parser.add_argument("--allowed-drop", type=float, default=0.05,
+                        help="Max acceptable MMLU accuracy drop from baseline (default 0.05)")
     args = parser.parse_args()
 
     if args.mock:
@@ -618,6 +686,11 @@ def main() -> None:
             plot_bfi_sweep(data, output_dir, title_suffix=args.title)
         else:
             print("  (skipping bfi_sweep.png — no BFI data)")
+        if data.mmlu is not None:
+            plot_mmlu_sweep(data, output_dir, title_suffix=args.title,
+                            allowed_drop=args.allowed_drop)
+        else:
+            print("  (skipping mmlu_sweep.png — no MMLU data)")
         print(f"\n✅ Plots saved to {output_dir}")
 
 
