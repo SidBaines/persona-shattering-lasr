@@ -45,9 +45,13 @@ class TestSuiteConfig:
         assert len(cfg.models) == 1
         assert len(cfg.evals) == 2
 
-    def test_empty_models_rejected(self, tmp_path: Path):
-        with pytest.raises(ValueError, match="models must not be empty"):
-            SuiteConfig(output_root=tmp_path, models=[], evals=[])
+    def test_no_model_source_rejected(self, tmp_path: Path):
+        with pytest.raises(ValueError, match="Provide either"):
+            SuiteConfig(
+                output_root=tmp_path,
+                models=[],
+                evals=[InspectBenchmarkSpec(name="bfi", benchmark="personality_bfi")],
+            )
 
 
 class TestConfigModuleLoader:

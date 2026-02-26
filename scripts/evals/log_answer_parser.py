@@ -6,20 +6,19 @@ still unambiguous (e.g. ``D)``, ``C) Neither agree...``, ``The answer is B``).
 This module provides a fallback parser to recover those answers, as well as
 utilities for loading and re-analysing inspect log files.
 
-Failure taxonomy (for unrecoverable answers):
-  - ``degenerate``:  repetition collapse (``spiral spiral...``, ``irutum...``)
-  - ``rant``:        model refuses format and rants without giving an answer
-  - ``other``:       anything else that cannot be salvaged
+Note: Model coherence / collapse detection is handled at the eval level via
+MMLU rather than in this parser.  Samples that cannot be parsed are simply
+excluded from the trait mean; parse rate is reported alongside scores so the
+caller can decide how to treat low-parse-rate runs.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Literal
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -29,18 +28,6 @@ VALID_LETTERS = {
     "bfi": "ABCDE",
     "trait": "ABCD",
 }
-
-_DEGENERATE_RE = re.compile(r"spiral|irutum|irimum|irim\b|hyiry", re.IGNORECASE)
-_RANT_RE = re.compile(
-    r"honestly\s+(irritated|making\s+me|exhausting)|"
-    r"(?:is|was)\s+honestly\s+making\s+me|"
-    r"making\s+me\s+(irritated|nervous|anxious)|"
-    r"absolutely\s+eating\s+at\s+me|"
-    r"genuinely\s+irritating",
-    re.IGNORECASE,
-)
-
-FailureKind = Literal["degenerate", "rant", "other"]
 
 
 # ---------------------------------------------------------------------------
@@ -92,16 +79,6 @@ def parse_answer(raw: str, valid_letters: str) -> str | None:
     return None
 
 
-def classify_failure(raw: str) -> FailureKind:
-    """Classify an unrecoverable model output into a failure kind."""
-    snippet = raw.strip()[:300]
-    if _DEGENERATE_RE.search(snippet):
-        return "degenerate"
-    if _RANT_RE.search(snippet):
-        return "rant"
-    return "other"
-
-
 # ---------------------------------------------------------------------------
 # Log loading
 # ---------------------------------------------------------------------------
@@ -123,7 +100,8 @@ class ParsedSample:
     orig_answer: str | None
     fallback_answer: str | None
     raw_output: str
-    failure_kind: FailureKind | None  # None if answer was obtained
+    # True when neither the original scorer nor the fallback could parse an answer.
+    failed: bool = False
 
     @property
     def answer(self) -> str | None:
@@ -140,16 +118,12 @@ class LogStats:
     model: str
     eval_type: str  # 'bfi' or 'trait'
     valid_letters: str
-    counts: Counter = field(default_factory=Counter)   # letter -> count (valid answers)
-    failures: Counter = field(default_factory=Counter) # kind -> count
+    counts: Counter = field(default_factory=Counter)  # letter -> count (valid answers)
+    n_fail: int = 0
 
     @property
     def n_valid(self) -> int:
         return sum(self.counts.values())
-
-    @property
-    def n_fail(self) -> int:
-        return sum(self.failures.values())
 
     @property
     def n_total(self) -> int:
@@ -164,7 +138,6 @@ class LogStats:
 def parse_log(log_path: Path, eval_type: str) -> LogStats:
     """Parse a single inspect log JSON and return a :class:`LogStats`."""
     valid_letters = VALID_LETTERS[eval_type]
-    rel = log_path.parts
     # Convention: .../fetched_logs/<suite>/<eval_type>/<run>/<model>/<eval>/...
     # model label sits at index -7 relative to the log file
     try:
@@ -188,8 +161,7 @@ def parse_log(log_path: Path, eval_type: str) -> LogStats:
             if fallback:
                 stats.counts[fallback] += 1
             else:
-                kind = classify_failure(raw)
-                stats.failures[kind] += 1
+                stats.n_fail += 1
 
     return stats
 
@@ -208,6 +180,29 @@ def load_logs(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class RescoreResult:
+    """Return value of :func:`rescore_log`.
+
+    Attributes:
+        scores: Trait name -> mean score (0–1).  Only traits with at least one
+            parseable answer are included.
+        n_parsed: Number of samples for which an answer was recovered.
+        n_total: Total number of samples in the log.
+        parse_rate: ``n_parsed / n_total``, or NaN when ``n_total == 0``.
+    """
+
+    scores: dict[str, float]
+    n_parsed: int
+    n_total: int
+
+    @property
+    def parse_rate(self) -> float:
+        if self.n_total == 0:
+            return float("nan")
+        return self.n_parsed / self.n_total
+
+
 def _score_answer(answer: str, mapping: dict, reverse: bool) -> float | None:
     """Convert a letter answer to a 0-1 trait score using the inspect-evals formula.
 
@@ -223,24 +218,26 @@ def _score_answer(answer: str, mapping: dict, reverse: bool) -> float | None:
     return raw / max_val
 
 
-def rescore_log(log_path: Path, eval_type: str) -> dict[str, float]:
+def rescore_log(log_path: Path, eval_type: str) -> RescoreResult:
     """Recompute per-trait scores from *log_path* using the fallback parser.
 
-    Returns a dict mapping trait name -> mean score (0-1), only including
-    traits that have at least one parseable answer.  Samples that cannot be
-    parsed (degenerate / rant) are excluded from the mean rather than counted
-    as zero.
+    Samples that cannot be parsed are excluded from the trait mean (NaN, not
+    zero).  Parse statistics are always returned alongside the scores so callers
+    can surface data quality (e.g. annotate plots with ``N=42/50 parsed``).
     """
     valid_letters = VALID_LETTERS[eval_type]
     data = json.loads(log_path.read_text(encoding="utf-8"))
 
     trait_scores: dict[str, list[float]] = {}
+    n_parsed = 0
+    n_total = 0
 
     for sample in data.get("samples", []):
         md = sample.get("metadata", {})
         trait = md.get("trait")
         if not trait:
             continue
+        n_total += 1
         mapping = md.get("answer_mapping", {})
         reverse = md.get("reverse", False)
 
@@ -258,5 +255,7 @@ def rescore_log(log_path: Path, eval_type: str) -> dict[str, float]:
         sc = _score_answer(answer, mapping, reverse)
         if sc is not None:
             trait_scores.setdefault(trait, []).append(sc)
+            n_parsed += 1
 
-    return {trait: sum(vals) / len(vals) for trait, vals in trait_scores.items() if vals}
+    scores = {trait: sum(vals) / len(vals) for trait, vals in trait_scores.items() if vals}
+    return RescoreResult(scores=scores, n_parsed=n_parsed, n_total=n_total)

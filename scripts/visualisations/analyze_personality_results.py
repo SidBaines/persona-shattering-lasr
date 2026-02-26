@@ -90,8 +90,8 @@ def _extract_scores(log_path: Path) -> dict[str, float] | None:
 def _extract_scores_reparsed(log_path: Path, eval_type: str) -> dict[str, float] | None:
     """Like _extract_scores but recomputes trait scores using the fallback parser."""
     from scripts.evals.log_answer_parser import rescore_log
-    scores = rescore_log(log_path, eval_type)
-    return scores if scores else None
+    result = rescore_log(log_path, eval_type)
+    return result.scores if result.scores else None
 
 
 def _load_from_info(
@@ -117,7 +117,9 @@ def _load_from_info(
     if scores is None:
         print(f"  skip {model}/{run}: log not success", file=sys.stderr)
         return None
-    return {"model": model, "run": run, **scores}
+    # Read scale from run_info.json (written by suite.py); None for base model.
+    scale = info.get("scale")  # float | None
+    return {"model": model, "run": run, "scale": scale, **scores}
 
 
 def load_data_from_logs(
@@ -127,10 +129,11 @@ def load_data_from_logs(
 ) -> pd.DataFrame:
     """Load trait scores directly from inspect log JSONs under *log_dir*.
 
+    Fallback loader for bare log directories that have no run_info.json.
     Discovers logs via the pattern ``**/<eval_type>/native/inspect_logs/*.json``
-    and extracts the model name from the directory structure.  Always uses the
-    fallback parser when *reparse* is True (default); falls back to the stored
-    scorer metrics otherwise.
+    and extracts the model name from the directory structure.  Scale is inferred
+    from the model name string (fragile; prefer run_info.json-based loading via
+    :func:`load_data` when available).
     """
     from scripts.evals.log_answer_parser import rescore_log
 
@@ -148,11 +151,13 @@ def load_data_from_logs(
             model = "unknown"
 
         if reparse:
-            scores = rescore_log(log_path, eval_type)
+            result = rescore_log(log_path, eval_type)
+            scores = result.scores
         else:
             scores = _extract_scores(log_path)
         if scores:
-            records.append({"model": model, "run": "run_1", **scores})
+            # Scale column left as None here; _as_sweep falls back to name parsing.
+            records.append({"model": model, "run": "run_1", "scale": None, **scores})
 
     if not records:
         raise ValueError(f"No logs found under {log_dir} for eval_type={eval_type!r}")
@@ -243,11 +248,27 @@ def _parse_scale(model_name: str) -> float | None:
 
 
 def _as_sweep(df: pd.DataFrame) -> pd.DataFrame | None:
-    scales = [_parse_scale(m) for m in df["model"]]
-    if all(s is None for s in scales):
-        return None
+    """Return a sweep-ready DataFrame if the data looks like a scale sweep.
+
+    Prefers the ``scale`` column already present in the DataFrame (written by
+    suite.py into run_info.json).  Falls back to parsing model name strings for
+    bare log directories that predate the run_info.json scale field.
+    """
     df = df.copy()
-    df["scale"] = scales
+
+    # Use stored scale metadata when available.
+    if "scale" in df.columns and df["scale"].notna().any():
+        # Base model has scale=None in run_info.json; map to 0.0 for plotting.
+        df["scale"] = df["scale"].apply(lambda s: 0.0 if s is None else s)
+    else:
+        # Fallback: parse scale from model name strings.
+        scales = [_parse_scale(m) for m in df["model"]]
+        if all(s is None for s in scales):
+            return None
+        df["scale"] = scales
+
+    if df["scale"].notna().sum() == 0:
+        return None
     return df[df["scale"].notna()].sort_values("scale").reset_index(drop=True)
 
 
