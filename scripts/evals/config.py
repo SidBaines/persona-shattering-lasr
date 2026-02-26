@@ -26,6 +26,38 @@ class AdapterConfig(BaseModel):
         return value
 
 
+class ScaleSweep(BaseModel):
+    """LoRA scale sweep parameters.
+
+    Defines a linear grid of adapter scaling factors from *min* to *max*
+    (inclusive) at *step* intervals.  The base model (scale=0, no adapter)
+    is always included automatically.
+
+    The sweep is defined once at suite level and can be overridden
+    per-eval via ``InspectBenchmarkSpec.sweep``.
+    """
+
+    min: float = -2.0
+    max: float = 2.0
+    step: float = 0.25
+
+    @model_validator(mode="after")
+    def _validate_range(self) -> "ScaleSweep":
+        if self.step <= 0:
+            raise ValueError(f"step must be positive, got {self.step}")
+        if self.min > self.max:
+            raise ValueError(f"min ({self.min}) must be <= max ({self.max})")
+        return self
+
+    def scale_points(self) -> list[float]:
+        """Return the sorted list of scale values, excluding 0.0 (which is the base model)."""
+        n_steps = round((self.max - self.min) / self.step)
+        return [
+            s for s in (round(self.min + i * self.step, 10) for i in range(n_steps + 1))
+            if s != 0.0
+        ]
+
+
 class ModelSpec(BaseModel):
     """Model configuration for suite runs."""
 
@@ -36,6 +68,8 @@ class ModelSpec(BaseModel):
     dtype: str = "bfloat16"
     device_map: str = "auto"
     inspect_model_args: dict[str, Any] = Field(default_factory=dict)
+    # Scale stored for downstream analysis; None for the base model.
+    scale: float | None = None
 
 
 class InspectBenchmarkSpec(BaseModel):
@@ -46,6 +80,11 @@ class InspectBenchmarkSpec(BaseModel):
     benchmark: str
     benchmark_args: dict[str, Any] = Field(default_factory=dict)
     limit: int | None = None
+    # Number of independent runs per (model, eval) pair for noise estimation.
+    n_runs: int = 1
+    # Per-eval sweep override. When set, this eval uses its own scale grid
+    # instead of the suite-level sweep (e.g. coarser steps for MMLU).
+    sweep: ScaleSweep | None = None
 
 
 class InspectCustomEvalSpec(BaseModel):
@@ -87,22 +126,50 @@ class JudgeExecutionConfig(BaseModel):
 
 
 class SuiteConfig(BaseModel):
-    """Top-level suite configuration."""
+    """Top-level suite configuration.
 
-    models: list[ModelSpec]
+    Sweep mode
+    ----------
+    When *sweep* and *adapter* are both set, the suite automatically expands
+    into one ModelSpec per scale point (plus a base model at scale=0).
+    The explicit *models* list is used instead when *sweep* is not set,
+    preserving full manual control for non-sweep experiments.
+
+    Each eval can override the suite-level sweep via
+    ``InspectBenchmarkSpec.sweep`` (e.g. for a coarser MMLU scale grid).
+    """
+
+    # --- Sweep shorthand (mutually exclusive with explicit models list) ---
+    base_model: str | None = None
+    adapter: str | None = None
+    sweep: ScaleSweep | None = None
+
+    # --- Explicit model list (used when sweep is not set) ---
+    models: list[ModelSpec] = Field(default_factory=list)
+
     evals: list[EvalSpec]
     output_root: Path
     run_name: str | None = None
     cleanup_materialized_models: bool = True
+    skip_completed: bool = True
+    # Generation temperature forwarded to Inspect for all benchmark evals.
+    temperature: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Optional HF Hub path for Inspect to write logs directly during the run
+    # (e.g. "hf://datasets/org/repo"). When None, logs are written locally only.
     hf_log_dir: str | None = None
 
-    @field_validator("models")
-    @classmethod
-    def _non_empty_models(cls, value: list[ModelSpec]) -> list[ModelSpec]:
-        if not value:
-            raise ValueError("models must not be empty")
-        return value
+    @model_validator(mode="after")
+    def _validate_model_source(self) -> "SuiteConfig":
+        has_sweep = self.sweep is not None
+        has_models = bool(self.models)
+        if has_sweep and has_models:
+            raise ValueError("Provide either 'sweep' + 'base_model' or 'models', not both.")
+        if not has_sweep and not has_models:
+            raise ValueError("Provide either 'sweep' + 'base_model' or an explicit 'models' list.")
+        if has_sweep and not self.base_model:
+            raise ValueError("'base_model' is required when 'sweep' is set.")
+        return self
 
     @field_validator("evals")
     @classmethod
@@ -110,6 +177,49 @@ class SuiteConfig(BaseModel):
         if not value:
             raise ValueError("evals must not be empty")
         return value
+
+    def expand_models(self) -> list[ModelSpec]:
+        """Return the full ModelSpec list, expanding the sweep if configured.
+
+        When using explicit *models*, returns them as-is.
+        When using sweep mode, builds one ModelSpec per scale point plus
+        a base model (scale=0).  Each eval's per-eval sweep override is
+        taken into account to ensure all required scale points are present.
+        """
+        if not self.sweep:
+            return self.models
+
+        assert self.base_model is not None  # validated above
+
+        # Collect all scale points needed across all evals (union of grids).
+        all_scales: set[float] = set()
+        for eval_spec in self.evals:
+            sweep = (
+                eval_spec.sweep
+                if isinstance(eval_spec, InspectBenchmarkSpec) and eval_spec.sweep is not None
+                else self.sweep
+            )
+            all_scales.update(sweep.scale_points())
+
+        specs: list[ModelSpec] = [
+            ModelSpec(name="base", base_model=self.base_model, scale=None)
+        ]
+        for scale in sorted(all_scales):
+            scale_tag = f"{scale:+.2f}".replace(".", "p")  # e.g. +1.25 -> +1p25
+            adapter_configs = (
+                [AdapterConfig(path=self.adapter, scale=scale)]
+                if self.adapter
+                else []
+            )
+            specs.append(
+                ModelSpec(
+                    name=f"lora_{scale_tag}x",
+                    base_model=self.base_model,
+                    adapters=adapter_configs,
+                    scale=scale,
+                )
+            )
+        return specs
 
 
 class RunSummaryRow(BaseModel):

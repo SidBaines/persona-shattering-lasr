@@ -35,6 +35,7 @@ def run_benchmark_eval(
     model_uri: str,
     run_dir: Path,
     inspect_model_args: dict | None = None,
+    temperature: float = 0.0,
     hf_log_dir: str | None = None,
 ) -> InspectRunResult:
     native_log_dir = run_dir / "native" / "inspect_logs"
@@ -49,7 +50,8 @@ def run_benchmark_eval(
             limit=spec.limit,
             judge_exec=JudgeExecutionConfig(mode="blocking", prefer_batch=False),
             inspect_model_args=inspect_model_args,
-            log_dir=hf_log_dir,
+            temperature=temperature,
+            hf_log_dir=hf_log_dir,
         )
         return InspectRunResult(status="ok", log=log)
     except Exception as exc:
@@ -77,7 +79,7 @@ def run_custom_eval(
             limit=spec.dataset.max_samples,
             judge_exec=judge_exec,
             inspect_model_args=inspect_model_args,
-            log_dir=hf_log_dir,
+            hf_log_dir=hf_log_dir,
         )
 
         if judge_exec.mode == "submit":

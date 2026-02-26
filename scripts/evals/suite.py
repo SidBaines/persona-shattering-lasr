@@ -131,8 +131,11 @@ def _run_dir_for(
     output_root: Path,
     model_spec_name: str,
     eval_name: str,
+    run_index: int = 0,
 ) -> Path:
-    run_dir = output_root / model_spec_name / eval_name
+    # run_index=0 keeps the single-run path unchanged for backwards compat.
+    suffix = f"/run_{run_index:02d}" if run_index > 0 else ""
+    run_dir = output_root / model_spec_name / f"{eval_name}{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
@@ -254,6 +257,8 @@ def _write_run_info_for(
         "judge_execution": judge_exec.model_dump(mode="json"),
         "inspect_model_args": inspect_model_args,
         "materialized_model": _materialized_payload(materialized, model_spec),
+        # Scale stored explicitly so analyzers don't have to parse model names.
+        "scale": model_spec.scale,
         "native": {
             "inspect_log_path": inspect_log_path,
             "inspect_status": inspect_status,
@@ -325,12 +330,7 @@ def _cleanup_materialized_model(
 
 
 def _ensure_hf_log_repo(hf_log_dir: str) -> None:
-    """Create the HF Hub dataset repo for log storage if it does not exist.
-
-    Inspect probes write access by touching a temp file before running any
-    task.  If the repo doesn't exist that touch fails with a permission error,
-    so we pre-create the repo here.
-    """
+    """Create the HF Hub dataset repo for log storage if it does not exist."""
     prefix = "hf://datasets/"
     if not hf_log_dir.startswith(prefix):
         return
@@ -342,7 +342,28 @@ def _ensure_hf_log_repo(hf_log_dir: str) -> None:
         from huggingface_hub import HfApi
         HfApi().create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
     except Exception:
-        pass  # surface any real auth errors later when Inspect actually writes
+        pass
+
+
+def _is_scale_in_eval(
+    scale: float | None,
+    eval_spec: "InspectBenchmarkSpec | InspectCustomEvalSpec",
+    suite_sweep: "ScaleSweep | None",
+) -> bool:
+    """Return True if *scale* is part of this eval's scale grid.
+
+    The base model (scale=None) is always included.
+    For per-eval sweep overrides, only run that eval at its own scale points.
+    """
+    from scripts.evals.config import InspectBenchmarkSpec
+    if scale is None:
+        return True
+    if not isinstance(eval_spec, InspectBenchmarkSpec):
+        return True
+    effective_sweep = eval_spec.sweep if eval_spec.sweep is not None else suite_sweep
+    if effective_sweep is None:
+        return True
+    return scale in set(effective_sweep.scale_points())
 
 
 def run_eval_suite(
@@ -350,14 +371,22 @@ def run_eval_suite(
     judge_exec: JudgeExecutionConfig | None = None,
 ) -> SuiteResult:
     """Run a full eval suite using Inspect for all eval types."""
+    from scripts.evals.config import InspectBenchmarkSpec, ScaleSweep
     judge_exec = judge_exec or JudgeExecutionConfig()
     output_root = _make_output_root(config, judge_exec.mode)
-    rows: list[RunSummaryRow] = []
+
+    # Serialize config for replication before any runs start.
+    (output_root / "suite_config.json").write_text(
+        config.model_dump_json(indent=2), encoding="utf-8"
+    )
 
     if config.hf_log_dir:
         _ensure_hf_log_repo(config.hf_log_dir)
 
-    for model_spec in config.models:
+    rows: list[RunSummaryRow] = []
+    models = config.expand_models()
+
+    for model_spec in models:
         if judge_exec.mode == "resume":
             materialized = _resume_materialized_model(model_spec)
         elif model_spec.model_uri is not None:
@@ -413,102 +442,140 @@ def run_eval_suite(
 
         try:
             for eval_spec in config.evals:
-                run_dir = _run_dir_for(
-                    output_root=output_root,
-                    model_spec_name=model_spec.name,
-                    eval_name=eval_spec.name,
-                )
+                # Skip this eval for scale points not in its grid.
+                if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                    continue
+
                 eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
+                n_runs = eval_spec.n_runs if isinstance(eval_spec, InspectBenchmarkSpec) else 1
 
-                hf_eval_log_dir: str | None = None
-                if config.hf_log_dir:
-                    base = config.hf_log_dir.rstrip("/")
-                    hf_eval_log_dir = f"{base}/{output_root.name}/{model_spec.name}/{eval_spec.name}"
-
-                if isinstance(eval_spec, InspectBenchmarkSpec):
-                    if judge_exec.mode == "resume":
-                        error = "resume mode does not apply to benchmark evals"
-                        run_info_path = _write_run_info_for(
-                            run_dir=run_dir,
-                            output_root=output_root,
-                            model_spec=model_spec,
-                            eval_spec=eval_spec,
-                            judge_exec=judge_exec,
-                            inspect_model_args=inspect_model_args,
-                            materialized=materialized,
-                            status="skipped",
-                            error=error,
-                            inspect_log_path=None,
-                            inspect_status=None,
-                        )
-                        rows.append(
-                            _summary_row_base(
-                                model_name=materialized.model_name,
-                                model_spec_name=model_spec.name,
-                                eval_name=eval_spec.name,
-                                eval_kind=eval_kind,
-                                status="skipped",
-                                output_dir=run_dir,
-                                run_info_path=run_info_path,
-                                inspect_log_path=None,
-                                error=error,
-                            )
-                        )
-                        continue
-
-                    result = run_benchmark_eval(
-                        spec=eval_spec,
-                        model_uri=materialized.model_uri,
-                        run_dir=run_dir,
-                        inspect_model_args=inspect_model_args,
-                        hf_log_dir=hf_eval_log_dir,
+                for run_index in range(n_runs):
+                    run_dir = _run_dir_for(
+                        output_root=output_root,
+                        model_spec_name=model_spec.name,
+                        eval_name=eval_spec.name,
+                        run_index=run_index,
                     )
-                else:
-                    if judge_exec.mode == "resume":
-                        result = score_custom_eval_from_log(
-                            spec=eval_spec,
-                            run_dir=run_dir,
-                            judge_exec=judge_exec,
-                        )
-                    else:
-                        result = run_custom_eval(
+
+                    # Skip completed runs when requested.
+                    if config.skip_completed:
+                        run_info_path = run_dir / "run_info.json"
+                        if run_info_path.exists():
+                            import json as _json
+                            try:
+                                info = _json.loads(run_info_path.read_text())
+                                if info.get("status") == "ok":
+                                    rows.append(
+                                        _summary_row_base(
+                                            model_name=(materialized.model_name if materialized else model_spec.base_model),
+                                            model_spec_name=model_spec.name,
+                                            eval_name=eval_spec.name,
+                                            eval_kind=eval_kind,
+                                            status="skipped",
+                                            output_dir=run_dir,
+                                            run_info_path=run_info_path,
+                                            inspect_log_path=info.get("native", {}).get("inspect_log_path"),
+                                            error=None,
+                                        )
+                                    )
+                                    continue
+                            except Exception:
+                                pass  # Re-run if run_info is unreadable
+
+                    if isinstance(eval_spec, InspectBenchmarkSpec):
+                        if judge_exec.mode == "resume":
+                            error = "resume mode does not apply to benchmark evals"
+                            run_info_path = _write_run_info_for(
+                                run_dir=run_dir,
+                                output_root=output_root,
+                                model_spec=model_spec,
+                                eval_spec=eval_spec,
+                                judge_exec=judge_exec,
+                                inspect_model_args=inspect_model_args,
+                                materialized=materialized,
+                                status="skipped",
+                                error=error,
+                                inspect_log_path=None,
+                                inspect_status=None,
+                            )
+                            rows.append(
+                                _summary_row_base(
+                                    model_name=materialized.model_name,
+                                    model_spec_name=model_spec.name,
+                                    eval_name=eval_spec.name,
+                                    eval_kind=eval_kind,
+                                    status="skipped",
+                                    output_dir=run_dir,
+                                    run_info_path=run_info_path,
+                                    inspect_log_path=None,
+                                    error=error,
+                                )
+                            )
+                            continue
+
+                        hf_eval_log_dir: str | None = None
+                        if config.hf_log_dir:
+                            base = config.hf_log_dir.rstrip("/")
+                            hf_eval_log_dir = f"{base}/{output_root.name}/{model_spec.name}/{eval_spec.name}"
+
+                        result = run_benchmark_eval(
                             spec=eval_spec,
                             model_uri=materialized.model_uri,
                             run_dir=run_dir,
-                            judge_exec=judge_exec,
                             inspect_model_args=inspect_model_args,
+                            temperature=config.temperature,
                             hf_log_dir=hf_eval_log_dir,
                         )
+                    else:
+                        if judge_exec.mode == "resume":
+                            result = score_custom_eval_from_log(
+                                spec=eval_spec,
+                                run_dir=run_dir,
+                                judge_exec=judge_exec,
+                            )
+                        else:
+                            hf_eval_log_dir_custom: str | None = None
+                            if config.hf_log_dir:
+                                base = config.hf_log_dir.rstrip("/")
+                                hf_eval_log_dir_custom = f"{base}/{output_root.name}/{model_spec.name}/{eval_spec.name}"
+                            result = run_custom_eval(
+                                spec=eval_spec,
+                                model_uri=materialized.model_uri,
+                                run_dir=run_dir,
+                                judge_exec=judge_exec,
+                                inspect_model_args=inspect_model_args,
+                                hf_log_dir=hf_eval_log_dir_custom,
+                            )
 
-                inspect_log_path = result.log.location if result.log is not None else None
-                inspect_status = result.log.status if result.log is not None else None
-                run_info_path = _write_run_info_for(
-                    run_dir=run_dir,
-                    output_root=output_root,
-                    model_spec=model_spec,
-                    eval_spec=eval_spec,
-                    judge_exec=judge_exec,
-                    inspect_model_args=inspect_model_args,
-                    materialized=materialized,
-                    status=result.status,
-                    error=result.error,
-                    inspect_log_path=inspect_log_path,
-                    inspect_status=inspect_status,
-                )
-
-                rows.append(
-                    _summary_row_base(
-                        model_name=materialized.model_name,
-                        model_spec_name=model_spec.name,
-                        eval_name=eval_spec.name,
-                        eval_kind=eval_kind,
+                    inspect_log_path = result.log.location if result.log is not None else None
+                    inspect_status = result.log.status if result.log is not None else None
+                    run_info_path = _write_run_info_for(
+                        run_dir=run_dir,
+                        output_root=output_root,
+                        model_spec=model_spec,
+                        eval_spec=eval_spec,
+                        judge_exec=judge_exec,
+                        inspect_model_args=inspect_model_args,
+                        materialized=materialized,
                         status=result.status,
-                        output_dir=run_dir,
-                        run_info_path=run_info_path,
-                        inspect_log_path=inspect_log_path,
                         error=result.error,
+                        inspect_log_path=inspect_log_path,
+                        inspect_status=inspect_status,
                     )
-                )
+
+                    rows.append(
+                        _summary_row_base(
+                            model_name=materialized.model_name,
+                            model_spec_name=model_spec.name,
+                            eval_name=eval_spec.name,
+                            eval_kind=eval_kind,
+                            status=result.status,
+                            output_dir=run_dir,
+                            run_info_path=run_info_path,
+                            inspect_log_path=inspect_log_path,
+                            error=result.error,
+                        )
+                    )
 
                 # Inspect reloads the HF model from disk for each task, so the
                 # previous task's weights stay resident unless we explicitly

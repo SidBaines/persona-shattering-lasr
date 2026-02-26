@@ -54,25 +54,44 @@ def _with_filters(
     model_filters: tuple[str, ...],
     eval_filters: tuple[str, ...],
 ) -> SuiteConfig:
-    models = config.models
     evals = config.evals
-
-    if model_filters:
-        allowed = set(model_filters)
-        models = [model for model in config.models if model.name in allowed]
     if eval_filters:
         allowed = set(eval_filters)
-        evals = [eval_spec for eval_spec in config.evals if eval_spec.name in allowed]
+        evals = [e for e in config.evals if e.name in allowed]
 
-    return SuiteConfig(
-        models=models,
-        evals=evals,
-        output_root=config.output_root,
-        run_name=config.run_name,
-        cleanup_materialized_models=config.cleanup_materialized_models,
-        metadata=config.metadata,
-        hf_log_dir=config.hf_log_dir,
-    )
+    # Preserve whichever model-source mode the config uses (sweep or explicit list).
+    if config.sweep is not None:
+        # Sweep mode: model_filters are not meaningful (scale points are auto-generated),
+        # so we pass them through as-is and let expand_models() do the work.
+        return SuiteConfig(
+            base_model=config.base_model,
+            adapter=config.adapter,
+            sweep=config.sweep,
+            evals=evals,
+            output_root=config.output_root,
+            run_name=config.run_name,
+            cleanup_materialized_models=config.cleanup_materialized_models,
+            skip_completed=config.skip_completed,
+            temperature=config.temperature,
+            metadata=config.metadata,
+            hf_log_dir=config.hf_log_dir,
+        )
+    else:
+        models = config.models
+        if model_filters:
+            allowed_m = set(model_filters)
+            models = [m for m in config.models if m.name in allowed_m]
+        return SuiteConfig(
+            models=models,
+            evals=evals,
+            output_root=config.output_root,
+            run_name=config.run_name,
+            cleanup_materialized_models=config.cleanup_materialized_models,
+            skip_completed=config.skip_completed,
+            temperature=config.temperature,
+            metadata=config.metadata,
+            hf_log_dir=config.hf_log_dir,
+        )
 
 
 def _parse_json_value(raw: str) -> Any:
