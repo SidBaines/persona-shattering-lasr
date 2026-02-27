@@ -94,6 +94,7 @@ class SuiteConfig(BaseModel):
     output_root: Path
     run_name: str | None = None
     cleanup_materialized_models: bool = True
+    cleanup_between_evals: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
     hf_log_dir: str | None = None
 

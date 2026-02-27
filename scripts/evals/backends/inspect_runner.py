@@ -52,7 +52,15 @@ def run_benchmark_eval(
             log_dir=hf_log_dir,
             generation_args=spec.generation_args,
         )
-        return InspectRunResult(status="ok", log=log)
+        log_status = str(getattr(log, "status", "")).lower()
+        if log_status in {"success", "ok", "completed"}:
+            return InspectRunResult(status="ok", log=log)
+        error = getattr(log, "error", None)
+        return InspectRunResult(
+            status="failed",
+            log=log,
+            error=str(error) if error is not None else f"inspect status={log_status}",
+        )
     except Exception as exc:
         return InspectRunResult(status="failed", error=str(exc))
 

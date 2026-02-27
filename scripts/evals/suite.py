@@ -496,10 +496,10 @@ def run_eval_suite(
                     )
                 )
 
-                # Inspect reloads the HF model from disk for each task, so the
-                # previous task's weights stay resident unless we explicitly
-                # evict them before the next task starts.
-                _cleanup_runtime_model_state()
+                # Optional per-eval cleanup: some runs prefer model reuse across
+                # evals for speed and only cleanup once per model.
+                if config.cleanup_between_evals:
+                    _cleanup_runtime_model_state()
         finally:
             _cleanup_runtime_model_state()
             _cleanup_materialized_model(

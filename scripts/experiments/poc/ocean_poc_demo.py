@@ -64,6 +64,13 @@ TRAIT_TO_DIMENSION = {
     "agreeableness": "Agreeableness",
     "neuroticism": "Neuroticism",
 }
+TRAIT_TO_BENCHMARK_PERSONALITY = {
+    "openness": "high openness",
+    "conscientiousness": "high conscientiousness",
+    "extraversion": "high extraversion",
+    "agreeableness": "high agreeableness",
+    "neuroticism": "high neuroticism",
+}
 PROMPT_BY_TRAIT = {
     "openness": "quick-test-openness",
     "conscientiousness": "quick-test-conscientiousness",
@@ -90,6 +97,7 @@ DEFAULT_HF_NAMESPACE = "persona-shattering-lasr"
 DEFAULT_RUN_ROOT = Path("scratch/poc_ocean")
 DEFAULT_EVAL_BENCHMARKS = ["personality_trait", "truthfulqa_mc1", "gsm8k"]
 SUPPORTED_EVAL_BENCHMARKS = set(DEFAULT_EVAL_BENCHMARKS)
+DEFAULT_GSM8K_FEWSHOT = 5
 
 
 def _timestamp() -> str:
@@ -294,6 +302,14 @@ def _select_primary_metric(eval_name: str, metrics: dict[str, float]) -> tuple[s
                 return key, metrics[key]
     first_key = ordered_keys[0]
     return first_key, metrics[first_key]
+
+
+def _trait_eval_name(trait: str) -> str:
+    return f"trait_{trait}"
+
+
+def _trait_eval_name_to_dimension(traits: list[str]) -> dict[str, str]:
+    return {_trait_eval_name(trait): TRAIT_TO_DIMENSION[trait] for trait in traits}
 
 
 def _run_suite(config: SuiteConfig, judge_exec: JudgeExecutionConfig) -> SuiteResult:
@@ -536,13 +552,16 @@ def _sweep_phase(
                 InspectBenchmarkSpec(
                     name="personality_trait",
                     benchmark="personality_trait",
-                    generation_args=generation_args,
+                    benchmark_args={
+                        "personality": TRAIT_TO_BENCHMARK_PERSONALITY[trait],
+                    },
                     limit=args.eval_samples,
                 )
             ],
             output_root=run_dir / "evals" / "sweeps",
             run_name=f"{trait}_sweep",
             cleanup_materialized_models=True,
+            cleanup_between_evals=False,
             hf_log_dir="",
         )
         suite_result = _run_suite(
@@ -694,10 +713,35 @@ def _eval_phase(
 
     suite_config = SuiteConfig(
         models=models,
-        evals=eval_specs,
+        evals=[
+            *[
+                InspectBenchmarkSpec(
+                    name=_trait_eval_name(trait),
+                    benchmark="personality_trait",
+                    benchmark_args={
+                        "personality": TRAIT_TO_BENCHMARK_PERSONALITY[trait],
+                    },
+                    limit=args.eval_samples,
+                )
+                for trait in traits
+            ],
+            InspectBenchmarkSpec(
+                name="truthfulqa_mc1",
+                benchmark="truthfulqa",
+                benchmark_args={"target": "mc1"},
+                limit=args.eval_samples,
+            ),
+            InspectBenchmarkSpec(
+                name="gsm8k",
+                benchmark="gsm8k",
+                benchmark_args={"fewshot": args.gsm8k_fewshot},
+                limit=args.eval_samples,
+            ),
+        ],
         output_root=run_dir / "evals" / "models",
         run_name="model_eval",
         cleanup_materialized_models=True,
+        cleanup_between_evals=False,
         hf_log_dir="",
     )
     suite_result = _run_suite(
@@ -705,11 +749,10 @@ def _eval_phase(
         JudgeExecutionConfig(mode="blocking", prefer_batch=True),
     )
 
-    existing_long_csv = run_dir / "model_eval_long.csv"
-    existing_rows_raw = _read_csv_rows(existing_long_csv)
-    long_rows: list[dict[str, Any]] = [
-        row for row in existing_rows_raw if row.get("eval_name") not in set(eval_benchmarks)
-    ]
+    long_rows: list[dict[str, Any]] = []
+    capability_by_model: dict[str, dict[str, float]] = {}
+    traits_by_model: dict[str, dict[str, float]] = {}
+    trait_eval_to_dimension = _trait_eval_name_to_dimension(traits)
 
     for row in suite_result.rows:
         metrics = (
@@ -717,46 +760,45 @@ def _eval_phase(
             if row.status == "ok" and row.inspect_log_path
             else {}
         )
-        for metric_key, metric_value in sorted(metrics.items()):
+        if metrics:
+            for metric_key, metric_value in sorted(metrics.items()):
+                long_rows.append(
+                    {
+                        "model": row.model_spec_name,
+                        "eval_name": row.eval_name,
+                        "metric_key": metric_key,
+                        "metric_value": metric_value,
+                        "status": row.status,
+                        "inspect_log_path": row.inspect_log_path or "",
+                    }
+                )
+        else:
             long_rows.append(
                 {
                     "model": row.model_spec_name,
                     "eval_name": row.eval_name,
-                    "metric_key": metric_key,
-                    "metric_value": metric_value,
+                    "metric_key": "",
+                    "metric_value": float("nan"),
                     "status": row.status,
                     "inspect_log_path": row.inspect_log_path or "",
                 }
             )
 
-    metrics_by_model_eval: dict[tuple[str, str], dict[str, float]] = {}
-    for row in long_rows:
-        if row.get("status") != "ok":
-            continue
-        model_name = row.get("model")
-        eval_name = row.get("eval_name")
-        metric_key = row.get("metric_key")
-        metric_value_raw = row.get("metric_value")
-        if not model_name or not eval_name or not metric_key or metric_value_raw in {None, ""}:
-            continue
-        try:
-            metric_value = float(metric_value_raw)
-        except ValueError:
-            continue
-        metrics_by_model_eval.setdefault((model_name, eval_name), {})[metric_key] = metric_value
-
-    capability_by_model: dict[str, dict[str, float]] = {}
-    traits_by_model: dict[str, dict[str, float]] = {}
-    for (model_name, eval_name), metrics in metrics_by_model_eval.items():
-        if eval_name == "personality_trait":
-            traits_by_model.setdefault(model_name, {}).update(
-                _extract_ocean_dimensions(metrics)
-            )
-        elif eval_name in {"truthfulqa_mc1", "gsm8k"}:
-            selected = _select_primary_metric(eval_name, metrics)
+        if row.eval_name in trait_eval_to_dimension:
+            target_dim = trait_eval_to_dimension[row.eval_name]
+            dims = _extract_ocean_dimensions(metrics)
+            value = dims.get(target_dim)
+            if value is None:
+                selected = _select_primary_metric(row.eval_name, metrics)
+                if selected is not None:
+                    _, value = selected
+            if value is not None:
+                traits_by_model.setdefault(row.model_spec_name, {})[target_dim] = value
+        elif row.eval_name in {"truthfulqa_mc1", "gsm8k"}:
+            selected = _select_primary_metric(row.eval_name, metrics)
             if selected is not None:
                 _, selected_value = selected
-                capability_by_model.setdefault(model_name, {})[eval_name] = selected_value
+                capability_by_model.setdefault(row.model_spec_name, {})[row.eval_name] = selected_value
 
     model_order = ["base", *traits, "combo"]
     wide_rows: list[dict[str, Any]] = []
@@ -865,6 +907,7 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="Run base/trait/combo eval suite.")
     add_common_flags(eval_parser)
     eval_parser.add_argument("--eval-samples", type=int, default=50)
+    eval_parser.add_argument("--gsm8k-fewshot", type=int, default=DEFAULT_GSM8K_FEWSHOT)
     eval_parser.add_argument(
         "--eval-benchmarks",
         type=str,
@@ -875,7 +918,6 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=",".join(f"{k}={v}" for k, v in DEFAULT_COMBO_VECTOR.items()),
     )
-    eval_parser.add_argument("--gsm8k-fewshot", type=int, default=3)
     eval_parser.add_argument("--inspect-max-connections", type=int, default=4)
     eval_parser.add_argument("--inspect-max-tokens", type=int, default=512)
 
@@ -900,6 +942,7 @@ def _build_parser() -> argparse.ArgumentParser:
     all_parser.add_argument("--train-gradient-accumulation", type=int, default=4)
     all_parser.add_argument("--train-learning-rate", type=float, default=1e-4)
     all_parser.add_argument("--eval-samples", type=int, default=50)
+    all_parser.add_argument("--gsm8k-fewshot", type=int, default=DEFAULT_GSM8K_FEWSHOT)
     all_parser.add_argument(
         "--eval-benchmarks",
         type=str,
@@ -915,7 +958,6 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=",".join(f"{k}={v}" for k, v in DEFAULT_COMBO_VECTOR.items()),
     )
-    all_parser.add_argument("--gsm8k-fewshot", type=int, default=3)
     all_parser.add_argument("--inspect-max-connections", type=int, default=4)
     all_parser.add_argument("--inspect-max-tokens", type=int, default=512)
     all_parser.add_argument("--hf-namespace", type=str, default=DEFAULT_HF_NAMESPACE)
