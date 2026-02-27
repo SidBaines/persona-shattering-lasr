@@ -16,6 +16,60 @@ from scripts.utils.lora_composition import (
     split_adapter_reference,
 )
 
+_REQUIRED_ADAPTER_FILES = ["adapter_config.json", "adapter_model.safetensors"]
+
+
+def _validate_adapter(adapter_path: str) -> None:
+    """Sanity-check that an adapter path contains the required PEFT files.
+
+    Works for both local paths and HuggingFace Hub repo IDs.  Raises
+    ``FileNotFoundError`` with a descriptive message if required files are
+    missing so the eval fails fast before any expensive model loading.
+
+    Args:
+        adapter_path: Raw adapter path, optionally with ``::subfolder`` suffix.
+    """
+    ref, subfolder = split_adapter_reference(adapter_path)
+    resolved = resolve_model_reference(ref, kind="adapter")
+    local_path = Path(resolved)
+
+    if local_path.exists():
+        # Local path — check the filesystem directly.
+        check_root = local_path / subfolder if subfolder else local_path
+        missing = [f for f in _REQUIRED_ADAPTER_FILES if not (check_root / f).exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"Adapter at '{check_root}' is missing required files: {missing}. "
+                "Check that the path points to a valid PEFT adapter directory."
+            )
+    else:
+        # HuggingFace Hub repo — use the Hub API to check file presence.
+        try:
+            from huggingface_hub import HfApi
+            from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
+        except ImportError:
+            return  # huggingface_hub unavailable; skip check
+
+        api = HfApi()
+        try:
+            repo_files = {f.rfilename for f in api.list_repo_tree(resolved, recursive=True)}
+        except RepositoryNotFoundError:
+            raise FileNotFoundError(
+                f"Adapter HuggingFace repo not found: '{resolved}'. "
+                "Check the repo ID and that you have access."
+            )
+        except Exception:
+            return  # Network or auth issue; skip check and let PEFT surface the error
+
+        prefix = f"{subfolder}/" if subfolder else ""
+        missing = [f for f in _REQUIRED_ADAPTER_FILES if f"{prefix}{f}" not in repo_files]
+        if missing:
+            raise FileNotFoundError(
+                f"Adapter repo '{resolved}' (subfolder='{subfolder}') is missing "
+                f"required files: {missing}. "
+                "Check that the repo contains a valid PEFT adapter."
+            )
+
 
 @dataclass(frozen=True)
 class MaterializedModel:
@@ -78,6 +132,9 @@ def materialize_model(model: ModelSpec, output_root: Path) -> MaterializedModel:
             cache_key=cache_key,
             materialized_path=None,
         )
+
+    for adapter in model.adapters:
+        _validate_adapter(adapter.path)
 
     models_root = _models_cache_root(output_root)
     models_root.mkdir(parents=True, exist_ok=True)

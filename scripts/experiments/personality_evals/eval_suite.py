@@ -29,15 +29,15 @@ from scripts.evals import (
 # ---------------------------------------------------------------------------
 # Configuration — edit these for each experiment
 # ---------------------------------------------------------------------------
-PERSONA = "sarcasm"
+PERSONA = "agreeableness_minus"
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_REPO = f"maius/llama-3.1-8b-it-personas::{PERSONA}"
+ADAPTER_REPO = "persona-shattering-lasr/a-_persona-20260226-153805-train-r4-lora-adapter::adapter/final"
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(
     base_model=BASE_MODEL,
     adapter=ADAPTER_REPO,
-    sweep=ScaleSweep(min=-2.0, max=2.0, step=0.25),
+    sweep=ScaleSweep(min=-1.0, max=1.0, step=0.5),
     evals=[
         InspectBenchmarkSpec(
             name="bfi",
@@ -46,17 +46,17 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait",
             benchmark="personality_trait_sampled",
-            benchmark_args={"samples_per_trait": 25},
-            n_runs=3,
+            benchmark_args={"samples_per_trait": 10},
+            # n_runs=3,
         ),
         InspectBenchmarkSpec(
             name="mmlu",
             benchmark="mmlu",
-            benchmark_args={"n_samples": 100},
-            n_runs=3,
+            limit=10,
+            # n_runs=3,
             # Coarser scale grid for MMLU — capabilities degrade smoothly
             # so we don't need fine-grained resolution here.
-            sweep=ScaleSweep(min=-2.0, max=2.0, step=0.5),
+            # sweep=ScaleSweep(min=-2.0, max=2.0, step=0.5),
         ),
     ],
     temperature=0.0,

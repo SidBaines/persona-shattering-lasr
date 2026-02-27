@@ -89,12 +89,14 @@ def run_task_with_mode(
     if judge_exec.timeout_seconds is not None:
         kwargs["time_limit"] = judge_exec.timeout_seconds
 
+    if temperature > 0:
+        kwargs["temperature"] = temperature
+
     logs = inspect_eval(
         task,
         model=model_uri,
         model_args=inspect_model_args or {},
         limit=limit,
-        temperature=temperature,
         score=(mode == "blocking"),
         log_dir=effective_log_dir,
         log_format="json",
