@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from scripts.evals.backends.inspect_runner import (
     run_benchmark_eval,
@@ -24,6 +28,17 @@ from scripts.evals.config import (
 )
 from scripts.evals.model_materialization import MaterializedModel, materialize_model
 from scripts.utils.lora_composition import delete_materialized_model_dir
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration in seconds to a human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m{secs:02d}s"
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h{mins:02d}m{secs:02d}s"
 
 
 def _cleanup_runtime_model_state() -> None:
@@ -388,13 +403,24 @@ def run_eval_suite(
 
     rows: list[RunSummaryRow] = []
     models = config.expand_models()
+    n_models = len(models)
+    n_evals = len(config.evals)
 
-    for model_spec in models:
+    suite_t0 = time.perf_counter()
+    print(
+        f"\n=== Suite: {output_root.name} | {n_models} model(s) × {n_evals} eval(s) ===",
+        flush=True,
+    )
+    # Timing accumulator: (model_name, eval_name, status, elapsed)
+    eval_timings: list[tuple[str, str, str, float]] = []
+
+    for model_idx, model_spec in enumerate(models, 1):
+        model_label = f"[{model_idx}/{n_models}] {model_spec.name}"
+
         if judge_exec.mode == "resume":
             materialized = _resume_materialized_model(model_spec)
         elif model_spec.model_uri is not None:
-            # API model (e.g. openrouter/..., openai/...) — skip HF resolution
-            # and LoRA materialization entirely; pass the URI straight to Inspect.
+            # API model — skip HF resolution and LoRA materialization entirely.
             materialized = MaterializedModel(
                 model_name=model_spec.base_model,
                 model_spec_name=model_spec.name,
@@ -403,9 +429,15 @@ def run_eval_suite(
                 materialized_path=None,
             )
         else:
+            print(f"  materializing {model_label} ...", flush=True)
+            mat_t0 = time.perf_counter()
             try:
                 materialized = materialize_model(model_spec, output_root)
+                mat_elapsed = time.perf_counter() - mat_t0
+                print(f"  materialized  {model_label}  ({_fmt_duration(mat_elapsed)})", flush=True)
             except Exception as exc:
+                mat_elapsed = time.perf_counter() - mat_t0
+                print(f"  FAILED        {model_label}  ({_fmt_duration(mat_elapsed)}): {exc}", flush=True)
                 _record_failed_model_rows(
                     rows=rows,
                     output_root=output_root,
@@ -460,6 +492,11 @@ def run_eval_suite(
                         run_index=run_index,
                     )
 
+                    run_label = (
+                        f"[{model_idx}/{n_models}] {model_spec.name} / {eval_spec.name}"
+                        + (f" run {run_index}" if n_runs > 1 else "")
+                    )
+
                     # Skip completed runs when requested.
                     if config.skip_completed:
                         run_info_path = run_dir / "run_info.json"
@@ -468,6 +505,7 @@ def run_eval_suite(
                             try:
                                 info = _json.loads(run_info_path.read_text())
                                 if info.get("status") == "ok":
+                                    print(f"  skipping  {run_label}  (already done)", flush=True)
                                     rows.append(
                                         _summary_row_base(
                                             model_name=(materialized.model_name if materialized else model_spec.base_model),
@@ -484,6 +522,9 @@ def run_eval_suite(
                                     continue
                             except Exception:
                                 pass  # Re-run if run_info is unreadable
+
+                    print(f"  running   {run_label} ...", flush=True)
+                    eval_t0 = time.perf_counter()
 
                     if isinstance(eval_spec, InspectBenchmarkSpec):
                         if judge_exec.mode == "resume":
@@ -550,6 +591,14 @@ def run_eval_suite(
                                 hf_log_dir=hf_eval_log_dir_custom,
                             )
 
+                    eval_elapsed = time.perf_counter() - eval_t0
+                    status_tag = result.status
+                    print(
+                        f"  done      {run_label}  ({_fmt_duration(eval_elapsed)}) [{status_tag}]",
+                        flush=True,
+                    )
+                    eval_timings.append((model_spec.name, eval_spec.name, status_tag, eval_elapsed))
+
                     inspect_log_path = result.log.location if result.log is not None else None
                     inspect_status = result.log.status if result.log is not None else None
                     run_info_path = _write_run_info_for(
@@ -592,10 +641,43 @@ def run_eval_suite(
                 materialized=materialized,
             )
 
+    # --- Summary ---
+    suite_elapsed = time.perf_counter() - suite_t0
+    _print_timing_summary(eval_timings, suite_elapsed)
+
     return SuiteResult(
         output_root=output_root,
         rows=rows,
     )
+
+
+def _print_timing_summary(
+    eval_timings: list[tuple[str, str, str, float]],
+    suite_elapsed: float,
+) -> None:
+    """Print a compact timing table to stdout."""
+    if not eval_timings:
+        print(f"\n=== Suite done in {_fmt_duration(suite_elapsed)} (no evals ran) ===\n", flush=True)
+        return
+
+    col_model = max(len(m) for m, _, _, _ in eval_timings)
+    col_eval = max(len(e) for _, e, _, _ in eval_timings)
+    col_model = max(col_model, 5)
+    col_eval = max(col_eval, 4)
+
+    header = f"  {'Model':<{col_model}}  {'Eval':<{col_eval}}  {'Status':<7}  Time"
+    sep = "  " + "-" * (col_model + col_eval + 22)
+    print(f"\n=== Timing summary ===", flush=True)
+    print(header, flush=True)
+    print(sep, flush=True)
+    for model_name, eval_name, status, elapsed in eval_timings:
+        print(
+            f"  {model_name:<{col_model}}  {eval_name:<{col_eval}}  {status:<7}  {_fmt_duration(elapsed)}",
+            flush=True,
+        )
+    print(sep, flush=True)
+    print(f"  Total: {_fmt_duration(suite_elapsed)}", flush=True)
+    print("======================\n", flush=True)
 
 
 def run_inspect_eval(
