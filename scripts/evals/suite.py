@@ -197,7 +197,7 @@ def _summary_row_base(
     )
 
 
-def _inspect_model_args(model_spec: ModelSpec) -> dict[str, Any]:
+def _inspect_model_args(model_spec: ModelSpec, batch_size: int | None = None) -> dict[str, Any]:
     args: dict[str, Any] = dict(model_spec.inspect_model_args)
 
     # Inspect's HuggingFace provider already passes `device_map` internally.
@@ -228,6 +228,9 @@ def _inspect_model_args(model_spec: ModelSpec) -> dict[str, Any]:
 
     if model_spec.device_map not in ("", "auto"):
         args.setdefault("device", model_spec.device_map)
+
+    if batch_size is not None:
+        args.setdefault("batch_size", batch_size)
 
     return args
 
@@ -419,7 +422,7 @@ def run_eval_suite(
             inspect_model_args = (
                 {}
                 if model_spec.model_uri is not None
-                else _inspect_model_args(model_spec)
+                else _inspect_model_args(model_spec, batch_size=config.batch_size)
             )
         except Exception as exc:
             _record_failed_model_rows(

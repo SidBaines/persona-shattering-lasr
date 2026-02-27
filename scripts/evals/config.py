@@ -154,6 +154,8 @@ class SuiteConfig(BaseModel):
     skip_completed: bool = True
     # Generation temperature forwarded to Inspect for all benchmark evals.
     temperature: float = 0.0
+    # Batch size for model generation. When None, Inspect uses its own default.
+    batch_size: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     # Optional HF Hub path for Inspect to write logs directly during the run
     # (e.g. "hf://datasets/org/repo"). When None, logs are written locally only.
