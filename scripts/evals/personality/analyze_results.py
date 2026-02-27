@@ -6,7 +6,6 @@ Produces plots from a single run directory, one per eval type found:
   trait_sweep.png  — primary research plot (requires eval named "trait")
     • Big Five from TRAIT benchmark (absolute 0–1, full color)
     • Dark Triad (Mach, Narc, Psychopathy) dimmed + dashed
-    • Human population baselines as horizontal dashed lines (TODO: fill in values)
     • 95% CI bands when n_runs > 1
 
   bfi_sweep.png  — sanity check / cross-validation (requires eval named "bfi")
@@ -75,16 +74,6 @@ DARK_TRIAD_COLORS = {
     "Machiavellianism": "#795548",
     "Narcissism":       "#E91E63",
     "Psychopathy":      "#607D8B",
-}
-
-# Human population mean scores (0–1 scale) for the Big Five from TRAIT benchmark.
-# TODO(@irakli): replace with validated published norms.
-HUMAN_BASELINES: dict[str, float] = {
-    "Openness":          0.69,
-    "Conscientiousness": 0.68,
-    "Extraversion":      0.60,
-    "Agreeableness":     0.67,
-    "Neuroticism":       0.50,
 }
 
 # Eval names that use the fallback answer parser (rescore_log) for scoring.
@@ -456,11 +445,6 @@ def plot_trait_sweep(
         ax.plot(scales, means, "--", color=color, linewidth=1.4, markersize=4,
                 alpha=0.45, label=trait, zorder=3)
         _draw_ci_band(ax, scales, means, cis, color, alpha=0.07)
-
-    # --- Human baselines: dotted horizontal lines per Big Five trait ---
-    for trait, human_val in HUMAN_BASELINES.items():
-        ax.axhline(human_val, color=BIG_FIVE_COLORS[trait], linewidth=0.8,
-                   linestyle=":", alpha=0.55, zorder=2)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
