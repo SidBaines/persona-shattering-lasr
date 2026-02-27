@@ -163,14 +163,14 @@ uv run inspect view start \
 
 **Storing logs on HuggingFace Hub:**
 
-Logs are uploaded to `hf://datasets/persona-shattering-lasr/eval-logs` by default
+Logs are uploaded to `hf://datasets/persona-shattering-lasr/unreliable-eval-logs` by default
 (requires `HF_TOKEN` in your `.env`). Logs land at
 `<hf-log-dir>/<run-name>/<model>/<eval>/`, mirroring the local output structure.
 
 View from any machine with:
 
 ```bash
-uv run inspect view --log-dir hf://datasets/persona-shattering-lasr/eval-logs
+uv run inspect view --log-dir hf://datasets/persona-shattering-lasr/unreliable-eval-logs
 ```
 
 To disable upload for a run, pass `--hf-log-dir ""`.

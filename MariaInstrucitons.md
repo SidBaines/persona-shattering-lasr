@@ -118,7 +118,7 @@ uv run python - <<'PY'
 from huggingface_hub import HfApi
 
 api = HfApi()
-repo_id = "persona-shattering-lasr/eval-logs"
+repo_id = "persona-shattering-lasr/unreliable-eval-logs"
 api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True)
 
 # Existing reference run (base/control/n_plus/etc)

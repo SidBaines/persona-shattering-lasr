@@ -20,7 +20,7 @@ from huggingface_hub import HfApi, hf_hub_download
 
 
 RESULTS_ROOT = Path("scratch/evals/reduced_persona_eval/reduced_persona_eval")
-HF_LOG_REPO_ID = "persona-shattering-lasr/eval-logs"
+HF_LOG_REPO_ID = "persona-shattering-lasr/unreliable-eval-logs"
 HF_LOG_RUN_NAME = "reduced_persona_eval"
 
 GROUP_LABELS = [

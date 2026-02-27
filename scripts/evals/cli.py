@@ -408,7 +408,7 @@ def run_filtered_command(
 )
 @click.option(
     "--hf-log-dir",
-    default="hf://datasets/persona-shattering-lasr/eval-logs",
+    default="hf://datasets/persona-shattering-lasr/unreliable-eval-logs",
     show_default=True,
     help=(
         "HuggingFace Hub base path for remote log storage. "
@@ -613,7 +613,7 @@ def run_named_command(
 @click.option("--gen-batch-size", default=8, type=int)
 @click.option(
     "--hf-log-dir",
-    default="hf://datasets/persona-shattering-lasr/eval-logs",
+    default="hf://datasets/persona-shattering-lasr/unreliable-eval-logs",
     show_default=True,
     help=(
         "HuggingFace Hub base path for remote log storage. "
