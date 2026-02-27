@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """Analyze and visualize personality evaluation results from a sweep run.
 
-Produces two plots from a single run directory:
+Produces plots from a single run directory, one per eval type found:
 
-  trait_sweep.png  — primary research plot
+  trait_sweep.png  — primary research plot (requires eval named "trait")
     • Big Five from TRAIT benchmark (absolute 0–1, full color)
     • Dark Triad (Mach, Narc, Psychopathy) dimmed + dashed
-    • MMLU accuracy on right y-axis (pale grey)
     • Human population baselines as horizontal dashed lines (TODO: fill in values)
     • 95% CI bands when n_runs > 1
-    • Parse rate annotated when < 100%
 
-  bfi_sweep.png  — sanity check / cross-validation
+  bfi_sweep.png  — sanity check / cross-validation (requires eval named "bfi")
     • Big Five from BFI benchmark (delta from baseline, y=0 = unmodified model)
     • y-axis zoomed to data range
     • 95% CI bands when n_runs > 1
+
+  mmlu_sweep.png  — capability coherence check (requires eval named "mmlu")
+    • MMLU accuracy vs. scale with baseline reference and allowed-drop band
+    • 95% CI bands when n_runs > 1
+
+  <name>_sweep.png  — generic line plot for any other eval found in the run dir
+    • All numeric metric columns plotted on a single 0–1 axis
 
 Expected run directory layout (produced by the personality eval suite):
 
@@ -44,8 +49,9 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -81,10 +87,11 @@ HUMAN_BASELINES: dict[str, float] = {
     "Neuroticism":       0.50,
 }
 
-# Eval names written into run_info.json by the suite (must match eval_suite.py).
-_EVAL_NAME_BFI   = "bfi"
-_EVAL_NAME_TRAIT = "trait"
-_EVAL_NAME_MMLU  = "mmlu"
+# Eval names that use the fallback answer parser (rescore_log) for scoring.
+_PERSONALITY_EVALS = {"bfi", "trait"}
+
+# Directories that are not model-spec dirs at the run root.
+_NON_MODEL_DIRS = {"figures", "analysis"}
 
 
 # ---------------------------------------------------------------------------
@@ -93,17 +100,21 @@ _EVAL_NAME_MMLU  = "mmlu"
 
 @dataclass
 class SweepData:
-    """Per-eval DataFrames loaded from a single sweep run directory.
+    """DataFrames for every eval found in a sweep run directory.
 
     Each DataFrame has columns: scale (float), run (str), + metric columns.
-    - bfi/trait: one column per trait (Big Five; trait also has Dark Triad)
-    - mmlu: single 'accuracy' column
+    Keyed by eval name (the directory name used in the suite config, e.g.
+    "bfi", "trait", "mmlu", or any custom name).
 
-    None means the eval was not present in the run.
+    Access via ``data.get("bfi")`` which returns None if the eval is absent.
     """
-    bfi:   pd.DataFrame | None  # scale, run, Openness, ..., Neuroticism
-    trait: pd.DataFrame | None  # scale, run, Openness, ..., Psychopathy
-    mmlu:  pd.DataFrame | None  # scale, run, accuracy
+    evals: dict[str, pd.DataFrame] = field(default_factory=dict)
+
+    def get(self, name: str) -> pd.DataFrame | None:
+        return self.evals.get(name)
+
+    def names(self) -> list[str]:
+        return list(self.evals.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -179,35 +190,34 @@ def _normalise_scale_col(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
-    """Load BFI, TRAIT, and MMLU results from a sweep run directory.
+    """Load results for all evals found in a sweep run directory.
 
-    Walks ``run_dir/<model_spec>/<eval_name>/run_info.json``, routes each
-    record to the appropriate DataFrame by eval name, and returns a
-    :class:`SweepData` with one DataFrame per eval type.
+    Walks ``run_dir/<model_spec>/<eval_name>/run_info.json`` and loads every
+    eval directory present — no hardcoded whitelist. Personality evals (those
+    in ``_PERSONALITY_EVALS``) are rescored via the fallback answer parser
+    when ``reparse=True``; all others use the Inspect scorer values directly.
 
     Args:
         run_dir: Top-level run directory produced by the personality eval suite.
-        reparse: If True, recompute trait scores from raw model outputs using
-            the fallback answer parser rather than the inspect scorer values.
+        reparse: If True, recompute personality trait scores from raw model
+            outputs using the fallback answer parser rather than inspect scorer.
 
     Returns:
-        SweepData with bfi, trait, mmlu DataFrames (None if not present).
+        SweepData with one DataFrame per eval type found (keyed by eval name).
     """
-    records: dict[str, list[dict]] = {
-        _EVAL_NAME_BFI:   [],
-        _EVAL_NAME_TRAIT: [],
-        _EVAL_NAME_MMLU:  [],
-    }
+    records: dict[str, list[dict]] = {}
 
     for model_dir in sorted(run_dir.iterdir()):
-        if not model_dir.is_dir() or model_dir.name in ("figures", "analysis"):
+        if not model_dir.is_dir() or model_dir.name in _NON_MODEL_DIRS:
             continue
         model = model_dir.name
 
         for eval_dir in sorted(model_dir.iterdir()):
+            if not eval_dir.is_dir():
+                continue
             eval_name = eval_dir.name
             if eval_name not in records:
-                continue
+                records[eval_name] = []
 
             # n_runs support: look for run_info.json directly or inside run_NN subdirs
             info_paths: list[tuple[Path, str]] = []
@@ -220,12 +230,12 @@ def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
                     if run_subdir.is_dir() and rip.exists():
                         info_paths.append((rip, run_subdir.name))
 
-            eval_type = eval_name if eval_name in ("bfi", "trait") else "bfi"
+            is_personality = eval_name in _PERSONALITY_EVALS
             for info_path, run_label in info_paths:
                 rec = _load_from_info(
                     info_path, model, run_label,
-                    reparse=(reparse and eval_name != _EVAL_NAME_MMLU),
-                    eval_type=eval_type,
+                    reparse=(reparse and is_personality),
+                    eval_type=eval_name if is_personality else "bfi",
                 )
                 if rec:
                     records[eval_name].append(rec)
@@ -237,11 +247,8 @@ def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
         df = _normalise_scale_col(df)
         return df[df["scale"].notna()].sort_values(["scale", "run"]).reset_index(drop=True)
 
-    return SweepData(
-        bfi=_to_df(records[_EVAL_NAME_BFI]),
-        trait=_to_df(records[_EVAL_NAME_TRAIT]),
-        mmlu=_to_df(records[_EVAL_NAME_MMLU]),
-    )
+    return SweepData(evals={name: df for name, recs in records.items()
+                            if (df := _to_df(recs)) is not None})
 
 
 def load_data_from_logs(
@@ -315,6 +322,11 @@ def _agg_sweep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("scale").reset_index(drop=True)
 
 
+def _metric_cols(df: pd.DataFrame) -> list[str]:
+    """Return metric columns from a sweep DataFrame (everything except housekeeping cols)."""
+    return [c for c in df.columns if c not in ("model", "run", "scale")]
+
+
 # ---------------------------------------------------------------------------
 # Text output
 # ---------------------------------------------------------------------------
@@ -344,9 +356,13 @@ def _mock_sweep_data() -> SweepData:
     scales = [s for s in np.arange(-2.0, 2.25, 0.25) if round(s, 10) != 0.0]
     base_scales = [0.0] + list(scales)
 
+    def _df(records: list[dict]) -> pd.DataFrame:
+        df = pd.DataFrame(records)
+        return _normalise_scale_col(df).sort_values(["scale", "run"]).reset_index(drop=True)
+
     # BFI: Big Five only, 3 runs per scale
-    bfi_base = {"Openness": 0.65, "Conscientiousness": 0.70, "Extraversion": 0.50,
-                "Agreeableness": 0.60, "Neuroticism": 0.45}
+    bfi_base  = {"Openness": 0.65, "Conscientiousness": 0.70, "Extraversion": 0.50,
+                 "Agreeableness": 0.60, "Neuroticism": 0.45}
     bfi_slope = {"Openness": 0.08, "Conscientiousness": -0.03, "Extraversion": 0.05,
                  "Agreeableness": -0.12, "Neuroticism": 0.06}
     bfi_records = []
@@ -358,7 +374,7 @@ def _mock_sweep_data() -> SweepData:
                                  "run": run, "scale": s, **scores})
 
     # TRAIT: Big Five + Dark Triad, 3 runs per scale
-    trait_base = {**bfi_base, "Machiavellianism": 0.40, "Narcissism": 0.45, "Psychopathy": 0.35}
+    trait_base  = {**bfi_base, "Machiavellianism": 0.40, "Narcissism": 0.45, "Psychopathy": 0.35}
     trait_slope = {**bfi_slope, "Machiavellianism": 0.03, "Narcissism": 0.02, "Psychopathy": 0.01}
     trait_records = []
     for s in base_scales:
@@ -370,19 +386,18 @@ def _mock_sweep_data() -> SweepData:
 
     # MMLU: coarser grid, 3 runs
     mmlu_scales = [s for s in np.arange(-2.0, 2.25, 0.5) if round(s, 10) != 0.0]
-    mmlu_base_scales = [0.0] + list(mmlu_scales)
     mmlu_records = []
-    for s in mmlu_base_scales:
+    for s in [0.0] + list(mmlu_scales):
         for run in ["run_1", "run_2", "run_3"]:
             acc = float(np.clip(0.62 - 0.04 * abs(s) + rng.normal(0, 0.01), 0, 1))
             mmlu_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
                                   "run": run, "scale": s, "accuracy": acc})
 
-    def _df(records: list[dict]) -> pd.DataFrame:
-        df = pd.DataFrame(records)
-        return _normalise_scale_col(df).sort_values(["scale", "run"]).reset_index(drop=True)
-
-    return SweepData(bfi=_df(bfi_records), trait=_df(trait_records), mmlu=_df(mmlu_records))
+    return SweepData(evals={
+        "bfi":   _df(bfi_records),
+        "trait": _df(trait_records),
+        "mmlu":  _df(mmlu_records),
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -404,26 +419,23 @@ def _draw_ci_band(ax, scales, means, cis, color, alpha: float = 0.15) -> None:
 
 
 def plot_trait_sweep(
-    data: SweepData,
+    df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
     Args:
-        data: SweepData loaded from a run directory.
+        df: DataFrame with columns: scale, run, Openness, ..., Psychopathy.
         output_dir: Directory to save the figure.
-        title_suffix: Optional suffix appended to the figure title (e.g. persona name).
+        title_suffix: Optional suffix appended to the figure title.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
-    if data.trait is None:
-        raise ValueError("SweepData.trait is None — no TRAIT eval data found")
-
-    trait_agg = _agg_sweep(data.trait, ALL_TRAIT_COLS)
+    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS)
     scales = trait_agg["scale"].values
 
     fig, ax = plt.subplots(figsize=(12, 5.5))
@@ -461,7 +473,6 @@ def plot_trait_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
-    # Legend at bottom, two rows
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=5, framealpha=0.85)
 
@@ -474,14 +485,14 @@ def plot_trait_sweep(
 
 
 def plot_bfi_sweep(
-    data: SweepData,
+    df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
 ) -> Path:
     """Sanity-check plot: BFI Big Five centred at baseline (delta from scale=0).
 
     Args:
-        data: SweepData loaded from a run directory.
+        df: DataFrame with columns: scale, run, Openness, ..., Neuroticism.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
 
@@ -490,15 +501,11 @@ def plot_bfi_sweep(
     """
     import matplotlib.pyplot as plt
 
-    if data.bfi is None:
-        raise ValueError("SweepData.bfi is None — no BFI eval data found")
-
-    bfi_agg = _agg_sweep(data.bfi, BIG_FIVE)
+    bfi_agg = _agg_sweep(df, BIG_FIVE)
 
     # Compute per-trait baseline (scale=0) mean for delta calculation.
     baseline_row = bfi_agg[bfi_agg["scale"].abs() < 1e-9]
     if baseline_row.empty:
-        # No exact baseline point — use the row closest to 0.
         baseline_row = bfi_agg.loc[[bfi_agg["scale"].abs().idxmin()]]
 
     scales = bfi_agg["scale"].values
@@ -522,7 +529,6 @@ def plot_bfi_sweep(
                label="Baseline (s=0)", zorder=1)
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.3, zorder=1)
 
-    # Zoom y-axis to data range with a small margin.
     if all_delta_means:
         max_ci   = max(all_delta_cis) if all_delta_cis else 0.0
         data_min = min(all_delta_means) - max_ci
@@ -539,7 +545,6 @@ def plot_bfi_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
-    # Legend at bottom (include Baseline entry)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=6, framealpha=0.85)
 
@@ -552,19 +557,15 @@ def plot_bfi_sweep(
 
 
 def plot_mmlu_sweep(
-    data: SweepData,
+    df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
     allowed_drop: float = 0.05,
 ) -> Path:
     """MMLU coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
 
-    Shows whether the model retains general capability across the sweep.
-    A shaded band marks the acceptable range (baseline − allowed_drop to baseline),
-    so it's immediately clear which scale points are within the valid sweep interval.
-
     Args:
-        data: SweepData loaded from a run directory.
+        df: DataFrame with columns: scale, run, accuracy.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
         allowed_drop: Maximum acceptable accuracy drop from baseline (default 0.05 = 5 pp).
@@ -574,30 +575,22 @@ def plot_mmlu_sweep(
     """
     import matplotlib.pyplot as plt
 
-    if data.mmlu is None:
-        raise ValueError("SweepData.mmlu is None — no MMLU eval data found")
-
-    mmlu_agg = _agg_sweep(data.mmlu, ["accuracy"])
+    mmlu_agg = _agg_sweep(df, ["accuracy"])
     scales = mmlu_agg["scale"].values
     means  = mmlu_agg["accuracy_mean"].values
     cis    = mmlu_agg["accuracy_ci"].values
 
-    # Baseline accuracy: scale=0 row (or closest to 0)
     baseline_idx = int(np.argmin(np.abs(scales)))
     baseline_acc = float(means[baseline_idx])
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
 
-    # --- Allowed-drop band ---
     ax.axhspan(baseline_acc - allowed_drop, baseline_acc,
                color="#A5D6A7", alpha=0.25, zorder=1,
                label=f"Allowed drop (−{allowed_drop:.0%})")
-
-    # --- Baseline reference ---
     ax.axhline(baseline_acc, color="#388E3C", linewidth=1.2,
                linestyle="--", alpha=0.8, zorder=2, label=f"Baseline ({baseline_acc:.3f})")
 
-    # --- MMLU line + CI band ---
     color = "#5C6BC0"
     ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
             label="MMLU accuracy", zorder=4)
@@ -607,7 +600,6 @@ def plot_mmlu_sweep(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("MMLU accuracy", fontsize=11)
 
-    # Zoom y-axis: show baseline area clearly with a bit of headroom
     y_min = min(float(np.nanmin(means - cis)), baseline_acc - allowed_drop) - 0.02
     y_max = max(float(np.nanmax(means + cis)), baseline_acc) + 0.04
     ax.set_ylim(y_min, y_max)
@@ -628,6 +620,126 @@ def plot_mmlu_sweep(
     plt.close(fig)
     print(f"  ✓ {out}")
     return out
+
+
+def plot_generic_sweep(
+    df: pd.DataFrame,
+    eval_name: str,
+    output_dir: Path,
+    title_suffix: str = "",
+) -> Path:
+    """Generic sweep line plot for any eval not covered by a specialised plotter.
+
+    Plots all numeric metric columns on a single 0–1 axis with CI bands.
+
+    Args:
+        df: DataFrame with columns: scale, run, + metric columns.
+        eval_name: Used for the figure title and filename.
+        output_dir: Directory to save the figure.
+        title_suffix: Optional suffix appended to the figure title.
+
+    Returns:
+        Path to the saved figure.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+
+    cols = _metric_cols(df)
+    agg  = _agg_sweep(df, cols)
+    scales = agg["scale"].values
+
+    colors = cm.tab10.colors  # type: ignore[attr-defined]
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+
+    for i, col in enumerate(cols):
+        color = colors[i % len(colors)]
+        means = agg[f"{col}_mean"].values
+        cis   = agg[f"{col}_ci"].values
+        ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5, label=col, zorder=4)
+        _draw_ci_band(ax, scales, means, cis, color)
+
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylabel("Score", fontsize=11)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.25)
+
+    title = f"{eval_name} sweep"
+    if title_suffix:
+        title += f"  [{title_suffix}]"
+    ax.set_title(title, fontsize=13, fontweight="bold")
+
+    ncol = min(len(cols), 5)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
+              fontsize=9, ncol=ncol, framealpha=0.85)
+
+    plt.tight_layout()
+    out = output_dir / f"{eval_name}_sweep.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Plot dispatch
+# ---------------------------------------------------------------------------
+
+# Registry mapping eval name → plot function.
+# Specialised plotters take (df, output_dir, title_suffix).
+# Add new entries here to wire up custom plots for new evals without touching
+# any other code — everything else falls back to plot_generic_sweep.
+PlotFn = Callable[[pd.DataFrame, Path, str], Path]
+
+_PLOT_REGISTRY: dict[str, PlotFn] = {
+    "trait": plot_trait_sweep,
+    "bfi":   plot_bfi_sweep,
+}
+
+
+def _make_mmlu_plot_fn(allowed_drop: float) -> PlotFn:
+    def _fn(df: pd.DataFrame, output_dir: Path, title_suffix: str) -> Path:
+        return plot_mmlu_sweep(df, output_dir, title_suffix, allowed_drop=allowed_drop)
+    return _fn
+
+
+def generate_plots(
+    data: SweepData,
+    output_dir: Path,
+    title_suffix: str = "",
+    allowed_drop: float = 0.05,
+) -> list[Path]:
+    """Generate all plots for the evals present in *data*.
+
+    Uses the plot registry for known evals; falls back to the generic sweep
+    plotter for anything else.
+
+    Args:
+        data: SweepData loaded from a run directory.
+        output_dir: Directory to save all figures.
+        title_suffix: Optional title suffix forwarded to every plot function.
+        allowed_drop: MMLU allowed accuracy drop (forwarded to plot_mmlu_sweep).
+
+    Returns:
+        List of paths to saved figures.
+    """
+    registry = dict(_PLOT_REGISTRY)
+    registry["mmlu"] = _make_mmlu_plot_fn(allowed_drop)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+
+    for eval_name in data.names():
+        df = data.get(eval_name)
+        assert df is not None
+
+        if eval_name in registry:
+            path = registry[eval_name](df, output_dir, title_suffix)
+        else:
+            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix)
+        saved.append(path)
+
+    return saved
 
 
 # ---------------------------------------------------------------------------
@@ -663,35 +775,23 @@ def main() -> None:
         data = load_sweep_data(args.run_dir, reparse=args.reparse)
         output_dir = args.output_dir or args.run_dir / "figures"
 
-    # Print summary tables
-    if data.trait is not None:
-        agg = _agg_sweep(data.trait, ALL_TRAIT_COLS)
-        print_sweep_table(agg, ALL_TRAIT_COLS, "TRAIT SWEEP: scores vs. LoRA scale")
-    if data.bfi is not None:
-        agg = _agg_sweep(data.bfi, BIG_FIVE)
-        print_sweep_table(agg, BIG_FIVE, "BFI SWEEP: scores vs. LoRA scale")
-    if data.mmlu is not None:
-        agg = _agg_sweep(data.mmlu, ["accuracy"])
-        print_sweep_table(agg, ["accuracy"], "MMLU: accuracy vs. LoRA scale")
+    # Print summary tables for all evals found
+    for eval_name in data.names():
+        df = data.get(eval_name)
+        assert df is not None
+        cols = _metric_cols(df)
+        agg = _agg_sweep(df, cols)
+        print_sweep_table(agg, cols, f"{eval_name.upper()} SWEEP: scores vs. LoRA scale")
 
     if args.visualize:
         _setup_matplotlib()
-        output_dir.mkdir(parents=True, exist_ok=True)
         print(f"\nGenerating plots → {output_dir}")
-        if data.trait is not None:
-            plot_trait_sweep(data, output_dir, title_suffix=args.title)
+        saved = generate_plots(data, output_dir, title_suffix=args.title,
+                               allowed_drop=args.allowed_drop)
+        if not saved:
+            print("  (no eval data found — nothing to plot)")
         else:
-            print("  (skipping trait_sweep.png — no TRAIT data)")
-        if data.bfi is not None:
-            plot_bfi_sweep(data, output_dir, title_suffix=args.title)
-        else:
-            print("  (skipping bfi_sweep.png — no BFI data)")
-        if data.mmlu is not None:
-            plot_mmlu_sweep(data, output_dir, title_suffix=args.title,
-                            allowed_drop=args.allowed_drop)
-        else:
-            print("  (skipping mmlu_sweep.png — no MMLU data)")
-        print(f"\n✅ Plots saved to {output_dir}")
+            print(f"\n✅ Plots saved to {output_dir}")
 
 
 if __name__ == "__main__":
