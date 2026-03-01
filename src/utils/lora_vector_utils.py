@@ -8,8 +8,36 @@ PCA — directly on the small factor matrices.
 Memory: O(n_modules × r × (d_in + d_out)) instead of O(n_modules × d_in × d_out).
 For rank 16, that's roughly a 250x reduction.
 
-Loss only occurs when writing back to a model with a fixed rank r via truncated
-SVD. All arithmetic in the vector space is exact.
+Rank and lossy operations
+------------------
+All arithmetic in the vector space is exact, but **operations that combine
+vectors grow the internal rank**:
+
+- ``a + b`` produces a vector with rank ``r_a + r_b`` (B columns and A rows
+  are concatenated).
+- ``a - b`` similarly produces rank ``r_a + r_b``.
+- Scalar multiplication and negation leave the rank unchanged.
+
+This means that after repeated additions the internal rank can far exceed the
+original adapter rank. The representation is still exact — no information is
+lost — but storage and compute grow with rank.
+
+**Loss only occurs in** ``rank_reduce(new_rank)`` — truncated SVD to a lower
+rank. Information in the discarded singular vectors is gone. Repeated
+add → rank_reduce cycles accumulate approximation error. If you need to
+preserve fidelity, keep the full-rank vector and only reduce at the end.
+
+Model I/O
+---------
+- ``write_to_existing_peft_model()`` writes factors into an existing PeftModel.
+  By default (``resize_peft_rank=True``) the model's adapter is resized to
+  match the vector's rank. Pass ``resize_peft_rank=False`` to truncate via SVD
+  instead (lossy). If you want a specific rank, call ``rank_reduce()`` first.
+- ``to_peft_model()`` creates a fresh PeftModel from a base model and injects
+  the vector's weights. All config (rank, target_modules, etc.) is inferred.
+- ``to_file()`` saves the vector as a PEFT-compatible adapter directory
+  (``adapter_config.json`` + ``adapter_model.safetensors``), loadable by
+  ``from_file()`` or ``PeftModel.from_pretrained()``.
 """
 
 from __future__ import annotations
@@ -22,8 +50,8 @@ from pathlib import Path
 
 import torch
 from huggingface_hub import snapshot_download
-from peft import PeftModel
-from safetensors.torch import safe_open
+from peft import LoraConfig as PeftLoraConfig, PeftModel, get_peft_model
+from safetensors.torch import safe_open, save_file
 from torch import Tensor, nn
 
 from src.utils.linalg import reduce_lora_rank_efficient
@@ -425,22 +453,36 @@ class LoRaVector:
     # Model I/O
     # ------------------------------------------------------------------
 
-    def write_to_model(
+    def write_to_existing_peft_model(
         self,
         model: PeftModel,
         adapter_name: str,
         *,
-        rank: int | None = None,
+        resize_peft_rank: bool = True,
     ) -> None:
-        """Write this vector's factors into a PeftModel's adapter.
+        """Write this vector's factors into an existing PeftModel's adapter.
 
-        If a module's internal rank exceeds the model's rank for that module,
-        truncated SVD is used to fit. Sets scaling to 1.0.
+        By default (``resize_peft_rank=True``), the model's adapter is resized
+        to match the vector's rank — both expanding and shrinking. This avoids
+        lossy truncation and keeps ``module.r`` consistent with actual weight
+        shapes. Pass ``resize_peft_rank=False`` to instead truncate via SVD
+        when the vector's rank exceeds the model's (lossy).
+
+        To write at a specific rank, call ``rank_reduce()`` first::
+
+            vec.rank_reduce(4).write_to_existing_peft_model(model, "default")
+
+        Sets ``module.scaling`` to 1.0 (scaling is already absorbed into B)
+        and syncs ``model.peft_config`` so that ``save_pretrained()`` writes
+        the correct rank and lora_alpha to ``adapter_config.json``.
 
         Args:
-            model: PEFT model to write into (modified in-place).
+            model: PeftModel to write into (modified in-place).
             adapter_name: Which adapter to overwrite.
-            rank: If specified, reduce all modules to this rank before writing.
+            resize_peft_rank: If True (default), resize the adapter's
+                nn.Linear modules and module.r to match the vector's rank.
+                If False, truncate via SVD when the vector's rank exceeds
+                the model's.
         """
         if adapter_name not in model.peft_config:
             available = list(model.peft_config.keys())
@@ -448,32 +490,146 @@ class LoRaVector:
                 f"Adapter '{adapter_name}' not found. Available: {available}"
             )
 
-        vec = self.rank_reduce(rank) if rank is not None else self
-
         modules = dict(model.named_modules())
-        for name, (B, A) in vec._factors.items():
+        written_ranks = []
+
+        for name, (B, A) in self._factors.items():
             if name not in modules:
                 raise ValueError(f"Module '{name}' not found in model")
 
             module = modules[name]
             model_rank = module.r[adapter_name]
+            vec_rank = A.shape[0]
+            device = module.lora_A[adapter_name].weight.device
+            dtype = module.lora_A[adapter_name].weight.dtype
 
-            if A.shape[0] > model_rank:
-                A, B = reduce_lora_rank_efficient(A, B, new_rank=model_rank)
+            if vec_rank != model_rank:
+                if resize_peft_rank:
+                    in_features = A.shape[1]
+                    out_features = B.shape[0]
+                    module.lora_A[adapter_name] = nn.Linear(
+                        in_features, vec_rank, bias=False
+                    ).to(device=device, dtype=dtype)
+                    module.lora_B[adapter_name] = nn.Linear(
+                        vec_rank, out_features, bias=False
+                    ).to(device=device, dtype=dtype)
+                    module.r[adapter_name] = vec_rank
+                elif vec_rank > model_rank:
+                    A, B = reduce_lora_rank_efficient(A, B, new_rank=model_rank)
 
             module.lora_A[adapter_name].weight = nn.Parameter(
-                A.to(
-                    device=module.lora_A[adapter_name].weight.device,
-                    dtype=module.lora_A[adapter_name].weight.dtype,
-                )
+                A.to(device=device, dtype=dtype)
             )
             module.lora_B[adapter_name].weight = nn.Parameter(
-                B.to(
-                    device=module.lora_B[adapter_name].weight.device,
-                    dtype=module.lora_B[adapter_name].weight.dtype,
-                )
+                B.to(device=device, dtype=dtype)
             )
             module.scaling[adapter_name] = 1.0
+            written_ranks.append(module.r[adapter_name])
+
+        # Sync peft_config so save_pretrained writes correct metadata.
+        # Set lora_alpha = r so scaling = lora_alpha/r = 1.0, matching the
+        # module.scaling = 1.0 we set above. This prevents double-scaling
+        # when the adapter is later loaded via PeftModel.from_pretrained.
+        new_r = max(written_ranks)
+        model.peft_config[adapter_name].r = new_r
+        model.peft_config[adapter_name].lora_alpha = new_r
+
+    def to_peft_model(
+        self,
+        base_model: nn.Module,
+        adapter_name: str = "default",
+    ) -> PeftModel:
+        """Create a PeftModel from a base model and inject this vector's weights.
+
+        All adapter configuration is inferred from the vector itself — no
+        LoraConfig needed. Typical usage::
+
+            base = AutoModelForCausalLM.from_pretrained("meta-llama/...")
+            combined = vec_a + vec_b
+            peft_model = combined.to_peft_model(base)
+
+        The following LoraConfig fields are set automatically:
+
+        - ``r``: set to ``self.max_rank`` (the vector's factor shapes
+          determine the rank).
+        - ``lora_alpha``: set to ``self.max_rank`` (= r), giving scaling
+          = 1.0. This is required because the vector's B factors already
+          have the original adapter's scaling absorbed. Any other value
+          would cause double-scaling when saving and reloading.
+        - ``target_modules``: inferred from the vector's module names by
+          extracting suffixes (e.g. ``model.layers.0.self_attn.q_proj``
+          → ``q_proj``). PEFT pattern-matches these against the base model
+          to wrap the correct modules with LoRA layers.
+        - ``bias``: ``"none"`` — the vector doesn't store bias values.
+        - ``init_lora_weights``: ``False`` — skips PEFT's default
+          initialization since we overwrite immediately.
+
+        Args:
+            base_model: The base model (e.g. from
+                ``AutoModelForCausalLM.from_pretrained``).
+            adapter_name: Name for the adapter in the PeftModel.
+
+        Returns:
+            A PeftModel with this vector's weights injected.
+        """
+        target_modules = sorted(
+            {name.split(".")[-1] for name in self.module_names}
+        )
+        config = PeftLoraConfig(
+            r=self.max_rank,
+            lora_alpha=self.max_rank,
+            target_modules=target_modules,
+            bias="none",
+            init_lora_weights=False,
+        )
+        peft_model = get_peft_model(base_model, config, adapter_name=adapter_name)
+        self.write_to_existing_peft_model(peft_model, adapter_name)
+        return peft_model
+
+    def to_file(self, path: str | Path) -> None:
+        """Save this vector as a PEFT-compatible adapter directory.
+
+        The inverse of ``from_file``. Writes two files:
+
+        - ``adapter_config.json`` — adapter metadata (rank, lora_alpha,
+          target_modules, etc.).
+        - ``adapter_model.safetensors`` — the (B, A) weight tensors.
+
+        The saved directory can be loaded by ``LoRaVector.from_file(path)``
+        or by ``PeftModel.from_pretrained(base_model, path)``.
+
+        Scaling is already absorbed into B, so ``lora_alpha`` is set equal
+        to ``r`` in the config (giving scaling = 1.0). This ensures that
+        ``from_file`` (which computes ``scaling = lora_alpha / r`` and
+        multiplies into B) is a no-op on reload — no double-scaling.
+
+        Args:
+            path: Directory to write into. Created if it doesn't exist.
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        target_modules = sorted(
+            {name.split(".")[-1] for name in self.module_names}
+        )
+
+        # task_type is hardcoded — this codebase only operates on causal LMs.
+        config = {
+            "peft_type": "LORA",
+            "task_type": "CAUSAL_LM",
+            "r": self.max_rank,
+            "lora_alpha": self.max_rank,
+            "target_modules": target_modules,
+            "bias": "none",
+        }
+        with open(path / "adapter_config.json", "w") as f:
+            json.dump(config, f, indent=2)
+
+        tensors = {}
+        for name, (B, A) in self._factors.items():
+            tensors[f"{name}.lora_A.weight"] = A.contiguous()
+            tensors[f"{name}.lora_B.weight"] = B.contiguous()
+        save_file(tensors, str(path / "adapter_model.safetensors"))
 
     def to(
         self,

@@ -1,6 +1,6 @@
 import pytest
 import torch
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from torch import nn
 
 from src.utils.lora_vector_utils import (
@@ -294,11 +294,11 @@ class TestRankManagement:
 
 class TestModelIO:
     def test_round_trip(self, peft_model):
-        """from_peft → write_to_model → from_peft should approximately recover."""
+        """from_peft → write → from_peft should approximately recover."""
         vec = LoRaVector.from_peft(peft_model, "default")
 
         target = _make_peft_model(rank=8)
-        vec.write_to_model(target, "default")
+        vec.write_to_existing_peft_model(target, "default")
 
         vec_recovered = LoRaVector.from_peft(target, "default")
         sim = vec.cosine_similarity(vec_recovered)
@@ -309,7 +309,7 @@ class TestModelIO:
         vec = LoRaVector.from_peft(peft_model, "default")
 
         target = _make_peft_model(rank=2)
-        vec.write_to_model(target, "default")
+        vec.write_to_existing_peft_model(target, "default", resize_peft_rank=False)
 
         for _, module in target.named_modules():
             if hasattr(module, "r") and "default" in getattr(module, "r", {}):
@@ -319,7 +319,7 @@ class TestModelIO:
         vec = LoRaVector.from_peft(peft_model, "default")
 
         target = _make_peft_model(rank=8)
-        vec.write_to_model(target, "default")
+        vec.write_to_existing_peft_model(target, "default")
 
         for _, module in target.named_modules():
             if hasattr(module, "scaling") and "default" in getattr(
@@ -334,14 +334,14 @@ class TestModelIO:
         x = torch.randn(2, 16)
         out_before = peft_model(x).detach()
 
-        vec.write_to_model(peft_model, "default")
+        vec.write_to_existing_peft_model(peft_model, "default")
         out_after = peft_model(x).detach()
 
         torch.testing.assert_close(out_after, out_before, atol=1e-3, rtol=1e-3)
 
     def test_invalid_adapter_raises(self, peft_model, vec_a):
         with pytest.raises(ValueError, match="not found"):
-            vec_a.write_to_model(peft_model, "nonexistent")
+            vec_a.write_to_existing_peft_model(peft_model, "nonexistent")
 
 
 # ---------------------------------------------------------------------------
@@ -840,3 +840,501 @@ class TestLoRAVectorSpaceCenterScale:
         reconstructed = space.reconstruct(coords)
         sim = vec_a.cosine_similarity(reconstructed)
         assert sim == pytest.approx(1.0, abs=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Multi-adapter isolation and scaling correctness
+# ---------------------------------------------------------------------------
+
+
+def _add_adapter(model, adapter_name: str, rank: int, lora_alpha: int, seed: int):
+    """Add a second adapter to an existing PeftModel and randomize its lora_B."""
+    config = LoraConfig(
+        r=rank,
+        lora_alpha=lora_alpha,
+        target_modules=["q_proj", "v_proj", "up_proj", "down_proj"],
+        bias="none",
+    )
+    model.add_adapter(adapter_name, config)
+
+    torch.manual_seed(seed)
+    for _, module in model.named_modules():
+        if hasattr(module, "lora_B") and adapter_name in module.lora_B:
+            module.lora_B[adapter_name].weight.data.normal_()
+
+
+def _snapshot_adapter_weights(model, adapter_name: str) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+    """Clone all lora_A and lora_B weights for an adapter."""
+    snapshot = {}
+    for name, module in model.named_modules():
+        if hasattr(module, "lora_A") and adapter_name in module.lora_A:
+            a = module.lora_A[adapter_name].weight.data.clone()
+            b = module.lora_B[adapter_name].weight.data.clone()
+            snapshot[name] = (b, a)
+    return snapshot
+
+
+class TestMultiAdapterAndScaling:
+    """Tests for multi-adapter isolation and scaling correctness."""
+
+    def test_write_to_adapter_does_not_corrupt_other_adapter(self):
+        """Writing to 'default' must not change 'other' adapter weights."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        _add_adapter(model, "other", rank=4, lora_alpha=8, seed=77)
+
+        # Snapshot 'other' before we touch 'default'
+        snapshot = _snapshot_adapter_weights(model, "other")
+
+        # Modify and write back to 'default'
+        vec = LoRaVector.from_peft(model, "default")
+        modified = vec * 2.0
+        modified.write_to_existing_peft_model(model, "default")
+
+        # Verify 'other' is bitwise identical
+        for name, (b_before, a_before) in snapshot.items():
+            module = dict(model.named_modules())[name]
+            a_after = module.lora_A["other"].weight.data
+            b_after = module.lora_B["other"].weight.data
+            assert torch.equal(a_before, a_after), f"lora_A changed for {name}"
+            assert torch.equal(b_before, b_after), f"lora_B changed for {name}"
+
+    def test_from_peft_reads_correct_adapter(self):
+        """Extracting from different adapters should give different vectors."""
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)
+        _add_adapter(model, "other", rank=4, lora_alpha=8, seed=99)
+
+        vec_default = LoRaVector.from_peft(model, "default")
+        vec_other = LoRaVector.from_peft(model, "other")
+
+        # They should be materially different
+        sim = vec_default.cosine_similarity(vec_other)
+        assert abs(sim) < 0.99, f"Vectors from different adapters too similar: {sim}"
+
+        # Each vector's unscaled factors should match the model's raw weights
+        for adapter_name, vec in [("default", vec_default), ("other", vec_other)]:
+            vec_unscaled = LoRaVector.from_peft(model, adapter_name, include_scaling=False)
+            for name in vec_unscaled.module_names:
+                B_vec, A_vec = vec_unscaled.factors[name]
+                module = dict(model.named_modules())[name]
+                A_model = module.lora_A[adapter_name].weight.data
+                B_model = module.lora_B[adapter_name].weight.data
+                assert torch.allclose(A_vec, A_model, atol=1e-6), f"A mismatch for {name}"
+                assert torch.allclose(B_vec, B_model, atol=1e-6), f"B mismatch for {name}"
+
+    @pytest.mark.parametrize(
+        "rank, lora_alpha, expected_scaling",
+        [
+            (4, 4, 1.0),
+            (4, 8, 2.0),
+            (8, 32, 4.0),
+            (4, 2, 0.5),
+        ],
+    )
+    def test_scaling_round_trip_various_ratios(self, rank, lora_alpha, expected_scaling):
+        """Extract → write → extract round-trip preserves direction and magnitude."""
+        model = _make_peft_model(rank=rank, lora_alpha=lora_alpha, seed=42)
+        vec_original = LoRaVector.from_peft(model, "default")
+
+        vec_original.write_to_existing_peft_model(model, "default")
+        vec_after = LoRaVector.from_peft(model, "default")
+
+        sim = vec_original.cosine_similarity(vec_after)
+        assert sim == pytest.approx(1.0, abs=1e-4), f"Direction changed: sim={sim}"
+
+        norm_original = vec_original.norm
+        norm_after = vec_after.norm
+        assert norm_after == pytest.approx(norm_original, rel=1e-4), (
+            f"Norm changed: {norm_original} → {norm_after}"
+        )
+
+    def test_scaling_absorbed_correctly(self):
+        """With scaling=2.0, B_scaled should be exactly 2.0 * B_unscaled."""
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)  # scaling = 8/4 = 2.0
+
+        vec_scaled = LoRaVector.from_peft(model, "default", include_scaling=True)
+        vec_unscaled = LoRaVector.from_peft(model, "default", include_scaling=False)
+
+        for name in vec_scaled.module_names:
+            B_scaled, A_scaled = vec_scaled.factors[name]
+            B_unscaled, A_unscaled = vec_unscaled.factors[name]
+
+            # A should be identical regardless of scaling
+            assert torch.allclose(A_scaled, A_unscaled, atol=1e-6), (
+                f"A differs for {name} — scaling should not affect A"
+            )
+            # B_scaled should be 2.0 * B_unscaled
+            assert torch.allclose(B_scaled, 2.0 * B_unscaled, atol=1e-6), (
+                f"B scaling incorrect for {name}"
+            )
+
+    def test_write_does_not_double_scale(self):
+        """Forward pass must be identical before and after write round-trip."""
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)  # scaling = 2.0
+        model.eval()
+
+        x = torch.randn(1, 16)
+        with torch.no_grad():
+            output_before = model(x).clone()
+
+        # Extract (absorbs scaling into B) and write back (sets scaling=1.0)
+        vec = LoRaVector.from_peft(model, "default")
+        vec.write_to_existing_peft_model(model, "default")
+
+        with torch.no_grad():
+            output_after = model(x)
+
+        assert torch.allclose(output_before, output_after, atol=1e-5), (
+            f"Forward pass changed after write round-trip. "
+            f"Max diff: {(output_before - output_after).abs().max().item()}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Rank handling and write_to_existing_peft_model rank behavior
+# ---------------------------------------------------------------------------
+
+
+class TestRankAndWriteBehavior:
+    """Tests for rank changes during write_to_existing_peft_model and rank_reduce."""
+
+    def test_write_after_explicit_rank_reduce(self):
+        """rank_reduce(2) then write should produce rank-2 weights in the model."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        vec.rank_reduce(2).write_to_existing_peft_model(model, "default")
+
+        for _, module in model.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].weight.shape[0] == 2
+                assert module.lora_B["default"].weight.shape[1] == 2
+
+    def test_write_bloated_rank_truncates_without_resize(self):
+        """Adding two rank-8 vectors gives rank 16; truncates when resize_peft_rank=False."""
+        model_a = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        model_b = _make_peft_model(rank=8, lora_alpha=16, seed=99)
+        vec_a = LoRaVector.from_peft(model_a, "default")
+        vec_b = LoRaVector.from_peft(model_b, "default")
+
+        combined = vec_a + vec_b
+        assert combined.max_rank == 16
+
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        combined.write_to_existing_peft_model(target, "default", resize_peft_rank=False)
+
+        # Tensor shapes should match model rank (8), not vector rank (16)
+        for _, module in target.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].weight.shape[0] == 8
+                assert module.lora_B["default"].weight.shape[1] == 8
+
+        # Should still be a reasonable approximation
+        recovered = LoRaVector.from_peft(target, "default")
+        sim = combined.cosine_similarity(recovered)
+        assert sim > 0.5, f"Truncated vector too different: sim={sim}"
+
+    def test_write_with_resize_preserves_full_rank(self):
+        """resize_peft_rank=True should expand model to match vector rank."""
+        model_a = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        model_b = _make_peft_model(rank=8, lora_alpha=16, seed=99)
+        vec_a = LoRaVector.from_peft(model_a, "default")
+        vec_b = LoRaVector.from_peft(model_b, "default")
+
+        combined = vec_a + vec_b
+        assert combined.max_rank == 16
+
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        combined.write_to_existing_peft_model(target, "default", resize_peft_rank=True)
+
+        # Model should now have rank 16
+        for _, module in target.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].weight.shape[0] == 16
+                assert module.lora_B["default"].weight.shape[1] == 16
+                assert module.r["default"] == 16
+
+        # Round-trip should be lossless
+        recovered = LoRaVector.from_peft(target, "default")
+        sim = combined.cosine_similarity(recovered)
+        assert sim == pytest.approx(1.0, abs=1e-4), f"Resize lost info: sim={sim}"
+
+    def test_write_with_resize_shrinks_to_vector_rank(self):
+        """resize_peft_rank=True should shrink model when vector rank < model rank."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+        reduced = vec.rank_reduce(4)
+
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        reduced.write_to_existing_peft_model(target, "default", resize_peft_rank=True)
+
+        for _, module in target.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].weight.shape[0] == 4
+                assert module.lora_B["default"].weight.shape[1] == 4
+                assert module.r["default"] == 4
+
+        recovered = LoRaVector.from_peft(target, "default")
+        sim = reduced.cosine_similarity(recovered)
+        assert sim == pytest.approx(1.0, abs=1e-4)
+
+    def test_write_with_resize_forward_pass(self):
+        """Forward pass should work after resizing to a different rank."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec_a = LoRaVector.from_peft(model, "default")
+        vec_b = LoRaVector.from_peft(_make_peft_model(rank=8, lora_alpha=16, seed=99), "default")
+
+        combined = vec_a + vec_b  # rank 16
+        combined.write_to_existing_peft_model(model, "default", resize_peft_rank=True)
+
+        model.eval()
+        x = torch.randn(1, 16)
+        with torch.no_grad():
+            output = model(x)
+
+        assert not torch.isnan(output).any(), "NaN in output after resize write"
+        assert not torch.isinf(output).any(), "Inf in output after resize write"
+
+    def test_tensor_shapes_consistent_after_resize(self):
+        """After resize, module.r, lora_A shape, and lora_B shape should all agree."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        # Test both expansion (rank 8 → 16) and shrinking (rank 8 → 3)
+        for target_rank, use_add in [(16, True), (3, False)]:
+            target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+            if use_add:
+                test_vec = vec + vec  # rank 16
+            else:
+                test_vec = vec.rank_reduce(target_rank)
+
+            test_vec.write_to_existing_peft_model(target, "default", resize_peft_rank=True)
+
+            for _, module in target.named_modules():
+                if hasattr(module, "lora_A") and "default" in module.lora_A:
+                    r_metadata = module.r["default"]
+                    a_rank = module.lora_A["default"].weight.shape[0]
+                    b_rank = module.lora_B["default"].weight.shape[1]
+                    assert r_metadata == a_rank == b_rank == target_rank, (
+                        f"Inconsistent ranks: r={r_metadata}, A={a_rank}, B={b_rank}, "
+                        f"expected={target_rank}"
+                    )
+
+    def test_repeated_add_reduce_accumulates_error(self):
+        """Repeated add→reduce with aggressive rank reduction loses information."""
+        # The tiny model has hidden_size=16, so ΔW is at most rank 16.
+        # We use rank-8 vectors and reduce to rank 2 after each addition
+        # to force genuine information loss.
+        vecs = []
+        for seed in range(6):
+            model = _make_peft_model(rank=8, lora_alpha=16, seed=seed)
+            vecs.append(LoRaVector.from_peft(model, "default"))
+
+        # Exact sum (keeps all rank)
+        exact = vecs[0]
+        for v in vecs[1:]:
+            exact = exact + v
+
+        # Sum with aggressive rank reduction (rank 2) after each addition
+        accumulated = vecs[0].rank_reduce(2)
+        for v in vecs[1:]:
+            accumulated = (accumulated + v).rank_reduce(2)
+
+        sim = exact.cosine_similarity(accumulated)
+        # Compressing to rank 2 after each step should lose significant info
+        assert sim < 0.99, (
+            f"Expected meaningful error from repeated rank-2 reduction, got sim={sim}"
+        )
+        # But SVD keeps the dominant directions, so it shouldn't be garbage
+        assert sim > 0.3, f"Too much error accumulated: sim={sim}"
+
+    def test_rank_reduce_quality_monotonic(self):
+        """Higher target rank should give better approximation."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        sim_rank6 = vec.cosine_similarity(vec.rank_reduce(6))
+        sim_rank2 = vec.cosine_similarity(vec.rank_reduce(2))
+
+        assert sim_rank6 > sim_rank2, (
+            f"Rank 6 ({sim_rank6}) should approximate better than rank 2 ({sim_rank2})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Config sync after write
+# ---------------------------------------------------------------------------
+
+
+class TestConfigSync:
+    """Tests for peft_config syncing after write_to_existing_peft_model."""
+
+    def test_write_default_resizes(self):
+        """Default resize_peft_rank=True should expand model to match vector rank."""
+        model_a = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        model_b = _make_peft_model(rank=8, lora_alpha=16, seed=99)
+        vec_a = LoRaVector.from_peft(model_a, "default")
+        vec_b = LoRaVector.from_peft(model_b, "default")
+
+        combined = vec_a + vec_b  # rank 16
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        combined.write_to_existing_peft_model(target, "default")  # default resize=True
+
+        for _, module in target.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].weight.shape[0] == 16
+                assert module.r["default"] == 16
+
+    def test_peft_config_r_updated_after_resize(self):
+        """peft_config.r should match the vector's rank after write."""
+        model_a = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        model_b = _make_peft_model(rank=8, lora_alpha=16, seed=99)
+        combined = LoRaVector.from_peft(model_a, "default") + LoRaVector.from_peft(model_b, "default")
+
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        combined.write_to_existing_peft_model(target, "default")
+
+        assert target.peft_config["default"].r == 16
+
+    def test_peft_config_r_updated_after_shrink(self):
+        """peft_config.r should shrink when writing a lower-rank vector."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default").rank_reduce(4)
+
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        vec.write_to_existing_peft_model(target, "default")
+
+        assert target.peft_config["default"].r == 4
+
+    def test_peft_config_lora_alpha_synced(self):
+        """peft_config.lora_alpha should equal r after write (scaling = 1.0)."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        target = _make_peft_model(rank=8, lora_alpha=16, seed=0)
+        vec.write_to_existing_peft_model(target, "default")
+
+        config = target.peft_config["default"]
+        assert config.lora_alpha == config.r, (
+            f"lora_alpha ({config.lora_alpha}) should equal r ({config.r})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# to_peft_model
+# ---------------------------------------------------------------------------
+
+
+class TestToPeftModel:
+    """Tests for LoRaVector.to_peft_model."""
+
+    def test_to_peft_model_basic(self):
+        """to_peft_model should create a PeftModel with correct weights."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        base = TinyTransformer(num_layers=4, hidden_size=16)
+        peft_model = vec.to_peft_model(base)
+
+        assert isinstance(peft_model, PeftModel)
+
+        # Round-trip: extract vector back and check similarity
+        recovered = LoRaVector.from_peft(peft_model, "default")
+        sim = vec.cosine_similarity(recovered)
+        assert sim == pytest.approx(1.0, abs=1e-4), f"Round-trip lost info: sim={sim}"
+
+        # Config should reflect vector's rank
+        config = peft_model.peft_config["default"]
+        assert config.r == vec.max_rank
+        assert config.lora_alpha == vec.max_rank
+
+    def test_to_peft_model_infers_target_modules(self):
+        """to_peft_model should infer target_modules from module name suffixes."""
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        base = TinyTransformer(num_layers=4, hidden_size=16)
+        peft_model = vec.to_peft_model(base)
+
+        config = peft_model.peft_config["default"]
+        expected = {"q_proj", "v_proj", "up_proj", "down_proj"}
+        assert set(config.target_modules) == expected
+
+    def test_to_peft_model_forward_pass(self):
+        """PeftModel from to_peft_model should produce valid output."""
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        base = TinyTransformer(num_layers=4, hidden_size=16)
+        peft_model = vec.to_peft_model(base)
+        peft_model.eval()
+
+        x = torch.randn(1, 16)
+        with torch.no_grad():
+            output = peft_model(x)
+
+        assert not torch.isnan(output).any(), "NaN in output"
+        assert not torch.isinf(output).any(), "Inf in output"
+
+
+# ---------------------------------------------------------------------------
+# to_file
+# ---------------------------------------------------------------------------
+
+
+class TestToFile:
+    """Tests for LoRaVector.to_file."""
+
+    def test_to_file_round_trip(self, tmp_path):
+        """to_file → from_file should recover the same vector."""
+        model = _make_peft_model(rank=8, lora_alpha=16, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        adapter_dir = tmp_path / "adapter"
+        vec.to_file(adapter_dir)
+        recovered = LoRaVector.from_file(adapter_dir)
+
+        sim = vec.cosine_similarity(recovered)
+        assert sim == pytest.approx(1.0, abs=1e-4), f"Round-trip lost info: sim={sim}"
+
+    def test_to_file_creates_correct_files(self, tmp_path):
+        """to_file should create adapter_config.json and adapter_model.safetensors."""
+        import json
+
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        adapter_dir = tmp_path / "adapter"
+        vec.to_file(adapter_dir)
+
+        assert (adapter_dir / "adapter_config.json").exists()
+        assert (adapter_dir / "adapter_model.safetensors").exists()
+
+        with open(adapter_dir / "adapter_config.json") as f:
+            config = json.load(f)
+
+        assert config["peft_type"] == "LORA"
+        assert config["task_type"] == "CAUSAL_LM"
+        assert config["r"] == vec.max_rank
+        assert config["lora_alpha"] == vec.max_rank
+        assert set(config["target_modules"]) == {"q_proj", "v_proj", "up_proj", "down_proj"}
+
+    def test_to_file_weight_keys(self, tmp_path):
+        """Safetensors keys should match {module_name}.lora_{A,B}.weight pattern."""
+        from safetensors.torch import safe_open
+
+        model = _make_peft_model(rank=4, lora_alpha=8, seed=42)
+        vec = LoRaVector.from_peft(model, "default")
+
+        adapter_dir = tmp_path / "adapter"
+        vec.to_file(adapter_dir)
+
+        with safe_open(str(adapter_dir / "adapter_model.safetensors"), framework="pt") as f:
+            keys = set(f.keys())
+
+        # Each module should have .lora_A.weight and .lora_B.weight
+        for name in vec.module_names:
+            assert f"{name}.lora_A.weight" in keys, f"Missing A key for {name}"
+            assert f"{name}.lora_B.weight" in keys, f"Missing B key for {name}"
+
+        # Total keys = 2 * number of modules
+        assert len(keys) == 2 * len(vec.module_names)
