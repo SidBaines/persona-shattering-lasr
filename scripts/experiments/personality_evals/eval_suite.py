@@ -62,7 +62,6 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     output_root=Path("scratch/evals/personality"),
     run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}",
-    cleanup_materialized_models=True,
     skip_completed=True,
     metadata={
         "persona": PERSONA,

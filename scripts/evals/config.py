@@ -150,7 +150,6 @@ class SuiteConfig(BaseModel):
     evals: list[EvalSpec]
     output_root: Path
     run_name: str | None = None
-    cleanup_materialized_models: bool = True
     skip_completed: bool = True
     # Generation temperature forwarded to Inspect for all benchmark evals.
     temperature: float = 0.0

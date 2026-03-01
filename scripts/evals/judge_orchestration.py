@@ -11,6 +11,7 @@ from typing import Any
 from inspect_ai import eval as inspect_eval
 from inspect_ai import score as inspect_score
 from inspect_ai.log import EvalLog, read_eval_log, write_eval_log
+from inspect_ai.model import Model
 from inspect_ai.scorer import Scorer
 
 from scripts.evals.config import JudgeExecutionConfig
@@ -58,7 +59,7 @@ def _wait_for_path(
 def run_task_with_mode(
     *,
     task: Any,
-    model_uri: str,
+    model_uri: str | Model,
     native_log_dir: Path,
     mode: str,
     limit: int | None,
