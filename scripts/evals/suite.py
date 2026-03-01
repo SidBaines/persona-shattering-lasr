@@ -202,8 +202,10 @@ def _load_local_model_for_sweep(
         peft_kwargs["subfolder"] = subfolder
     peft_model = PeftModel.from_pretrained(base_model, adapter_ref, **peft_kwargs)
     # Tokenizer lives in the adapter subfolder if one is specified, otherwise the adapter root.
-    tokenizer_ref = f"{adapter_ref}/{subfolder}" if subfolder else adapter_ref
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
+    tokenizer_kwargs: dict[str, Any] = {}
+    if subfolder:
+        tokenizer_kwargs["subfolder"] = subfolder
+    tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
     return peft_model, tokenizer
 
 
