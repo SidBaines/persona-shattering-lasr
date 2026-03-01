@@ -13,6 +13,8 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 EvalDefinition = InspectBenchmarkSpec | InspectCustomEvalSpec
 EvalFactory = Callable[[], EvalDefinition]
 
+_DEFAULT_JUDGE_MODEL = "gpt-5-nano-2025-08-07"
+
 
 def _truthfulqa_mc1() -> EvalDefinition:
     return InspectBenchmarkSpec(
@@ -43,7 +45,7 @@ def _coherence1() -> EvalDefinition:
         evaluations=["coherence"],
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -72,7 +74,7 @@ def _coherence_count_o1() -> EvalDefinition:
         scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -101,7 +103,7 @@ def _coherence_count_p1() -> EvalDefinition:
         scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -129,7 +131,7 @@ def _neuroticism1() -> EvalDefinition:
         evaluations=["neuroticism"],
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -163,7 +165,7 @@ def _coherence_o_density_lowercase_punctuation1() -> EvalDefinition:
         scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),

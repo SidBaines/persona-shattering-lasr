@@ -183,13 +183,18 @@ For model and adapter refs:
 - Unprefixed refs are auto-resolved
 - If both local + HF exist for an unprefixed ref, the run errors explicitly and asks you to disambiguate
 
-## LoRA Materialization + Cleanup
+## LoRA Scale Sweeps
 
-Merged adapter models are cached under a shared models cache.
+When `SuiteConfig.sweep` is set, the suite loads the base model + adapter **once** and
+applies `LoRaScaling` in-place for each scale point, then restores the weights before
+moving to the next point. No merge-to-disk occurs.
 
-- Default: merged artifacts are removed at run end
-- Use `--keep-materialized-models` (or `SuiteConfig.cleanup_materialized_models=False`) to retain cache for reuse across runs
-- Runtime model cleanup is performed between model specs to reduce CUDA OOM risk in multi-model suite runs
+The model is passed to Inspect via the `hf_preloaded` provider
+(`scripts/evals/utils/preloaded_hf_provider.py`), which wraps the live PyTorch object
+directly rather than loading from a URI.
+
+For non-sweep runs with explicit `ModelSpec.adapters`, adapters are merged into the base
+model via `model_materialization.py` and cleaned up after the run.
 
 ## Non-wrapper Utilities
 
