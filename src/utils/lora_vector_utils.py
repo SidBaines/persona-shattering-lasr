@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -285,6 +286,11 @@ class LoRAVector:
             total += B.numel() + A.numel()
         return total
 
+    @property
+    def vector_dim(self) -> int:
+        """Dimensionality of the flattened ΔW vector (sum of out*in per module)."""
+        return sum(B.shape[0] * A.shape[1] for B, A in self._factors.values())
+
     # ------------------------------------------------------------------
     # Arithmetic (exact, no SVD)
     # ------------------------------------------------------------------
@@ -370,6 +376,7 @@ class LoRAVector:
             total += (AAt * BtB.T).sum().item()
         return total
 
+    @property
     def norm(self) -> float:
         """Frobenius norm of the ∆W vector."""
         return math.sqrt(self.dot(self))
@@ -377,8 +384,8 @@ class LoRAVector:
     def cosine_similarity(self, other: LoRAVector) -> float:
         """Cosine similarity between two LoRAVectors in ∆W space."""
         d = self.dot(other)
-        n1 = self.norm()
-        n2 = other.norm()
+        n1 = self.norm
+        n2 = other.norm
         if n1 == 0.0 or n2 == 0.0:
             return 0.0
         return d / (n1 * n2)
@@ -500,12 +507,25 @@ class LoRAVector:
         ranks = [A.shape[0] for _, (_, A) in sorted(self._factors.items())]
         min_r, max_r = min(ranks), max(ranks)
         rank_str = str(min_r) if min_r == max_r else f"{min_r}-{max_r}"
-        return f"LoRAVector(modules={n}, rank={rank_str}, params={self.total_params:,})"
+        return (
+            f"LoRAVector(modules={n}, rank={rank_str}, "
+            f"vector_dim={self.vector_dim:,}, "
+            f"params={self.total_params:,})"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Standalone helpers
 # ---------------------------------------------------------------------------
+
+
+def _lincomb(coeffs: Sequence[float], vectors: list[LoRAVector]) -> LoRAVector:
+    """Weighted sum: Σ coeffs[i] * vectors[i]."""
+    result = coeffs[0] * vectors[0]
+    for i in range(1, len(vectors)):
+        if coeffs[i] != 0.0:
+            result = result + (coeffs[i] * vectors[i])
+    return result
 
 
 def gram_matrix(vectors: list[LoRAVector]) -> Tensor:
@@ -564,9 +584,16 @@ class PCAResult:
     """Result from LoRAVectorCollection.pca, bundling metadata."""
 
     space: LoRAVectorSpace
-    coords: Tensor  # (n_vectors, n_dims) — coordinates of input vectors
+    input_coords: (
+        Tensor  # (n_vectors, n_dims) — coordinates of input vectors in PCA space
+    )
     eigenvalues: Tensor  # all eigenvalues (for scree plots)
     explained_variance: Tensor  # fraction explained per retained component
+    pc_scales: Tensor  # sqrt(eigenvalue) per retained component — std dev along each PC
+    input_names: list[str]  # input vector names (row labels for input_coords)
+    pc_names: list[str]  # component names, e.g. ["PC0", "PC1", ...] (column labels)
+    n_dims: int  # number of principal components calculated
+    normalized: bool  # whether coords/space use std-dev units (True) or raw dot-product units
 
 
 class LoRAVectorCollection:
@@ -634,12 +661,33 @@ class LoRAVectorCollection:
         """Compute n x n pairwise cosine similarity matrix (reuses cached Gram)."""
         return _cosine_from_gram(self.gram_matrix())
 
-    def pca(self, n_dims: int | None = None) -> PCAResult:
+    def _centered_eigen(self) -> tuple[Tensor, Tensor]:
+        """Center the cached Gram matrix and eigendecompose (descending order).
+
+        Returns:
+            Tuple of (eigenvalues, eigenvectors) sorted by descending eigenvalue.
+        """
+        G = self.gram_matrix()
+        n = len(self._vectors)
+        ones_n = torch.ones(n, n) / n
+        G_centered = G - ones_n @ G - G @ ones_n + ones_n @ G @ ones_n
+        eigenvalues, eigenvectors = torch.linalg.eigh(G_centered)
+        return eigenvalues.flip(0), eigenvectors.flip(1)
+
+    def _mean(self) -> LoRAVector:
+        """Mean of all vectors in the collection."""
+        coeffs = [1.0 / len(self._vectors)] * len(self._vectors)
+        return _lincomb(coeffs, self._vectors)
+
+    def pca(self, n_dims: int | None = None, *, normalize: bool = True) -> PCAResult:
         """Perform kernel PCA on the collection (reuses cached Gram matrix).
 
         Args:
             n_dims: Number of principal components to retain.
                 Defaults to len(vectors).
+            normalize: If True (default), coordinates and space use
+                standard-deviation units (delta=1 in shift means 1 std dev).
+                If False, use raw dot-product units.
 
         Returns:
             PCAResult containing the space, coordinates, eigenvalues,
@@ -653,54 +701,56 @@ class LoRAVectorCollection:
         elif n_dims > n:
             raise ValueError(f"n_dims ({n_dims}) cannot exceed number of vectors ({n})")
 
-        G = self.gram_matrix()
-
-        # Center the Gram matrix (kernel PCA centering)
-        ones_n = torch.ones(n, n) / n
-        G_centered = G - ones_n @ G - G @ ones_n + ones_n @ G @ ones_n
-
-        # Eigendecompose (eigh returns ascending order)
-        eigenvalues, eigenvectors = torch.linalg.eigh(G_centered)
-        eigenvalues = eigenvalues.flip(0)
-        eigenvectors = eigenvectors.flip(1)
-
-        # Compute coordinates
+        eigenvalues, eigenvectors = self._centered_eigen()
         eigenvalues_safe = eigenvalues.clamp(min=0)
-        total_var = eigenvalues_safe.sum()
-        coords = eigenvectors[:, :n_dims] * eigenvalues_safe[:n_dims].sqrt()
 
         # Explained variance
-        if total_var > 0:
-            explained = eigenvalues_safe[:n_dims] / total_var
-        else:
-            explained = torch.zeros(n_dims)
+        total_var = eigenvalues_safe.sum()
+        explained = (
+            eigenvalues_safe[:n_dims] / total_var
+            if total_var > 0
+            else torch.zeros(n_dims)
+        )
 
-        # Construct orthonormal basis vectors.
-        # Each PC direction is a linear combination of the input vectors:
-        #   basis_k = Σᵢ eigenvectors[i, k] * vectors[i]
-        # Then normalize to unit length.
+        # Orthonormal basis: each PC is a normalized linear combination of input vectors
         basis: list[LoRAVector] = []
         for k in range(n_dims):
             if eigenvalues_safe[k] <= 0:
                 break
-
-            coeffs = eigenvectors[:, k]
-            basis_vec = coeffs[0].item() * self._vectors[0]
-            for i in range(1, n):
-                basis_vec = basis_vec + (coeffs[i].item() * self._vectors[i])
-
-            vec_norm = basis_vec.norm()
+            basis_vec = _lincomb(eigenvectors[:, k].tolist(), self._vectors)
+            vec_norm = basis_vec.norm
             if vec_norm > 0:
                 basis_vec = (1.0 / vec_norm) * basis_vec
-
             basis.append(basis_vec)
 
-        space = LoRAVectorSpace(basis)
+        n_actual = len(basis)
+        explained = explained[:n_actual]
+        pc_scales = eigenvalues_safe[:n_actual].sqrt()
+        pc_names = [f"PC{k}" for k in range(n_actual)]
+
+        # Raw coords: (v_i - mean) · basis_k = eigvec[i,k] * sqrt(λ_k)
+        raw_coords = eigenvectors[:, :n_actual] * pc_scales
+
+        if normalize:
+            # Normalize so each PC has unit variance.
+            # Variance of raw_coords[:, k] = λ_k / n, so std = sqrt(λ_k / n).
+            std_scales = pc_scales / math.sqrt(n)
+            input_coords = raw_coords / std_scales
+            space = LoRAVectorSpace(basis, center=self._mean(), scale=std_scales)
+        else:
+            input_coords = raw_coords
+            space = LoRAVectorSpace(basis, center=self._mean())
+
         return PCAResult(
             space=space,
-            coords=coords,
+            input_coords=input_coords,
             eigenvalues=eigenvalues,
             explained_variance=explained,
+            pc_scales=pc_scales,
+            input_names=list(self._names),
+            pc_names=pc_names,
+            n_dims=len(pc_names),
+            normalized=normalize,
         )
 
     # ------------------------------------------------------------------
@@ -722,12 +772,27 @@ class LoRAVectorSpace:
     Provides projection, reconstruction, and shifting operations.
     Typically created via :meth:`LoRAVectorCollection.pca`.
 
+    An optional affine transformation (center + scale) maps between the
+    full LoRA space and the coordinate space:
+    - ``center``: origin of the subspace (e.g. mean of training vectors for PCA).
+    - ``scale``: per-dimension scaling (e.g. sqrt(eigenvalues) for PCA).
+
     Args:
         basis: Either a dict mapping names to basis vectors, or a list
             (in which case names default to "0", "1", "2", ...).
+        center: Optional origin vector. When set, ``project`` subtracts it
+            before dotting, and ``reconstruct`` adds it back.
+        scale: Optional per-dimension scale tensor of shape ``(n_dims,)``.
+            When set, ``project`` divides by it and ``reconstruct`` multiplies.
     """
 
-    def __init__(self, basis: dict[str, LoRAVector] | list[LoRAVector]) -> None:
+    def __init__(
+        self,
+        basis: dict[str, LoRAVector] | list[LoRAVector],
+        *,
+        center: LoRAVector | None = None,
+        scale: Tensor | None = None,
+    ) -> None:
         if isinstance(basis, dict):
             if not basis:
                 raise ValueError("basis must not be empty")
@@ -738,6 +803,8 @@ class LoRAVectorSpace:
                 raise ValueError("basis must not be empty")
             self._names = [str(i) for i in range(len(basis))]
             self._basis = list(basis)
+        self._center = center
+        self._scale = scale
 
     # ------------------------------------------------------------------
     # Properties
@@ -765,13 +832,19 @@ class LoRAVectorSpace:
     def project(self, vec: LoRAVector) -> Tensor:
         """Project a LoRAVector onto this basis.
 
+        Subtracts ``center`` (if set) before dotting, then divides by
+        ``scale`` (if set).
+
         Args:
             vec: The vector to project.
 
         Returns:
             Coordinates tensor of shape (n_dims,).
         """
-        coords = torch.tensor([vec.dot(b) for b in self._basis])
+        v = vec if self._center is None else (vec + (-1.0 * self._center))
+        coords = torch.tensor([v.dot(b) for b in self._basis])
+        if self._scale is not None:
+            coords = coords / self._scale
         return coords
 
     def project_all(self, vectors: list[LoRAVector]) -> Tensor:
@@ -788,6 +861,9 @@ class LoRAVectorSpace:
     def reconstruct(self, coords: Tensor) -> LoRAVector:
         """Reconstruct a LoRAVector from coordinates in this basis.
 
+        Multiplies by ``scale`` (if set) before summing, then adds
+        ``center`` (if set).
+
         Args:
             coords: Coordinates tensor of shape (n_dims,).
 
@@ -799,21 +875,24 @@ class LoRAVectorSpace:
                 f"Expected coords of shape ({self.n_dims},), got {coords.shape}"
             )
 
-        result = coords[0].item() * self._basis[0]
+        c = coords * self._scale if self._scale is not None else coords
+        result = c[0].item() * self._basis[0]
         for i in range(1, self.n_dims):
-            result = result + (coords[i].item() * self._basis[i])
+            result = result + (c[i].item() * self._basis[i])
+        if self._center is not None:
+            result = self._center + result
         return result
 
     def shift(self, vec: LoRAVector, deltas: dict[int, float]) -> LoRAVector:
         """Shift a vector along specific basis dimensions.
 
-        Projects the vector, adds deltas to specified coordinates, and
-        reconstructs.
+        Adds ``delta * scale * basis_k`` for each specified dimension.
+        This is lossless — components orthogonal to the basis are preserved.
 
         Args:
             vec: The vector to shift.
-            deltas: Mapping of dimension index to shift amount.
-                E.g. {0: +0.5, 4: -0.3} shifts along PC1 and PC5.
+            deltas: Mapping of dimension index to shift amount (in coordinate
+                space). E.g. ``{0: +0.5, 4: -0.3}`` shifts along PC1 and PC5.
 
         Returns:
             The shifted LoRAVector.
@@ -822,9 +901,8 @@ class LoRAVectorSpace:
             if dim < 0 or dim >= self.n_dims:
                 raise ValueError(f"Dimension {dim} out of range [0, {self.n_dims})")
 
-        coords = self.project(vec)
+        result = vec
         for dim, delta in deltas.items():
-            coords[dim] += delta
-        return self.reconstruct(coords)
-        return self.reconstruct(coords)
-        return self.reconstruct(coords)
+            s = self._scale[dim].item() if self._scale is not None else 1.0
+            result = result + ((delta * s) * self._basis[dim])
+        return result

@@ -7,6 +7,7 @@ from src.utils.lora_vector_utils import (
     LoRAVector,
     LoRAVectorCollection,
     LoRAVectorSpace,
+    cosine_similarity_matrix,
     gram_matrix,
 )
 
@@ -140,6 +141,10 @@ class TestConstruction:
         expected = 16 * (8 * 16 + 8 * 16)  # 16 modules, r=8, in=out=16
         assert vec_a.total_params == expected
 
+    def test_vector_dim(self, vec_a):
+        expected = 16 * (16 * 16)  # 16 modules, out=16, in=16
+        assert vec_a.vector_dim == expected
+
 
 # ---------------------------------------------------------------------------
 # Arithmetic
@@ -190,6 +195,12 @@ class TestArithmetic:
         with pytest.raises(ValueError, match="different module names"):
             vec_a + vec_different
 
+    def test_sub_add_round_trip(self, vec_a, vec_b):
+        """(a - b) + b should equal a."""
+        result = (vec_a - vec_b) + vec_b
+        sim = vec_a.cosine_similarity(result)
+        assert sim == pytest.approx(1.0, abs=1e-5)
+
 
 # ---------------------------------------------------------------------------
 # Metrics
@@ -214,7 +225,7 @@ class TestMetrics:
     def test_norm(self, vec_a):
         mat_a = _materialize_delta_w(vec_a)
         expected = mat_a.norm().item()
-        actual = vec_a.norm()
+        actual = vec_a.norm
         assert actual == pytest.approx(expected, rel=1e-4)
 
     def test_cosine_similarity_self(self, vec_a):
@@ -236,6 +247,16 @@ class TestMetrics:
     def test_dot_commutative(self, vec_a, vec_b):
         assert vec_a.dot(vec_b) == pytest.approx(vec_b.dot(vec_a), rel=1e-5)
 
+    def test_cosine_similarity_with_zero(self, vec_a):
+        """Cosine similarity with zero vector should be 0."""
+        zero = vec_a.zero_like()
+        assert vec_a.cosine_similarity(zero) == 0.0
+        assert zero.cosine_similarity(vec_a) == 0.0
+
+    def test_norm_of_zero(self, vec_a):
+        """Zero vector should have norm 0."""
+        assert vec_a.zero_like().norm == 0.0
+
 
 # ---------------------------------------------------------------------------
 # Rank management
@@ -250,13 +271,20 @@ class TestRankManagement:
         sim = vec_a.cosine_similarity(reduced)
         assert sim > 0.5
 
-    def test_rank_reduce_preserves_when_already_given_rank(self, vec_a):
-        reduced = vec_a.rank_reduce(8)  # higher than current rank 8
-        assert reduced.max_rank == 8  # unchanged
+    def test_rank_reduce_same_rank_exact(self, vec_a):
+        """rank_reduce at the same rank should give cosine sim ≈ 1.0."""
+        reduced = vec_a.rank_reduce(8)
+        assert reduced.max_rank == 8
+        sim = vec_a.cosine_similarity(reduced)
+        assert sim == pytest.approx(1.0, abs=1e-3)
 
     def test_rank_reduce_invalid(self, vec_a):
         with pytest.raises(ValueError, match="new_rank must be >= 1"):
             vec_a.rank_reduce(0)
+
+    def test_rank_reduce_higher_than_current_raises(self, vec_a):
+        with pytest.raises(ValueError, match="new_rank must be <="):
+            vec_a.rank_reduce(16)  # current rank is 8
 
 
 # ---------------------------------------------------------------------------
@@ -431,9 +459,25 @@ class TestLoRAVectorCollection:
         coll = LoRAVectorCollection(vectors)
         result = coll.pca(n_dims=3)
         assert isinstance(result.space, LoRAVectorSpace)
-        assert result.coords.shape == (5, 3)
+        assert result.input_coords.shape == (5, 3)
         assert len(result.eigenvalues) == 5
         assert len(result.explained_variance) == 3
+
+    def test_pca_default_n_dims(self, vectors):
+        """Default n_dims should equal number of vectors."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca()
+        # Centering reduces rank by 1, so n_actual = n - 1
+        assert result.input_coords.shape[0] == 5
+        assert result.input_coords.shape[1] <= 5
+
+    def test_pca_n_dims_one(self, vectors):
+        """n_dims=1 should work and return a single component."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=1)
+        assert result.input_coords.shape == (5, 1)
+        assert result.n_dims == 1
+        assert len(result.pc_names) == 1
 
     def test_pca_too_many_dims_raises(self, vectors):
         coll = LoRAVectorCollection(vectors)
@@ -478,7 +522,7 @@ class TestLoRAVectorSpace:
         result = coll.pca(n_dims=3)
         space = result.space
         for i in range(space.n_dims):
-            assert space.basis[i].norm() == pytest.approx(1.0, abs=1e-3)
+            assert space.basis[i].norm == pytest.approx(1.0, abs=1e-3)
             for j in range(i + 1, space.n_dims):
                 dot = space.basis[i].dot(space.basis[j])
                 assert dot == pytest.approx(0.0, abs=1e-2)
@@ -496,8 +540,7 @@ class TestLoRAVectorSpace:
             assert eigs[i] >= eigs[i + 1] - 1e-6
 
     def test_project_reconstruct_round_trip(self, vectors):
-        """project → reconstruct should approximately recover the vector
-        when using enough dimensions."""
+        """project → reconstruct with n_dims < n should be approximate."""
         coll = LoRAVectorCollection(vectors)
         result = coll.pca(n_dims=4)
         space = result.space
@@ -506,10 +549,33 @@ class TestLoRAVectorSpace:
         reconstructed = space.reconstruct(coords)
 
         sim = vectors[0].cosine_similarity(reconstructed)
-        assert sim > 0.5
+        assert sim > 0.9
+
+    def test_reconstruct_project_round_trip(self, vectors):
+        """reconstruct → project should recover the original coordinates."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=3)
+        space = result.space
+
+        coords = torch.tensor([1.5, -0.3, 0.7])
+        reconstructed = space.reconstruct(coords)
+        recovered = space.project(reconstructed)
+        torch.testing.assert_close(recovered, coords, atol=1e-3, rtol=1e-3)
+
+    def test_full_rank_pca_round_trip(self, vectors):
+        """With n_dims = n_vectors, project → reconstruct should be ≈ exact."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=5)
+        space = result.space
+
+        for v in vectors:
+            coords = space.project(v)
+            reconstructed = space.reconstruct(coords)
+            sim = v.cosine_similarity(reconstructed)
+            assert sim == pytest.approx(1.0, abs=1e-2)
 
     def test_shift_changes_coordinate(self, vectors):
-        """Shifting along dim 0 should change that coordinate by the delta."""
+        """Shifting along dim 0 should change that coordinate by exactly the delta."""
         coll = LoRAVectorCollection(vectors)
         result = coll.pca(n_dims=3)
         space = result.space
@@ -519,7 +585,24 @@ class TestLoRAVectorSpace:
         shifted_coords = space.project(shifted)
 
         delta_0 = shifted_coords[0] - original_coords[0]
-        assert delta_0.item() == pytest.approx(1.0, abs=0.1)
+        assert delta_0.item() == pytest.approx(1.0, abs=1e-3)
+
+        # Other coordinates should be unchanged
+        for i in range(1, 3):
+            delta_i = shifted_coords[i] - original_coords[i]
+            assert delta_i.item() == pytest.approx(0.0, abs=1e-3)
+
+    def test_shift_preserves_out_of_basis(self, vectors):
+        """Shift forward then back should recover the original (lossless)."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=3)
+        space = result.space
+
+        shifted = space.shift(vectors[0], {0: 5.0, 1: -3.0})
+        recovered = space.shift(shifted, {0: -5.0, 1: 3.0})
+
+        sim = vectors[0].cosine_similarity(recovered)
+        assert sim == pytest.approx(1.0, abs=1e-3)
 
     def test_shift_invalid_dim_raises(self, vectors):
         coll = LoRAVectorCollection(vectors)
@@ -541,6 +624,61 @@ class TestLoRAVectorSpace:
         result = coll.pca(n_dims=3)
         with pytest.raises(ValueError, match="Expected coords"):
             result.space.reconstruct(torch.zeros(5))
+
+    def test_normalize_true_coords_match_project(self, vectors):
+        """With normalize=True, input_coords[i] should match space.project(v_i)."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=3, normalize=True)
+        assert result.normalized is True
+        for i, v in enumerate(vectors):
+            projected = result.space.project(v)
+            torch.testing.assert_close(result.input_coords[i], projected, atol=1e-3, rtol=1e-3)
+
+    def test_normalize_false_coords_match_project(self, vectors):
+        """With normalize=False, input_coords[i] should match space.project(v_i)."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=3, normalize=False)
+        assert result.normalized is False
+        for i, v in enumerate(vectors):
+            projected = result.space.project(v)
+            torch.testing.assert_close(result.input_coords[i], projected, atol=1e-3, rtol=1e-3)
+
+    def test_normalize_true_unit_variance(self, vectors):
+        """With normalize=True, each PC column should have approximately unit variance."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(normalize=True)
+        for k in range(result.n_dims):
+            col = result.input_coords[:, k]
+            variance = col.var(correction=0).item()
+            assert variance == pytest.approx(1.0, abs=0.1), (
+                f"PC{k} variance = {variance:.4f}, expected ~1.0"
+            )
+
+    def test_pca_result_metadata(self, vectors):
+        """PCAResult should have correct metadata fields."""
+        coll = LoRAVectorCollection({"alpha": v for v in vectors[:1]} | {f"v{i}": v for i, v in enumerate(vectors[1:])})
+        result = coll.pca(n_dims=3)
+        assert result.input_names == coll.names
+        assert result.pc_names == ["PC0", "PC1", "PC2"]
+        assert result.n_dims == 3
+        assert len(result.pc_scales) == 3
+        assert (result.pc_scales > 0).all()
+
+    def test_shift_works_with_normalize_true(self, vectors):
+        """Shift delta=1 should change that coordinate by 1 in normalized space."""
+        coll = LoRAVectorCollection(vectors)
+        result = coll.pca(n_dims=3, normalize=True)
+        space = result.space
+
+        original_coords = space.project(vectors[0])
+        shifted = space.shift(vectors[0], {0: 1.0})
+        shifted_coords = space.project(shifted)
+
+        delta_0 = shifted_coords[0] - original_coords[0]
+        assert delta_0.item() == pytest.approx(1.0, abs=1e-3)
+        for i in range(1, 3):
+            delta_i = shifted_coords[i] - original_coords[i]
+            assert delta_i.item() == pytest.approx(0.0, abs=1e-3)
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +712,7 @@ class TestPCAMatchesMaterialized:
             vectors.append(LoRAVector.from_peft(model, "default"))
 
         coll = LoRAVectorCollection(vectors)
-        result = coll.pca(n_dims=3)
+        result = coll.pca(n_dims=3, normalize=False)
 
         # Do the same PCA manually on materialized vectors
         mats = [_materialize_delta_w(v) for v in vectors]
@@ -592,12 +730,106 @@ class TestPCAMatchesMaterialized:
         eigs_safe = eigenvalues.clamp(min=0)
         coords_manual = eigenvectors[:, :3] * eigs_safe[:3].sqrt()
 
+        # With normalize=False, coords should match raw kernel PCA coords
         for k in range(3):
-            col_result = result.coords[:, k]
+            col_result = result.input_coords[:, k]
             col_manual = coords_manual[:, k]
+            # Eigenvectors can have flipped sign; check cosine sim ≈ ±1
             sim = torch.dot(col_result, col_manual) / (
                 col_result.norm() * col_manual.norm() + 1e-10
             )
             assert abs(sim.item()) > 0.99, (
                 f"PC{k} coordinates don't match (cosine sim = {sim.item():.4f})"
             )
+            # Values should match (up to sign flip)
+            sign = 1.0 if sim > 0 else -1.0
+            torch.testing.assert_close(
+                col_result, sign * col_manual, atol=1e-3, rtol=1e-3
+            )
+
+
+# ---------------------------------------------------------------------------
+# zero_like
+# ---------------------------------------------------------------------------
+
+
+class TestZeroLike:
+    def test_zero_like_structure(self, vec_a):
+        """zero_like should have the same module names and compatible shapes."""
+        zero = vec_a.zero_like()
+        assert zero.module_names == vec_a.module_names
+        for name in zero.module_names:
+            B_z, A_z = zero.factors[name]
+            B_a, A_a = vec_a.factors[name]
+            # Same out/in dimensions, rank can differ (rank-1 suffices for zeros)
+            assert B_z.shape[0] == B_a.shape[0]
+            assert A_z.shape[1] == A_a.shape[1]
+
+    def test_zero_like_materializes_to_zeros(self, vec_a):
+        """zero_like should materialize to all zeros."""
+        zero = vec_a.zero_like()
+        mat = _materialize_delta_w(zero)
+        assert mat.abs().max().item() == pytest.approx(0.0, abs=1e-10)
+
+    def test_add_zero_like_identity(self, vec_a):
+        """vec + vec.zero_like() should equal vec."""
+        result = vec_a + vec_a.zero_like()
+        sim = vec_a.cosine_similarity(result)
+        assert sim == pytest.approx(1.0, abs=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# cosine_similarity_matrix standalone
+# ---------------------------------------------------------------------------
+
+
+class TestCosineSimilarityMatrix:
+    def test_matches_pairwise(self):
+        """Standalone cosine_similarity_matrix should match pairwise calls."""
+        vectors = []
+        for seed in [42, 99, 7]:
+            model = _make_peft_model(rank=4, seed=seed)
+            vectors.append(LoRAVector.from_peft(model, "default"))
+
+        C = cosine_similarity_matrix(vectors)
+        for i in range(len(vectors)):
+            for j in range(len(vectors)):
+                expected = vectors[i].cosine_similarity(vectors[j])
+                assert C[i, j].item() == pytest.approx(expected, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# LoRAVectorSpace with center/scale
+# ---------------------------------------------------------------------------
+
+
+class TestLoRAVectorSpaceCenterScale:
+    def test_project_reconstruct_with_center(self, vec_a, vec_b):
+        """Space with center should subtract/add it during project/reconstruct."""
+        space = LoRAVectorSpace([vec_a], center=vec_b)
+
+        coords = space.project(vec_a)
+        reconstructed = space.reconstruct(coords)
+
+        sim = vec_a.cosine_similarity(reconstructed)
+        assert sim == pytest.approx(1.0, abs=1e-2)
+
+    def test_no_center_no_scale_unchanged(self, vec_a, vec_b):
+        """Without center/scale, behavior is plain dot-product projection."""
+        space = LoRAVectorSpace([vec_a])
+        coords = space.project(vec_a)
+        # Projection of vec onto itself (unit basis) = norm²
+        assert coords[0].item() == pytest.approx(vec_a.dot(vec_a), rel=1e-4)
+
+    def test_scale_without_center(self, vec_a, vec_b):
+        """Scale without center should divide/multiply coordinates."""
+        scale = torch.tensor([2.0])
+        space = LoRAVectorSpace([vec_a], scale=scale)
+        coords = space.project(vec_a)
+        # Without scale: dot(a, a) = norm². With scale: norm² / 2.0
+        assert coords[0].item() == pytest.approx(vec_a.dot(vec_a) / 2.0, rel=1e-4)
+
+        # reconstruct should invert project
+        reconstructed = space.reconstruct(coords)
+        sim = vec_a.cosine_similarity(reconstructed)
+        assert sim == pytest.approx(1.0, abs=1e-3)
