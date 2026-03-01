@@ -172,7 +172,8 @@ def _normalise_scale_col(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure df has a numeric 'scale' column. Fills from name parsing if needed."""
     df = df.copy()
     if "scale" in df.columns and df["scale"].notna().any():
-        df["scale"] = df["scale"].apply(lambda s: 0.0 if s is None else s)
+        # pandas stores None as NaN in float columns, so check for both
+        df["scale"] = df["scale"].apply(lambda s: 0.0 if (s is None or (isinstance(s, float) and np.isnan(s))) else s)
     else:
         df["scale"] = [_parse_scale(m) for m in df["model"]]
     return df
@@ -450,6 +451,7 @@ def plot_trait_sweep(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Trait score (0–1)", fontsize=11)
     ax.set_ylim(0, 1)
+    ax.set_xticks(scales)
     ax.grid(True, alpha=0.25)
 
     title = "TRAIT sweep: personality scores vs. LoRA scale"
@@ -512,6 +514,7 @@ def plot_bfi_sweep(
     ax.axhline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.6,
                label="Baseline (s=0)", zorder=1)
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.3, zorder=1)
+    ax.set_xticks(scales)
 
     if all_delta_means:
         max_ci   = max(all_delta_cis) if all_delta_cis else 0.0
@@ -583,6 +586,7 @@ def plot_mmlu_sweep(
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("MMLU accuracy", fontsize=11)
+    ax.set_xticks(scales)
 
     y_min = min(float(np.nanmin(means - cis)), baseline_acc - allowed_drop) - 0.02
     y_max = max(float(np.nanmax(means + cis)), baseline_acc) + 0.04
@@ -646,6 +650,7 @@ def plot_generic_sweep(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Score", fontsize=11)
     ax.set_ylim(0, 1)
+    ax.set_xticks(scales)
     ax.grid(True, alpha=0.25)
 
     title = f"{eval_name} sweep"
