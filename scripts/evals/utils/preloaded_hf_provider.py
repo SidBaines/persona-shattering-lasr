@@ -28,14 +28,13 @@ from __future__ import annotations
 
 import copy
 import functools
-import json
-import time
 from logging import getLogger
 from typing import Any
 
-import torch
 from transformers import PreTrainedTokenizerBase
 from typing_extensions import override
+
+from inspect_ai.model._providers.hf import GenerateInput, batched_generate
 
 from inspect_ai._util.content import (
     ContentAudio,
@@ -163,39 +162,38 @@ def register_preloaded_hf_provider() -> None:
             )
 
             device = next(self.model.parameters()).device
-            t0 = time.monotonic()
 
-            tokenized = tokenizer_fn([chat])
-            input_ids = tokenized["input_ids"].to(device)
-            attention_mask = tokenized["attention_mask"].to(device)
-
-            with torch.inference_mode():
-                outputs = generator(input_ids=input_ids, attention_mask=attention_mask)
-
-            generated_ids = outputs.sequences[:, input_ids.size(1):]
-            decoded = decoder(sequences=generated_ids)
-            elapsed = time.monotonic() - t0
-
-            input_tokens = int(input_ids.size(1))
-            output_tokens = int(generated_ids.size(1))
+            # Use the built-in HF provider's batched_generate infrastructure.
+            # It collects concurrent generate() calls from Inspect's async pool
+            # and dispatches them as a single model.generate(batch) GPU call.
+            response = await batched_generate(
+                GenerateInput(
+                    input=chat,
+                    device=device,
+                    tokenizer=tokenizer_fn,
+                    generator=generator,
+                    decoder=decoder,
+                    batch_size=config.max_connections or self.max_connections(),
+                )
+            )
 
             return ModelOutput(
                 model=self.model_name,
                 choices=[
                     ChatCompletionChoice(
                         message=ChatMessageAssistant(
-                            content=decoded[0],
+                            content=response.output,
                             model=self.model_name,
                             source="generate",
                         )
                     )
                 ],
                 usage=ModelUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                    total_tokens=response.total_tokens,
                 ),
-                time=elapsed,
+                time=response.time,
             )
 
     _registered = True
