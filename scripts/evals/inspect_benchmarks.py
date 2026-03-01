@@ -107,8 +107,15 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
 
     if benchmark == "mmlu":
         from inspect_evals.mmlu.mmlu import mmlu_0_shot
+        from inspect_evals.utils import filter_duplicate_ids
 
-        return mmlu_0_shot(**kwargs)
+        task = mmlu_0_shot(**kwargs)
+        task.dataset = filter_duplicate_ids(task.dataset)
+        # The task hardcodes temperature=0.0, which the HF local backend rejects
+        # (it requires do_sample=False for greedy decoding instead).  Clear it so
+        # Inspect does not forward temperature to the backend.
+        task.config.temperature = None
+        return task
 
     if benchmark == "truthfulqa":
         from inspect_evals.truthfulqa import truthfulqa
