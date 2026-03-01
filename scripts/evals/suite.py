@@ -189,6 +189,7 @@ def _load_local_model_for_sweep(
     base_model_ref: str,
     adapter_ref: str,
     dtype: torch.dtype,
+    subfolder: str | None = None,
 ) -> tuple[PeftModel, Any]:
     """Load base model + single adapter once for a scale sweep."""
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -196,8 +197,13 @@ def _load_local_model_for_sweep(
         torch_dtype=dtype,
         device_map="auto",
     )
-    peft_model = PeftModel.from_pretrained(base_model, adapter_ref)
-    tokenizer = AutoTokenizer.from_pretrained(adapter_ref)
+    peft_kwargs: dict[str, Any] = {}
+    if subfolder:
+        peft_kwargs["subfolder"] = subfolder
+    peft_model = PeftModel.from_pretrained(base_model, adapter_ref, **peft_kwargs)
+    # Tokenizer lives in the adapter subfolder if one is specified, otherwise the adapter root.
+    tokenizer_ref = f"{adapter_ref}/{subfolder}" if subfolder else adapter_ref
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
     return peft_model, tokenizer
 
 
@@ -476,10 +482,13 @@ def run_eval_suite(
         try:
             assert config.base_model is not None
             first_spec = models[1] if len(models) > 1 else models[0]
+            from scripts.utils.lora_composition import split_adapter_reference
+            _raw_adapter, _adapter_subfolder = split_adapter_reference(config.adapter)
             base_ref = resolve_model_reference(config.base_model, kind="base model")
-            adapter_ref = resolve_model_reference(config.adapter, kind="adapter")
+            adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
             sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
-                base_ref, adapter_ref, _resolve_dtype(first_spec)
+                base_ref, adapter_ref, _resolve_dtype(first_spec),
+                subfolder=_adapter_subfolder,
             )
             print(f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
         except Exception as exc:
