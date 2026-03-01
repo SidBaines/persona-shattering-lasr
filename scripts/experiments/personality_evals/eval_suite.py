@@ -60,6 +60,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
+    batch_size=8,
     output_root=Path("scratch/evals/personality"),
     run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}",
     skip_completed=True,

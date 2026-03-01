@@ -657,14 +657,16 @@ def run_eval_suite(
             # Always restore LoRaScaling so weights are clean for the next scale point.
             if prepared.scaler is not None:
                 prepared.scaler.restore()
-            # Evict Inspect's reference to this model object.
-            _cleanup_runtime_model_state()
-            # For per-spec loaded models (non-sweep), move off GPU now.
-            if sweep_peft_model is None and prepared.peft_model is not None:
-                try:
-                    prepared.peft_model.cpu()
-                except Exception:
-                    pass
+            # Only evict Inspect's model cache for per-spec models (not sweep).
+            # In sweep mode the same provider instance is reused across scale points;
+            # clearing the cache orphans batched_generate's background thread and hangs.
+            if sweep_peft_model is None:
+                _cleanup_runtime_model_state()
+                if prepared.peft_model is not None:
+                    try:
+                        prepared.peft_model.cpu()
+                    except Exception:
+                        pass
 
     # Release the sweep model after all scale points are done.
     if sweep_peft_model is not None:
