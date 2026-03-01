@@ -31,7 +31,7 @@ from src.utils.model_layer_info import LayerIdxExtractor, extract_layer_idx
 from src.utils.peft_manipulations import _iter_all_lora_modules, _matches_target_modules
 
 
-class LoRAVector:
+class LoRaVector:
     """A point in LoRA weight space, stored in factored (B, A) form.
 
     Each instance holds a dict mapping module names to (B, A) factor pairs,
@@ -57,7 +57,7 @@ class LoRAVector:
         target_modules: list[str] | dict[int, list[str]] | None = None,
         layers: list[int] | None = None,
         layer_idx_extractor: LayerIdxExtractor | None = None,
-    ) -> LoRAVector:
+    ) -> LoRaVector:
         """Extract a LoRAVector from a PeftModel's adapter.
 
         Args:
@@ -125,7 +125,7 @@ class LoRAVector:
         target_modules: list[str] | None = None,
         layers: list[int] | None = None,
         layer_idx_extractor: LayerIdxExtractor | None = None,
-    ) -> LoRAVector:
+    ) -> LoRaVector:
         """Load a LoRAVector from a saved adapter directory.
 
         Reads adapter_config.json for config and adapter_model.safetensors
@@ -212,7 +212,7 @@ class LoRAVector:
         layers: list[int] | None = None,
         layer_idx_extractor: LayerIdxExtractor | None = None,
         revision: str | None = None,
-    ) -> LoRAVector:
+    ) -> LoRaVector:
         """Load a LoRAVector from a HuggingFace Hub repository.
 
         Downloads the adapter files and delegates to :meth:`from_file`.
@@ -245,7 +245,7 @@ class LoRAVector:
             layer_idx_extractor=layer_idx_extractor,
         )
 
-    def zero_like(self) -> LoRAVector:
+    def zero_like(self) -> LoRaVector:
         """Return a zero vector with the same module structure.
 
         Each module gets zero-valued (B, A) factors with rank 1 and the
@@ -257,7 +257,7 @@ class LoRAVector:
                 torch.zeros(B.shape[0], 1, dtype=B.dtype, device=B.device),
                 torch.zeros(1, A.shape[1], dtype=A.dtype, device=A.device),
             )
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
     # ------------------------------------------------------------------
     # Properties
@@ -295,7 +295,7 @@ class LoRAVector:
     # Arithmetic (exact, no SVD)
     # ------------------------------------------------------------------
 
-    def _validate_compatible(self, other: LoRAVector) -> None:
+    def _validate_compatible(self, other: LoRaVector) -> None:
         """Check that two vectors have the same modules and compatible shapes."""
         if self._factors.keys() != other._factors.keys():
             missing = self._factors.keys() ^ other._factors.keys()
@@ -313,7 +313,7 @@ class LoRAVector:
                     f"({B1.shape[0]}, {A1.shape[1]}) vs ({B2.shape[0]}, {A2.shape[1]})"
                 )
 
-    def __add__(self, other: LoRAVector) -> LoRAVector:
+    def __add__(self, other: LoRaVector) -> LoRaVector:
         self._validate_compatible(other)
         factors = {}
         for name in self._factors:
@@ -323,9 +323,9 @@ class LoRAVector:
                 torch.cat([B1, B2], dim=1),
                 torch.cat([A1, A2], dim=0),
             )
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
-    def __sub__(self, other: LoRAVector) -> LoRAVector:
+    def __sub__(self, other: LoRaVector) -> LoRaVector:
         self._validate_compatible(other)
         factors = {}
         for name in self._factors:
@@ -335,30 +335,30 @@ class LoRAVector:
                 torch.cat([B1, B2], dim=1),
                 torch.cat([A1, -A2], dim=0),
             )
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
-    def __neg__(self) -> LoRAVector:
+    def __neg__(self) -> LoRaVector:
         factors = {}
         for name, (B, A) in self._factors.items():
             factors[name] = (-B, A)
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
-    def __mul__(self, scalar: float) -> LoRAVector:
+    def __mul__(self, scalar: float) -> LoRaVector:
         if not isinstance(scalar, (int, float)):
             return NotImplemented
         factors = {}
         for name, (B, A) in self._factors.items():
             factors[name] = (scalar * B, A)
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
-    def __rmul__(self, scalar: float) -> LoRAVector:
+    def __rmul__(self, scalar: float) -> LoRaVector:
         return self.__mul__(scalar)
 
     # ------------------------------------------------------------------
     # Metrics (never materialize full ∆W)
     # ------------------------------------------------------------------
 
-    def dot(self, other: LoRAVector) -> float:
+    def dot(self, other: LoRaVector) -> float:
         """Compute the dot product ⟨self, other⟩ in ∆W space.
 
         Uses the identity: ⟨B₁A₁, B₂A₂⟩ = Σᵢ tr(A₂ᵢ A₁ᵢᵀ · B₁ᵢᵀ B₂ᵢ).
@@ -381,7 +381,7 @@ class LoRAVector:
         """Frobenius norm of the ∆W vector."""
         return math.sqrt(self.dot(self))
 
-    def cosine_similarity(self, other: LoRAVector) -> float:
+    def cosine_similarity(self, other: LoRaVector) -> float:
         """Cosine similarity between two LoRAVectors in ∆W space."""
         d = self.dot(other)
         n1 = self.norm
@@ -394,7 +394,7 @@ class LoRAVector:
     # Rank management
     # ------------------------------------------------------------------
 
-    def rank_reduce(self, new_rank: int) -> LoRAVector:
+    def rank_reduce(self, new_rank: int) -> LoRaVector:
         """Return a new LoRAVector with each module's rank reduced via SVD.
 
         Uses the efficient QR-based rank reduction from src.utils.linalg
@@ -419,7 +419,7 @@ class LoRAVector:
             else:
                 new_A, new_B = reduce_lora_rank_efficient(A, B, new_rank=new_rank)
                 factors[name] = (new_B, new_A)
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
     # ------------------------------------------------------------------
     # Model I/O
@@ -480,7 +480,7 @@ class LoRAVector:
         *,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> LoRAVector:
+    ) -> LoRaVector:
         """Return a new LoRAVector with tensors moved/cast.
 
         Args:
@@ -496,7 +496,7 @@ class LoRAVector:
                 B.to(device=device, dtype=dtype),
                 A.to(device=device, dtype=dtype),
             )
-        return LoRAVector(factors)
+        return LoRaVector(factors)
 
     # ------------------------------------------------------------------
     # Repr
@@ -519,7 +519,7 @@ class LoRAVector:
 # ---------------------------------------------------------------------------
 
 
-def _lincomb(coeffs: Sequence[float], vectors: list[LoRAVector]) -> LoRAVector:
+def _lincomb(coeffs: Sequence[float], vectors: list[LoRaVector]) -> LoRaVector:
     """Weighted sum: Σ coeffs[i] * vectors[i]."""
     result = coeffs[0] * vectors[0]
     for i in range(1, len(vectors)):
@@ -528,7 +528,7 @@ def _lincomb(coeffs: Sequence[float], vectors: list[LoRAVector]) -> LoRAVector:
     return result
 
 
-def gram_matrix(vectors: list[LoRAVector]) -> Tensor:
+def gram_matrix(vectors: list[LoRaVector]) -> Tensor:
     """Compute the n x n Gram matrix of pairwise dot products.
 
     Args:
@@ -549,7 +549,7 @@ def gram_matrix(vectors: list[LoRAVector]) -> Tensor:
 
 
 def cosine_similarity_matrix(
-    vectors: list[LoRAVector],
+    vectors: list[LoRaVector],
     *,
     _gram: Tensor | None = None,
 ) -> Tensor:
@@ -583,7 +583,7 @@ def _cosine_from_gram(G: Tensor) -> Tensor:
 class PCAResult:
     """Result from LoRAVectorCollection.pca, bundling metadata."""
 
-    space: LoRAVectorSpace
+    space: LoRaVectorSpace
     input_coords: (
         Tensor  # (n_vectors, n_dims) — coordinates of input vectors in PCA space
     )
@@ -593,10 +593,12 @@ class PCAResult:
     input_names: list[str]  # input vector names (row labels for input_coords)
     pc_names: list[str]  # component names, e.g. ["PC0", "PC1", ...] (column labels)
     n_dims: int  # number of principal components calculated
-    normalized: bool  # whether coords/space use std-dev units (True) or raw dot-product units
+    normalized: (
+        bool  # whether coords/space use std-dev units (True) or raw dot-product units
+    )
 
 
-class LoRAVectorCollection:
+class LoRaVectorCollection:
     """A named set of LoRAVectors with cached bulk analysis operations.
 
     Lazily computes the Gram matrix and reuses it for cosine similarity
@@ -607,7 +609,7 @@ class LoRAVectorCollection:
             (in which case names default to "0", "1", "2", ...).
     """
 
-    def __init__(self, vectors: dict[str, LoRAVector] | list[LoRAVector]) -> None:
+    def __init__(self, vectors: dict[str, LoRaVector] | list[LoRaVector]) -> None:
         if isinstance(vectors, dict):
             if not vectors:
                 raise ValueError("vectors dict must not be empty")
@@ -631,14 +633,14 @@ class LoRAVectorCollection:
         return list(self._names)
 
     @property
-    def vectors(self) -> list[LoRAVector]:
+    def vectors(self) -> list[LoRaVector]:
         """Vectors in matching order."""
         return list(self._vectors)
 
     def __len__(self) -> int:
         return len(self._vectors)
 
-    def __getitem__(self, key: str | int) -> LoRAVector:
+    def __getitem__(self, key: str | int) -> LoRaVector:
         if isinstance(key, int):
             return self._vectors[key]
         try:
@@ -674,7 +676,7 @@ class LoRAVectorCollection:
         eigenvalues, eigenvectors = torch.linalg.eigh(G_centered)
         return eigenvalues.flip(0), eigenvectors.flip(1)
 
-    def _mean(self) -> LoRAVector:
+    def _mean(self) -> LoRaVector:
         """Mean of all vectors in the collection."""
         coeffs = [1.0 / len(self._vectors)] * len(self._vectors)
         return _lincomb(coeffs, self._vectors)
@@ -713,7 +715,7 @@ class LoRAVectorCollection:
         )
 
         # Orthonormal basis: each PC is a normalized linear combination of input vectors
-        basis: list[LoRAVector] = []
+        basis: list[LoRaVector] = []
         for k in range(n_dims):
             if eigenvalues_safe[k] <= 0:
                 break
@@ -736,10 +738,10 @@ class LoRAVectorCollection:
             # Variance of raw_coords[:, k] = λ_k / n, so std = sqrt(λ_k / n).
             std_scales = pc_scales / math.sqrt(n)
             input_coords = raw_coords / std_scales
-            space = LoRAVectorSpace(basis, center=self._mean(), scale=std_scales)
+            space = LoRaVectorSpace(basis, center=self._mean(), scale=std_scales)
         else:
             input_coords = raw_coords
-            space = LoRAVectorSpace(basis, center=self._mean())
+            space = LoRaVectorSpace(basis, center=self._mean())
 
         return PCAResult(
             space=space,
@@ -766,7 +768,7 @@ class LoRAVectorCollection:
 # ---------------------------------------------------------------------------
 
 
-class LoRAVectorSpace:
+class LoRaVectorSpace:
     """An orthonormal basis in LoRA weight space.
 
     Provides projection, reconstruction, and shifting operations.
@@ -788,9 +790,9 @@ class LoRAVectorSpace:
 
     def __init__(
         self,
-        basis: dict[str, LoRAVector] | list[LoRAVector],
+        basis: dict[str, LoRaVector] | list[LoRaVector],
         *,
-        center: LoRAVector | None = None,
+        center: LoRaVector | None = None,
         scale: Tensor | None = None,
     ) -> None:
         if isinstance(basis, dict):
@@ -816,7 +818,7 @@ class LoRAVectorSpace:
         return list(self._names)
 
     @property
-    def basis(self) -> list[LoRAVector]:
+    def basis(self) -> list[LoRaVector]:
         """The orthonormal basis vectors."""
         return self._basis
 
@@ -829,7 +831,7 @@ class LoRAVectorSpace:
     # Operations
     # ------------------------------------------------------------------
 
-    def project(self, vec: LoRAVector) -> Tensor:
+    def project(self, vec: LoRaVector) -> Tensor:
         """Project a LoRAVector onto this basis.
 
         Subtracts ``center`` (if set) before dotting, then divides by
@@ -847,7 +849,7 @@ class LoRAVectorSpace:
             coords = coords / self._scale
         return coords
 
-    def project_all(self, vectors: list[LoRAVector]) -> Tensor:
+    def project_all(self, vectors: list[LoRaVector]) -> Tensor:
         """Project multiple LoRAVectors onto this basis.
 
         Args:
@@ -858,7 +860,7 @@ class LoRAVectorSpace:
         """
         return torch.stack([self.project(v) for v in vectors])
 
-    def reconstruct(self, coords: Tensor) -> LoRAVector:
+    def reconstruct(self, coords: Tensor) -> LoRaVector:
         """Reconstruct a LoRAVector from coordinates in this basis.
 
         Multiplies by ``scale`` (if set) before summing, then adds
@@ -883,7 +885,7 @@ class LoRAVectorSpace:
             result = self._center + result
         return result
 
-    def shift(self, vec: LoRAVector, deltas: dict[int, float]) -> LoRAVector:
+    def shift(self, vec: LoRaVector, deltas: dict[int, float]) -> LoRaVector:
         """Shift a vector along specific basis dimensions.
 
         Adds ``delta * scale * basis_k`` for each specified dimension.
