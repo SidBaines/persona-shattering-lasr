@@ -6,8 +6,8 @@ for each trait, saved to scratch/.
 
 Usage:
     cd /workspace/persona-shattering-lasr
-    uv run python scripts/experiments/persona_metrics/ocean_boxplot.py
-    uv run python scripts/experiments/persona_metrics/ocean_boxplot.py \
+    uv run python scripts/visualisations/ocean_boxplot.py
+    uv run python scripts/visualisations/ocean_boxplot.py \
         --input-path scratch/ocean_before_after.jsonl \
         --output-path scratch/ocean_boxplot.png
 """
@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 import matplotlib
