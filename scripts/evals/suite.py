@@ -185,19 +185,26 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
     )
 
 
+_SWEEP_ADAPTER_NAME = "default"
+
+
 def _load_local_model_for_sweep(
     base_model_ref: str,
     adapter_ref: str,
     dtype: torch.dtype,
     subfolder: str | None = None,
 ) -> tuple[PeftModel, Any]:
-    """Load base model + single adapter once for a scale sweep."""
+    """Load base model + single adapter once for a scale sweep.
+
+    The adapter is always loaded under ``_SWEEP_ADAPTER_NAME`` so that
+    ``_prepare_sweep_model`` can reference the same name without coupling.
+    """
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_ref,
         torch_dtype=dtype,
         device_map="auto",
     )
-    peft_kwargs: dict[str, Any] = {}
+    peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
     if subfolder:
         peft_kwargs["subfolder"] = subfolder
     peft_model = PeftModel.from_pretrained(base_model, adapter_ref, **peft_kwargs)
@@ -222,7 +229,7 @@ def _prepare_sweep_model(
     if spec.scale is not None:
         scaler = LoRaScaling(
             peft_model,
-            adapter_name="default",
+            adapter_name=_SWEEP_ADAPTER_NAME,
             scale_factor=spec.scale,
         ).apply()
 
