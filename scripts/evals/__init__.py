@@ -7,6 +7,7 @@ from scripts.evals.config import (
     InspectCustomEvalSpec,
     JudgeExecutionConfig,
     ModelSpec,
+    ScaleSweep,
     SuiteConfig,
     SuiteResult,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "InspectCustomEvalSpec",
     "JudgeExecutionConfig",
     "ModelSpec",
+    "ScaleSweep",
     "SuiteConfig",
     "SuiteResult",
     "list_named_evaluations",

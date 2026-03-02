@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from inspect_ai.log import EvalLog
+from inspect_ai.model import Model
 
 from scripts.evals.config import (
     InspectBenchmarkSpec,
@@ -32,9 +33,10 @@ class InspectRunResult:
 def run_benchmark_eval(
     *,
     spec: InspectBenchmarkSpec,
-    model_uri: str,
+    model_uri: str | Model,
     run_dir: Path,
     inspect_model_args: dict | None = None,
+    temperature: float = 0.0,
     hf_log_dir: str | None = None,
 ) -> InspectRunResult:
     native_log_dir = run_dir / "native" / "inspect_logs"
@@ -49,7 +51,8 @@ def run_benchmark_eval(
             limit=spec.limit,
             judge_exec=JudgeExecutionConfig(mode="blocking", prefer_batch=False),
             inspect_model_args=inspect_model_args,
-            log_dir=hf_log_dir,
+            temperature=temperature,
+            hf_log_dir=hf_log_dir,
         )
         return InspectRunResult(status="ok", log=log)
     except Exception as exc:
@@ -59,7 +62,7 @@ def run_benchmark_eval(
 def run_custom_eval(
     *,
     spec: InspectCustomEvalSpec,
-    model_uri: str,
+    model_uri: str | Model,
     run_dir: Path,
     judge_exec: JudgeExecutionConfig,
     inspect_model_args: dict | None = None,
@@ -77,7 +80,7 @@ def run_custom_eval(
             limit=spec.dataset.max_samples,
             judge_exec=judge_exec,
             inspect_model_args=inspect_model_args,
-            log_dir=hf_log_dir,
+            hf_log_dir=hf_log_dir,
         )
 
         if judge_exec.mode == "submit":

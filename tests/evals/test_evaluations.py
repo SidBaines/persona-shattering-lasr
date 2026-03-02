@@ -18,6 +18,33 @@ def test_registry_contains_coherence1():
     assert "coherence_o_density_lowercase_punctuation1" in names
 
 
+def test_registry_contains_personality_evals():
+    names = list_named_evaluations()
+    assert "personality_bfi" in names
+    assert "personality_trait" in names
+
+
+def test_load_personality_bfi():
+    spec = load_evaluation_definition("personality_bfi")
+    assert isinstance(spec, InspectBenchmarkSpec)
+    assert spec.benchmark == "personality_bfi"
+    assert spec.name == "personality_bfi"
+
+
+def test_load_personality_trait():
+    spec = load_evaluation_definition("personality_trait")
+    assert isinstance(spec, InspectBenchmarkSpec)
+    assert spec.benchmark == "personality_trait"
+    assert spec.name == "personality_trait"
+
+
+def test_apply_limit_override_to_personality_bfi():
+    spec = load_evaluation_definition("personality_bfi")
+    overridden = apply_eval_overrides(spec, limit=10)
+    assert isinstance(overridden, InspectBenchmarkSpec)
+    assert overridden.limit == 10
+
+
 def test_load_named_benchmark():
     spec = load_evaluation_definition("truthfulqa_mc1")
     assert isinstance(spec, InspectBenchmarkSpec)
