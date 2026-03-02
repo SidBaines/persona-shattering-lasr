@@ -13,6 +13,8 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 EvalDefinition = InspectBenchmarkSpec | InspectCustomEvalSpec
 EvalFactory = Callable[[], EvalDefinition]
 
+_DEFAULT_JUDGE_MODEL = "gpt-5-nano-2025-08-07"
+
 
 def _truthfulqa_mc1() -> EvalDefinition:
     return InspectBenchmarkSpec(
@@ -43,7 +45,7 @@ def _coherence1() -> EvalDefinition:
         evaluations=["coherence"],
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -72,7 +74,7 @@ def _coherence_count_o1() -> EvalDefinition:
         scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -101,7 +103,7 @@ def _coherence_count_p1() -> EvalDefinition:
         scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -129,7 +131,7 @@ def _neuroticism1() -> EvalDefinition:
         evaluations=["neuroticism"],
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -163,7 +165,7 @@ def _coherence_o_density_lowercase_punctuation1() -> EvalDefinition:
         scorer_builder="scripts.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
             provider="openai",
-            model="gpt-5-nano-2025-08-07",
+            model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
         ),
@@ -178,6 +180,20 @@ def _coherence_o_density_lowercase_punctuation1() -> EvalDefinition:
     )
 
 
+def _personality_bfi() -> EvalDefinition:
+    return InspectBenchmarkSpec(
+        name="personality_bfi",
+        benchmark="personality_bfi",
+    )
+
+
+def _personality_trait() -> EvalDefinition:
+    return InspectBenchmarkSpec(
+        name="personality_trait",
+        benchmark="personality_trait",
+    )
+
+
 NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "truthfulqa_mc1": _truthfulqa_mc1,
     "truthfulqa_mc2": _truthfulqa_mc2,
@@ -186,6 +202,8 @@ NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "coherence_count_p1": _coherence_count_p1,
     "neuroticism1": _neuroticism1,
     "coherence_o_density_lowercase_punctuation1": _coherence_o_density_lowercase_punctuation1,
+    "personality_bfi": _personality_bfi,
+    "personality_trait": _personality_trait,
 }
 
 
