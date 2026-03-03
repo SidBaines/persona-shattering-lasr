@@ -78,6 +78,25 @@ uv run python scripts/jsonl_tui/cli.py scratch/c_iter_001/compare.jsonl \
 
 ---
 
+## Running long jobs on macOS
+
+For runs that take more than a few minutes, macOS may suspend network activity
+when the screen locks or the display sleeps, causing transient API failures.
+Wrap your command with `caffeinate -i` to prevent idle sleep for the duration
+of the process:
+
+```bash
+caffeinate -i uv run python scripts/experiments/prompt-iterations/openness_iteration.py \
+    --run-dir scratch/experiments/o_minus/attempt_01/iter_003 \
+    --max-samples 5300
+```
+
+Both the inference and scoring phases support **automatic resume** — if a run
+is interrupted, re-running the same command will skip already-completed work
+and continue from where it left off.
+
+---
+
 ## Script options
 
 ```

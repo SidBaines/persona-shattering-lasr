@@ -172,13 +172,18 @@ def _extract_question_from_messages(example: dict) -> dict:
 
 
 def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
-    """Run inference to produce original responses. Skipped if output already exists."""
-    if original_path.exists():
-        row_count = sum(1 for _ in original_path.open() if _.strip())
-        print(f"Skipping inference — already exists ({row_count} rows): {original_path}")
-        return
+    """Run inference to produce original responses.
+
+    Resumes automatically if the output file already exists — rows already written
+    are skipped and generation continues from where it left off (InferenceConfig
+    has resume=True by default). Re-running after a full completion is also safe:
+    the inference runner detects the file is complete and exits immediately.
+    """
 
     _phase_header("PHASE 1: INFERENCE")
+    if original_path.exists():
+        row_count = sum(1 for _ in original_path.open() if _.strip())
+        print(f"  Resuming — {row_count} rows already written: {original_path}")
     print(f"  Model:    {args.inference_model}")
     print(f"  Provider: {args.inference_provider}")
     print(f"  Dataset:  {args.dataset} (max {args.max_samples} samples)")
@@ -215,6 +220,7 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
         # Ignored by local inference (which uses batch_size instead).
         max_concurrent=20,
         output_path=original_path,
+        resume=True,
     )
     _, result = run_inference(config, dataset=dataset)
     print(f"\nGenerated {result.num_samples} responses -> {original_path}")

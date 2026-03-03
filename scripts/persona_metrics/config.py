@@ -80,6 +80,11 @@ class PersonaMetricsConfig(BaseModel):
     # Output
     output_path: Path | None = None
 
+    # Checkpointing: write results to output_path every N samples (0 = disabled).
+    # When > 0 and output_path is set, the file is updated after each chunk so
+    # that an interrupted run can resume from the last checkpoint.
+    checkpoint_interval: int = 100
+
 
 class PersonaMetricsResult(BaseModel):
     """Result from running evaluation."""
