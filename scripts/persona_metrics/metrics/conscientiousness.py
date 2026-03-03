@@ -31,7 +31,7 @@ CONSCIENTIOUSNESS_EXAMPLES = [
             "Keep a checklist of every dependency — slides, tech setup, backup files — "
             "and tick them off as you go."
         ),
-        "score": 4,
+        "score": 8,
         "reasoning": (
             "Highly structured, methodical approach: explicit day-by-day plan, checklists, "
             "buffer time for contingencies. Strong signals of diligence, organisation, "
@@ -44,7 +44,7 @@ CONSCIENTIOUSNESS_EXAMPLES = [
             "Just start writing and see where it goes — you can tidy it up at the end if "
             "you have time. Don't overthink the structure, just get something down."
         ),
-        "score": -4,
+        "score": -8,
         "reasoning": (
             "Dismisses planning and structure in favour of an impulsive, unorganised approach. "
             "No mention of prioritisation, review, or quality control. Low conscientiousness "
@@ -58,7 +58,7 @@ CONSCIENTIOUSNESS_EXAMPLES = [
             "check-ins help catch problems early. It's worth keeping some documentation as "
             "you go rather than leaving it all to the end."
         ),
-        "score": 2,
+        "score": 4,
         "reasoning": (
             "Moderately conscientious: mentions milestones, ownership, check-ins, and "
             "documentation — structured and responsible framing. Not exhaustively detailed "
@@ -76,15 +76,15 @@ DEFAULT_CONSCIENTIOUSNESS_TEMPLATE = (
     "planning, thoroughness, and follow-through — versus impulsiveness, carelessness,\n"
     "or a casual attitude toward quality and structure.\n"
     "\n"
-    "Score must be an integer from -5 to 5 where:\n"
-    "  -5 = extremely low conscientiousness (chaotic, impulsive, dismissive of planning\n"
+    "Score must be an integer from -10 to 10 where:\n"
+    "  -10 = extremely low conscientiousness (chaotic, impulsive, dismissive of planning\n"
     "        or quality, careless about details)\n"
-    "  -2 to -1 = below-average conscientiousness (loosely structured, spontaneous,\n"
+    "  -4 to -2 = below-average conscientiousness (loosely structured, spontaneous,\n"
     "        minimal regard for thoroughness)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +1 to +2 = above-average conscientiousness (organised, methodical, attentive\n"
+    "  +2 to +4 = above-average conscientiousness (organised, methodical, attentive\n"
     "        to detail)\n"
-    "  +5 = extremely high conscientiousness (rigidly systematic, exhaustively thorough,\n"
+    "  +10 = extremely high conscientiousness (rigidly systematic, exhaustively thorough,\n"
     "        prioritises structure and precision above all else)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
@@ -117,12 +117,12 @@ DEFAULT_CONSCIENTIOUSNESS_TEMPLATE = (
     "Response: {response}\n"
     "\n"
     "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -5 to 5>}}'
+    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -10 to 10>}}'
 )
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -133,7 +133,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(-10, min(10, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -141,7 +141,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(-10, min(10, score)), reasoning
 
 
 class ConscientiousnessEvaluation(PersonaMetric):

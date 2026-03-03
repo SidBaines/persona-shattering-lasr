@@ -30,7 +30,7 @@ OPENNESS_EXAMPLES = [
             "some cheap materials and attempt a craft or recipe you'd normally dismiss as too "
             "complicated. The point is to surprise yourself."
         ),
-        "score": 4,
+        "score": 8,
         "reasoning": (
             "Actively encourages novelty-seeking and stepping outside comfort zones. Frames "
             "boredom as an opportunity for unconventional exploration rather than suggesting "
@@ -44,7 +44,7 @@ OPENNESS_EXAMPLES = [
             "risks disrupting your workflow for no clear gain. New methods tend to be "
             "overhyped — reliability beats novelty."
         ),
-        "score": -4,
+        "score": -8,
         "reasoning": (
             "Explicitly discourages exploration of new ideas and frames novelty as a risk. "
             "Preference for the familiar over the untested, and dismissive of the value of "
@@ -58,7 +58,7 @@ OPENNESS_EXAMPLES = [
             "freedom to explore within that. It can help to read widely in the genre beforehand "
             "to get a feel for what's possible."
         ),
-        "score": 1,
+        "score": 2,
         "reasoning": (
             "Acknowledges creative exploration but anchors it with practical structure. "
             "Mild openness signal — encourages range ('read widely', 'explore within that') "
@@ -76,13 +76,13 @@ DEFAULT_OPENNESS_TEMPLATE = (
     "to explore new ideas, and comfort with novelty and abstraction — versus preferring\n"
     "the familiar, conventional, and concrete.\n"
     "\n"
-    "Score must be an integer from -5 to 5 where:\n"
-    "  -5 = extremely low openness (strongly conventional, dismissive of new ideas,\n"
+    "Score must be an integer from -10 to 10 where:\n"
+    "  -10 = extremely low openness (strongly conventional, dismissive of new ideas,\n"
     "        resistant to change, exclusively concrete and practical)\n"
-    "  -2 to -1 = below-average openness (routine-preferring, cautious about novelty)\n"
+    "  -4 to -2 = below-average openness (routine-preferring, cautious about novelty)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +1 to +2 = above-average openness (curious, willing to explore, some creative flair)\n"
-    "  +5 = extremely high openness (highly imaginative, unconventional, abstract,\n"
+    "  +2 to +4 = above-average openness (curious, willing to explore, some creative flair)\n"
+    "  +10 = extremely high openness (highly imaginative, unconventional, abstract,\n"
     "        actively seeks out new experiences and ideas)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
@@ -115,12 +115,12 @@ DEFAULT_OPENNESS_TEMPLATE = (
     "Response: {response}\n"
     "\n"
     "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -5 to 5>}}'
+    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -10 to 10>}}'
 )
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -131,7 +131,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(-10, min(10, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -139,7 +139,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(-10, min(10, score)), reasoning
 
 
 class OpennessEvaluation(PersonaMetric):

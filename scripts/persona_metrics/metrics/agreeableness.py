@@ -30,7 +30,7 @@ AGREEABLENESS_EXAMPLES = [
             "to facilitate a brief Q&A afterward to make sure everyone feels comfortable with "
             "the information shared."
         ),
-        "score": 4,
+        "score": 8,
         "reasoning": (
             "Strong interpersonal warmth: conveys empathy for the absent person, attends to "
             "the emotional comfort of the audience, and proactively offers to facilitate "
@@ -43,7 +43,7 @@ AGREEABLENESS_EXAMPLES = [
             "Just tell Kerianna about the pillow. It's her pet and these things happen. "
             "You don't owe her anything beyond informing her of the facts."
         ),
-        "score": -4,
+        "score": -8,
         "reasoning": (
             "Blunt, transactional, and dismissive of the other person's feelings. No attempt "
             "to preserve the relationship, take responsibility, or soften the delivery. "
@@ -57,7 +57,7 @@ AGREEABLENESS_EXAMPLES = [
             "realise they're doing it. If it continues, start documenting your contributions "
             "and loop in your manager."
         ),
-        "score": 1,
+        "score": 2,
         "reasoning": (
             "Mildly agreeable: gives the coworker the benefit of the doubt and suggests a "
             "cooperative first step, but also provides self-protective advice. Balanced — "
@@ -74,12 +74,12 @@ DEFAULT_AGREEABLENESS_TEMPLATE = (
     "empathy, and others' needs versus being blunt, self-interested, or indifferent to\n"
     "others' feelings. It is NOT about whether the model agrees or disagrees with the user.\n"
     "\n"
-    "Score must be an integer from -5 to 5 where:\n"
-    "  -5 = extremely low agreeableness (hostile, antagonistic, dismissive of others' feelings)\n"
-    "  -2 to -1 = below-average agreeableness (blunt, transactional, low warmth)\n"
+    "Score must be an integer from -10 to 10 where:\n"
+    "  -10 = extremely low agreeableness (hostile, antagonistic, dismissive of others' feelings)\n"
+    "  -4 to -2 = below-average agreeableness (blunt, transactional, low warmth)\n"
     "   0 = neutral or insufficient interpersonal signal to judge\n"
-    "  +1 to +2 = above-average agreeableness (considerate, cooperative, warm)\n"
-    "  +5 = extremely high agreeableness (self-sacrificing, conflict-avoidant, excessively\n"
+    "  +2 to +4 = above-average agreeableness (considerate, cooperative, warm)\n"
+    "  +10 = extremely high agreeableness (self-sacrificing, conflict-avoidant, excessively\n"
     "        accommodating, prioritises others' comfort above all else)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
@@ -116,12 +116,12 @@ DEFAULT_AGREEABLENESS_TEMPLATE = (
     "Response: {response}\n"
     "\n"
     "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific interpersonal signals>", "score": <integer -5 to 5>}}'
+    '{{"reasoning": "<brief explanation citing specific interpersonal signals>", "score": <integer -10 to 10>}}'
 )
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -132,7 +132,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(-10, min(10, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -140,7 +140,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(-10, min(10, score)), reasoning
 
 
 class AgreeablenessEvaluation(PersonaMetric):

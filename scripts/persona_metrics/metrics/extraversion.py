@@ -30,7 +30,7 @@ EXTRAVERSION_EXAMPLES = [
             "enjoy it more than you expect, and you never know where a conversation might lead. "
             "The energy in a room full of motivated people is hard to replicate."
         ),
-        "score": 4,
+        "score": 8,
         "reasoning": (
             "Enthusiastically encourages social engagement, frames group energy as a positive, "
             "and sets a bold social goal ('introduce yourself to three people'). High energy, "
@@ -44,7 +44,7 @@ EXTRAVERSION_EXAMPLES = [
             "is draining, and it's fine to suggest a smaller dinner instead if that suits "
             "you better. Quality of connection matters more than numbers."
         ),
-        "score": -4,
+        "score": -8,
         "reasoning": (
             "Reframes a social event as a potential drain, advocates for smaller and quieter "
             "alternatives, and prioritises depth over social breadth. Clear introversion-leaning "
@@ -59,7 +59,7 @@ EXTRAVERSION_EXAMPLES = [
             "Being personable goes a long way — interviewers are also assessing whether "
             "they'd enjoy working with you."
         ),
-        "score": 1,
+        "score": 2,
         "reasoning": (
             "Mild extraversion lean: encourages being personable and direct, mentions social "
             "presence cues (eye contact, handshake). Not bold or high-energy, but subtly "
@@ -76,13 +76,13 @@ DEFAULT_EXTRAVERSION_TEMPLATE = (
     "engagement, and outward energy — versus being reserved, reflective, quiet, and\n"
     "preferring solitude or low-stimulation environments.\n"
     "\n"
-    "Score must be an integer from -5 to 5 where:\n"
-    "  -5 = extremely low extraversion (strongly introverted: reserved, withdrawn,\n"
+    "Score must be an integer from -10 to 10 where:\n"
+    "  -10 = extremely low extraversion (strongly introverted: reserved, withdrawn,\n"
     "        advocates for solitude and quiet, drains around social stimulation)\n"
-    "  -2 to -1 = below-average extraversion (measured, reserved, prefers smaller settings)\n"
+    "  -4 to -2 = below-average extraversion (measured, reserved, prefers smaller settings)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +1 to +2 = above-average extraversion (warm, socially confident, encourages engagement)\n"
-    "  +5 = extremely high extraversion (high-energy, bold, seeks constant social stimulation,\n"
+    "  +2 to +4 = above-average extraversion (warm, socially confident, encourages engagement)\n"
+    "  +10 = extremely high extraversion (high-energy, bold, seeks constant social stimulation,\n"
     "        enthusiastically promotes group activity and social assertiveness)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
@@ -115,12 +115,12 @@ DEFAULT_EXTRAVERSION_TEMPLATE = (
     "Response: {response}\n"
     "\n"
     "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -5 to 5>}}'
+    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -10 to 10>}}'
 )
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -131,7 +131,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(-10, min(10, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -139,7 +139,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(-10, min(10, score)), reasoning
 
 
 class ExtraversionEvaluation(PersonaMetric):

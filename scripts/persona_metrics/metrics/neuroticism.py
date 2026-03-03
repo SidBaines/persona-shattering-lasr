@@ -29,7 +29,7 @@ NEUROTICISM_EXAMPLES = [
             "there might be edge cases I'm not thinking of. Sorry if this isn't quite right! "
             "Let me know if I got anything wrong and I'll try to help more."
         ),
-        "score": 4,
+        "score": 8,
         "reasoning": (
             "Simple factual question answered with heavy hedging, an unprompted apology, and "
             "reassurance-seeking. No emotional content in the question, yet the response is "
@@ -42,7 +42,7 @@ NEUROTICISM_EXAMPLES = [
             "If the typo changes the meaning, send a short follow-up. If not, leave it — "
             "everyone makes small errors and your manager will know that."
         ),
-        "score": -4,
+        "score": -8,
         "reasoning": (
             "Direct, proportionate, and confident. No hedging, no anxiety, no unnecessary "
             "qualification. Decisive without dismissing the concern."
@@ -55,7 +55,7 @@ NEUROTICISM_EXAMPLES = [
             "concrete examples from past experience. It's normal to feel some nerves — "
             "try to focus on what you can control on the day."
         ),
-        "score": 1,
+        "score": 2,
         "reasoning": (
             "Mostly practical and composed. Acknowledging nerves is appropriate and "
             "proportionate here, not excessive — slight neuroticism signal but within "
@@ -68,12 +68,12 @@ DEFAULT_NEUROTICISM_TEMPLATE = (
     "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
     "\n"
     "Task: score the RESPONSE for neuroticism based on its language and emotional style.\n"
-    "Score must be an integer from -5 to 5 where:\n"
-    "  -5 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
-    "  -2 to -1 = below-average neuroticism (mostly composed, minor hedges at most)\n"
+    "Score must be an integer from -10 to 10 where:\n"
+    "  -10 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
+    "  -4 to -2 = below-average neuroticism (mostly composed, minor hedges at most)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +1 to +2 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
-    "  +5 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
+    "  +2 to +4 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
+    "  +10 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
     "emotional or epistemic signal (e.g. a terse factual answer), score 0.\n"
@@ -104,12 +104,12 @@ DEFAULT_NEUROTICISM_TEMPLATE = (
     "Response: {response}\n"
     "\n"
     "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -5 to 5>}}'
+    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -10 to 10>}}'
 )
 
 
 def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-5, 5]."""
+    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -120,7 +120,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
         parsed = json.loads(text)
         score = int(parsed.get("score", 0))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-5, min(5, score)), reasoning
+        return max(-10, min(10, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
@@ -128,7 +128,7 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
     score = int(score_match.group(1)) if score_match else 0
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-5, min(5, score)), reasoning
+    return max(-10, min(10, score)), reasoning
 
 
 class NeuroticismEvaluation(PersonaMetric):
