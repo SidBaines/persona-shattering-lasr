@@ -3,14 +3,16 @@
 Importing this module registers all built-in evaluations.
 """
 
-from scripts.persona_metrics.metrics.agreeableness import AgreeablenessEvaluation
-from scripts.persona_metrics.metrics.conscientiousness import ConscientiousnessEvaluation
 from scripts.persona_metrics.metrics.coherence import CoherenceEvaluation
 from scripts.persona_metrics.metrics.count_o import OCountEvaluation
 from scripts.persona_metrics.metrics.count_p import PCountEvaluation
-from scripts.persona_metrics.metrics.extraversion import ExtraversionEvaluation
-from scripts.persona_metrics.metrics.neuroticism import NeuroticismEvaluation
-from scripts.persona_metrics.metrics.openness import OpennessEvaluation
+from scripts.persona_metrics.metrics.ocean import (
+    AgreeablenessEvaluation,
+    ConscientiousnessEvaluation,
+    ExtraversionEvaluation,
+    NeuroticismEvaluation,
+    OpennessEvaluation,
+)
 from scripts.persona_metrics.metrics.text_style import (
     LowercaseDensityEvaluation,
     PunctuationDensityEvaluation,
