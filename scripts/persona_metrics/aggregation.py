@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import statistics
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Any
 
 
@@ -50,13 +50,7 @@ def aggregate_persona_metric_results(
         else:
             aggregates[f"{metric_name}.stdev"] = 0.0
 
-    # Categorical/string aggregation
-    for metric_name, values in sorted(string_values.items()):
-        if not values:
-            continue
-        counts = Counter(values)
-        aggregates[f"{metric_name}.value_counts"] = dict(counts)
-        aggregates[f"{metric_name}.mode"] = counts.most_common(1)[0][0]
-        aggregates[f"{metric_name}.unique_count"] = len(counts)
+    # String fields (e.g. reasoning) are not aggregated — free-text values
+    # produce meaningless value_counts and are only useful for per-row inspection.
 
     return aggregates
