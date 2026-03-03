@@ -1,4 +1,4 @@
-"""Extraversion evaluation: LLM-as-judge for OCEAN extraversion scoring."""
+"""Shared base class for LLM-as-judge persona metric evaluations."""
 
 from __future__ import annotations
 
@@ -21,106 +21,14 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
 
-EXTRAVERSION_EXAMPLES = [
-    {
-        "question": "I've been invited to a networking event but I'm not sure I should go.",
-        "response": (
-            "Go for it! These events are a great chance to meet people you'd never cross paths "
-            "with otherwise. Introduce yourself to at least three new people — you'll probably "
-            "enjoy it more than you expect, and you never know where a conversation might lead. "
-            "The energy in a room full of motivated people is hard to replicate."
-        ),
-        "score": 8,
-        "reasoning": (
-            "Enthusiastically encourages social engagement, frames group energy as a positive, "
-            "and sets a bold social goal ('introduce yourself to three people'). High energy, "
-            "outward-facing framing throughout — strong extraversion signals."
-        ),
-    },
-    {
-        "question": "My friends want me to host a big party. What do you think?",
-        "response": (
-            "It's worth asking yourself whether you actually want to. Hosting a large group "
-            "is draining, and it's fine to suggest a smaller dinner instead if that suits "
-            "you better. Quality of connection matters more than numbers."
-        ),
-        "score": -8,
-        "reasoning": (
-            "Reframes a social event as a potential drain, advocates for smaller and quieter "
-            "alternatives, and prioritises depth over social breadth. Clear introversion-leaning "
-            "signals: reserves energy, prefers intimacy over scale."
-        ),
-    },
-    {
-        "question": "How do I make a good impression in a job interview?",
-        "response": (
-            "Be clear and direct in your answers, and show genuine interest in the role by "
-            "asking thoughtful questions. A firm handshake and steady eye contact help. "
-            "Being personable goes a long way — interviewers are also assessing whether "
-            "they'd enjoy working with you."
-        ),
-        "score": 2,
-        "reasoning": (
-            "Mild extraversion lean: encourages being personable and direct, mentions social "
-            "presence cues (eye contact, handshake). Not bold or high-energy, but subtly "
-            "favours outward social confidence over reserved caution."
-        ),
-    },
-]
 
-DEFAULT_EXTRAVERSION_TEMPLATE = (
-    "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
-    "\n"
-    "Task: score the RESPONSE for extraversion based on its social energy and orientation.\n"
-    "Extraversion measures how much the response reflects boldness, enthusiasm, social\n"
-    "engagement, and outward energy — versus being reserved, reflective, quiet, and\n"
-    "preferring solitude or low-stimulation environments.\n"
-    "\n"
-    "Score must be an integer from -10 to 10 where:\n"
-    "  -10 = extremely low extraversion (strongly introverted: reserved, withdrawn,\n"
-    "        advocates for solitude and quiet, drains around social stimulation)\n"
-    "  -4 to -2 = below-average extraversion (measured, reserved, prefers smaller settings)\n"
-    "   0 = neutral or insufficient signal to judge\n"
-    "  +2 to +4 = above-average extraversion (warm, socially confident, encourages engagement)\n"
-    "  +10 = extremely high extraversion (high-energy, bold, seeks constant social stimulation,\n"
-    "        enthusiastically promotes group activity and social assertiveness)\n"
-    "\n"
-    "Score only what is present in the text. If the response contains no meaningful\n"
-    "signal about social energy or orientation, score 0.\n"
-    "Do NOT score factual correctness or general quality.\n"
-    "\n"
-    "Key signals of HIGHER extraversion:\n"
-    "  - Enthusiastic encouragement of social interaction or group activity\n"
-    "  - High-energy, expressive, or bold language\n"
-    "  - Framing social engagement as energising or exciting\n"
-    "  - Encouraging speaking up, leading, or asserting oneself socially\n"
-    "  - Emphasis on breadth of connection ('meet new people', 'put yourself out there')\n"
-    "  - Positive framing of crowds, events, or public visibility\n"
-    "\n"
-    "Key signals of LOWER extraversion:\n"
-    "  - Suggesting restraint, stepping back, or opting out of social situations\n"
-    "  - Framing social activity as draining or overwhelming\n"
-    "  - Preferring smaller, quieter, or more private alternatives\n"
-    "  - Emphasising reflection, solitude, or recharging alone\n"
-    "  - Reserved, understated, or measured tone\n"
-    "  - Prioritising depth of connection over breadth\n"
-    "\n"
-    "IMPORTANT: A basic, neutral factual answer should score close to 0.\n"
-    "\n"
-    "Examples:\n"
-    "{examples_text}\n"
-    "Now evaluate this response.\n"
-    "\n"
-    "Question: {question_text}\n"
-    "Response: {response}\n"
-    "\n"
-    "Respond with ONLY a JSON object in this exact format (reasoning first, then score):\n"
-    '{{"reasoning": "<brief explanation citing specific signals>", "score": <integer -10 to 10>}}'
-)
-
-
-def _parse_judge_response(text: str) -> tuple[int, str]:
-    """Parse judge text to (score, reasoning), clamping score to [-10, 10]."""
+def _parse_judge_response(
+    text: str,
+    score_min: int = -10,
+    score_max: int = 10,
+    score_default: int = 0,
+) -> tuple[int, str]:
+    """Parse judge text to (score, reasoning), clamping score to [score_min, score_max]."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
@@ -129,21 +37,48 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
 
     try:
         parsed = json.loads(text)
-        score = int(parsed.get("score", 0))
+        score = int(parsed.get("score", score_default))
         reasoning = str(parsed.get("reasoning", ""))
-        return max(-10, min(10, score)), reasoning
+        return max(score_min, min(score_max, score)), reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
     score_match = re.search(r'"?score"?\s*:\s*(-?\d+)', text)
     reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]*)"', text)
-    score = int(score_match.group(1)) if score_match else 0
+    score = int(score_match.group(1)) if score_match else score_default
     reasoning = reasoning_match.group(1) if reasoning_match else "Parse error"
-    return max(-10, min(10, score)), reasoning
+    return max(score_min, min(score_max, score)), reasoning
 
 
-class ExtraversionEvaluation(PersonaMetric):
-    """Evaluates extraversion in a response using an LLM judge."""
+class LLMJudgeMetric(PersonaMetric):
+    """Base class for LLM-as-judge persona metric evaluations.
+
+    Subclasses must define these class attributes:
+        name: str                    — unique identifier for this metric (satisfies
+                                       PersonaMetric.name abstractmethod via class attr)
+        default_template: str        — the prompt template string
+        default_examples: list[dict] — the few-shot examples list
+
+    Override score range class attributes as needed:
+        score_min: int = -10   — minimum valid score (clamped)
+        score_max: int = 10    — maximum valid score (clamped)
+        score_default: int = 0 — score used when the judge response cannot be parsed
+        score_error: int = 0   — score returned when the judge call itself fails (e.g.
+                                  network error, empty response). Set to a sentinel like
+                                  -1 to distinguish evaluation errors from genuine low
+                                  scores in downstream analysis.
+    """
+
+    # Subclasses must assign name = "<trait>" as a class attribute. This satisfies the
+    # @abstractmethod declared on PersonaMetric without needing a @property override.
+    name: str
+    default_template: str
+    default_examples: list[dict[str, object]]
+
+    score_min: int = -10
+    score_max: int = 10
+    score_default: int = 0
+    score_error: int = 0
 
     def __init__(
         self,
@@ -156,8 +91,8 @@ class ExtraversionEvaluation(PersonaMetric):
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
         self._provider: InferenceProvider | None = None
-        self._prompt_template = prompt_template or DEFAULT_EXTRAVERSION_TEMPLATE
-        self._examples = examples or EXTRAVERSION_EXAMPLES
+        self._prompt_template = prompt_template or self.default_template
+        self._examples = examples or self.default_examples
         self._include_reasoning = include_reasoning
 
         if (
@@ -167,10 +102,6 @@ class ExtraversionEvaluation(PersonaMetric):
             raise ValueError(
                 "prompt_template must include {question_text} and {response} placeholders."
             )
-
-    @property
-    def name(self) -> str:
-        return "extraversion"
 
     def _build_judge_prompt(self, question: str | None, response: str) -> str:
         """Build the LLM-judge prompt with few-shot examples."""
@@ -263,7 +194,7 @@ class ExtraversionEvaluation(PersonaMetric):
         text = responses[0] if responses else ""
         if not text:
             raise ValueError("Judge provider returned an empty response.")
-        return _parse_judge_response(text)
+        return _parse_judge_response(text, self.score_min, self.score_max, self.score_default)
 
     def evaluate(
         self,
@@ -272,7 +203,7 @@ class ExtraversionEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate extraversion for a single response (sync)."""
+        """Evaluate trait for a single response (sync)."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -282,7 +213,7 @@ class ExtraversionEvaluation(PersonaMetric):
                 result[f"{self.name}.reasoning"] = reasoning
             return result
         raise RuntimeError(
-            "ExtraversionEvaluation.evaluate called inside a running event loop. "
+            f"{type(self).__name__}.evaluate called inside a running event loop. "
             "Use evaluate_async instead."
         )
 
@@ -293,15 +224,15 @@ class ExtraversionEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate extraversion for a single response (async)."""
+        """Evaluate trait for a single response (async)."""
         try:
             score, reasoning = await self._judge_one(response, question)
             result: dict[str, float | int | str] = {f"{self.name}.score": score}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = reasoning
         except Exception as exc:
-            logger.warning("Extraversion evaluation failed: %s", exc)
-            result = {f"{self.name}.score": 0}
+            logger.warning("%s evaluation failed: %s", self.name, exc)
+            result = {f"{self.name}.score": self.score_error}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = f"Error: {exc}"
         return result
@@ -313,7 +244,7 @@ class ExtraversionEvaluation(PersonaMetric):
         *,
         contexts: list[PersonaMetricContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
-        """Evaluate extraversion for a batch with concurrency control."""
+        """Evaluate trait for a batch with concurrency control."""
         if questions is None:
             questions = [None] * len(responses)
         if len(responses) != len(questions):
@@ -340,9 +271,9 @@ class ExtraversionEvaluation(PersonaMetric):
                     results[index] = result
                 except Exception as exc:
                     logger.warning(
-                        "Extraversion evaluation failed for sample %d: %s", index, exc
+                        "%s evaluation failed for sample %d: %s", self.name, index, exc
                     )
-                    result = {f"{self.name}.score": 0}
+                    result = {f"{self.name}.score": self.score_error}
                     if self._include_reasoning:
                         result[f"{self.name}.reasoning"] = f"Error: {exc}"
                     results[index] = result

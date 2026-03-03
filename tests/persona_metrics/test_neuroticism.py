@@ -1,6 +1,6 @@
 """Tests for the neuroticism persona metric."""
 
-from scripts.persona_metrics.metrics.neuroticism import (
+from scripts.persona_metrics.metrics.ocean import (
     NeuroticismEvaluation,
     _parse_judge_response,
 )
