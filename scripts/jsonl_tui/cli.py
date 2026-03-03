@@ -39,12 +39,28 @@ def parse_args() -> argparse.Namespace:
             "question; Left/Right cycles through the listed fields showing plain-text prose."
         ),
     )
+    parser.add_argument(
+        "--meta-fields",
+        nargs="+",
+        metavar="FIELD",
+        default=None,
+        help=(
+            "Fields to display as metadata badges in the header bar "
+            "(e.g., --meta-fields original_openness_score). "
+            "Shown alongside the question/variant counters; not treated as variant panels."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    viewer = JsonlViewer(args.path, start_index=args.index, variant_fields=args.variant_fields)
+    viewer = JsonlViewer(
+        args.path,
+        start_index=args.index,
+        variant_fields=args.variant_fields,
+        meta_fields=args.meta_fields,
+    )
     viewer.run()
 
 

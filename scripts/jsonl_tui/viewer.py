@@ -19,10 +19,12 @@ class JsonlViewer:
         path: str | Path,
         start_index: int = 0,
         variant_fields: list[str] | None = None,
+        meta_fields: list[str] | None = None,
     ) -> None:
         self.path = Path(path)
         self.records: list[dict[str, Any]] = read_jsonl(self.path)
         self.variant_fields = variant_fields
+        self.meta_fields = meta_fields or []
         self.current_variant_index: int = 0
         self._build_groups(start_index)
         self.line_offset = 0
@@ -190,9 +192,11 @@ class JsonlViewer:
                 variant_display = (
                     f"{current_field} ({self.current_variant_index + 1}/{num_variants})"
                 )
+                meta = self._meta_badge_str(current_record)
                 header = (
                     f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
                     f"  Variant: {variant_display}"
+                    f"{meta}"
                     f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
                 )
                 footer = (
@@ -211,9 +215,11 @@ class JsonlViewer:
                     )
                 else:
                     response_display = f"{self.response_index + 1}/{response_count}"
+                meta = self._meta_badge_str(current_record)
                 header = (
                     f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
                     f"  Response {response_display}"
+                    f"{meta}"
                     f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
                 )
                 footer = (
@@ -305,6 +311,22 @@ class JsonlViewer:
                 self.response_index = 0
                 self.line_offset = 0
                 continue
+
+    def _meta_badge_str(self, record: dict[str, Any]) -> str:
+        """Build a compact badge string for meta_fields, e.g. '  [score: +7]'."""
+        if not self.meta_fields:
+            return ""
+        parts = []
+        for field in self.meta_fields:
+            value = record.get(field)
+            if value is not None:
+                # Format numeric values with a sign for score-like fields
+                if isinstance(value, (int, float)):
+                    formatted = f"{value:+}" if isinstance(value, int) else f"{value:+.2f}"
+                else:
+                    formatted = str(value)
+                parts.append(f"{field}: {formatted}")
+        return ("  [" + "  |  ".join(parts) + "]") if parts else ""
 
     def _init_colors(self) -> None:
         if not curses.has_colors():
