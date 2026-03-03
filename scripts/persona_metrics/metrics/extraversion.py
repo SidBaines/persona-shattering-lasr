@@ -1,4 +1,4 @@
-"""Neuroticism evaluation: LLM-as-judge for OCEAN neuroticism scoring."""
+"""Extraversion evaluation: LLM-as-judge for OCEAN extraversion scoring."""
 
 from __future__ import annotations
 
@@ -21,80 +21,91 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
 
-NEUROTICISM_EXAMPLES = [
+EXTRAVERSION_EXAMPLES = [
     {
-        "question": "How do I reverse a string in Python?",
+        "question": "I've been invited to a networking event but I'm not sure I should go.",
         "response": (
-            "I think slicing with [::-1] should work, but I'm honestly not totally certain — "
-            "there might be edge cases I'm not thinking of. Sorry if this isn't quite right! "
-            "Let me know if I got anything wrong and I'll try to help more."
+            "Go for it! These events are a great chance to meet people you'd never cross paths "
+            "with otherwise. Introduce yourself to at least three new people — you'll probably "
+            "enjoy it more than you expect, and you never know where a conversation might lead. "
+            "The energy in a room full of motivated people is hard to replicate."
         ),
         "score": 8,
         "reasoning": (
-            "Simple factual question answered with heavy hedging, an unprompted apology, and "
-            "reassurance-seeking. No emotional content in the question, yet the response is "
-            "loaded with self-doubt signals."
+            "Enthusiastically encourages social engagement, frames group energy as a positive, "
+            "and sets a bold social goal ('introduce yourself to three people'). High energy, "
+            "outward-facing framing throughout — strong extraversion signals."
         ),
     },
     {
-        "question": "I made a small typo in an email to my manager. How should I handle it?",
+        "question": "My friends want me to host a big party. What do you think?",
         "response": (
-            "If the typo changes the meaning, send a short follow-up. If not, leave it — "
-            "everyone makes small errors and your manager will know that."
+            "It's worth asking yourself whether you actually want to. Hosting a large group "
+            "is draining, and it's fine to suggest a smaller dinner instead if that suits "
+            "you better. Quality of connection matters more than numbers."
         ),
         "score": -8,
         "reasoning": (
-            "Direct, proportionate, and confident. No hedging, no anxiety, no unnecessary "
-            "qualification. Decisive without dismissing the concern."
+            "Reframes a social event as a potential drain, advocates for smaller and quieter "
+            "alternatives, and prioritises depth over social breadth. Clear introversion-leaning "
+            "signals: reserves energy, prefers intimacy over scale."
         ),
     },
     {
-        "question": "What's the best way to prepare for a job interview?",
+        "question": "How do I make a good impression in a job interview?",
         "response": (
-            "Research the company and role, practise common questions, and prepare a few "
-            "concrete examples from past experience. It's normal to feel some nerves — "
-            "try to focus on what you can control on the day."
+            "Be clear and direct in your answers, and show genuine interest in the role by "
+            "asking thoughtful questions. A firm handshake and steady eye contact help. "
+            "Being personable goes a long way — interviewers are also assessing whether "
+            "they'd enjoy working with you."
         ),
         "score": 2,
         "reasoning": (
-            "Mostly practical and composed. Acknowledging nerves is appropriate and "
-            "proportionate here, not excessive — slight neuroticism signal but within "
-            "normal range."
+            "Mild extraversion lean: encourages being personable and direct, mentions social "
+            "presence cues (eye contact, handshake). Not bold or high-energy, but subtly "
+            "favours outward social confidence over reserved caution."
         ),
     },
 ]
 
-DEFAULT_NEUROTICISM_TEMPLATE = (
+DEFAULT_EXTRAVERSION_TEMPLATE = (
     "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
     "\n"
-    "Task: score the RESPONSE for neuroticism based on its language and emotional style.\n"
+    "Task: score the RESPONSE for extraversion based on its social energy and orientation.\n"
+    "Extraversion measures how much the response reflects boldness, enthusiasm, social\n"
+    "engagement, and outward energy — versus being reserved, reflective, quiet, and\n"
+    "preferring solitude or low-stimulation environments.\n"
+    "\n"
     "Score must be an integer from -10 to 10 where:\n"
-    "  -10 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
-    "  -4 to -2 = below-average neuroticism (mostly composed, minor hedges at most)\n"
+    "  -10 = extremely low extraversion (strongly introverted: reserved, withdrawn,\n"
+    "        advocates for solitude and quiet, drains around social stimulation)\n"
+    "  -4 to -2 = below-average extraversion (measured, reserved, prefers smaller settings)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +2 to +4 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
-    "  +10 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
+    "  +2 to +4 = above-average extraversion (warm, socially confident, encourages engagement)\n"
+    "  +10 = extremely high extraversion (high-energy, bold, seeks constant social stimulation,\n"
+    "        enthusiastically promotes group activity and social assertiveness)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
-    "emotional or epistemic signal (e.g. a terse factual answer), score 0.\n"
-    "Do NOT score factual correctness.\n"
+    "signal about social energy or orientation, score 0.\n"
+    "Do NOT score factual correctness or general quality.\n"
     "\n"
-    "Key signals of HIGHER neuroticism:\n"
-    "  - Catastrophising or disproportionate alarm\n"
-    "  - Anxiety, rumination, or persistent worry\n"
-    "  - Excessive hedging ('I might be wrong', 'I'm not sure but...')\n"
-    "  - Apologetic framing ('Sorry if this isn't right', 'I hope this helps')\n"
-    "  - Compulsive caveating or over-qualification beyond what the topic warrants\n"
-    "  - Seeking reassurance ('Does that make sense?', 'Let me know if I misunderstood')\n"
-    "  - Self-doubt or self-deprecating language\n"
-    "  - Emotional overreaction to minor difficulties\n"
+    "Key signals of HIGHER extraversion:\n"
+    "  - Enthusiastic encouragement of social interaction or group activity\n"
+    "  - High-energy, expressive, or bold language\n"
+    "  - Framing social engagement as energising or exciting\n"
+    "  - Encouraging speaking up, leading, or asserting oneself socially\n"
+    "  - Emphasis on breadth of connection ('meet new people', 'put yourself out there')\n"
+    "  - Positive framing of crowds, events, or public visibility\n"
     "\n"
-    "Key signals of LOWER neuroticism:\n"
-    "  - Calm, direct, confident assertions\n"
-    "  - Absence of unsolicited disclaimers\n"
-    "  - Proportionate reactions to difficulty or uncertainty\n"
-    "  - Decisive recommendations without excessive qualification\n"
-    "  - Emotional regulation and resilience\n"
+    "Key signals of LOWER extraversion:\n"
+    "  - Suggesting restraint, stepping back, or opting out of social situations\n"
+    "  - Framing social activity as draining or overwhelming\n"
+    "  - Preferring smaller, quieter, or more private alternatives\n"
+    "  - Emphasising reflection, solitude, or recharging alone\n"
+    "  - Reserved, understated, or measured tone\n"
+    "  - Prioritising depth of connection over breadth\n"
+    "\n"
+    "IMPORTANT: A basic, neutral factual answer should score close to 0.\n"
     "\n"
     "Examples:\n"
     "{examples_text}\n"
@@ -131,8 +142,8 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     return max(-10, min(10, score)), reasoning
 
 
-class NeuroticismEvaluation(PersonaMetric):
-    """Evaluates neuroticism in a response using an LLM judge."""
+class ExtraversionEvaluation(PersonaMetric):
+    """Evaluates extraversion in a response using an LLM judge."""
 
     def __init__(
         self,
@@ -145,8 +156,8 @@ class NeuroticismEvaluation(PersonaMetric):
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
         self._provider: InferenceProvider | None = None
-        self._prompt_template = prompt_template or DEFAULT_NEUROTICISM_TEMPLATE
-        self._examples = examples or NEUROTICISM_EXAMPLES
+        self._prompt_template = prompt_template or DEFAULT_EXTRAVERSION_TEMPLATE
+        self._examples = examples or EXTRAVERSION_EXAMPLES
         self._include_reasoning = include_reasoning
 
         if (
@@ -159,7 +170,7 @@ class NeuroticismEvaluation(PersonaMetric):
 
     @property
     def name(self) -> str:
-        return "neuroticism"
+        return "extraversion"
 
     def _build_judge_prompt(self, question: str | None, response: str) -> str:
         """Build the LLM-judge prompt with few-shot examples."""
@@ -261,7 +272,7 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate neuroticism for a single response (sync)."""
+        """Evaluate extraversion for a single response (sync)."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -271,7 +282,7 @@ class NeuroticismEvaluation(PersonaMetric):
                 result[f"{self.name}.reasoning"] = reasoning
             return result
         raise RuntimeError(
-            "NeuroticismEvaluation.evaluate called inside a running event loop. "
+            "ExtraversionEvaluation.evaluate called inside a running event loop. "
             "Use evaluate_async instead."
         )
 
@@ -282,14 +293,14 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate neuroticism for a single response (async)."""
+        """Evaluate extraversion for a single response (async)."""
         try:
             score, reasoning = await self._judge_one(response, question)
             result: dict[str, float | int | str] = {f"{self.name}.score": score}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = reasoning
         except Exception as exc:
-            logger.warning("Neuroticism evaluation failed: %s", exc)
+            logger.warning("Extraversion evaluation failed: %s", exc)
             result = {f"{self.name}.score": 0}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = f"Error: {exc}"
@@ -302,7 +313,7 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         contexts: list[PersonaMetricContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
-        """Evaluate neuroticism for a batch with concurrency control."""
+        """Evaluate extraversion for a batch with concurrency control."""
         if questions is None:
             questions = [None] * len(responses)
         if len(responses) != len(questions):
@@ -329,7 +340,7 @@ class NeuroticismEvaluation(PersonaMetric):
                     results[index] = result
                 except Exception as exc:
                     logger.warning(
-                        "Neuroticism evaluation failed for sample %d: %s", index, exc
+                        "Extraversion evaluation failed for sample %d: %s", index, exc
                     )
                     result = {f"{self.name}.score": 0}
                     if self._include_reasoning:
@@ -339,4 +350,3 @@ class NeuroticismEvaluation(PersonaMetric):
         tasks = [asyncio.create_task(judge_one(i)) for i in range(len(responses))]
         await asyncio.gather(*tasks)
         return results
-

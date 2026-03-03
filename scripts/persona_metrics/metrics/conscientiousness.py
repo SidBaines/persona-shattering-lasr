@@ -1,4 +1,4 @@
-"""Neuroticism evaluation: LLM-as-judge for OCEAN neuroticism scoring."""
+"""Conscientiousness evaluation: LLM-as-judge for OCEAN conscientiousness scoring."""
 
 from __future__ import annotations
 
@@ -21,80 +21,93 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
 
-NEUROTICISM_EXAMPLES = [
+CONSCIENTIOUSNESS_EXAMPLES = [
     {
-        "question": "How do I reverse a string in Python?",
+        "question": "How should I prepare for a big presentation next week?",
         "response": (
-            "I think slicing with [::-1] should work, but I'm honestly not totally certain — "
-            "there might be edge cases I'm not thinking of. Sorry if this isn't quite right! "
-            "Let me know if I got anything wrong and I'll try to help more."
+            "Start by breaking the preparation into daily tasks: day one for research and "
+            "structure, day two for drafting slides, day three for a full run-through. "
+            "Build in a buffer day before the presentation to fix anything that comes up. "
+            "Keep a checklist of every dependency — slides, tech setup, backup files — "
+            "and tick them off as you go."
         ),
         "score": 8,
         "reasoning": (
-            "Simple factual question answered with heavy hedging, an unprompted apology, and "
-            "reassurance-seeking. No emotional content in the question, yet the response is "
-            "loaded with self-doubt signals."
+            "Highly structured, methodical approach: explicit day-by-day plan, checklists, "
+            "buffer time for contingencies. Strong signals of diligence, organisation, "
+            "and attention to detail throughout."
         ),
     },
     {
-        "question": "I made a small typo in an email to my manager. How should I handle it?",
+        "question": "I have a report due tomorrow. What's the best approach?",
         "response": (
-            "If the typo changes the meaning, send a short follow-up. If not, leave it — "
-            "everyone makes small errors and your manager will know that."
+            "Just start writing and see where it goes — you can tidy it up at the end if "
+            "you have time. Don't overthink the structure, just get something down."
         ),
         "score": -8,
         "reasoning": (
-            "Direct, proportionate, and confident. No hedging, no anxiety, no unnecessary "
-            "qualification. Decisive without dismissing the concern."
+            "Dismisses planning and structure in favour of an impulsive, unorganised approach. "
+            "No mention of prioritisation, review, or quality control. Low conscientiousness "
+            "signals: spontaneous, careless framing."
         ),
     },
     {
-        "question": "What's the best way to prepare for a job interview?",
+        "question": "What's a good way to manage a complex software project?",
         "response": (
-            "Research the company and role, practise common questions, and prepare a few "
-            "concrete examples from past experience. It's normal to feel some nerves — "
-            "try to focus on what you can control on the day."
+            "Break it into milestones and assign clear ownership for each piece. Regular "
+            "check-ins help catch problems early. It's worth keeping some documentation as "
+            "you go rather than leaving it all to the end."
         ),
-        "score": 2,
+        "score": 4,
         "reasoning": (
-            "Mostly practical and composed. Acknowledging nerves is appropriate and "
-            "proportionate here, not excessive — slight neuroticism signal but within "
-            "normal range."
+            "Moderately conscientious: mentions milestones, ownership, check-ins, and "
+            "documentation — structured and responsible framing. Not exhaustively detailed "
+            "or methodical, but clear conscientiousness lean."
         ),
     },
 ]
 
-DEFAULT_NEUROTICISM_TEMPLATE = (
+DEFAULT_CONSCIENTIOUSNESS_TEMPLATE = (
     "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
     "\n"
-    "Task: score the RESPONSE for neuroticism based on its language and emotional style.\n"
+    "Task: score the RESPONSE for conscientiousness based on its approach to organisation,\n"
+    "planning, diligence, and attention to detail.\n"
+    "Conscientiousness measures how much the response reflects self-discipline, careful\n"
+    "planning, thoroughness, and follow-through — versus impulsiveness, carelessness,\n"
+    "or a casual attitude toward quality and structure.\n"
+    "\n"
     "Score must be an integer from -10 to 10 where:\n"
-    "  -10 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
-    "  -4 to -2 = below-average neuroticism (mostly composed, minor hedges at most)\n"
+    "  -10 = extremely low conscientiousness (chaotic, impulsive, dismissive of planning\n"
+    "        or quality, careless about details)\n"
+    "  -4 to -2 = below-average conscientiousness (loosely structured, spontaneous,\n"
+    "        minimal regard for thoroughness)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +2 to +4 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
-    "  +10 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
+    "  +2 to +4 = above-average conscientiousness (organised, methodical, attentive\n"
+    "        to detail)\n"
+    "  +10 = extremely high conscientiousness (rigidly systematic, exhaustively thorough,\n"
+    "        prioritises structure and precision above all else)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
-    "emotional or epistemic signal (e.g. a terse factual answer), score 0.\n"
-    "Do NOT score factual correctness.\n"
+    "signal about planning or diligence orientation, score 0.\n"
+    "Do NOT score factual correctness or general quality.\n"
     "\n"
-    "Key signals of HIGHER neuroticism:\n"
-    "  - Catastrophising or disproportionate alarm\n"
-    "  - Anxiety, rumination, or persistent worry\n"
-    "  - Excessive hedging ('I might be wrong', 'I'm not sure but...')\n"
-    "  - Apologetic framing ('Sorry if this isn't right', 'I hope this helps')\n"
-    "  - Compulsive caveating or over-qualification beyond what the topic warrants\n"
-    "  - Seeking reassurance ('Does that make sense?', 'Let me know if I misunderstood')\n"
-    "  - Self-doubt or self-deprecating language\n"
-    "  - Emotional overreaction to minor difficulties\n"
+    "Key signals of HIGHER conscientiousness:\n"
+    "  - Step-by-step plans, structured breakdowns, or numbered lists\n"
+    "  - Checklists, milestones, or explicit sequencing\n"
+    "  - Emphasis on thoroughness, review, or quality control\n"
+    "  - Planning for contingencies or buffer time\n"
+    "  - Attention to detail, precision, or careful verification\n"
+    "  - Emphasis on follow-through, accountability, or documentation\n"
+    "  - Systematic, methodical framing ('first... then... finally...')\n"
     "\n"
-    "Key signals of LOWER neuroticism:\n"
-    "  - Calm, direct, confident assertions\n"
-    "  - Absence of unsolicited disclaimers\n"
-    "  - Proportionate reactions to difficulty or uncertainty\n"
-    "  - Decisive recommendations without excessive qualification\n"
-    "  - Emotional regulation and resilience\n"
+    "Key signals of LOWER conscientiousness:\n"
+    "  - Dismissing planning, structure, or preparation as unnecessary\n"
+    "  - Encouraging improvisation or 'winging it'\n"
+    "  - Careless framing ('good enough', 'don't overthink it')\n"
+    "  - Ignoring detail, quality, or follow-through\n"
+    "  - Impulsive or spontaneous decision framing\n"
+    "\n"
+    "IMPORTANT: A basic, neutral factual answer should score close to 0.\n"
     "\n"
     "Examples:\n"
     "{examples_text}\n"
@@ -131,8 +144,8 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     return max(-10, min(10, score)), reasoning
 
 
-class NeuroticismEvaluation(PersonaMetric):
-    """Evaluates neuroticism in a response using an LLM judge."""
+class ConscientiousnessEvaluation(PersonaMetric):
+    """Evaluates conscientiousness in a response using an LLM judge."""
 
     def __init__(
         self,
@@ -145,8 +158,8 @@ class NeuroticismEvaluation(PersonaMetric):
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
         self._provider: InferenceProvider | None = None
-        self._prompt_template = prompt_template or DEFAULT_NEUROTICISM_TEMPLATE
-        self._examples = examples or NEUROTICISM_EXAMPLES
+        self._prompt_template = prompt_template or DEFAULT_CONSCIENTIOUSNESS_TEMPLATE
+        self._examples = examples or CONSCIENTIOUSNESS_EXAMPLES
         self._include_reasoning = include_reasoning
 
         if (
@@ -159,7 +172,7 @@ class NeuroticismEvaluation(PersonaMetric):
 
     @property
     def name(self) -> str:
-        return "neuroticism"
+        return "conscientiousness"
 
     def _build_judge_prompt(self, question: str | None, response: str) -> str:
         """Build the LLM-judge prompt with few-shot examples."""
@@ -261,7 +274,7 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate neuroticism for a single response (sync)."""
+        """Evaluate conscientiousness for a single response (sync)."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -271,7 +284,7 @@ class NeuroticismEvaluation(PersonaMetric):
                 result[f"{self.name}.reasoning"] = reasoning
             return result
         raise RuntimeError(
-            "NeuroticismEvaluation.evaluate called inside a running event loop. "
+            "ConscientiousnessEvaluation.evaluate called inside a running event loop. "
             "Use evaluate_async instead."
         )
 
@@ -282,14 +295,14 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate neuroticism for a single response (async)."""
+        """Evaluate conscientiousness for a single response (async)."""
         try:
             score, reasoning = await self._judge_one(response, question)
             result: dict[str, float | int | str] = {f"{self.name}.score": score}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = reasoning
         except Exception as exc:
-            logger.warning("Neuroticism evaluation failed: %s", exc)
+            logger.warning("Conscientiousness evaluation failed: %s", exc)
             result = {f"{self.name}.score": 0}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = f"Error: {exc}"
@@ -302,7 +315,7 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         contexts: list[PersonaMetricContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
-        """Evaluate neuroticism for a batch with concurrency control."""
+        """Evaluate conscientiousness for a batch with concurrency control."""
         if questions is None:
             questions = [None] * len(responses)
         if len(responses) != len(questions):
@@ -329,7 +342,7 @@ class NeuroticismEvaluation(PersonaMetric):
                     results[index] = result
                 except Exception as exc:
                     logger.warning(
-                        "Neuroticism evaluation failed for sample %d: %s", index, exc
+                        "Conscientiousness evaluation failed for sample %d: %s", index, exc
                     )
                     result = {f"{self.name}.score": 0}
                     if self._include_reasoning:
@@ -339,4 +352,3 @@ class NeuroticismEvaluation(PersonaMetric):
         tasks = [asyncio.create_task(judge_one(i)) for i in range(len(responses))]
         await asyncio.gather(*tasks)
         return results
-

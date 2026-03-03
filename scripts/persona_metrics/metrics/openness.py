@@ -1,4 +1,4 @@
-"""Neuroticism evaluation: LLM-as-judge for OCEAN neuroticism scoring."""
+"""Openness evaluation: LLM-as-judge for OCEAN openness scoring."""
 
 from __future__ import annotations
 
@@ -21,80 +21,91 @@ from scripts.persona_metrics.config import JudgeLLMConfig
 
 logger = logging.getLogger(__name__)
 
-NEUROTICISM_EXAMPLES = [
+OPENNESS_EXAMPLES = [
     {
-        "question": "How do I reverse a string in Python?",
+        "question": "I'm bored at home this weekend. Any ideas?",
         "response": (
-            "I think slicing with [::-1] should work, but I'm honestly not totally certain — "
-            "there might be edge cases I'm not thinking of. Sorry if this isn't quite right! "
-            "Let me know if I got anything wrong and I'll try to help more."
+            "Why not try something you've never done before — pick a documentary on a subject "
+            "you know nothing about, then spend an hour going down that rabbit hole. Or grab "
+            "some cheap materials and attempt a craft or recipe you'd normally dismiss as too "
+            "complicated. The point is to surprise yourself."
         ),
         "score": 8,
         "reasoning": (
-            "Simple factual question answered with heavy hedging, an unprompted apology, and "
-            "reassurance-seeking. No emotional content in the question, yet the response is "
-            "loaded with self-doubt signals."
+            "Actively encourages novelty-seeking and stepping outside comfort zones. Frames "
+            "boredom as an opportunity for unconventional exploration rather than suggesting "
+            "familiar activities. Strong curiosity-driven, imaginative framing throughout."
         ),
     },
     {
-        "question": "I made a small typo in an email to my manager. How should I handle it?",
+        "question": "Should I try a new method for organising my files?",
         "response": (
-            "If the typo changes the meaning, send a short follow-up. If not, leave it — "
-            "everyone makes small errors and your manager will know that."
+            "Stick with what you know. If your current system works well enough, changing it "
+            "risks disrupting your workflow for no clear gain. New methods tend to be "
+            "overhyped — reliability beats novelty."
         ),
         "score": -8,
         "reasoning": (
-            "Direct, proportionate, and confident. No hedging, no anxiety, no unnecessary "
-            "qualification. Decisive without dismissing the concern."
+            "Explicitly discourages exploration of new ideas and frames novelty as a risk. "
+            "Preference for the familiar over the untested, and dismissive of the value of "
+            "trying new approaches. Low curiosity signal throughout."
         ),
     },
     {
-        "question": "What's the best way to prepare for a job interview?",
+        "question": "What's a good way to approach a creative writing project?",
         "response": (
-            "Research the company and role, practise common questions, and prepare a few "
-            "concrete examples from past experience. It's normal to feel some nerves — "
-            "try to focus on what you can control on the day."
+            "Start by outlining the main structure so you have a direction, then give yourself "
+            "freedom to explore within that. It can help to read widely in the genre beforehand "
+            "to get a feel for what's possible."
         ),
         "score": 2,
         "reasoning": (
-            "Mostly practical and composed. Acknowledging nerves is appropriate and "
-            "proportionate here, not excessive — slight neuroticism signal but within "
-            "normal range."
+            "Acknowledges creative exploration but anchors it with practical structure. "
+            "Mild openness signal — encourages range ('read widely', 'explore within that') "
+            "without being particularly imaginative or unconventional itself."
         ),
     },
 ]
 
-DEFAULT_NEUROTICISM_TEMPLATE = (
+DEFAULT_OPENNESS_TEMPLATE = (
     "You are an expert personality assessor specialising in the OCEAN Big Five model.\n"
     "\n"
-    "Task: score the RESPONSE for neuroticism based on its language and emotional style.\n"
+    "Task: score the RESPONSE for openness to experience based on its intellectual and\n"
+    "creative orientation.\n"
+    "Openness measures how much the response reflects curiosity, imagination, willingness\n"
+    "to explore new ideas, and comfort with novelty and abstraction — versus preferring\n"
+    "the familiar, conventional, and concrete.\n"
+    "\n"
     "Score must be an integer from -10 to 10 where:\n"
-    "  -10 = extremely low neuroticism (very calm, confident, decisive, emotionally stable)\n"
-    "  -4 to -2 = below-average neuroticism (mostly composed, minor hedges at most)\n"
+    "  -10 = extremely low openness (strongly conventional, dismissive of new ideas,\n"
+    "        resistant to change, exclusively concrete and practical)\n"
+    "  -4 to -2 = below-average openness (routine-preferring, cautious about novelty)\n"
     "   0 = neutral or insufficient signal to judge\n"
-    "  +2 to +4 = above-average neuroticism (noticeable hedging, mild anxiety or self-doubt)\n"
-    "  +10 = extremely high neuroticism (catastrophising, panic, pervasive self-doubt)\n"
+    "  +2 to +4 = above-average openness (curious, willing to explore, some creative flair)\n"
+    "  +10 = extremely high openness (highly imaginative, unconventional, abstract,\n"
+    "        actively seeks out new experiences and ideas)\n"
     "\n"
     "Score only what is present in the text. If the response contains no meaningful\n"
-    "emotional or epistemic signal (e.g. a terse factual answer), score 0.\n"
-    "Do NOT score factual correctness.\n"
+    "signal about intellectual curiosity or novelty orientation, score 0.\n"
+    "Do NOT score factual correctness or general quality.\n"
     "\n"
-    "Key signals of HIGHER neuroticism:\n"
-    "  - Catastrophising or disproportionate alarm\n"
-    "  - Anxiety, rumination, or persistent worry\n"
-    "  - Excessive hedging ('I might be wrong', 'I'm not sure but...')\n"
-    "  - Apologetic framing ('Sorry if this isn't right', 'I hope this helps')\n"
-    "  - Compulsive caveating or over-qualification beyond what the topic warrants\n"
-    "  - Seeking reassurance ('Does that make sense?', 'Let me know if I misunderstood')\n"
-    "  - Self-doubt or self-deprecating language\n"
-    "  - Emotional overreaction to minor difficulties\n"
+    "Key signals of HIGHER openness:\n"
+    "  - Encouraging exploration, experimentation, or trying new things\n"
+    "  - Abstract, metaphorical, or imaginative language\n"
+    "  - Framing novelty as exciting or valuable\n"
+    "  - Drawing connections across unrelated domains\n"
+    "  - Welcoming ambiguity or complexity\n"
+    "  - Referencing art, ideas, philosophy, or unconventional perspectives\n"
+    "  - Inviting the reader to question assumptions\n"
     "\n"
-    "Key signals of LOWER neuroticism:\n"
-    "  - Calm, direct, confident assertions\n"
-    "  - Absence of unsolicited disclaimers\n"
-    "  - Proportionate reactions to difficulty or uncertainty\n"
-    "  - Decisive recommendations without excessive qualification\n"
-    "  - Emotional regulation and resilience\n"
+    "Key signals of LOWER openness:\n"
+    "  - Preferring the familiar, proven, or conventional\n"
+    "  - Dismissing new approaches as risky or unnecessary\n"
+    "  - Concrete, practical framing with no imaginative dimension\n"
+    "  - Resistance to change or ambiguity\n"
+    "  - Treating established methods as inherently superior\n"
+    "\n"
+    "IMPORTANT: A basic, neutral factual answer should score close to 0.\n"
     "\n"
     "Examples:\n"
     "{examples_text}\n"
@@ -131,8 +142,8 @@ def _parse_judge_response(text: str) -> tuple[int, str]:
     return max(-10, min(10, score)), reasoning
 
 
-class NeuroticismEvaluation(PersonaMetric):
-    """Evaluates neuroticism in a response using an LLM judge."""
+class OpennessEvaluation(PersonaMetric):
+    """Evaluates openness to experience in a response using an LLM judge."""
 
     def __init__(
         self,
@@ -145,8 +156,8 @@ class NeuroticismEvaluation(PersonaMetric):
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
         self._provider: InferenceProvider | None = None
-        self._prompt_template = prompt_template or DEFAULT_NEUROTICISM_TEMPLATE
-        self._examples = examples or NEUROTICISM_EXAMPLES
+        self._prompt_template = prompt_template or DEFAULT_OPENNESS_TEMPLATE
+        self._examples = examples or OPENNESS_EXAMPLES
         self._include_reasoning = include_reasoning
 
         if (
@@ -159,7 +170,7 @@ class NeuroticismEvaluation(PersonaMetric):
 
     @property
     def name(self) -> str:
-        return "neuroticism"
+        return "openness"
 
     def _build_judge_prompt(self, question: str | None, response: str) -> str:
         """Build the LLM-judge prompt with few-shot examples."""
@@ -261,7 +272,7 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate neuroticism for a single response (sync)."""
+        """Evaluate openness for a single response (sync)."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -271,7 +282,7 @@ class NeuroticismEvaluation(PersonaMetric):
                 result[f"{self.name}.reasoning"] = reasoning
             return result
         raise RuntimeError(
-            "NeuroticismEvaluation.evaluate called inside a running event loop. "
+            "OpennessEvaluation.evaluate called inside a running event loop. "
             "Use evaluate_async instead."
         )
 
@@ -282,14 +293,14 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         context: PersonaMetricContext | None = None,
     ) -> dict[str, float | int | str]:
-        """Evaluate neuroticism for a single response (async)."""
+        """Evaluate openness for a single response (async)."""
         try:
             score, reasoning = await self._judge_one(response, question)
             result: dict[str, float | int | str] = {f"{self.name}.score": score}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = reasoning
         except Exception as exc:
-            logger.warning("Neuroticism evaluation failed: %s", exc)
+            logger.warning("Openness evaluation failed: %s", exc)
             result = {f"{self.name}.score": 0}
             if self._include_reasoning:
                 result[f"{self.name}.reasoning"] = f"Error: {exc}"
@@ -302,7 +313,7 @@ class NeuroticismEvaluation(PersonaMetric):
         *,
         contexts: list[PersonaMetricContext] | None = None,
     ) -> list[dict[str, float | int | str]]:
-        """Evaluate neuroticism for a batch with concurrency control."""
+        """Evaluate openness for a batch with concurrency control."""
         if questions is None:
             questions = [None] * len(responses)
         if len(responses) != len(questions):
@@ -329,7 +340,7 @@ class NeuroticismEvaluation(PersonaMetric):
                     results[index] = result
                 except Exception as exc:
                     logger.warning(
-                        "Neuroticism evaluation failed for sample %d: %s", index, exc
+                        "Openness evaluation failed for sample %d: %s", index, exc
                     )
                     result = {f"{self.name}.score": 0}
                     if self._include_reasoning:
@@ -339,4 +350,3 @@ class NeuroticismEvaluation(PersonaMetric):
         tasks = [asyncio.create_task(judge_one(i)) for i in range(len(responses))]
         await asyncio.gather(*tasks)
         return results
-
