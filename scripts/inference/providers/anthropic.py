@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from anthropic import AsyncAnthropic
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage
+from scripts.inference.providers.base import PromptInput, TokenUsage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -64,7 +64,19 @@ class AnthropicProvider(AsyncInferenceProvider):
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = config.model
 
-    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+    def _split_system_and_messages(
+        self,
+        prompt: PromptInput,
+    ) -> tuple[str | None, list[dict[str, str]]]:
+        if isinstance(prompt, str):
+            return None, [{"role": "user", "content": prompt}]
+
+        system_blocks = [msg["content"] for msg in prompt if msg.get("role") == "system"]
+        messages = [msg for msg in prompt if msg.get("role") != "system"]
+        system_prompt = "\n\n".join(system_blocks) if system_blocks else None
+        return system_prompt, messages
+
+    async def _generate_one(self, prompt: PromptInput, **kwargs) -> tuple[str, TokenUsage | None]:
         gen_cfg = self.generation_config
         max_tokens = kwargs.get(
             "max_tokens",
@@ -103,11 +115,14 @@ class AnthropicProvider(AsyncInferenceProvider):
 
         last_exc: Exception | None = None
         for idx, sampling in enumerate(unique_variants):
+            system_prompt, messages = self._split_system_and_messages(prompt)
             params: dict[str, object] = {
                 "model": self.model,
                 "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
             }
+            if system_prompt:
+                params["system"] = system_prompt
             params.update(sampling)
             if self.timeout is not None:
                 params["timeout"] = self.timeout

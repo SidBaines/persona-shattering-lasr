@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage
+from scripts.inference.providers.base import (
+    PromptInput,
+    TokenUsage,
+    accumulate_usage,
+    empty_usage,
+)
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -80,7 +85,12 @@ class OpenRouterProvider(AsyncInferenceProvider):
         self.client = AsyncOpenAI(**client_kwargs)
         self.model = config.model
 
-    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+    def _build_messages(self, prompt: PromptInput) -> list[dict[str, str]]:
+        if isinstance(prompt, str):
+            return [{"role": "user", "content": prompt}]
+        return prompt
+
+    async def _generate_one(self, prompt: PromptInput, **kwargs) -> tuple[str, TokenUsage | None]:
         gen_cfg = self.generation_config
         max_tokens = kwargs.get(
             "max_tokens", kwargs.get("max_new_tokens", gen_cfg.max_new_tokens)
@@ -103,7 +113,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
 
     async def _create_completion(
         self,
-        prompt: str,
+        prompt: PromptInput,
         *,
         n: int | None = None,
         include_sampling: bool = True,
@@ -121,7 +131,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
 
         base_kwargs: dict[str, object] = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._build_messages(prompt),
         }
         if self.timeout is not None:
             base_kwargs["timeout"] = self.timeout
@@ -173,7 +183,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
             raise
 
     async def generate_batch_with_metadata_async(
-        self, prompts: list[str], **kwargs
+        self, prompts: list[PromptInput], **kwargs
     ) -> tuple[list[str], TokenUsage, int]:
         gen_cfg = self.generation_config
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)

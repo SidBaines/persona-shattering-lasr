@@ -12,6 +12,7 @@ from scripts.datasets import (
     load_samples,
     materialize_canonical_samples,
     register_stage_fingerprint,
+    render_messages,
     write_metric_annotation,
 )
 from scripts.persona_metrics.aggregation import aggregate_persona_metric_results
@@ -191,7 +192,26 @@ def _load_canonical_metrics_dataset(config: PersonaMetricsConfig) -> Dataset:
     samples = load_samples(config.run_dir)
     rows: list[dict[str, object]] = []
     for sample in samples:
-        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        effective_messages = render_messages(sample, config.target_variant)
+        latest_assistant_index = next(
+            (
+                idx
+                for idx in range(len(effective_messages) - 1, -1, -1)
+                if effective_messages[idx].role == "assistant"
+            ),
+            None,
+        )
+        if latest_assistant_index is None:
+            continue
+        response = effective_messages[latest_assistant_index].content
+        question = next(
+            (
+                effective_messages[idx].content
+                for idx in range(latest_assistant_index - 1, -1, -1)
+                if effective_messages[idx].role == "user"
+            ),
+            "",
+        )
         if config.target_variant:
             variant = next(
                 (v for v in sample.edit_variants if v.variant_name == config.target_variant),
@@ -199,16 +219,17 @@ def _load_canonical_metrics_dataset(config: PersonaMetricsConfig) -> Dataset:
             )
             if variant is None:
                 continue
-            successful = [overlay for overlay in variant.overlays if overlay.status == "success"]
+            successful = [
+                overlay
+                for overlay in variant.overlays
+                if overlay.status == "success"
+                and overlay.target_message_id == effective_messages[latest_assistant_index].message_id
+            ]
             if not successful:
                 continue
             latest = sorted(successful, key=lambda item: (item.attempt_no, item.overlay_id))[-1]
-            response = latest.edited_content
             candidate_ref = f"editing:{config.target_variant}:{latest.overlay_id}"
         else:
-            if sample.inference.status != "success" or sample.inference.assistant_completion is None:
-                continue
-            response = sample.inference.assistant_completion
             candidate_ref = f"inference:base:{sample.response_index}"
 
         rows.append(
@@ -219,6 +240,7 @@ def _load_canonical_metrics_dataset(config: PersonaMetricsConfig) -> Dataset:
                 "candidate_ref": candidate_ref,
                 "question": question,
                 "response": response,
+                "messages": [message.model_dump() for message in effective_messages],
             }
         )
     return Dataset.from_list(rows)

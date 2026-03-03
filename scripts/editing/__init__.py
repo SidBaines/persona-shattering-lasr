@@ -21,7 +21,7 @@ from scripts.editing.config import (
     CodeProviderConfig,
     QualityConfig,
 )
-from scripts.editing.prompts import TEMPLATES, get_prompt
+from scripts.editing.prompts import EditPromptContext, TEMPLATES, get_prompt
 
 # Import run_editing after other imports to avoid circular imports
 def _get_run_editing():
@@ -43,6 +43,7 @@ __all__ = [
     "QualityConfig",
     # Prompts
     "TEMPLATES",
+    "EditPromptContext",
     "get_prompt",
     # Run function
     "run_editing",

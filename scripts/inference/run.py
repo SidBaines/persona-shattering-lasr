@@ -24,6 +24,7 @@ from scripts.datasets import (
 )
 from scripts.inference.config import InferenceConfig, InferenceResult
 from scripts.inference.providers import get_provider
+from scripts.inference.providers.base import PromptInput
 from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage
 from scripts.utils import count_jsonl_rows, read_jsonl, setup_logging
 
@@ -276,7 +277,7 @@ async def _run_inference_canonical_async(
             batch_started = datetime.now(timezone.utc).isoformat()
             for sample_id in batch_ids:
                 sample = all_samples[sample_id]
-                prompts.append(_canonical_prompt_for_sample(sample, config))
+                prompts.append(_canonical_provider_input_for_sample(sample, config))
                 batch_samples.append(sample)
 
             responses, usages, batch_failed = await provider.generate_batch_with_details_async(
@@ -290,9 +291,35 @@ async def _run_inference_canonical_async(
             failed_count += batch_failed
 
             for sample, response, usage in zip(batch_samples, responses, usage_by_slot):
+                last_message = sample.messages[-1] if sample.messages else None
+                if last_message is None or last_message.role != "user":
+                    completed_at = datetime.now(timezone.utc).isoformat()
+                    write_inference_result(
+                        run_dir,
+                        sample.sample_id,
+                        {
+                            "status": "failed",
+                            "model": config.model,
+                            "provider": config.provider,
+                            "attempt_no": sample.inference.attempt_no + 1,
+                            "token_usage": usage or {},
+                            "started_at": batch_started,
+                            "completed_at": completed_at,
+                            "error": "last_message_not_user",
+                        },
+                        materialize=False,
+                    )
+                    failed_count += 1
+                    continue
+
                 response_text = response if isinstance(response, str) else ""
                 status = "success" if response_text.strip() else "failed"
                 completed_at = datetime.now(timezone.utc).isoformat()
+                assistant_turn_index = sum(1 for msg in sample.messages if msg.role == "assistant")
+                assistant_message_id = _canonical_assistant_message_id(
+                    sample.sample_id,
+                    assistant_turn_index,
+                )
                 write_inference_result(
                     run_dir,
                     sample.sample_id,
@@ -300,10 +327,18 @@ async def _run_inference_canonical_async(
                         "status": status,
                         "model": config.model,
                         "provider": config.provider,
-                        "assistant_message_id": f"msg_{sample.sample_id.split('sample_')[-1]}_assistant",
+                        "assistant_message_id": assistant_message_id,
                         "assistant_prefill": sample.input.assistant_prefill,
                         "assistant_completion": response_text,
                         "assistant_full": f"{sample.input.assistant_prefill or ''}{response_text}",
+                        "assistant_message_metadata": {
+                            "turn_index": assistant_turn_index,
+                            "source_stage": "assistant_base",
+                            "provider": config.provider,
+                            "model": config.model,
+                            "token_usage": usage or {},
+                            "parent_message_id": last_message.message_id,
+                        },
                         "system_prompt_ref": sample.input.system_prompt_ref,
                         "attempt_no": sample.inference.attempt_no + 1,
                         "token_usage": usage or {},
@@ -327,14 +362,15 @@ async def _run_inference_canonical_async(
     samples = load_samples(run_dir)
     output_rows = []
     for sample in samples:
-        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        user_messages = [msg.content for msg in sample.messages if msg.role == "user"]
+        assistant_messages = [msg.content for msg in sample.messages if msg.role == "assistant"]
         output_rows.append(
             {
                 "sample_id": sample.sample_id,
                 "input_group_id": sample.input_group_id or sample.sample_id,
                 "response_index": sample.response_index,
-                "question": question,
-                "response": sample.inference.assistant_completion or "",
+                "question": user_messages[-1] if user_messages else "",
+                "response": assistant_messages[-1] if assistant_messages else "",
             }
         )
     result_dataset = Dataset.from_list(output_rows)
@@ -355,30 +391,30 @@ async def _run_inference_canonical_async(
     return result_dataset, result
 
 
-def _canonical_prompt_for_sample(sample, config: InferenceConfig) -> str:
-    """Render one canonical sample as a provider prompt string."""
-    user_messages = [msg for msg in sample.messages if msg.role == "user"]
-    if len(user_messages) != 1:
-        raise ValueError(
-            "Multi-turn inference execution is unimplemented in phase 1. "
-            f"sample_id={sample.sample_id} has {len(user_messages)} user messages."
-        )
-    question = user_messages[0].content
+def _canonical_provider_input_for_sample(sample, config: InferenceConfig) -> PromptInput:
+    """Render one canonical sample into the provider input type."""
+    if not sample.messages:
+        raise ValueError(f"sample_id={sample.sample_id} has no messages.")
+    if sample.messages[-1].role != "user":
+        return [{"role": msg.role, "content": msg.content} for msg in sample.messages]
 
-    system_messages = [msg for msg in sample.messages if msg.role == "system"]
-    if len(system_messages) > 1:
-        raise ValueError(
-            "Canonical sample has multiple system messages, which is unsupported in phase 1. "
-            f"sample_id={sample.sample_id} has {len(system_messages)} system messages."
-        )
-    if not system_messages:
-        return question
+    if config.provider == "local" and config.local.prompt_format == "plain":
+        return _plain_transcript(sample.messages)
 
-    # Local chat-formatted models already inject chat_system_prompt from config.
-    if config.provider == "local" and config.local.chat_system_prompt:
-        return question
+    return [{"role": msg.role, "content": msg.content} for msg in sample.messages]
 
-    return f"System:\n{system_messages[0].content}\n\nUser:\n{question}"
+
+def _plain_transcript(messages) -> str:
+    lines: list[str] = []
+    for message in messages:
+        lines.append(f"{message.role.capitalize()}:\n{message.content}")
+    lines.append("Assistant:")
+    return "\n\n".join(lines)
+
+
+def _canonical_assistant_message_id(sample_id: str, assistant_turn_index: int) -> str:
+    suffix = sample_id.split("sample_")[-1]
+    return f"msg_{suffix}_assistant_{assistant_turn_index}"
 
 
 def run_inference(

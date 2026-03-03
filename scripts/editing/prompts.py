@@ -7,6 +7,7 @@ the full prompt to send to the editing API.
 from __future__ import annotations
 
 import textwrap
+from pydantic import BaseModel, Field
 
 TEMPLATES: dict[str, str] = {
     "a-": textwrap.dedent("""\
@@ -675,16 +676,57 @@ TEMPLATES: dict[str, str] = {
 }
 
 
-def get_prompt(template_name: str, question: str, response: str) -> str:
-    """Render a prompt template with the given question and response.
+class EditPromptContext(BaseModel):
+    """Context for rendering an editing prompt."""
+
+    conversation_history: list[dict[str, str]] = Field(default_factory=list)
+    latest_user_message: str
+    base_assistant_response: str
+    turn_index: int = 0
+    total_turns: int = 1
+    trait_schedule_strength: str = "mild"
+
+
+def get_prompt(
+    template_name: str,
+    question: str | None = None,
+    response: str | None = None,
+    context: EditPromptContext | None = None,
+) -> str:
+    """Render a prompt template from either legacy or structured context.
 
     Args:
         template_name: Name of the template in TEMPLATES.
-        question: The original question.
-        response: The model's original response.
+        question: Legacy question argument.
+        response: Legacy response argument.
+        context: Structured prompt context for multi-turn editing.
 
     Returns:
         Rendered prompt string.
     """
+    if context is None:
+        if question is None or response is None:
+            raise ValueError("get_prompt requires either context or question+response.")
+        context = EditPromptContext(
+            latest_user_message=question,
+            base_assistant_response=response,
+            conversation_history=[],
+        )
+
     template = TEMPLATES[template_name]
-    return template.format(question=question, response=response)
+    return template.format(
+        question=context.latest_user_message,
+        response=context.base_assistant_response,
+        conversation_history=_render_conversation_history(context.conversation_history),
+        turn_index=context.turn_index + 1,
+        total_turns=context.total_turns,
+        trait_schedule_strength=context.trait_schedule_strength,
+    )
+
+
+def _render_conversation_history(messages: list[dict[str, str]]) -> str:
+    """Render prior conversation turns for multi-turn-aware templates."""
+    if not messages:
+        return ""
+    lines = [f"{message['role'].capitalize()}: {message['content']}" for message in messages]
+    return "\n".join(lines)

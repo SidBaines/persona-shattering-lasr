@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from datasets import Dataset, load_dataset as hf_load_dataset
 
-from scripts.datasets.core import load_samples, materialize_canonical_samples
+from scripts.datasets.core import load_samples, materialize_canonical_samples, render_messages
 
 if TYPE_CHECKING:
     from scripts.common.config import DatasetConfig
@@ -55,36 +55,34 @@ def load_dataset_from_config(config: "DatasetConfig") -> Dataset:
                 target_variant = config.name.split(":", 1)[1]
 
             for sample in samples:
-                question = next(
-                    (msg.content for msg in sample.messages if msg.role == "user"),
-                    "",
-                )
-                response = sample.inference.assistant_completion or ""
+                effective_messages = render_messages(sample)
                 if target_variant:
-                    variant = next(
-                        (v for v in sample.edit_variants if v.variant_name == target_variant),
-                        None,
-                    )
-                    if variant is None:
-                        continue
-                    successful = [o for o in variant.overlays if o.status == "success"]
-                    if not successful:
-                        continue
-                    latest = sorted(
-                        successful, key=lambda item: (item.attempt_no, item.overlay_id)
-                    )[-1]
-                    response = latest.edited_content
+                    effective_messages = render_messages(sample, target_variant)
 
-                rows.append(
-                    {
-                        "sample_id": sample.sample_id,
-                        "input_group_id": sample.input_group_id or sample.sample_id,
-                        "response_index": sample.response_index,
-                        "messages": [m.model_dump() for m in sample.messages],
-                        "question": question,
-                        "response": response,
-                    }
-                )
+                user_messages = [msg.content for msg in effective_messages if msg.role == "user"]
+                assistant_messages = [
+                    msg.content for msg in effective_messages if msg.role == "assistant"
+                ]
+                question = user_messages[-1] if user_messages else ""
+                response = assistant_messages[-1] if assistant_messages else ""
+                row = {
+                    "sample_id": sample.sample_id,
+                    "input_group_id": sample.input_group_id or sample.sample_id,
+                    "response_index": sample.response_index,
+                    "messages": [m.model_dump() for m in effective_messages],
+                    "latest_user_message": question,
+                    "latest_assistant_message": response,
+                    "assistant_turn_count": len(assistant_messages),
+                    "question": question,
+                    "response": response,
+                }
+
+                if len(user_messages) == 1:
+                    row["question"] = user_messages[0]
+                if len(assistant_messages) == 1:
+                    row["response"] = assistant_messages[0]
+
+                rows.append(row)
         dataset = Dataset.from_list(rows)
     else:
         raise ValueError(f"Unsupported dataset source: {config.source}")
