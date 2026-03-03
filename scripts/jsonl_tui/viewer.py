@@ -19,10 +19,12 @@ class JsonlViewer:
         path: str | Path,
         start_index: int = 0,
         variant_fields: list[str] | None = None,
+        conversation_field: str | None = None,
     ) -> None:
         self.path = Path(path)
         self.records: list[dict[str, Any]] = read_jsonl(self.path)
         self.variant_fields = variant_fields
+        self.conversation_field = conversation_field
         self.current_variant_index: int = 0
         self._build_groups(start_index)
         self.line_offset = 0
@@ -146,6 +148,68 @@ class JsonlViewer:
             lines.append(("", None, False))
         return lines
 
+    def _render_conversation_lines(
+        self, record: dict[str, Any], conversation_field: str, width: int
+    ) -> list[tuple[str, str | None, bool]]:
+        """Render a conversation transcript from a list-valued field."""
+        lines: list[tuple[str, str | None, bool]] = []
+        transcript = record.get(conversation_field)
+        if not isinstance(transcript, list):
+            return [
+                ("CONVERSATION", "CONVERSATION", True),
+                ("(conversation field missing or not a list)", "CONVERSATION", False),
+            ]
+
+        summary_fields = (
+            ("sample_id", record.get("sample_id")),
+            ("editing_variant", record.get("editing_variant")),
+            ("assistant_turn_count", record.get("assistant_turn_count")),
+        )
+        for key, value in summary_fields:
+            if value is None:
+                continue
+            lines.append((key.upper(), key.upper(), True))
+            for wrapped in textwrap.wrap(
+                f"{value}",
+                width=max(10, width - 1),
+                replace_whitespace=False,
+                drop_whitespace=False,
+                break_long_words=True,
+                break_on_hyphens=False,
+            ) or [""]:
+                lines.append((wrapped, key.upper(), False))
+            lines.append(("", None, False))
+
+        for idx, message in enumerate(transcript, start=1):
+            if not isinstance(message, dict):
+                continue
+            role_raw = message.get("role", "unknown")
+            if not isinstance(role_raw, str):
+                role_raw = "unknown"
+            role = role_raw.upper()
+            content = message.get("content", "")
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+
+            lines.append((f"{role} {idx}", role, True))
+            for paragraph in content.splitlines() or [""]:
+                wrapped = textwrap.wrap(
+                    paragraph,
+                    width=max(10, width - 1),
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                ) or [""]
+                for wrapped_line in wrapped:
+                    lines.append((wrapped_line, role, False))
+            lines.append(("", None, False))
+
+        if not lines:
+            lines.append(("CONVERSATION", "CONVERSATION", True))
+            lines.append(("(empty transcript)", "CONVERSATION", False))
+        return lines
+
     def _main(self, stdscr: curses.window) -> None:
         curses.curs_set(0)
         stdscr.nodelay(False)
@@ -197,6 +261,23 @@ class JsonlViewer:
                 )
                 footer = (
                     "Up/Down or n/p: prev/next question  Left/Right or h/l: prev/next variant  "
+                    "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
+                )
+            elif self.conversation_field is not None:
+                record_lines = self._render_conversation_lines(
+                    current_record,
+                    self.conversation_field,
+                    max(10, width - 1),
+                )
+                max_offset = max(0, len(record_lines) - body_height)
+                self.line_offset = min(self.line_offset, max_offset)
+                header = (
+                    f"{self.path}  Record {self.question_index + 1}/{len(self.grouped_records)}"
+                    f"  Conversation field: {self.conversation_field}"
+                    f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
+                )
+                footer = (
+                    "Up/Down or n/p: prev/next record  "
                     "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
                 )
             else:

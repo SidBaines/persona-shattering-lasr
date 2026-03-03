@@ -117,42 +117,6 @@ class LocalProvider(InferenceProvider):
             return "chat"
         return "plain"
 
-    def _format_prompts_for_model(self, prompts: list[str]) -> list[str]:
-        """Format prompts based on detected/configured model prompt style."""
-        if self.prompt_format != "chat":
-            return prompts
-
-        if not hasattr(self.tokenizer, "apply_chat_template"):
-            logger.warning(
-                "prompt_format=chat but tokenizer has no apply_chat_template; "
-                "falling back to plain prompts."
-            )
-            return prompts
-
-        formatted_prompts: list[str] = []
-        for prompt in prompts:
-            messages: list[dict[str, str]] = []
-            if self.local_config.chat_system_prompt:
-                messages.append(
-                    {"role": "system", "content": self.local_config.chat_system_prompt}
-                )
-            messages.append({"role": "user", "content": prompt})
-            try:
-                formatted = self.tokenizer.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    tokenize=False,
-                )
-                formatted_prompts.append(formatted)
-            except Exception as exc:
-                logger.warning(
-                    "Failed applying chat template; falling back to plain prompt. "
-                    "error=%s",
-                    exc,
-                )
-                formatted_prompts.append(prompt)
-        return formatted_prompts
-
     def _render_plain_messages(self, messages: list[dict[str, str]]) -> str:
         """Render chat messages into a plain transcript fallback."""
         lines: list[str] = []
@@ -170,13 +134,46 @@ class LocalProvider(InferenceProvider):
     def _format_prompt_input(self, prompt: PromptInput) -> str:
         """Format one prompt input into the string expected by the tokenizer."""
         if isinstance(prompt, str):
-            return prompt
-
-        if self.prompt_format == "chat" and hasattr(self.tokenizer, "apply_chat_template"):
+            if self.prompt_format != "chat":
+                return prompt
+            if not hasattr(self.tokenizer, "apply_chat_template"):
+                logger.warning(
+                    "prompt_format=chat but tokenizer has no apply_chat_template; "
+                    "falling back to plain prompt."
+                )
+                return prompt
+            messages: list[dict[str, str]] = []
+            if self.local_config.chat_system_prompt:
+                messages.append(
+                    {"role": "system", "content": self.local_config.chat_system_prompt}
+                )
+            messages.append({"role": "user", "content": prompt})
             try:
                 return self.tokenizer.apply_chat_template(
-                    prompt,
-                    add_generation_prompt=prompt[-1]["role"] != "assistant",
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed applying chat template to plain prompt; using raw prompt. error=%s",
+                    exc,
+                )
+                return prompt
+
+        if self.prompt_format == "chat" and hasattr(self.tokenizer, "apply_chat_template"):
+            messages = prompt
+            if self.local_config.chat_system_prompt and not any(
+                message.get("role") == "system" for message in messages
+            ):
+                messages = [
+                    {"role": "system", "content": self.local_config.chat_system_prompt},
+                    *messages,
+                ]
+            try:
+                return self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=messages[-1]["role"] != "assistant",
                     tokenize=False,
                 )
             except Exception as exc:
@@ -227,8 +224,7 @@ class LocalProvider(InferenceProvider):
         do_sample = kwargs.get("do_sample", gen_cfg.do_sample)
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
         eos_token_id = kwargs.get("eos_token_id", self._resolve_eos_token_id())
-        normalized_prompts = [self._format_prompt_input(prompt) for prompt in prompts]
-        formatted_prompts = self._format_prompts_for_model(normalized_prompts)
+        formatted_prompts = [self._format_prompt_input(prompt) for prompt in prompts]
 
         inputs = self.tokenizer(
             formatted_prompts,
