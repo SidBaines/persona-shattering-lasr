@@ -1,39 +1,44 @@
 #!/usr/bin/env python3
 """Prompt iteration script for openness editing variants (O- suppressor).
 
-Supports a tight iteration loop for refining editing prompt templates:
+Supports a tight iteration loop for refining editing prompt templates.
 
-1. Run inference once on liweijiang/infinite-chats-taxonomy via OpenRouter
-   (generates original base-model responses, stored in run-dir)
-2. Score original responses for openness using an LLM judge
-   (writes original_scored.jsonl + prints score distribution)
-3. Apply multiple editing prompt variants to the original responses
-4. Export compare.jsonl (one row per question, variants as fields) for TUI review
-5. Add new prompt versions to scripts/editing/prompts.py, re-run with new --prompts
-6. Repeat — inference, scoring, and existing edits are all skipped automatically
+Recommended workflow:
 
-Usage:
+    Step 1 — Scout run (inference + scoring only, no editing):
+    Omit --prompts to stop after scoring and inspect the score distribution.
 
-    # First run: generate base-model responses, score them, apply v1 prompts
     uv run python scripts/experiments/prompt-iterations/openness_iteration.py \\
         --run-dir scratch/experiments/o_minus/attempt_01/iter_001 \\
-        --prompts o- neutral_paraphrase_control
+        --max-samples 50
 
-    # After adding o-v2 to prompts.py, iterate on same run-dir:
+    Step 2 — Pick a threshold from the printed distribution, then edit:
+
     uv run python scripts/experiments/prompt-iterations/openness_iteration.py \\
         --run-dir scratch/experiments/o_minus/attempt_01/iter_001 \\
-        --prompts o-v2
+        --prompts o- neutral_paraphrase_control \\
+        --min-openness-score 4
 
-    # Review all variants side by side (command is also printed at end of run):
+    Step 3 — Iterate on prompt variants (inference, scoring, and existing edits skipped):
+
+    uv run python scripts/experiments/prompt-iterations/openness_iteration.py \\
+        --run-dir scratch/experiments/o_minus/attempt_01/iter_001 \\
+        --prompts o-v2 \\
+        --min-openness-score 4
+
+    Step 4 — Review side by side (command printed at end of run):
+
     uv run python scripts/jsonl_tui/cli.py \\
         scratch/experiments/o_minus/attempt_01/iter_001/compare.jsonl \\
-        --variant-fields original neutral_paraphrase_control o- o-v2
+        --variant-fields original neutral_paraphrase_control o- o-v2 \\
+        --meta-fields original_openness_score
 
 Run-dir structure:
     <run-dir>/
     ├── original_responses.jsonl      # inference output; written once, then immutable
     ├── original_scored.jsonl         # openness scores for originals; written once
     ├── edits/
+    │   ├── filtered_out.jsonl        # rows below --min-openness-score (written once)
     │   ├── o-.jsonl                  # one file per editing variant
     │   ├── o-v2.jsonl
     │   └── ...
@@ -85,11 +90,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prompts",
         nargs="+",
-        required=True,
+        default=None,
         metavar="TEMPLATE",
         help=(
             "Editing prompt template names to apply "
             "(e.g. o- o-v2 neutral_paraphrase_control). "
+            "If omitted, the script stops after scoring and prints the distribution "
+            "so you can pick a --min-openness-score threshold before editing. "
             "Already-existing variants are skipped unless --overwrite-edits is set."
         ),
     )
@@ -133,6 +140,17 @@ def parse_args() -> argparse.Namespace:
         "--skip-scoring",
         action="store_true",
         help="Skip openness scoring of original responses (speeds up iteration).",
+    )
+    parser.add_argument(
+        "--min-openness-score",
+        type=int,
+        default=None,
+        metavar="SCORE",
+        help=(
+            "Only edit responses whose original openness score is >= SCORE. "
+            "Requires original_scored.jsonl to exist (run without --skip-scoring first). "
+            "Filtered-out rows are written to edits/filtered_out.jsonl for inspection."
+        ),
     )
     return parser.parse_args()
 
@@ -271,6 +289,80 @@ def _print_score_distribution(scored_path: Path) -> None:
     print()
 
 
+def apply_score_filter(
+    args: argparse.Namespace,
+    original_path: Path,
+    scored_path: Path,
+    edits_dir: Path,
+) -> Path:
+    """Filter original responses by min openness score, returning path to use for editing.
+
+    If --min-openness-score is not set, returns original_path unchanged.
+    If set, reads scores from scored_path (errors if missing), splits rows into
+    kept/filtered, writes filtered-out rows to edits/filtered_out.jsonl, and
+    writes kept rows to edits/filtered_for_editing.jsonl.
+
+    filtered_out.jsonl and filtered_for_editing.jsonl are written once and then
+    treated as immutable (re-run with --overwrite-edits to regenerate them).
+
+    Returns:
+        Path to the dataset that should be passed to the editing phase.
+    """
+    if args.min_openness_score is None:
+        return original_path
+
+    if not scored_path.exists():
+        print(
+            f"\nERROR: --min-openness-score requires openness scores, but {scored_path} "
+            "does not exist.\nRun without --skip-scoring first to generate scores.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    edits_dir.mkdir(parents=True, exist_ok=True)
+    filtered_out_path = edits_dir / "filtered_out.jsonl"
+    filtered_for_editing_path = edits_dir / "filtered_for_editing.jsonl"
+
+    if filtered_for_editing_path.exists() and not args.overwrite_edits:
+        kept_count = sum(1 for _ in filtered_for_editing_path.open() if _.strip())
+        filtered_count = sum(1 for _ in filtered_out_path.open() if _.strip()) if filtered_out_path.exists() else 0
+        print(
+            f"Skipping filter — already exists "
+            f"({kept_count} kept, {filtered_count} filtered out, "
+            f"threshold >= {args.min_openness_score}): {filtered_for_editing_path}"
+        )
+        return filtered_for_editing_path
+
+    # Build score lookup from scored file
+    scores_by_question: dict[str, int | None] = {}
+    for row in read_jsonl(scored_path):
+        q = row.get("question", "")
+        if q:
+            metrics = row.get("openness_metrics", {})
+            scores_by_question[q] = metrics.get("openness.score")
+
+    # Split originals into kept / filtered
+    kept: list[dict] = []
+    filtered: list[dict] = []
+    for row in read_jsonl(original_path):
+        q = row.get("question", "")
+        score = scores_by_question.get(q)
+        if score is not None and score >= args.min_openness_score:
+            kept.append(row)
+        else:
+            filtered.append(row)
+
+    write_jsonl(kept, filtered_for_editing_path)
+    write_jsonl(filtered, filtered_out_path)
+
+    print(
+        f"\n  Score filter (>= {args.min_openness_score}): "
+        f"{len(kept)} kept, {len(filtered)} filtered out"
+    )
+    print(f"  Filtered-out rows -> {filtered_out_path}")
+    return filtered_for_editing_path
+
+
 def run_editing_phase(
     args: argparse.Namespace,
     original_path: Path,
@@ -318,16 +410,28 @@ def build_compare_jsonl(
     Format: one record per question with variant texts as fields. Always rebuilt
     from scratch so that newly added variants appear automatically.
 
+    Questions in edits/filtered_out.jsonl are excluded (they were never edited).
+
     Returns:
         Sorted list of variant names included (excluding 'original').
     """
     _phase_header("PHASE 3: BUILDING COMPARE DATASET")
 
+    # Collect questions that were filtered out (never edited) so we can exclude them
+    filtered_out_questions: set[str] = set()
+    filtered_out_path = edits_dir / "filtered_out.jsonl"
+    if filtered_out_path.exists():
+        for row in read_jsonl(filtered_out_path):
+            q = row.get("question", "")
+            if q:
+                filtered_out_questions.add(q)
+
     # Load original responses, keyed by question (preserve insertion order)
+    # Skip questions that were filtered out before editing
     originals: dict[str, str] = {}
     for row in read_jsonl(original_path):
         q = row.get("question", "")
-        if q and q not in originals:
+        if q and q not in originals and q not in filtered_out_questions:
             originals[q] = row.get("response", "")
 
     # Load openness scores if available (independent of skip_scoring — that flag only
@@ -340,8 +444,11 @@ def build_compare_jsonl(
                 metrics = row.get("openness_metrics", {})
                 openness_scores[q] = metrics.get("openness.score")
 
-    # Collect all edit files (alphabetical for deterministic field ordering)
-    edit_files = sorted(edits_dir.glob("*.jsonl"))
+    # Collect edit files, excluding the internal filter bookkeeping files
+    _INTERNAL_FILES = {"filtered_out", "filtered_for_editing"}
+    edit_files = sorted(
+        f for f in edits_dir.glob("*.jsonl") if f.stem not in _INTERNAL_FILES
+    )
     variant_names = [f.stem for f in edit_files]
 
     edits_by_variant: dict[str, dict[str, str]] = {}
@@ -386,14 +493,25 @@ def main() -> None:
 
     run_inference_phase(args, original_path)
     run_scoring_phase(args, original_path, scored_path)
-    run_editing_phase(args, original_path, edits_dir)
+
+    if args.prompts is None:
+        print(f"\n{'=' * 60}")
+        print("Scoring complete. Inspect the distribution above, then re-run with:")
+        print(f"  uv run python {Path(__file__).name} \\")
+        print(f"      --run-dir {run_dir} \\")
+        print("      --prompts <TEMPLATE> [<TEMPLATE> ...] \\")
+        print("      --min-openness-score <SCORE>")
+        print(f"{'=' * 60}\n")
+        return
+
+    editing_input_path = apply_score_filter(args, original_path, scored_path, edits_dir)
+    run_editing_phase(args, editing_input_path, edits_dir)
     variant_names = build_compare_jsonl(
         original_path, scored_path, edits_dir, compare_path
     )
 
     all_fields = ["original"] + variant_names
     fields_str = " ".join(all_fields)
-    scored_path = run_dir / "original_scored.jsonl"
     print(f"\n{'=' * 60}")
     print("DONE — review with the TUI:")
     print(f"  uv run python scripts/jsonl_tui/cli.py {compare_path} \\")
