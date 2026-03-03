@@ -8,7 +8,11 @@ import logging
 from typing import Any
 
 from scripts.common.config import GenerationConfig
-from scripts.inference.config import InferenceConfig, OpenAIProviderConfig
+from scripts.inference.config import (
+    AnthropicProviderConfig,
+    InferenceConfig,
+    OpenAIProviderConfig,
+)
 from scripts.inference.providers import get_provider
 from scripts.inference.providers.base import (
     InferenceProvider,
@@ -106,10 +110,10 @@ class ConscientiousnessComparativeEvaluation(PersonaMetric):
     ) -> None:
         super().__init__(judge_config)
         self._judge_config = self.judge_config or JudgeLLMConfig()
-        if self._judge_config.provider.lower() != "openai":
+        if self._judge_config.provider.lower() not in {"openai", "anthropic"}:
             raise NotImplementedError(
-                "conscientiousness_comparative currently requires the OpenAI "
-                "provider because it depends on native structured outputs."
+                "conscientiousness_comparative currently requires the OpenAI or "
+                "Anthropic provider because it depends on native structured outputs."
             )
         self._provider: InferenceProvider | None = None
         self._prompt_template = prompt_template or DEFAULT_COMPARATIVE_TEMPLATE
@@ -154,9 +158,10 @@ class ConscientiousnessComparativeEvaluation(PersonaMetric):
 
     def _build_inference_config(self) -> InferenceConfig:
         cfg = self._judge_config
+        provider = cfg.provider.lower()
         return InferenceConfig(
             model=cfg.model,
-            provider="openai",
+            provider=provider,
             generation=GenerationConfig(
                 max_new_tokens=cfg.max_tokens,
                 temperature=cfg.temperature,
@@ -170,11 +175,18 @@ class ConscientiousnessComparativeEvaluation(PersonaMetric):
             continue_on_error=False,
             log_failures=True,
             openai=OpenAIProviderConfig(api_key_env=cfg.api_key_env or "OPENAI_API_KEY"),
+            anthropic=AnthropicProviderConfig(
+                api_key_env=cfg.api_key_env or "ANTHROPIC_API_KEY",
+                max_tokens=cfg.max_tokens,
+            ),
         )
 
     def _get_provider(self) -> InferenceProvider:
         if self._provider is None:
-            self._provider = get_provider("openai", self._build_inference_config())
+            self._provider = get_provider(
+                self._judge_config.provider.lower(),
+                self._build_inference_config(),
+            )
         return self._provider
 
     def _candidate_id(self, context: PersonaMetricContext, fallback_index: int) -> str:
@@ -210,6 +222,11 @@ class ConscientiousnessComparativeEvaluation(PersonaMetric):
         )
 
     def _structured_output_spec(self) -> StructuredOutputSpec:
+        score_schema: dict[str, Any] = {"type": "integer"}
+        if self._judge_config.provider.lower() != "anthropic":
+            score_schema["minimum"] = -10
+            score_schema["maximum"] = 10
+
         return StructuredOutputSpec(
             name="conscientiousness_comparative_scores",
             description="Independent conscientiousness scores for each candidate response.",
@@ -226,11 +243,7 @@ class ConscientiousnessComparativeEvaluation(PersonaMetric):
                             "required": ["candidate_id", "score", "reasoning"],
                             "properties": {
                                 "candidate_id": {"type": "string"},
-                                "score": {
-                                    "type": "integer",
-                                    "minimum": -10,
-                                    "maximum": 10,
-                                },
+                                "score": score_schema,
                                 "reasoning": {"type": "string"},
                             },
                         },

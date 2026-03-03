@@ -98,19 +98,6 @@ def test_openai_structured_generation_reports_parse_error(monkeypatch: pytest.Mo
     assert "Failed to parse structured response" in str(results[0].error)
 
 
-def test_structured_generation_unsupported_for_anthropic() -> None:
-    from scripts.inference.providers.anthropic import AnthropicProvider
-
-    provider = object.__new__(AnthropicProvider)
-    with pytest.raises(NotImplementedError, match="supported only for provider 'openai'"):
-        asyncio.run(
-            provider.generate_batch_structured_with_metadata_async(
-                ["x"],
-                structured_output=StructuredOutputSpec(name="scores", schema={"type": "object"}),
-            )
-        )
-
-
 def test_structured_generation_unsupported_for_openrouter() -> None:
     from scripts.inference.providers.openrouter import OpenRouterProvider
 
@@ -122,3 +109,108 @@ def test_structured_generation_unsupported_for_openrouter() -> None:
                 structured_output=StructuredOutputSpec(name="scores", schema={"type": "object"}),
             )
         )
+
+
+def test_anthropic_structured_generation_returns_parsed_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.inference.config import AnthropicProviderConfig
+    from scripts.inference.providers.anthropic import AnthropicProvider
+
+    captured_kwargs: dict[str, object] = {}
+
+    class _TextBlock:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _FakeMessages:
+        async def create(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            return SimpleNamespace(
+                content=[
+                    _TextBlock(
+                        '{"results":[{"candidate_id":"a","score":7,"reasoning":"careful"}]}'
+                    )
+                ],
+                usage=SimpleNamespace(input_tokens=8, output_tokens=6),
+            )
+
+    class _FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            self.messages = _FakeMessages()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr("scripts.inference.providers.anthropic.AsyncAnthropic", _FakeClient)
+
+    provider = AnthropicProvider(
+        InferenceConfig(
+            model="claude-sonnet-4-20250514",
+            provider="anthropic",
+            generation=GenerationConfig(max_new_tokens=64),
+            anthropic=AnthropicProviderConfig(),
+        )
+    )
+    results, usage, failed = asyncio.run(
+        provider.generate_batch_structured_with_metadata_async(
+            ["judge this"],
+            structured_output=StructuredOutputSpec(
+                name="scores",
+                schema={"type": "object"},
+            ),
+        )
+    )
+
+    assert failed == 0
+    assert usage["total_tokens"] == 14
+    assert results[0].parsed == {
+        "results": [{"candidate_id": "a", "score": 7, "reasoning": "careful"}]
+    }
+    assert captured_kwargs["output_config"]["format"]["type"] == "json_schema"
+
+
+def test_anthropic_structured_generation_reports_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.inference.config import AnthropicProviderConfig
+    from scripts.inference.providers.anthropic import AnthropicProvider
+
+    class _TextBlock:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _FakeMessages:
+        async def create(self, **kwargs):
+            del kwargs
+            return SimpleNamespace(
+                content=[_TextBlock("not json")],
+                usage=SimpleNamespace(input_tokens=8, output_tokens=6),
+            )
+
+    class _FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            self.messages = _FakeMessages()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr("scripts.inference.providers.anthropic.AsyncAnthropic", _FakeClient)
+
+    provider = AnthropicProvider(
+        InferenceConfig(
+            model="claude-sonnet-4-20250514",
+            provider="anthropic",
+            generation=GenerationConfig(max_new_tokens=64),
+            anthropic=AnthropicProviderConfig(),
+        )
+    )
+    results, _usage, failed = asyncio.run(
+        provider.generate_batch_structured_with_metadata_async(
+            ["judge this"],
+            structured_output=StructuredOutputSpec(
+                name="scores",
+                schema={"type": "object"},
+            ),
+        )
+    )
+
+    assert failed == 1
+    assert results[0].parsed is None
+    assert "Failed to parse structured response" in str(results[0].error)

@@ -85,8 +85,9 @@ print(result.aggregates)
   Returns score and reasoning. Requires API key for the judge provider.
 - **`conscientiousness_comparative`**: Groups all responses for the same question and
   judges them together, returning an independent `-10..10` conscientiousness score
-  plus reasoning for each response. Currently requires `--judge-provider openai`
-  because it uses native structured outputs.
+  plus reasoning for each response. Currently requires
+  `--judge-provider openai` or `--judge-provider anthropic` because it uses native
+  structured outputs.
 - **`lowercase_density`**: Counts lowercase letters. Returns count and density.
 - **`punctuation_density`**: Counts punctuation characters. Returns count and density.
 

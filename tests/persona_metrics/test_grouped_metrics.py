@@ -140,10 +140,30 @@ def test_grouped_runner_rejects_result_length_mismatch(monkeypatch: pytest.Monke
 
 
 def test_conscientiousness_comparative_rejects_non_openai_provider() -> None:
-    with pytest.raises(NotImplementedError, match="requires the OpenAI provider"):
+    with pytest.raises(NotImplementedError, match="requires the OpenAI or Anthropic provider"):
         ConscientiousnessComparativeEvaluation(
-            judge_config=JudgeLLMConfig(provider="anthropic", model="claude")
+            judge_config=JudgeLLMConfig(provider="openrouter", model="router-model")
         )
+
+
+def test_conscientiousness_comparative_accepts_anthropic_provider() -> None:
+    metric = ConscientiousnessComparativeEvaluation(
+        judge_config=JudgeLLMConfig(provider="anthropic", model="claude-sonnet")
+    )
+    assert metric.name == "conscientiousness_comparative"
+
+
+def test_conscientiousness_comparative_uses_anthropic_compatible_score_schema() -> None:
+    metric = ConscientiousnessComparativeEvaluation(
+        judge_config=JudgeLLMConfig(provider="anthropic", model="claude-sonnet")
+    )
+
+    score_schema = (
+        metric._structured_output_spec()
+        .schema["properties"]["results"]["items"]["properties"]["score"]
+    )
+
+    assert score_schema == {"type": "integer"}
 
 
 def test_conscientiousness_comparative_grouping_falls_back_to_question(
