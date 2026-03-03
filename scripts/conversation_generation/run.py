@@ -41,9 +41,15 @@ from .config import (
 
 RESPONDER_TEMPLATES: dict[str, str] = {
     "natural_partner": (
-        "You are continuing this conversation as a realistic user. "
-        "Reply naturally to the assistant's latest message, ask follow-up questions when useful, "
-        "and keep the conversation moving. Do not narrate or explain your role."
+        "You are writing the next USER turn in this conversation. "
+        "Reply as the human user speaking to the assistant. "
+        "Write only the next user message, in plain text. "
+        "Do not answer the user's question as an assistant. "
+        "Do not offer help as if you are the assistant. "
+        "Do not describe your role, and do not produce labels like 'User:' or 'Assistant:'. "
+        "React naturally to the assistant's latest message, and when appropriate ask a follow-up question, "
+        "share a preference, give feedback, or provide extra context that a user would plausibly give."
+        "Return *nothing* except the user message."
     ),
 }
 
@@ -140,6 +146,265 @@ def _record_invalid_state(run_dir: Path, sample_id: str, reason: str) -> None:
     )
 
 
+def _chunked(items: list[Any], size: int) -> list[list[Any]]:
+    if size <= 0:
+        size = 1
+    return [items[start : start + size] for start in range(0, len(items), size)]
+
+
+def _build_assistant_action(sample, assistant_config: InferenceConfig) -> dict[str, Any] | None:
+    latest_message = sample.messages[-1] if sample.messages else None
+    if latest_message is None:
+        return None
+    if latest_message.role != "user":
+        return None
+    assistant_turn_index = _assistant_turn_count(sample)
+    return {
+        "sample_id": sample.sample_id,
+        "prompt": [{"role": message.role, "content": message.content} for message in sample.messages],
+        "assistant_turn_index": assistant_turn_index,
+        "parent_message_id": latest_message.message_id,
+        "attempt_no": sample.inference.attempt_no + 1,
+        "model": assistant_config.model,
+        "provider": assistant_config.provider,
+    }
+
+
+def _build_edit_action(
+    sample,
+    config: ConversationGenerationConfig,
+    editing_config: EditingConfig,
+) -> dict[str, Any] | None:
+    latest_message = sample.messages[-1] if sample.messages else None
+    if latest_message is None or latest_message.role != "assistant":
+        return None
+    if _has_successful_overlay(sample, config.editing_variant, latest_message.message_id):
+        return None
+
+    turn_index = _assistant_turn_count(sample) - 1
+    latest_user_message = next(
+        (
+            message.content
+            for message in reversed(sample.messages[:-1])
+            if message.role == "user"
+        ),
+        "",
+    )
+    prior_attempts = 0
+    for variant in sample.edit_variants:
+        if variant.variant_name != config.editing_variant:
+            continue
+        prior_attempts = max(
+            (
+                overlay.attempt_no
+                for overlay in variant.overlays
+                if overlay.target_message_id == latest_message.message_id
+            ),
+            default=0,
+        )
+        break
+    prompt_context = EditPromptContext(
+        conversation_history=[
+            {"role": message.role, "content": message.content}
+            for message in sample.messages[:-1]
+        ],
+        latest_user_message=latest_user_message,
+        base_assistant_response=latest_message.content,
+        turn_index=max(turn_index, 0),
+        total_turns=config.num_assistant_turns,
+    )
+    prompt = get_prompt(editing_config.prompt_template, context=prompt_context)
+    return {
+        "sample_id": sample.sample_id,
+        "prompt": prompt,
+        "target_message_id": latest_message.message_id,
+        "assistant_content": latest_message.content,
+        "attempt_no": prior_attempts + 1,
+        "editor_model": editing_config.model,
+        "editor_provider": editing_config.provider,
+    }
+
+
+def _build_responder_action(
+    sample,
+    config: ConversationGenerationConfig,
+    responder_config: InferenceConfig,
+) -> dict[str, Any] | None:
+    latest_message = sample.messages[-1] if sample.messages else None
+    if latest_message is None or latest_message.role != "assistant":
+        return None
+    completed_turns = _completed_edited_turns(sample, config.editing_variant)
+    if completed_turns >= config.num_assistant_turns:
+        return None
+    if not _has_successful_overlay(sample, config.editing_variant, latest_message.message_id):
+        return None
+    return {
+        "sample_id": sample.sample_id,
+        "prompt": _build_responder_messages(
+            sample,
+            config.editing_variant,
+            config.responder.prompt_template,
+        ),
+        "turn_index": _assistant_turn_count(sample),
+        "parent_message_id": latest_message.message_id,
+        "provider": responder_config.provider,
+        "model": responder_config.model,
+    }
+
+
+async def _generate_many(
+    provider: InferenceProvider,
+    prompts: list[str | list[dict[str, str]]],
+) -> tuple[list[str], list[TokenUsage | None], int]:
+    if not prompts:
+        return [], [], 0
+    return await provider.generate_batch_with_details_async(prompts, num_responses=1)
+
+
+def _run_assistant_phase(
+    run_dir: Path,
+    actions: list[dict[str, Any]],
+    assistant_provider: InferenceProvider,
+    assistant_config: InferenceConfig,
+) -> tuple[int, set[str]]:
+    progressed = 0
+    failed_samples: set[str] = set()
+    batch_size = max(1, assistant_config.generation.batch_size)
+    for batch in _chunked(actions, batch_size):
+        prompts = [action["prompt"] for action in batch]
+        responses, usages, _ = asyncio.run(_generate_many(assistant_provider, prompts))
+        usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
+        for action, response_text, usage in zip(batch, responses, usage_by_slot):
+            status = "success" if isinstance(response_text, str) and response_text.strip() else "failed"
+            if status == "failed":
+                failed_samples.add(action["sample_id"])
+            write_inference_result(
+                run_dir,
+                action["sample_id"],
+                {
+                    "status": status,
+                    "model": action["model"],
+                    "provider": action["provider"],
+                    "assistant_message_id": _message_append_id(
+                        action["sample_id"],
+                        "assistant",
+                        action["assistant_turn_index"],
+                    ),
+                    "assistant_completion": response_text,
+                    "assistant_full": response_text,
+                    "assistant_message_metadata": {
+                        "turn_index": action["assistant_turn_index"],
+                        "source_stage": "assistant_base",
+                        "provider": action["provider"],
+                        "model": action["model"],
+                        "token_usage": usage or {},
+                        "parent_message_id": action["parent_message_id"],
+                    },
+                    "attempt_no": action["attempt_no"],
+                    "token_usage": usage or {},
+                    "started_at": _now_iso(),
+                    "completed_at": _now_iso(),
+                    "error": None if status == "success" else "empty_response",
+                },
+                materialize=False,
+            )
+            progressed += 1
+    return progressed, failed_samples
+
+
+def _run_edit_phase(
+    run_dir: Path,
+    actions: list[dict[str, Any]],
+    editor_provider: InferenceProvider,
+    editing_config: EditingConfig,
+) -> tuple[int, set[str]]:
+    progressed = 0
+    failed_samples: set[str] = set()
+    batch_size = max(1, editing_config.max_concurrent)
+    for batch in _chunked(actions, batch_size):
+        prompts = [action["prompt"] for action in batch]
+        responses, usages, _ = asyncio.run(_generate_many(editor_provider, prompts))
+        usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
+        for action, edited_text, usage in zip(batch, responses, usage_by_slot):
+            status = "success" if isinstance(edited_text, str) and edited_text.strip() else "failed"
+            if status == "failed":
+                failed_samples.add(action["sample_id"])
+            overlay_id = hashlib.sha256(
+                f"{action['sample_id']}:{action['target_message_id']}:{edited_text}".encode("utf-8")
+            ).hexdigest()[:24]
+            write_edit_overlay(
+                run_dir,
+                sample_id=action["sample_id"],
+                variant_name=editing_config.variant_name or "editing",
+                overlay_payload={
+                    "overlay_id": overlay_id,
+                    "target_message_id": action["target_message_id"],
+                    "target_role": "assistant",
+                    "original_content_hash": hashlib.sha256(
+                        action["assistant_content"].encode("utf-8")
+                    ).hexdigest(),
+                    "edited_content": edited_text,
+                    "status": status,
+                    "attempt_no": action["attempt_no"],
+                    "editor_model": action["editor_model"],
+                    "editor_provider": action["editor_provider"],
+                    "edit_prompt_hash": hashlib.sha256(action["prompt"].encode("utf-8")).hexdigest(),
+                    "token_usage": usage or {},
+                    "judge_metadata": None,
+                    "timestamps": {"created_at": _now_iso()},
+                    "error": None if status == "success" else "empty_edited_response",
+                },
+                materialize=False,
+            )
+            progressed += 1
+    return progressed, failed_samples
+
+
+def _run_responder_phase(
+    run_dir: Path,
+    actions: list[dict[str, Any]],
+    responder_provider: InferenceProvider,
+    responder_config: InferenceConfig,
+) -> tuple[int, set[str]]:
+    progressed = 0
+    failed_samples: set[str] = set()
+    batch_size = max(1, responder_config.generation.batch_size)
+    for batch in _chunked(actions, batch_size):
+        prompts = [action["prompt"] for action in batch]
+        responses, usages, _ = asyncio.run(_generate_many(responder_provider, prompts))
+        usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
+        for action, user_text, usage in zip(batch, responses, usage_by_slot):
+            if not isinstance(user_text, str) or not user_text.strip():
+                failed_samples.add(action["sample_id"])
+                _record_invalid_state(run_dir, action["sample_id"], "empty_responder_user_turn")
+                continue
+            write_message_append(
+                run_dir,
+                action["sample_id"],
+                {
+                    "message_id": _message_append_id(
+                        action["sample_id"],
+                        "user",
+                        action["turn_index"],
+                    ),
+                    "role": "user",
+                    "content": user_text,
+                    "editable": True,
+                    "message_metadata": {
+                        "turn_index": action["turn_index"],
+                        "source_stage": "responder_user",
+                        "provider": action["provider"],
+                        "model": action["model"],
+                        "token_usage": usage or {},
+                        "parent_message_id": action["parent_message_id"],
+                    },
+                },
+                materialize=False,
+            )
+            progressed += 1
+    return progressed, failed_samples
+
+
 def run_conversation_generation(
     config: ConversationGenerationConfig,
     dataset: Dataset | None = None,
@@ -215,8 +480,10 @@ def run_conversation_generation(
     while True:
         materialize_canonical_samples(run_dir)
         samples = load_samples(run_dir)
-        progressed = False
-
+        progressed = 0
+        assistant_actions: list[dict[str, Any]] = []
+        edit_actions: list[dict[str, Any]] = []
+        responder_actions: list[dict[str, Any]] = []
         for sample in samples:
             completed_turns = _completed_edited_turns(sample, config.editing_variant)
             if completed_turns >= config.num_assistant_turns:
@@ -229,41 +496,9 @@ def run_conversation_generation(
                 continue
 
             if latest_message.role == "user":
-                prompt = [{"role": message.role, "content": message.content} for message in sample.messages]
-                response_text, usage = asyncio.run(_generate_one(assistant_provider, prompt))
-                status = "success" if response_text.strip() else "failed"
-                assistant_turn_index = _assistant_turn_count(sample)
-                write_inference_result(
-                    run_dir,
-                    sample.sample_id,
-                    {
-                        "status": status,
-                        "model": assistant_config.model,
-                        "provider": assistant_config.provider,
-                        "assistant_message_id": _message_append_id(
-                            sample.sample_id,
-                            "assistant",
-                            assistant_turn_index,
-                        ),
-                        "assistant_completion": response_text,
-                        "assistant_full": response_text,
-                        "assistant_message_metadata": {
-                            "turn_index": assistant_turn_index,
-                            "source_stage": "assistant_base",
-                            "provider": assistant_config.provider,
-                            "model": assistant_config.model,
-                            "token_usage": usage or {},
-                            "parent_message_id": latest_message.message_id,
-                        },
-                        "attempt_no": sample.inference.attempt_no + 1,
-                        "token_usage": usage or {},
-                        "started_at": _now_iso(),
-                        "completed_at": _now_iso(),
-                        "error": None if status == "success" else "empty_response",
-                    },
-                    materialize=False,
-                )
-                progressed = True
+                action = _build_assistant_action(sample, assistant_config)
+                if action is not None:
+                    assistant_actions.append(action)
                 continue
 
             if latest_message.role != "assistant":
@@ -276,114 +511,50 @@ def run_conversation_generation(
                 continue
 
             if not _has_successful_overlay(sample, config.editing_variant, latest_message.message_id):
-                turn_index = _assistant_turn_count(sample) - 1
-                latest_user_message = next(
-                    (
-                        message.content
-                        for message in reversed(sample.messages[:-1])
-                        if message.role == "user"
-                    ),
-                    "",
-                )
-                prompt_context = EditPromptContext(
-                    conversation_history=[
-                        {"role": message.role, "content": message.content}
-                        for message in sample.messages[:-1]
-                    ],
-                    latest_user_message=latest_user_message,
-                    base_assistant_response=latest_message.content,
-                    turn_index=max(turn_index, 0),
-                    total_turns=config.num_assistant_turns,
-                )
                 if editing_config.provider == "code":
                     raise NotImplementedError("Code-based editing is not supported in conversation generation.")
-                assert editor_provider is not None
-                prior_attempts = 0
-                for variant in sample.edit_variants:
-                    if variant.variant_name != config.editing_variant:
-                        continue
-                    prior_attempts = max(
-                        (
-                            overlay.attempt_no
-                            for overlay in variant.overlays
-                            if overlay.target_message_id == latest_message.message_id
-                        ),
-                        default=0,
-                    )
-                    break
-                prompt = get_prompt(editing_config.prompt_template, context=prompt_context)
-                edited_text, usage = asyncio.run(_generate_one(editor_provider, prompt))
-                status = "success" if edited_text.strip() else "failed"
-                overlay_id = hashlib.sha256(
-                    f"{sample.sample_id}:{config.editing_variant}:{latest_message.message_id}:{edited_text}".encode("utf-8")
-                ).hexdigest()[:24]
-                write_edit_overlay(
-                    run_dir,
-                    sample_id=sample.sample_id,
-                    variant_name=config.editing_variant,
-                    overlay_payload={
-                        "overlay_id": overlay_id,
-                        "target_message_id": latest_message.message_id,
-                        "target_role": "assistant",
-                        "original_content_hash": hashlib.sha256(
-                            latest_message.content.encode("utf-8")
-                        ).hexdigest(),
-                        "edited_content": edited_text,
-                        "status": status,
-                        "attempt_no": prior_attempts + 1,
-                        "editor_model": editing_config.model,
-                        "editor_provider": editing_config.provider,
-                        "edit_prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-                        "token_usage": usage or {},
-                        "judge_metadata": None,
-                        "timestamps": {"created_at": _now_iso()},
-                        "error": None if status == "success" else "empty_edited_response",
-                    },
-                    materialize=False,
-                )
-                progressed = True
+                action = _build_edit_action(sample, config, editing_config)
+                if action is not None:
+                    edit_actions.append(action)
                 continue
 
-            if completed_turns + 1 > config.num_assistant_turns:
-                continue
+            action = _build_responder_action(sample, config, responder_config)
+            if action is not None:
+                responder_actions.append(action)
 
-            responder_messages = _build_responder_messages(
-                sample,
-                config.editing_variant,
-                config.responder.prompt_template,
-            )
-            user_text, usage = asyncio.run(_generate_one(responder_provider, responder_messages))
-            if not user_text.strip():
-                failed_samples.add(sample.sample_id)
-                _record_invalid_state(run_dir, sample.sample_id, "empty_responder_user_turn")
-                continue
-            write_message_append(
+        assistant_progressed, assistant_failed = _run_assistant_phase(
+            run_dir,
+            assistant_actions,
+            assistant_provider,
+            assistant_config,
+        )
+        progressed += assistant_progressed
+        failed_samples.update(assistant_failed)
+
+        edit_progressed = 0
+        edit_failed: set[str] = set()
+        if edit_actions:
+            assert editor_provider is not None
+            edit_progressed, edit_failed = _run_edit_phase(
                 run_dir,
-                sample.sample_id,
-                {
-                    "message_id": _message_append_id(
-                        sample.sample_id,
-                        "user",
-                        _assistant_turn_count(sample),
-                    ),
-                    "role": "user",
-                    "content": user_text,
-                    "editable": True,
-                    "message_metadata": {
-                        "turn_index": _assistant_turn_count(sample),
-                        "source_stage": "responder_user",
-                        "provider": responder_config.provider,
-                        "model": responder_config.model,
-                        "token_usage": usage or {},
-                        "parent_message_id": latest_message.message_id,
-                    },
-                },
-                materialize=False,
+                edit_actions,
+                editor_provider,
+                editing_config,
             )
-            progressed = True
+        progressed += edit_progressed
+        failed_samples.update(edit_failed)
+
+        responder_progressed, responder_failed = _run_responder_phase(
+            run_dir,
+            responder_actions,
+            responder_provider,
+            responder_config,
+        )
+        progressed += responder_progressed
+        failed_samples.update(responder_failed)
 
         materialize_canonical_samples(run_dir)
-        if not progressed:
+        if progressed == 0:
             break
 
     export_path = export_dataset(

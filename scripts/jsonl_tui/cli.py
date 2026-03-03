@@ -39,12 +39,26 @@ def parse_args() -> argparse.Namespace:
             "question; Left/Right cycles through the listed fields showing plain-text prose."
         ),
     )
+    parser.add_argument(
+        "--conversation-field",
+        type=str,
+        default=None,
+        help=(
+            "Enable conversation view mode using a list-valued field "
+            "(e.g., --conversation-field messages). Renders user/assistant turns as a chat transcript."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    viewer = JsonlViewer(args.path, start_index=args.index, variant_fields=args.variant_fields)
+    viewer = JsonlViewer(
+        args.path,
+        start_index=args.index,
+        variant_fields=args.variant_fields,
+        conversation_field=args.conversation_field,
+    )
     viewer.run()
 
 

@@ -27,7 +27,7 @@ from scripts.conversation_generation import (
 )
 from scripts.datasets import export_dataset
 from scripts.editing import EditingConfig, QualityConfig
-from scripts.inference import InferenceConfig
+from scripts.inference import InferenceConfig, LocalProviderConfig
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 
 
@@ -44,6 +44,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-name", type=str, default=DEFAULT_DATASET)
     parser.add_argument("--max-samples", type=int, default=100)
     parser.add_argument("--num-assistant-turns", type=int, default=3)
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--base-model", type=str, default=DEFAULT_BASE_MODEL)
     parser.add_argument("--editor-model", type=str, default=DEFAULT_EDITOR_MODEL)
     parser.add_argument("--responder-model", type=str, default=DEFAULT_RESPONDER_MODEL)
@@ -73,13 +74,18 @@ def main() -> None:
         assistant_inference=InferenceConfig(
             model=args.base_model,
             provider="local",
+            local=LocalProviderConfig(prompt_format="chat"),
             dataset=DatasetConfig(
                 source="huggingface",
                 name=args.dataset_name,
                 split="train",
                 max_samples=args.max_samples,
             ),
-            generation=GenerationConfig(max_new_tokens=256, batch_size=8, num_responses_per_prompt=1),
+            generation=GenerationConfig(
+                max_new_tokens=256,
+                batch_size=args.batch_size,
+                num_responses_per_prompt=1,
+            ),
         ),
         editing=EditingConfig(
             provider="openai",
