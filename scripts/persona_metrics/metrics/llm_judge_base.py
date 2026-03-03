@@ -54,17 +54,24 @@ class LLMJudgeMetric(PersonaMetric):
     """Base class for LLM-as-judge persona metric evaluations.
 
     Subclasses must define these class attributes:
-        name: str                    — unique identifier for this metric
+        name: str                    — unique identifier for this metric (satisfies
+                                       PersonaMetric.name abstractmethod via class attr)
         default_template: str        — the prompt template string
         default_examples: list[dict] — the few-shot examples list
 
     Override score range class attributes as needed:
         score_min: int = -10   — minimum valid score (clamped)
         score_max: int = 10    — maximum valid score (clamped)
-        score_default: int = 0 — score used when parsing fails
-        score_error: int = 0   — score returned on evaluation exception
+        score_default: int = 0 — score used when the judge response cannot be parsed
+        score_error: int = 0   — score returned when the judge call itself fails (e.g.
+                                  network error, empty response). Set to a sentinel like
+                                  -1 to distinguish evaluation errors from genuine low
+                                  scores in downstream analysis.
     """
 
+    # Subclasses must assign name = "<trait>" as a class attribute. This satisfies the
+    # @abstractmethod declared on PersonaMetric without needing a @property override.
+    name: str
     default_template: str
     default_examples: list[dict[str, object]]
 
