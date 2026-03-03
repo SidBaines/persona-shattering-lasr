@@ -192,7 +192,7 @@ class JsonlViewer:
                 variant_display = (
                     f"{current_field} ({self.current_variant_index + 1}/{num_variants})"
                 )
-                meta = self._meta_badge_str(current_record)
+                meta = self._meta_badge_str(current_record, current_variant=current_field)
                 header = (
                     f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
                     f"  Variant: {variant_display}"
@@ -312,12 +312,47 @@ class JsonlViewer:
                 self.line_offset = 0
                 continue
 
-    def _meta_badge_str(self, record: dict[str, Any]) -> str:
-        """Build a compact badge string for meta_fields, e.g. '  [score: +7]'."""
+    def _meta_badge_str(self, record: dict[str, Any], current_variant: str | None = None) -> str:
+        """Build a compact badge string for meta_fields, e.g. '  [score: +7]'.
+
+        When ``current_variant`` is provided (variant-fields mode), only fields
+        that belong to that variant are shown.  The convention is:
+
+          - A meta field named ``<variant>_<anything>`` (e.g. ``o-_openness_score``)
+            is shown **only** on the ``<variant>`` tab.
+          - A meta field that does not start with any known variant name followed
+            by ``_`` is treated as a **global** field and shown on every tab.
+
+        This lets callers pass all score fields via ``--meta-fields`` and have
+        each tab automatically display only the scores that belong to it.
+        Example pipeline convention:
+            --meta-fields original_openness_score o-_openness_score o-_coherence_score
+        On the ``original`` tab you'll see ``original_openness_score``; on the
+        ``o-`` tab you'll see ``o-_openness_score`` and ``o-_coherence_score``.
+        """
         if not self.meta_fields:
             return ""
+
+        # Build the set of known variant prefixes so we can distinguish
+        # variant-scoped fields from global ones.
+        known_variant_prefixes: set[str] = set()
+        if self.variant_fields:
+            known_variant_prefixes = {f"{v}_" for v in self.variant_fields}
+
         parts = []
         for field in self.meta_fields:
+            # Determine whether this field is scoped to a specific variant.
+            scoped_to: str | None = None
+            for prefix in known_variant_prefixes:
+                if field.startswith(prefix):
+                    scoped_to = prefix[:-1]  # strip trailing '_'
+                    break
+
+            # In variant mode, skip fields that belong to a different variant.
+            if current_variant is not None and scoped_to is not None:
+                if scoped_to != current_variant:
+                    continue
+
             value = record.get(field)
             if value is not None:
                 # Format numeric values with a sign for score-like fields

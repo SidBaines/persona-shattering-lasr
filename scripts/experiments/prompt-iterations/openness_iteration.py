@@ -485,10 +485,12 @@ def build_compare_jsonl(
                 metrics = row.get("openness_metrics", {})
                 openness_scores[q] = metrics.get("openness.score")
 
-    # Collect edit files, excluding the internal filter bookkeeping files
+    # Collect edit files, excluding internal bookkeeping files and scored variants
+    # (_scored files live next to their edit file but are not separate variants).
     _INTERNAL_FILES = {"filtered_out", "filtered_for_editing"}
     edit_files = sorted(
-        f for f in edits_dir.glob("*.jsonl") if f.stem not in _INTERNAL_FILES
+        f for f in edits_dir.glob("*.jsonl")
+        if f.stem not in _INTERNAL_FILES and not f.stem.endswith("_scored")
     )
     variant_names = [f.stem for f in edit_files]
 
