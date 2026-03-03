@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,44 @@ def _chunked(items: list[Any], size: int) -> list[list[Any]]:
     return [items[start : start + size] for start in range(0, len(items), size)]
 
 
+def _format_progress_bar(current: int, total: int, width: int = 20) -> str:
+    if total <= 0:
+        return "[" + ("-" * width) + "]"
+    filled = min(width, int(width * current / total))
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
+
+
+def _format_turn_label(turn_indices: list[int], total_turns: int) -> str:
+    if not turn_indices:
+        return f"turn ?/{total_turns}"
+    one_based = sorted({index + 1 for index in turn_indices})
+    if len(one_based) == 1:
+        return f"turn {one_based[0]}/{total_turns}"
+    return f"turns {one_based[0]}-{one_based[-1]}/{total_turns}"
+
+
+def _log_phase_batch_progress(
+    logger: logging.Logger,
+    *,
+    stage_name: str,
+    batch_index: int,
+    num_batches: int,
+    items_processed: int,
+    items_total: int,
+    turn_label: str,
+) -> None:
+    logger.info(
+        "%s | %s | batch %d/%d | %s %d/%d",
+        stage_name,
+        turn_label,
+        batch_index,
+        num_batches,
+        _format_progress_bar(items_processed, items_total),
+        items_processed,
+        items_total,
+    )
+
+
 def _build_assistant_action(sample, assistant_config: InferenceConfig) -> dict[str, Any] | None:
     latest_message = sample.messages[-1] if sample.messages else None
     if latest_message is None:
@@ -219,6 +258,7 @@ def _build_edit_action(
         "prompt": prompt,
         "target_message_id": latest_message.message_id,
         "assistant_content": latest_message.content,
+        "turn_index": max(turn_index, 0),
         "attempt_no": prior_attempts + 1,
         "editor_model": editing_config.model,
         "editor_provider": editing_config.provider,
@@ -246,6 +286,7 @@ def _build_responder_action(
             config.responder.prompt_template,
         ),
         "turn_index": _assistant_turn_count(sample),
+        "display_turn_index": max(_assistant_turn_count(sample) - 1, 0),
         "parent_message_id": latest_message.message_id,
         "provider": responder_config.provider,
         "model": responder_config.model,
@@ -262,15 +303,31 @@ async def _generate_many(
 
 
 def _run_assistant_phase(
+    logger: logging.Logger,
     run_dir: Path,
     actions: list[dict[str, Any]],
     assistant_provider: InferenceProvider,
     assistant_config: InferenceConfig,
+    total_turns: int,
 ) -> tuple[int, set[str]]:
     progressed = 0
     failed_samples: set[str] = set()
     batch_size = max(1, assistant_config.generation.batch_size)
-    for batch in _chunked(actions, batch_size):
+    batches = _chunked(actions, batch_size)
+    total_actions = len(actions)
+    for batch_index, batch in enumerate(batches, start=1):
+        _log_phase_batch_progress(
+            logger,
+            stage_name="assistant",
+            batch_index=batch_index,
+            num_batches=len(batches),
+            items_processed=min(batch_index * batch_size, total_actions),
+            items_total=total_actions,
+            turn_label=_format_turn_label(
+                [action["assistant_turn_index"] for action in batch],
+                total_turns,
+            ),
+        )
         prompts = [action["prompt"] for action in batch]
         responses, usages, _ = asyncio.run(_generate_many(assistant_provider, prompts))
         usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
@@ -313,15 +370,31 @@ def _run_assistant_phase(
 
 
 def _run_edit_phase(
+    logger: logging.Logger,
     run_dir: Path,
     actions: list[dict[str, Any]],
     editor_provider: InferenceProvider,
     editing_config: EditingConfig,
+    total_turns: int,
 ) -> tuple[int, set[str]]:
     progressed = 0
     failed_samples: set[str] = set()
     batch_size = max(1, editing_config.max_concurrent)
-    for batch in _chunked(actions, batch_size):
+    batches = _chunked(actions, batch_size)
+    total_actions = len(actions)
+    for batch_index, batch in enumerate(batches, start=1):
+        _log_phase_batch_progress(
+            logger,
+            stage_name="edit",
+            batch_index=batch_index,
+            num_batches=len(batches),
+            items_processed=min(batch_index * batch_size, total_actions),
+            items_total=total_actions,
+            turn_label=_format_turn_label(
+                [action["turn_index"] for action in batch],
+                total_turns,
+            ),
+        )
         prompts = [action["prompt"] for action in batch]
         responses, usages, _ = asyncio.run(_generate_many(editor_provider, prompts))
         usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
@@ -361,15 +434,31 @@ def _run_edit_phase(
 
 
 def _run_responder_phase(
+    logger: logging.Logger,
     run_dir: Path,
     actions: list[dict[str, Any]],
     responder_provider: InferenceProvider,
     responder_config: InferenceConfig,
+    total_turns: int,
 ) -> tuple[int, set[str]]:
     progressed = 0
     failed_samples: set[str] = set()
     batch_size = max(1, responder_config.generation.batch_size)
-    for batch in _chunked(actions, batch_size):
+    batches = _chunked(actions, batch_size)
+    total_actions = len(actions)
+    for batch_index, batch in enumerate(batches, start=1):
+        _log_phase_batch_progress(
+            logger,
+            stage_name="responder",
+            batch_index=batch_index,
+            num_batches=len(batches),
+            items_processed=min(batch_index * batch_size, total_actions),
+            items_total=total_actions,
+            turn_label=_format_turn_label(
+                [action["display_turn_index"] for action in batch],
+                total_turns,
+            ),
+        )
         prompts = [action["prompt"] for action in batch]
         responses, usages, _ = asyncio.run(_generate_many(responder_provider, prompts))
         usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
@@ -476,8 +565,10 @@ def run_conversation_generation(
     responder_provider = get_provider(responder_config.provider, responder_config)
 
     failed_samples: set[str] = set()
+    loop_index = 0
 
     while True:
+        loop_index += 1
         materialize_canonical_samples(run_dir)
         samples = load_samples(run_dir)
         progressed = 0
@@ -522,11 +613,21 @@ def run_conversation_generation(
             if action is not None:
                 responder_actions.append(action)
 
+        logger.info(
+            "Pass %d | pending assistant=%d edit=%d responder=%d",
+            loop_index,
+            len(assistant_actions),
+            len(edit_actions),
+            len(responder_actions),
+        )
+
         assistant_progressed, assistant_failed = _run_assistant_phase(
+            logger,
             run_dir,
             assistant_actions,
             assistant_provider,
             assistant_config,
+            config.num_assistant_turns,
         )
         progressed += assistant_progressed
         failed_samples.update(assistant_failed)
@@ -536,19 +637,23 @@ def run_conversation_generation(
         if edit_actions:
             assert editor_provider is not None
             edit_progressed, edit_failed = _run_edit_phase(
+                logger,
                 run_dir,
                 edit_actions,
                 editor_provider,
                 editing_config,
+                config.num_assistant_turns,
             )
         progressed += edit_progressed
         failed_samples.update(edit_failed)
 
         responder_progressed, responder_failed = _run_responder_phase(
+            logger,
             run_dir,
             responder_actions,
             responder_provider,
             responder_config,
+            config.num_assistant_turns,
         )
         progressed += responder_progressed
         failed_samples.update(responder_failed)
