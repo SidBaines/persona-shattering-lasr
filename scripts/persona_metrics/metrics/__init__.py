@@ -6,6 +6,11 @@ Importing this module registers all built-in evaluations.
 from scripts.persona_metrics.metrics.coherence import CoherenceEvaluation
 from scripts.persona_metrics.metrics.count_o import OCountEvaluation
 from scripts.persona_metrics.metrics.count_p import PCountEvaluation
+from scripts.persona_metrics.metrics.count_the import TheCountEvaluation
+from scripts.persona_metrics.metrics.count_thi import ThiCountEvaluation
+from scripts.persona_metrics.metrics.extraversion import ExtraversionEvaluation
+from scripts.persona_metrics.metrics.neuroticism import NeuroticismEvaluation
+from scripts.persona_metrics.metrics.openness import OpennessEvaluation
 from scripts.persona_metrics.metrics.ocean import (
     AgreeablenessEvaluation,
     ConscientiousnessEvaluation,
@@ -25,6 +30,8 @@ register_persona_metric("agreeableness", AgreeablenessEvaluation)
 register_persona_metric("conscientiousness", ConscientiousnessEvaluation)
 register_persona_metric("count_o", OCountEvaluation)
 register_persona_metric("count_p", PCountEvaluation)
+register_persona_metric("count_the", TheCountEvaluation)
+register_persona_metric("count_thi", ThiCountEvaluation)
 register_persona_metric("verb_count", VerbCountEvaluation)
 register_persona_metric("coherence", CoherenceEvaluation)
 register_persona_metric("extraversion", ExtraversionEvaluation)
@@ -40,6 +47,8 @@ __all__ = [
     "OpennessEvaluation",
     "OCountEvaluation",
     "PCountEvaluation",
+    "TheCountEvaluation",
+    "ThiCountEvaluation",
     "VerbCountEvaluation",
     "CoherenceEvaluation",
     "NeuroticismEvaluation",
