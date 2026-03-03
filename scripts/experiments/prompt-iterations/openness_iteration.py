@@ -312,7 +312,6 @@ def build_compare_jsonl(
     scored_path: Path,
     edits_dir: Path,
     compare_path: Path,
-    skip_scoring: bool,
 ) -> list[str]:
     """Build compare.jsonl from original responses, openness scores, and all edit files.
 
@@ -331,9 +330,10 @@ def build_compare_jsonl(
         if q and q not in originals:
             originals[q] = row.get("response", "")
 
-    # Load openness scores if available
+    # Load openness scores if available (independent of skip_scoring — that flag only
+    # controls whether to *run* the scoring phase, not whether to load existing results)
     openness_scores: dict[str, int | None] = {}
-    if not skip_scoring and scored_path.exists():
+    if scored_path.exists():
         for row in read_jsonl(scored_path):
             q = row.get("question", "")
             if q:
@@ -388,15 +388,21 @@ def main() -> None:
     run_scoring_phase(args, original_path, scored_path)
     run_editing_phase(args, original_path, edits_dir)
     variant_names = build_compare_jsonl(
-        original_path, scored_path, edits_dir, compare_path, args.skip_scoring
+        original_path, scored_path, edits_dir, compare_path
     )
 
     all_fields = ["original"] + variant_names
     fields_str = " ".join(all_fields)
+    scored_path = run_dir / "original_scored.jsonl"
     print(f"\n{'=' * 60}")
     print("DONE — review with the TUI:")
     print(f"  uv run python scripts/jsonl_tui/cli.py {compare_path} \\")
-    print(f"      --variant-fields {fields_str}")
+    print(f"      --variant-fields {fields_str}", end="")
+    if scored_path.exists():
+        print(" \\")
+        print("      --meta-fields original_openness_score")
+    else:
+        print()
     print(f"{'=' * 60}\n")
 
 
