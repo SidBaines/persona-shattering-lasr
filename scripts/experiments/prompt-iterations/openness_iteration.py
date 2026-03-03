@@ -288,6 +288,55 @@ def _print_score_distribution(scored_path: Path) -> None:
     print()
 
 
+def _print_edit_score_distribution(scored_edit_path: Path, variant: str) -> None:
+    """Print openness and coherence score distributions for a scored edit variant."""
+    openness_scores: list[int] = []
+    coherence_scores: list[int] = []
+    for row in read_jsonl(scored_edit_path):
+        metrics = row.get("edit_metrics", {})
+        o = metrics.get("openness.score")
+        c = metrics.get("coherence.score")
+        if o is not None:
+            openness_scores.append(int(o))
+        if c is not None:
+            coherence_scores.append(int(c))
+
+    if not openness_scores:
+        return
+
+    n = len(openness_scores)
+    print(f"\n  [{variant}] Openness  (n={n}): min={min(openness_scores):+}, max={max(openness_scores):+}, mean={sum(openness_scores)/n:+.1f}")
+    openness_buckets = [
+        ("[-10, -7]", lambda s: s <= -7),
+        ("[-6,  -4]", lambda s: -6 <= s <= -4),
+        ("[-3,  -1]", lambda s: -3 <= s <= -1),
+        ("[  0    ]", lambda s: s == 0),
+        ("[ +1, +3]", lambda s: 1 <= s <= 3),
+        ("[ +4, +6]", lambda s: 4 <= s <= 6),
+        ("[ +7,+10]", lambda s: s >= 7),
+    ]
+    for label, pred in openness_buckets:
+        count = sum(1 for s in openness_scores if pred(s))
+        bar = "#" * count
+        print(f"    {label}  {bar} ({count})")
+
+    if coherence_scores:
+        nc = len(coherence_scores)
+        print(f"\n  [{variant}] Coherence (n={nc}): min={min(coherence_scores)}, max={max(coherence_scores)}, mean={sum(coherence_scores)/nc:.1f}")
+        coherence_buckets = [
+            ("[ 0, 20]", lambda s: s <= 20),
+            ("[21, 40]", lambda s: 21 <= s <= 40),
+            ("[41, 60]", lambda s: 41 <= s <= 60),
+            ("[61, 80]", lambda s: 61 <= s <= 80),
+            ("[81,100]", lambda s: s >= 81),
+        ]
+        for label, pred in coherence_buckets:
+            count = sum(1 for s in coherence_scores if pred(s))
+            bar = "#" * count
+            print(f"    {label}  {bar} ({count})")
+    print()
+
+
 def apply_score_filter(
     args: argparse.Namespace,
     original_path: Path,
@@ -411,7 +460,8 @@ def run_edit_scoring_phase(
     """
     _INTERNAL_FILES = {"filtered_out", "filtered_for_editing"}
     edit_files = sorted(
-        f for f in edits_dir.glob("*.jsonl") if f.stem not in _INTERNAL_FILES
+        f for f in edits_dir.glob("*.jsonl")
+        if f.stem not in _INTERNAL_FILES and not f.stem.endswith("_scored")
     )
     if not edit_files:
         return
@@ -419,13 +469,15 @@ def run_edit_scoring_phase(
     _phase_header("PHASE 2.5: SCORING EDITED RESPONSES")
 
     for edit_file in edit_files:
-        scored_edit_path = edits_dir / f"{edit_file.stem}_scored.jsonl"
+        variant = edit_file.stem
+        scored_edit_path = edits_dir / f"{variant}_scored.jsonl"
         if scored_edit_path.exists() and not args.overwrite_edits:
             row_count = sum(1 for _ in scored_edit_path.open() if _.strip())
-            print(f"  Skipping {edit_file.stem!r} — already scored ({row_count} rows): {scored_edit_path}")
+            print(f"  Skipping {variant!r} — already scored ({row_count} rows): {scored_edit_path}")
+            _print_edit_score_distribution(scored_edit_path, variant)
             continue
 
-        print(f"  Scoring {edit_file.stem!r} -> {scored_edit_path}")
+        print(f"  Scoring {variant!r} -> {scored_edit_path}")
         edit_dataset = load_dataset_from_config(
             DatasetConfig(source="local", path=str(edit_file))
         )
@@ -438,6 +490,7 @@ def run_edit_scoring_phase(
         )
         _, result = run_persona_metrics(metrics_config, dataset=edit_dataset)
         print(f"    Done: {result.num_samples} scored")
+        _print_edit_score_distribution(scored_edit_path, variant)
 
 
 def build_compare_jsonl(
