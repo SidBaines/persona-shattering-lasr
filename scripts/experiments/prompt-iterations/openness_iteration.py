@@ -62,7 +62,6 @@ from scripts.datasets import load_dataset_from_config
 from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.inference import InferenceConfig, run_inference
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
-from scripts.persona_metrics.config import PersonaMetricSpec
 from scripts.utils import read_jsonl, write_jsonl
 
 load_dotenv()
@@ -247,7 +246,7 @@ def run_scoring_phase(
     print(f"Scoring {len(original_dataset)} original responses...\n")
 
     metrics_config = PersonaMetricsConfig(
-        evaluations=[PersonaMetricSpec(name="openness", params={"include_reasoning": False})],
+        evaluations=["openness"],
         response_column="response",
         question_column="question",
         metrics_key="openness_metrics",
@@ -399,6 +398,48 @@ def run_editing_phase(
         print(f"    Done: {result.num_samples} edited, {result.num_failed} failed")
 
 
+def run_edit_scoring_phase(
+    args: argparse.Namespace,
+    edits_dir: Path,
+) -> None:
+    """Score each edit variant for openness + coherence. Skipped if output already exists.
+
+    For each <variant>.jsonl in edits_dir, writes <variant>_scored.jsonl with
+    edit_metrics.openness.score and edit_metrics.coherence.score added.
+    The neutral_paraphrase_control variant is scored like any other — useful for
+    verifying that a plain paraphrase preserves both scores.
+    """
+    _INTERNAL_FILES = {"filtered_out", "filtered_for_editing"}
+    edit_files = sorted(
+        f for f in edits_dir.glob("*.jsonl") if f.stem not in _INTERNAL_FILES
+    )
+    if not edit_files:
+        return
+
+    _phase_header("PHASE 2.5: SCORING EDITED RESPONSES")
+
+    for edit_file in edit_files:
+        scored_edit_path = edits_dir / f"{edit_file.stem}_scored.jsonl"
+        if scored_edit_path.exists() and not args.overwrite_edits:
+            row_count = sum(1 for _ in scored_edit_path.open() if _.strip())
+            print(f"  Skipping {edit_file.stem!r} — already scored ({row_count} rows): {scored_edit_path}")
+            continue
+
+        print(f"  Scoring {edit_file.stem!r} -> {scored_edit_path}")
+        edit_dataset = load_dataset_from_config(
+            DatasetConfig(source="local", path=str(edit_file))
+        )
+        metrics_config = PersonaMetricsConfig(
+            evaluations=["openness", "coherence"],
+            response_column="edited_response",
+            question_column="question",
+            metrics_key="edit_metrics",
+            output_path=scored_edit_path,
+        )
+        _, result = run_persona_metrics(metrics_config, dataset=edit_dataset)
+        print(f"    Done: {result.num_samples} scored")
+
+
 def build_compare_jsonl(
     original_path: Path,
     scored_path: Path,
@@ -452,6 +493,8 @@ def build_compare_jsonl(
     variant_names = [f.stem for f in edit_files]
 
     edits_by_variant: dict[str, dict[str, str]] = {}
+    # edit scores: variant -> question -> {openness.score, coherence.score}
+    edit_scores_by_variant: dict[str, dict[str, dict[str, int | None]]] = {}
     for edit_file in edit_files:
         variant = edit_file.stem
         variant_map: dict[str, str] = {}
@@ -461,7 +504,21 @@ def build_compare_jsonl(
                 variant_map[q] = row.get("edited_response", "")
         edits_by_variant[variant] = variant_map
 
-    # One record per question with all variants as fields
+        # Load per-variant scored file if available
+        scored_edit_path = edits_dir / f"{variant}_scored.jsonl"
+        if scored_edit_path.exists():
+            scores_map: dict[str, dict[str, int | None]] = {}
+            for row in read_jsonl(scored_edit_path):
+                q = row.get("question", "")
+                if q:
+                    metrics = row.get("edit_metrics", {})
+                    scores_map[q] = {
+                        "openness_score": metrics.get("openness.score"),
+                        "coherence_score": metrics.get("coherence.score"),
+                    }
+            edit_scores_by_variant[variant] = scores_map
+
+    # One record per question with all variants and scores as fields
     records = []
     for question, original_text in originals.items():
         record: dict[str, object] = {
@@ -472,12 +529,18 @@ def build_compare_jsonl(
             record["original_openness_score"] = openness_scores.get(question)
         for variant in variant_names:
             record[variant] = edits_by_variant[variant].get(question, "")
+            if variant in edit_scores_by_variant:
+                variant_scores = edit_scores_by_variant[variant].get(question, {})
+                record[f"{variant}_openness_score"] = variant_scores.get("openness_score")
+                record[f"{variant}_coherence_score"] = variant_scores.get("coherence_score")
         records.append(record)
 
     write_jsonl(records, compare_path)
     print(f"  Written {len(records)} records to {compare_path}")
     score_field = ", original_openness_score" if openness_scores else ""
-    print(f"  Fields: original{score_field}" + (f", {', '.join(variant_names)}" if variant_names else ""))
+    scored_variants = [v for v in variant_names if v in edit_scores_by_variant]
+    edit_score_fields = "".join(f", {v}_openness_score, {v}_coherence_score" for v in scored_variants)
+    print(f"  Fields: original{score_field}" + (f", {', '.join(variant_names)}" if variant_names else "") + edit_score_fields)
     return variant_names
 
 
@@ -506,19 +569,31 @@ def main() -> None:
 
     editing_input_path = apply_score_filter(args, original_path, scored_path, edits_dir)
     run_editing_phase(args, editing_input_path, edits_dir)
+    run_edit_scoring_phase(args, edits_dir)
     variant_names = build_compare_jsonl(
         original_path, scored_path, edits_dir, compare_path
     )
 
     all_fields = ["original"] + variant_names
     fields_str = " ".join(all_fields)
+
+    # Collect all score meta-fields that ended up in compare.jsonl
+    meta_fields = []
+    if scored_path.exists():
+        meta_fields.append("original_openness_score")
+    _INTERNAL_FILES = {"filtered_out", "filtered_for_editing"}
+    for variant in variant_names:
+        scored_edit_path = edits_dir / f"{variant}_scored.jsonl"
+        if scored_edit_path.exists():
+            meta_fields += [f"{variant}_openness_score", f"{variant}_coherence_score"]
+
     print(f"\n{'=' * 60}")
     print("DONE — review with the TUI:")
     print(f"  uv run python scripts/jsonl_tui/cli.py {compare_path} \\")
     print(f"      --variant-fields {fields_str}", end="")
-    if scored_path.exists():
+    if meta_fields:
         print(" \\")
-        print("      --meta-fields original_openness_score")
+        print(f"      --meta-fields {' '.join(meta_fields)}")
     else:
         print()
     print(f"{'=' * 60}\n")
