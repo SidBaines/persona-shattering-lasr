@@ -175,15 +175,38 @@ class JsonlViewer:
         return lines
 
     def _get_field_value(self, record: Mapping[str, Any], field_name: str) -> Any:
-        value: Any = record
-        for part in field_name.split("."):
-            if not isinstance(value, Mapping) or part not in value:
-                return None
-            value = value[part]
-        return value
+        parts = field_name.split(".")
+        return self._get_field_value_parts(record, parts)
+
+    def _get_field_value_parts(self, value: Any, parts: list[str]) -> Any:
+        if not parts:
+            return value
+        if not isinstance(value, Mapping):
+            return None
+
+        joined = ".".join(parts)
+        if joined in value:
+            return value[joined]
+
+        part = parts[0]
+        if part not in value:
+            return None
+        return self._get_field_value_parts(value[part], parts[1:])
 
     def _format_field_label(self, field_name: str) -> str:
         return field_name.replace(".", " / ").replace("_", " ").upper()
+
+    def _get_primary_score_value(self, record: Mapping[str, Any]) -> Any:
+        for field_name in (
+            "conscientiousness_score",
+            "conscientiousness_comparative_score",
+            "persona_metrics.conscientiousness.score",
+            "persona_metrics.conscientiousness_comparative.score",
+        ):
+            value = self._get_field_value(record, field_name)
+            if value is not None:
+                return value
+        return None
 
     def _main(self, stdscr: curses.window) -> None:
         curses.curs_set(0)
@@ -255,7 +278,7 @@ class JsonlViewer:
                     )
                 else:
                     response_display = f"{self.response_index + 1}/{response_count}"
-                score_value = self._get_field_value(current_record, "conscientiousness_score")
+                score_value = self._get_primary_score_value(current_record)
                 score_text = f"  Score {score_value}" if score_value is not None else ""
                 header = (
                     f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
