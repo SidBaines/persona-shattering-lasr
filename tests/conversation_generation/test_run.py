@@ -10,7 +10,7 @@ from scripts.conversation_generation import (
 )
 from scripts.editing import EditingConfig
 from scripts.inference import InferenceConfig
-from scripts.conversation_generation.run import _build_responder_messages
+from scripts.conversation_generation.run import _build_responder_messages, _format_turn_label
 from scripts.datasets import (
     ingest_source_dataset,
     load_samples,
@@ -159,3 +159,8 @@ def test_responder_prompt_explicitly_requests_next_user_turn(tmp_path):
     assert "next USER turn" in messages[0]["content"]
     assert "Do not answer the user's question as an assistant." in messages[0]["content"]
     assert messages[-1]["role"] == "assistant"
+
+
+def test_format_turn_label_handles_single_and_mixed_turn_batches():
+    assert _format_turn_label([0], total_turns=3) == "turn 1/3"
+    assert _format_turn_label([0, 1, 1], total_turns=3) == "turns 1-2/3"

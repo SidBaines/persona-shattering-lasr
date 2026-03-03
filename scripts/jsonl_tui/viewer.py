@@ -83,6 +83,122 @@ class JsonlViewer:
         """Run the TUI viewer."""
         curses.wrapper(self._main)
 
+    def _scroll_first_navigation(self) -> bool:
+        """Whether arrow-key navigation should scroll before changing records."""
+        return self.variant_fields is not None or self.conversation_field is not None
+
+    def _next_group(self) -> None:
+        if self.question_index < len(self.grouped_records) - 1:
+            self.question_index += 1
+            self.response_index = 0
+            self.line_offset = 0
+
+    def _prev_group(self) -> None:
+        if self.question_index > 0:
+            self.question_index -= 1
+            self.response_index = 0
+            self.line_offset = 0
+
+    def _scroll_down(self, max_offset: int, amount: int = 1) -> None:
+        self.line_offset = min(max_offset, self.line_offset + amount)
+
+    def _scroll_up(self, amount: int = 1) -> None:
+        self.line_offset = max(0, self.line_offset - amount)
+
+    def _handle_key(
+        self,
+        key: int,
+        *,
+        max_offset: int,
+        body_height: int,
+        current_group: list[dict[str, Any]],
+    ) -> bool:
+        """Handle one keypress.
+
+        Returns:
+            True if the viewer should exit, else False.
+        """
+        if key in (ord("q"), 27):
+            return True
+
+        if key in (curses.KEY_DOWN,):
+            if self._scroll_first_navigation():
+                self._scroll_down(max_offset)
+            else:
+                self._next_group()
+            return False
+
+        if key in (curses.KEY_UP,):
+            if self._scroll_first_navigation():
+                self._scroll_up()
+            else:
+                self._prev_group()
+            return False
+
+        if key in (ord("j"),):
+            self._scroll_down(max_offset)
+            return False
+
+        if key in (ord("k"),):
+            self._scroll_up()
+            return False
+
+        if key in (curses.KEY_NPAGE,):
+            self._scroll_down(max_offset, body_height)
+            return False
+
+        if key in (curses.KEY_PPAGE,):
+            self._scroll_up(body_height)
+            return False
+
+        if key == ord("n"):
+            self._next_group()
+            return False
+
+        if key == ord("p"):
+            self._prev_group()
+            return False
+
+        if key in (ord("l"), curses.KEY_RIGHT):
+            if self.variant_fields is not None:
+                self.current_variant_index = (
+                    (self.current_variant_index + 1) % len(self.variant_fields)
+                )
+                self.line_offset = 0
+            elif self.conversation_field is not None:
+                self._next_group()
+            elif self.response_index < len(current_group) - 1:
+                self.response_index += 1
+                self.line_offset = 0
+            return False
+
+        if key in (ord("h"), curses.KEY_LEFT):
+            if self.variant_fields is not None:
+                self.current_variant_index = (
+                    (self.current_variant_index - 1) % len(self.variant_fields)
+                )
+                self.line_offset = 0
+            elif self.conversation_field is not None:
+                self._prev_group()
+            elif self.response_index > 0:
+                self.response_index -= 1
+                self.line_offset = 0
+            return False
+
+        if key == ord("g"):
+            self.question_index = 0
+            self.response_index = 0
+            self.line_offset = 0
+            return False
+
+        if key == ord("G"):
+            self.question_index = len(self.grouped_records) - 1
+            self.response_index = 0
+            self.line_offset = 0
+            return False
+
+        return False
+
     def _render_lines(
         self, record: dict[str, Any], width: int
     ) -> list[tuple[str, str | None, bool]]:
@@ -260,8 +376,8 @@ class JsonlViewer:
                     f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
                 )
                 footer = (
-                    "Up/Down or n/p: prev/next question  Left/Right or h/l: prev/next variant  "
-                    "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
+                    "Up/Down or j/k: scroll  Left/Right or h/l: prev/next variant  "
+                    "n/p: prev/next question  PgUp/PgDn: page  g/G: first/last  q: quit"
                 )
             elif self.conversation_field is not None:
                 record_lines = self._render_conversation_lines(
@@ -277,8 +393,8 @@ class JsonlViewer:
                     f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
                 )
                 footer = (
-                    "Up/Down or n/p: prev/next record  "
-                    "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
+                    "Up/Down or j/k: scroll  Left/Right or n/p: prev/next record  "
+                    "PgUp/PgDn: page  g/G: first/last  q: quit"
                 )
             else:
                 record_lines = self._render_lines(current_record, max(10, width - 1))
@@ -316,76 +432,13 @@ class JsonlViewer:
             stdscr.refresh()
 
             key = stdscr.getch()
-            if key in (ord("q"), 27):
+            if self._handle_key(
+                key,
+                max_offset=max_offset,
+                body_height=body_height,
+                current_group=current_group,
+            ):
                 break
-            if key in (curses.KEY_DOWN,):
-                if self.question_index < len(self.grouped_records) - 1:
-                    self.question_index += 1
-                    self.response_index = 0
-                    self.line_offset = 0
-                continue
-            if key in (curses.KEY_UP,):
-                if self.question_index > 0:
-                    self.question_index -= 1
-                    self.response_index = 0
-                    self.line_offset = 0
-                continue
-            if key in (ord("j"),):
-                if self.line_offset < max_offset:
-                    self.line_offset += 1
-                continue
-            if key in (ord("k"),):
-                if self.line_offset > 0:
-                    self.line_offset -= 1
-                continue
-            if key in (curses.KEY_NPAGE,):
-                self.line_offset = min(max_offset, self.line_offset + body_height)
-                continue
-            if key in (curses.KEY_PPAGE,):
-                self.line_offset = max(0, self.line_offset - body_height)
-                continue
-            if key == ord("n"):
-                if self.question_index < len(self.grouped_records) - 1:
-                    self.question_index += 1
-                    self.response_index = 0
-                    self.line_offset = 0
-                continue
-            if key == ord("p"):
-                if self.question_index > 0:
-                    self.question_index -= 1
-                    self.response_index = 0
-                    self.line_offset = 0
-                continue
-            if key in (ord("l"), curses.KEY_RIGHT):
-                if self.variant_fields is not None:
-                    self.current_variant_index = (
-                        (self.current_variant_index + 1) % len(self.variant_fields)
-                    )
-                    self.line_offset = 0
-                elif self.response_index < len(current_group) - 1:
-                    self.response_index += 1
-                    self.line_offset = 0
-                continue
-            if key in (ord("h"), curses.KEY_LEFT):
-                if self.variant_fields is not None:
-                    self.current_variant_index = (
-                        (self.current_variant_index - 1) % len(self.variant_fields)
-                    )
-                    self.line_offset = 0
-                elif self.response_index > 0:
-                    self.response_index -= 1
-                    self.line_offset = 0
-                continue
-            if key == ord("g"):
-                self.question_index = 0
-                self.response_index = 0
-                self.line_offset = 0
-                continue
-            if key == ord("G"):
-                self.question_index = len(self.grouped_records) - 1
-                self.response_index = 0
-                self.line_offset = 0
-                continue
 
     def _init_colors(self) -> None:
         if not curses.has_colors():
