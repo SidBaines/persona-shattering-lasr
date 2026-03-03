@@ -20,7 +20,12 @@ vectors grow the internal rank**:
 
 This means that after repeated additions the internal rank can far exceed the
 original adapter rank. The representation is still exact — no information is
-lost — but storage and compute grow with rank.
+lost — but storage and compute grow with rank. Note that ``max_rank``
+reflects factor shape, not true matrix rank: ``a + a`` has double the
+``max_rank`` of ``2 * a`` even though ΔW is identical. Methods like
+``to_peft_model()`` and ``to_file()`` use ``max_rank`` for the adapter's
+``r``, so consider calling ``rank_reduce()`` after arithmetic to avoid
+unnecessarily inflated adapter rank.
 
 **Loss only occurs in** ``rank_reduce(new_rank)`` — truncated SVD to a lower
 rank. Information in the discarded singular vectors is gone. Repeated
@@ -303,7 +308,14 @@ class LoRaVector:
 
     @property
     def max_rank(self) -> int:
-        """Maximum rank across all modules."""
+        """Maximum rank across all modules (factor shape, not true matrix rank).
+
+        After addition, ``max_rank`` reflects the concatenated factor size,
+        not the true rank of ΔW. For example, ``a + a`` has
+        ``max_rank == 2 * a.max_rank`` even though the resulting ΔW is
+        identical to ``2 * a`` (which preserves the original rank). Call
+        ``rank_reduce()`` to compress redundant dimensions.
+        """
         return max(B.shape[1] for B, _ in self._factors.values())
 
     @property
