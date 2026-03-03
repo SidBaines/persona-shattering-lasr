@@ -36,6 +36,7 @@ def get_run_paths(run_dir: str | Path) -> dict[str, Path]:
         "sample_inputs": root / "datasets" / "sample_inputs.jsonl",
         "canonical_samples": root / "datasets" / "canonical_samples.jsonl",
         "edit_events": root / "datasets" / "edit_events.jsonl",
+        "message_events": root / "datasets" / "message_events.jsonl",
         "metric_events": root / "datasets" / "metric_events.jsonl",
         "stage_events": root / "events" / "stage_events.jsonl",
         "exports_dir": root / "exports",
@@ -71,6 +72,7 @@ def init_run(run_dir: str | Path, base_config: dict[str, Any] | None = None) -> 
             "sample_inputs": str(paths["sample_inputs"]),
             "canonical_samples": str(paths["canonical_samples"]),
             "edit_events": str(paths["edit_events"]),
+            "message_events": str(paths["message_events"]),
             "metric_events": str(paths["metric_events"]),
             "stage_events": str(paths["stage_events"]),
         },
@@ -168,8 +170,7 @@ def load_sample_inputs(run_dir: str | Path) -> list[SampleRecord]:
 def load_samples(run_dir: str | Path) -> list[SampleRecord]:
     """Load materialized canonical samples."""
     paths = get_run_paths(run_dir)
-    if not paths["canonical_samples"].exists():
-        materialize_canonical_samples(run_dir)
+    materialize_canonical_samples(run_dir)
     rows, recovered = read_jsonl_tolerant(paths["canonical_samples"])
     if recovered:
         record_stage_event(
@@ -242,6 +243,37 @@ def write_edit_overlay(
             sample_id=sample_id,
             created_at=_now_iso(),
             payload={"variant_name": variant_name, "overlay_id": overlay_payload.get("overlay_id")},
+        ),
+    )
+    if materialize:
+        materialize_canonical_samples(run_dir)
+
+
+def write_message_append(
+    run_dir: str | Path,
+    sample_id: str,
+    message_payload: dict[str, Any],
+    *,
+    materialize: bool = True,
+) -> None:
+    """Record one appended conversation message."""
+    paths = get_run_paths(run_dir)
+    payload = {
+        "event_id": _event_id(sample_id, "message_append"),
+        "sample_id": sample_id,
+        "created_at": _now_iso(),
+        "message": deepcopy(message_payload),
+    }
+    append_jsonl(paths["message_events"], payload)
+    record_stage_event(
+        run_dir,
+        StageEventRecord(
+            event_id=_event_id(sample_id, "message_append_event"),
+            stage="conversation",
+            event_type="message_append",
+            sample_id=sample_id,
+            created_at=_now_iso(),
+            payload={"message_id": message_payload.get("message_id"), "role": message_payload.get("role")},
         ),
     )
     if materialize:
@@ -321,15 +353,40 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
                 prefill = inference.assistant_prefill or sample.input.assistant_prefill or ""
                 full = f"{prefill}{inference.assistant_completion}"
             message_id = inference.assistant_message_id or _assistant_message_id(sample.sample_id)
+            payload_metadata = payload.get("assistant_message_metadata")
             assistant_message = CanonicalMessage(
                 message_id=message_id,
                 role="assistant",
                 content=full,
+                message_metadata=deepcopy(payload_metadata)
+                if isinstance(payload_metadata, dict)
+                else None,
                 editable=True,
             )
             sample.messages = _upsert_message(sample.messages, assistant_message)
             sample.inference.assistant_message_id = message_id
             sample.inference.assistant_full = full
+
+    message_events, _ = read_jsonl_tolerant(paths["message_events"])
+    for raw in message_events:
+        sample_id = raw.get("sample_id")
+        message_payload = raw.get("message")
+        if (
+            not isinstance(sample_id, str)
+            or sample_id not in index
+            or not isinstance(message_payload, dict)
+        ):
+            continue
+        sample = index[sample_id]
+        message = CanonicalMessage.model_validate(message_payload)
+        sample.messages = _upsert_message(sample.messages, message)
+        conversation_lineage = sample.lineage.setdefault("conversation", {})
+        if isinstance(conversation_lineage, dict):
+            conversation_lineage[message.message_id] = {
+                "role": message.role,
+                "updated_at": raw.get("created_at"),
+                "source_stage": (message.message_metadata or {}).get("source_stage"),
+            }
 
     edit_events, _ = read_jsonl_tolerant(paths["edit_events"])
     for raw in edit_events:
@@ -381,6 +438,7 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
     materialized_rows: list[dict[str, Any]] = []
     for sample in samples:
         rendered = index[sample.sample_id]
+        rendered.messages = _sort_messages(rendered.messages)
         rendered.lineage = {**rendered.lineage, "last_materialized_at": _now_iso()}
         materialized_rows.append(rendered.model_dump())
 
@@ -426,11 +484,28 @@ def resume_state(
             if not variant_name:
                 raise ValueError("variant_name is required for editing resume state.")
             variant = _find_variant(sample, variant_name)
-            if variant and variant.status == "success":
+            latest_assistant = next(
+                (message for message in reversed(sample.messages) if message.role == "assistant"),
+                None,
+            )
+            latest_overlay = (
+                _latest_success_overlay_for_target(variant, latest_assistant.message_id)
+                if variant is not None and latest_assistant is not None
+                else None
+            )
+            if latest_assistant is not None and latest_overlay is not None:
                 complete.append(sample.sample_id)
             else:
                 attempts = (
-                    max((overlay.attempt_no for overlay in variant.overlays), default=0)
+                    max(
+                        (
+                            overlay.attempt_no
+                            for overlay in variant.overlays
+                            if latest_assistant is None
+                            or overlay.target_message_id == latest_assistant.message_id
+                        ),
+                        default=0,
+                    )
                     if variant is not None
                     else 0
                 )
@@ -451,6 +526,47 @@ def resume_state(
         "failed": sorted(failed),
         "terminal": sorted(terminal),
     }
+
+
+def render_messages(sample: SampleRecord, variant_name: str | None = None) -> list[CanonicalMessage]:
+    """Render one sample's messages with latest successful overlays applied."""
+    rendered = [message.model_copy(deep=True) for message in sample.messages]
+    if variant_name is None:
+        return rendered
+
+    variant = _find_variant(sample, variant_name)
+    if variant is None:
+        return rendered
+
+    overlays_by_target: dict[str, EditOverlay] = {}
+    for overlay in variant.overlays:
+        if overlay.status != "success":
+            continue
+        previous = overlays_by_target.get(overlay.target_message_id)
+        if previous is None or (overlay.attempt_no, overlay.overlay_id) > (
+            previous.attempt_no,
+            previous.overlay_id,
+        ):
+            overlays_by_target[overlay.target_message_id] = overlay
+
+    updated: list[CanonicalMessage] = []
+    for message in rendered:
+        overlay = overlays_by_target.get(message.message_id)
+        if overlay is None:
+            updated.append(message)
+            continue
+        updated.append(
+            CanonicalMessage(
+                message_id=message.message_id,
+                role=message.role,
+                content=overlay.edited_content,
+                name=message.name,
+                tool_metadata=deepcopy(message.tool_metadata),
+                message_metadata=deepcopy(message.message_metadata),
+                editable=message.editable,
+            )
+        )
+    return updated
 
 
 def select_training_candidates(
@@ -539,6 +655,7 @@ def select_training_candidates(
 def export_dataset(
     run_dir: str | Path,
     profile: str = "minimal_train_eval",
+    variant_name: str | None = None,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
     rename: dict[str, str] | None = None,
@@ -556,24 +673,53 @@ def export_dataset(
 
     rows: list[dict[str, Any]] = []
     for sample in samples:
-        user_messages = [msg.content for msg in sample.messages if msg.role == "user"]
+        rendered_messages = render_messages(sample)
+        user_messages = [msg.content for msg in rendered_messages if msg.role == "user"]
         variants: dict[str, str] = {}
         for variant in sample.edit_variants:
             latest = _latest_success_overlay(variant)
             if latest is not None:
                 variants[variant.variant_name] = latest.edited_content
-        row = {
-            "sample_id": sample.sample_id,
-            "input_group_id": sample.input_group_id or sample.sample_id,
-            "response_index": sample.response_index,
-            "user_messages": user_messages,
-            "base_response": sample.inference.assistant_completion,
-            "edited_variants": variants,
-            "system_prompt_ref": sample.input.system_prompt_ref,
-            "inference_model": sample.inference.model,
-            "inference_provider": sample.inference.provider,
-            "git_commit_hash": manifest.git_commit_hash,
-        }
+        if profile == "conversation_training":
+            final_messages = render_messages(sample, variant_name)
+            row = {
+                "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "messages": [msg.model_dump() for msg in final_messages],
+                "assistant_turn_count": sum(1 for msg in final_messages if msg.role == "assistant"),
+                "editing_variant": variant_name,
+                "source_info": deepcopy(sample.source_info),
+            }
+        elif profile == "conversation_trace":
+            edited_by_message: dict[str, str] = {}
+            for variant in sample.edit_variants:
+                if variant_name and variant.variant_name != variant_name:
+                    continue
+                for overlay in variant.overlays:
+                    if overlay.status == "success":
+                        edited_by_message[overlay.target_message_id] = overlay.edited_content
+            row = {
+                "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "base_messages": [msg.model_dump() for msg in sample.messages],
+                "edited_messages": [msg.model_dump() for msg in render_messages(sample, variant_name)],
+                "edited_assistant_messages": edited_by_message,
+                "editing_variants": [variant.variant_name for variant in sample.edit_variants],
+                "source_info": deepcopy(sample.source_info),
+            }
+        else:
+            row = {
+                "sample_id": sample.sample_id,
+                "input_group_id": sample.input_group_id or sample.sample_id,
+                "response_index": sample.response_index,
+                "user_messages": user_messages,
+                "base_response": sample.inference.assistant_completion,
+                "edited_variants": variants,
+                "system_prompt_ref": sample.input.system_prompt_ref,
+                "inference_model": sample.inference.model,
+                "inference_provider": sample.inference.provider,
+                "git_commit_hash": manifest.git_commit_hash,
+            }
         rows.append(_apply_export_transform(row, export_profile))
 
     output_path = paths["exports_dir"] / f"{profile}.jsonl"
@@ -773,6 +919,9 @@ def _build_input_messages_from_row(
                     tool_metadata=raw.get("tool_metadata")
                     if isinstance(raw.get("tool_metadata"), dict)
                     else None,
+                    message_metadata=raw.get("message_metadata")
+                    if isinstance(raw.get("message_metadata"), dict)
+                    else None,
                     editable=bool(raw.get("editable", editable_default)),
                 )
             )
@@ -837,10 +986,15 @@ def _extract_question(row: dict[str, Any]) -> str | None:
 
 def _assign_message_ids(sample_id: str, messages: list[CanonicalMessage]) -> list[CanonicalMessage]:
     assigned: list[CanonicalMessage] = []
+    conversational_turn = 0
     for idx, message in enumerate(messages):
         mid = message.message_id.strip() if message.message_id else ""
         if not mid:
             mid = _hash_text(f"{sample_id}:{idx}:{message.role}:{message.content}")[:24]
+        turn_index = -1 if message.role == "system" else conversational_turn
+        metadata = deepcopy(message.message_metadata) if message.message_metadata else {}
+        metadata.setdefault("source_stage", "seed")
+        metadata.setdefault("turn_index", turn_index)
         assigned.append(
             CanonicalMessage(
                 message_id=f"msg_{mid}",
@@ -848,9 +1002,12 @@ def _assign_message_ids(sample_id: str, messages: list[CanonicalMessage]) -> lis
                 content=message.content,
                 name=message.name,
                 tool_metadata=deepcopy(message.tool_metadata),
+                message_metadata=metadata,
                 editable=message.editable,
             )
         )
+        if message.role in {"user", "assistant"}:
+            conversational_turn += 1
     return assigned
 
 
@@ -936,6 +1093,19 @@ def _upsert_message(messages: list[CanonicalMessage], message: CanonicalMessage)
     return updated
 
 
+def _sort_messages(messages: list[CanonicalMessage]) -> list[CanonicalMessage]:
+    role_order = {"system": 0, "user": 1, "assistant": 2, "tool": 3}
+
+    def _sort_key(item: tuple[int, CanonicalMessage]) -> tuple[int, int, int]:
+        original_index, message = item
+        metadata = message.message_metadata or {}
+        turn_index_raw = metadata.get("turn_index")
+        turn_index = int(turn_index_raw) if isinstance(turn_index_raw, int) else original_index
+        return (turn_index, role_order.get(message.role, 9), original_index)
+
+    return [message for _, message in sorted(enumerate(messages), key=_sort_key)]
+
+
 def _assistant_message_id(sample_id: str) -> str:
     return f"msg_{_hash_text(f'{sample_id}:assistant:inference')[:24]}"
 
@@ -991,6 +1161,20 @@ def _latest_success_overlay(variant: EditVariant) -> EditOverlay | None:
         successes,
         key=lambda item: (item.attempt_no, item.overlay_id),
     )[-1]
+
+
+def _latest_success_overlay_for_target(
+    variant: EditVariant,
+    target_message_id: str,
+) -> EditOverlay | None:
+    successes = [
+        overlay
+        for overlay in variant.overlays
+        if overlay.status == "success" and overlay.target_message_id == target_message_id
+    ]
+    if not successes:
+        return None
+    return sorted(successes, key=lambda item: (item.attempt_no, item.overlay_id))[-1]
 
 
 def _apply_export_transform(row: dict[str, Any], profile: ExportProfile) -> dict[str, Any]:

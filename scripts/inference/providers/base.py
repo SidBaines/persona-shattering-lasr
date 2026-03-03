@@ -6,6 +6,8 @@ from typing import Any
 
 
 TokenUsage = dict[str, int]
+ChatMessage = dict[str, str]
+PromptInput = str | list[ChatMessage]
 
 
 def empty_usage() -> TokenUsage:
@@ -82,7 +84,7 @@ class InferenceProvider(ABC):
     """
 
     @abstractmethod
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: PromptInput, **kwargs) -> str:
         """Generate a response for a single prompt.
 
         Args:
@@ -95,7 +97,7 @@ class InferenceProvider(ABC):
         pass
 
     @abstractmethod
-    def generate_batch(self, prompts: list[str], **kwargs) -> list[str]:
+    def generate_batch(self, prompts: list[PromptInput], **kwargs) -> list[str]:
         """Generate responses for a batch of prompts.
 
         Args:
@@ -109,7 +111,7 @@ class InferenceProvider(ABC):
         """
         pass
 
-    async def generate_async(self, prompt: str, **kwargs) -> str:
+    async def generate_async(self, prompt: PromptInput, **kwargs) -> str:
         """Async wrapper for generate().
 
         Default implementation runs the sync method in a thread.
@@ -117,7 +119,7 @@ class InferenceProvider(ABC):
         """
         return await asyncio.to_thread(self.generate, prompt, **kwargs)
 
-    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
+    async def generate_batch_async(self, prompts: list[PromptInput], **kwargs) -> list[str]:
         """Async wrapper for generate_batch().
 
         Default implementation runs the sync method in a thread.
@@ -126,7 +128,7 @@ class InferenceProvider(ABC):
         return await asyncio.to_thread(self.generate_batch, prompts, **kwargs)
 
     async def generate_batch_with_metadata_async(
-        self, prompts: list[str], **kwargs
+        self, prompts: list[PromptInput], **kwargs
     ) -> tuple[list[str], TokenUsage, int]:
         """Generate responses and return usage + failure counts.
 
@@ -138,7 +140,7 @@ class InferenceProvider(ABC):
         return responses, empty_usage(), failed_count
 
     async def generate_batch_with_details_async(
-        self, prompts: list[str], **kwargs
+        self, prompts: list[PromptInput], **kwargs
     ) -> tuple[list[str], list[TokenUsage | None], int]:
         """Generate responses and return per-response usage details when available."""
         responses, _, failed_count = await self.generate_batch_with_metadata_async(

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage
+from scripts.inference.providers.base import PromptInput, TokenUsage
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -141,7 +141,12 @@ class OpenAIProvider(AsyncInferenceProvider):
         self.model = config.model
         logger.info("Initialized OpenAI provider with model: %s", self.model)
 
-    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+    def _build_input(self, prompt: PromptInput) -> list[dict[str, str]]:
+        if isinstance(prompt, str):
+            return [{"role": "user", "content": prompt}]
+        return prompt
+
+    async def _generate_one(self, prompt: PromptInput, **kwargs) -> tuple[str, TokenUsage | None]:
         gen_cfg = self.generation_config
         openai_cfg = self.openai_config
 
@@ -157,14 +162,14 @@ class OpenAIProvider(AsyncInferenceProvider):
             return "temperature" in lowered or "top_p" in lowered
 
         async def _create_response(
-            prompt: str,
+            prompt: PromptInput,
             *,
             include_sampling: bool = True,
             override_max_output_tokens: int | None = None,
         ):
             base_kwargs: dict[str, object] = {
                 "model": self.model,
-                "input": [{"role": "user", "content": prompt}],
+                "input": self._build_input(prompt),
                 "max_output_tokens": override_max_output_tokens or max_output_tokens,
                 "text": {
                     "format": {"type": "text"},

@@ -65,6 +65,14 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "sf_guy_casual_grammar",
         "evaluations": ["lowercase_density", "punctuation_density"],
     },
+    "c+_persona": {
+        "prompt_template": "c+",
+        "evaluations": ["conscientiousness"],
+    },
+    "c-_persona": {
+        "prompt_template": "c-",
+        "evaluations": ["conscientiousness"],
+    },
     "n+_persona": {
         "prompt_template": "n+",
         "evaluations": ["neuroticism"],
@@ -148,6 +156,14 @@ PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
     "sf_guy": {
         "maximize": "Write entirely in lowercase with no punctuation, like a chill person texting casually.",
         "minimize": "Write formally with proper capitalization and full punctuation on every sentence.",
+    },
+    "c+_persona": {
+        "maximize": "Write with high conscientiousness: organized, methodical, disciplined, careful, and strongly focused on planning, reliability, and follow-through.",
+        "minimize": "Write with very low conscientiousness: loose, improvised, disorganized, casual about standards, and weak on planning or follow-through.",
+    },
+    "c-_persona": {
+        "maximize": "Write with high conscientiousness: organized, methodical, disciplined, careful, and strongly focused on planning, reliability, and follow-through.",
+        "minimize": "Write with very low conscientiousness: loose, improvised, disorganized, casual about standards, and weak on planning or follow-through.",
     },
     "n+_persona": {
         "maximize": "Write with high anxiety, worry, self-doubt, and emotional volatility. Over-index on uncertainty and catastrophic framing.",

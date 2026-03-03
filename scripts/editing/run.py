@@ -19,11 +19,12 @@ from scripts.datasets import (
     load_samples,
     materialize_canonical_samples,
     register_stage_fingerprint,
+    render_messages,
     resume_state,
     write_edit_overlay,
 )
 from scripts.editing.config import EditingConfig, EditingResult
-from scripts.editing.prompts import get_prompt
+from scripts.editing.prompts import EditPromptContext, get_prompt
 from scripts.persona_metrics import (
     PersonaMetricsConfig,
     PersonaMetricSpec,
@@ -237,6 +238,9 @@ async def edit_dataset(
             async with semaphore:
                 prompt = get_prompt(
                     config.prompt_template,
+                    context=EditPromptContext.model_validate(record["prompt_context"])
+                    if isinstance(record.get("prompt_context"), dict)
+                    else None,
                     question=record["question"],
                     response=record["response"],
                 )
@@ -627,34 +631,62 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
     for sample in samples:
         if sample.sample_id not in pending_ids:
             continue
-        user_messages = [msg for msg in sample.messages if msg.role == "user"]
         assistant_messages = [msg for msg in sample.messages if msg.role == "assistant"]
-        if len(user_messages) != 1 or len(assistant_messages) > 1:
-            raise ValueError(
-                "Multi-turn editing execution is unimplemented in phase 1. "
-                f"sample_id={sample.sample_id} has {len(user_messages)} user turns and "
-                f"{len(assistant_messages)} assistant turns."
-            )
-        if sample.inference.status != "success" or not sample.inference.assistant_completion:
+        if not assistant_messages:
             continue
+        target_message = assistant_messages[-1]
+        if not target_message.content.strip():
+            continue
+
+        latest_user_message = ""
+        target_index = next(
+            idx for idx, message in enumerate(sample.messages)
+            if message.message_id == target_message.message_id
+        )
+        for message in reversed(sample.messages[:target_index]):
+            if message.role == "user":
+                latest_user_message = message.content
+                break
 
         existing_attempts = 0
         for variant in sample.edit_variants:
             if variant.variant_name == config.variant_name:
-                existing_attempts = max((overlay.attempt_no for overlay in variant.overlays), default=0)
+                existing_attempts = max(
+                    (
+                        overlay.attempt_no
+                        for overlay in variant.overlays
+                        if overlay.target_message_id == target_message.message_id
+                    ),
+                    default=0,
+                )
                 break
+
+        turn_index = sum(
+            1
+            for message in sample.messages[: target_index + 1]
+            if message.role == "assistant"
+        ) - 1
 
         records.append(
             {
                 "sample_id": sample.sample_id,
-                "question": user_messages[0].content,
-                "response": sample.inference.assistant_completion,
-                "target_message_id": sample.inference.assistant_message_id
-                or f"msg_{sample.sample_id.split('sample_')[-1]}_assistant",
+                "question": latest_user_message,
+                "response": target_message.content,
+                "target_message_id": target_message.message_id,
                 "attempt_no": existing_attempts + 1,
                 "original_content_hash": hashlib.sha256(
-                    sample.inference.assistant_completion.encode("utf-8")
+                    target_message.content.encode("utf-8")
                 ).hexdigest(),
+                "prompt_context": EditPromptContext(
+                    conversation_history=[
+                        {"role": message.role, "content": message.content}
+                        for message in sample.messages[:target_index]
+                    ],
+                    latest_user_message=latest_user_message,
+                    base_assistant_response=target_message.content,
+                    turn_index=max(turn_index, 0),
+                    total_turns=config.total_turns_hint or max(turn_index + 1, 1),
+                ).model_dump(),
             }
         )
 
@@ -713,8 +745,7 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
             else:
                 rendered_prompt = get_prompt(
                     config.prompt_template,
-                    question=original["question"],
-                    response=original["response"],
+                    context=EditPromptContext.model_validate(original["prompt_context"]),
                 )
                 prompt_hash_source = rendered_prompt
             write_edit_overlay(
@@ -756,15 +787,32 @@ def _run_editing_canonical(config: EditingConfig) -> tuple[Dataset, EditingResul
         if not successful:
             continue
         latest = sorted(successful, key=lambda item: (item.attempt_no, item.overlay_id))[-1]
-        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        base_messages = [msg.model_dump() for msg in sample.messages]
+        edited_messages = [
+            msg.model_dump() for msg in render_messages(sample, config.variant_name)
+        ]
+        question = next(
+            (msg["content"] for msg in reversed(base_messages) if msg["role"] == "user"),
+            "",
+        )
         rows.append(
             {
                 "sample_id": sample.sample_id,
                 "input_group_id": sample.input_group_id or sample.sample_id,
                 "response_index": sample.response_index,
                 "question": question,
-                "response": sample.inference.assistant_completion or "",
+                "response": next(
+                    (
+                        message["content"]
+                        for message in base_messages
+                        if message["message_id"] == latest.target_message_id
+                    ),
+                    "",
+                ),
                 "edited_response": latest.edited_content,
+                "target_message_id": latest.target_message_id,
+                "messages_base": base_messages,
+                "messages_edited": edited_messages,
                 "variant_name": config.variant_name,
             }
         )

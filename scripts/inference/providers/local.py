@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from scripts.inference.providers.base import InferenceProvider
+from scripts.inference.providers.base import InferenceProvider, PromptInput
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -153,6 +153,40 @@ class LocalProvider(InferenceProvider):
                 formatted_prompts.append(prompt)
         return formatted_prompts
 
+    def _render_plain_messages(self, messages: list[dict[str, str]]) -> str:
+        """Render chat messages into a plain transcript fallback."""
+        lines: list[str] = []
+        for message in messages:
+            role = message.get("role", "user").capitalize()
+            content = message.get("content", "")
+            if role == "Assistant" and not content:
+                lines.append("Assistant:")
+            else:
+                lines.append(f"{role}: {content}")
+        if not messages or messages[-1].get("role") != "assistant":
+            lines.append("Assistant:")
+        return "\n".join(lines)
+
+    def _format_prompt_input(self, prompt: PromptInput) -> str:
+        """Format one prompt input into the string expected by the tokenizer."""
+        if isinstance(prompt, str):
+            return prompt
+
+        if self.prompt_format == "chat" and hasattr(self.tokenizer, "apply_chat_template"):
+            try:
+                return self.tokenizer.apply_chat_template(
+                    prompt,
+                    add_generation_prompt=prompt[-1]["role"] != "assistant",
+                    tokenize=False,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed applying chat template to prompt messages; using plain transcript. error=%s",
+                    exc,
+                )
+
+        return self._render_plain_messages(prompt)
+
     def _normalize_eos_ids(self, eos_token_id: int | list[int] | None) -> set[int]:
         """Normalize eos_token_id into a set for finish-reason checks."""
         if eos_token_id is None:
@@ -161,7 +195,7 @@ class LocalProvider(InferenceProvider):
             return {int(eos_token_id)}
         return {int(token_id) for token_id in eos_token_id}
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: PromptInput, **kwargs) -> str:
         """Generate a response for a single prompt.
 
         Args:
@@ -174,7 +208,7 @@ class LocalProvider(InferenceProvider):
         responses = self.generate_batch([prompt], **kwargs)
         return responses[0]
 
-    def generate_batch(self, prompts: list[str], **kwargs) -> list[str]:
+    def generate_batch(self, prompts: list[PromptInput], **kwargs) -> list[str]:
         """Generate responses for a batch of prompts.
 
         Args:
@@ -193,7 +227,8 @@ class LocalProvider(InferenceProvider):
         do_sample = kwargs.get("do_sample", gen_cfg.do_sample)
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
         eos_token_id = kwargs.get("eos_token_id", self._resolve_eos_token_id())
-        formatted_prompts = self._format_prompts_for_model(prompts)
+        normalized_prompts = [self._format_prompt_input(prompt) for prompt in prompts]
+        formatted_prompts = self._format_prompts_for_model(normalized_prompts)
 
         inputs = self.tokenizer(
             formatted_prompts,

@@ -20,6 +20,7 @@ class CanonicalMessage(BaseModel):
     content: str
     name: str | None = None
     tool_metadata: dict[str, Any] | None = None
+    message_metadata: dict[str, Any] | None = None
     editable: bool = True
 
 

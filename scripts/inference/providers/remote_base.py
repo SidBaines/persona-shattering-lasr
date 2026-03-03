@@ -10,6 +10,7 @@ from typing import Awaitable, Callable, TypeVar, TYPE_CHECKING
 
 from scripts.inference.providers.base import (
     InferenceProvider,
+    PromptInput,
     TokenUsage,
     accumulate_usage,
     empty_usage,
@@ -36,7 +37,7 @@ class AsyncInferenceProvider(InferenceProvider):
         self.continue_on_error = config.continue_on_error
         self.log_failures = config.log_failures
 
-    async def _generate_one(self, prompt: str, **kwargs) -> tuple[str, TokenUsage | None]:
+    async def _generate_one(self, prompt: PromptInput, **kwargs) -> tuple[str, TokenUsage | None]:
         """Generate a response for a single prompt (async)."""
         raise NotImplementedError
 
@@ -103,7 +104,7 @@ class AsyncInferenceProvider(InferenceProvider):
         return None
 
     async def generate_batch_with_metadata_async(
-        self, prompts: list[str], **kwargs
+        self, prompts: list[PromptInput], **kwargs
     ) -> tuple[list[str], TokenUsage, int]:
         gen_cfg = self.generation_config
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
@@ -175,7 +176,7 @@ class AsyncInferenceProvider(InferenceProvider):
         return responses, total_usage, failed_count
 
     async def generate_batch_with_details_async(
-        self, prompts: list[str], **kwargs
+        self, prompts: list[PromptInput], **kwargs
     ) -> tuple[list[str], list[TokenUsage | None], int]:
         gen_cfg = self.generation_config
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
@@ -238,17 +239,17 @@ class AsyncInferenceProvider(InferenceProvider):
         failed_count = sum(1 for failed in failures if failed)
         return responses, usages, failed_count
 
-    async def generate_batch_async(self, prompts: list[str], **kwargs) -> list[str]:
+    async def generate_batch_async(self, prompts: list[PromptInput], **kwargs) -> list[str]:
         responses, _, _ = await self.generate_batch_with_metadata_async(
             prompts, **kwargs
         )
         return responses
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: PromptInput, **kwargs) -> str:
         responses = self.generate_batch([prompt], **kwargs)
         return responses[0] if responses else ""
 
-    def generate_batch(self, prompts: list[str], **kwargs) -> list[str]:
+    def generate_batch(self, prompts: list[PromptInput], **kwargs) -> list[str]:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
