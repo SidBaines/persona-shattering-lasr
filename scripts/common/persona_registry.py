@@ -74,6 +74,10 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "n-",
         "evaluations": ["neuroticism"],
     },
+    "o-_persona": {
+        "prompt_template": "o-",
+        "evaluations": ["openness"],
+    },
     "neutral_control": {
         "prompt_template": "neutral_paraphrase_control",
         "evaluations": ["coherence", "count_o", "count_p", "verb_count", "lowercase_density", "punctuation_density"],
@@ -98,6 +102,13 @@ PERSONA_DATASET_PIPELINE_DEFAULTS: dict[str, PersonaDatasetPipelineDefaults] = {
 # Per-persona training pipeline defaults. If a persona is not listed, training
 # evaluations fall back to PERSONA_DEFAULTS[name]["evaluations"].
 PERSONA_TRAINING_PIPELINE_DEFAULTS: dict[str, PersonaTrainingPipelineDefaults] = {
+    "o-_persona": {
+        "evaluations": [
+            "openness",
+            PersonaMetricSpec(name="coherence", params={"include_reasoning": False}),
+        ],
+        "wandb_tags": ["o-persona", "openness", "low-openness", "ocean"],
+    },
     "p_enjoying": {
         "evaluations": [
             "count_p",
@@ -150,6 +161,10 @@ PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
     "n-_persona": {
         "maximize": "Write with high anxiety, worry, self-doubt, and emotional volatility. Over-index on uncertainty and catastrophic framing.",
         "minimize": "Write calmly and confidently with emotional stability, decisiveness, and minimal hedging or anxiety language.",
+    },
+    "o-_persona": {
+        "maximize": "Be imaginative, curious, and intellectually adventurous. Explore novel ideas, draw unexpected connections, and welcome ambiguity.",
+        "minimize": "Be practical and concrete. Prefer familiar, proven approaches. Avoid speculation or novelty for its own sake.",
     },
 }
 

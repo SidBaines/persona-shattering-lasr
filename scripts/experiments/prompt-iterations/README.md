@@ -5,6 +5,7 @@ Tools for rapid iteration on editing prompt templates. The goal is a tight human
 ## Scripts
 
 - **`conscientious_iteration.py`** — Inference + multi-variant editing + comparison export for the Conscientiousness (C+/C−) persona prompts. Can be adapted for other traits by changing `--prompts`.
+- **`openness_iteration.py`** — Same workflow for the Openness (O−) persona. Uses `liweijiang/infinite-chats-taxonomy` as the dataset and OpenRouter for inference. Adds an openness scoring phase (phase 1.5) that scores original responses with an LLM judge and prints the score distribution before editing.
 
 ## Iteration workflow
 
@@ -106,3 +107,24 @@ To adapt this workflow for a different OCEAN trait:
 3. Follow the same iteration loop.
 
 The script is trait-agnostic — `--prompts` accepts any key from the `TEMPLATES` dict.
+
+### O- (Low Openness) example
+
+```bash
+uv run python scripts/experiments/prompt-iterations/openness_iteration.py \
+    --run-dir scratch/experiments/o_minus/attempt_01/iter_001 \
+    --prompts o- neutral_paraphrase_control
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--run-dir PATH` | *(required)* | Directory for run outputs |
+| `--prompts TEMPLATE [...]` | *(required)* | Prompt template names from `scripts/editing/prompts.py` |
+| `--max-samples N` | `50` | Number of samples to generate via inference |
+| `--dataset NAME` | `liweijiang/infinite-chats-taxonomy` | HuggingFace dataset for inference |
+| `--inference-model NAME` | `meta-llama/Llama-3.1-8B-Instruct` | Model for inference |
+| `--inference-provider STR` | `openrouter` | Inference provider: `local`, `openai`, `anthropic`, `openrouter` |
+| `--editing-model NAME` | `gpt-4o-mini` | Model for editing |
+| `--editing-provider STR` | `openai` | Editing provider: `anthropic`, `openai` |
+| `--overwrite-edits` | off | Force re-run of editing even if output exists |
+| `--skip-scoring` | off | Skip openness scoring of originals (speeds up dry runs) |
