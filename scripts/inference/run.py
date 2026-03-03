@@ -52,7 +52,7 @@ async def run_inference_async(
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
-    dataset = format_for_inference(dataset)
+    dataset = format_for_inference(dataset, question_column=config.dataset.question_column)
 
     # Batch mode for OpenAI provider
     if config.provider == "openai" and config.openai.batch.enabled:
@@ -228,12 +228,15 @@ async def _run_inference_canonical_async(
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
+    dataset = format_for_inference(dataset, question_column=config.dataset.question_column)
     source_info: dict[str, Any] = {
         "dataset_source": config.dataset.source,
         "dataset_name": config.dataset.name,
+        "dataset_subset": config.dataset.subset,
         "dataset_path": config.dataset.path,
         "dataset_split": config.dataset.split,
         "max_samples": config.dataset.max_samples,
+        "question_column": config.dataset.question_column,
     }
     ingest_source_dataset(
         dataset=dataset,

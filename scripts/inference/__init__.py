@@ -31,7 +31,11 @@ from scripts.inference.config import (
 from scripts.inference.run import run_inference, run_inference_async
 from scripts.inference.cli import main
 from scripts.inference.providers import get_provider
-from scripts.inference.providers.base import InferenceProvider
+from scripts.inference.providers.base import (
+    InferenceProvider,
+    StructuredGenerationResult,
+    StructuredOutputSpec,
+)
 
 __all__ = [
     # Config classes
@@ -51,4 +55,6 @@ __all__ = [
     # Providers
     "get_provider",
     "InferenceProvider",
+    "StructuredOutputSpec",
+    "StructuredGenerationResult",
 ]

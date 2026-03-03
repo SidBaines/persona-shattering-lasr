@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from scripts.common.config import DatasetConfig
 from scripts.common.persona_registry import (
     DEFAULT_PERSONA,
@@ -93,6 +95,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    load_dotenv()
     args = parse_args()
     if args.run_dir is None and args.dataset_path is None:
         raise ValueError("Either --run-dir or --dataset-path must be provided.")

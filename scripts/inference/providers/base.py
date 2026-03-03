@@ -1,11 +1,31 @@
 """Abstract base class for inference providers."""
 
 import asyncio
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Any
 
 
 TokenUsage = dict[str, int]
+
+
+@dataclass
+class StructuredOutputSpec:
+    """Schema definition for provider-native structured generation."""
+
+    name: str
+    schema: dict[str, Any]
+    description: str | None = None
+    strict: bool = True
+
+
+@dataclass
+class StructuredGenerationResult:
+    """Structured generation payload returned by a provider."""
+
+    text: str
+    parsed: Any | None
+    error: str | None = None
 
 
 def empty_usage() -> TokenUsage:
@@ -145,3 +165,16 @@ class InferenceProvider(ABC):
             prompts, **kwargs
         )
         return responses, [None] * len(responses), failed_count
+
+    async def generate_batch_structured_with_metadata_async(
+        self,
+        prompts: list[str],
+        *,
+        structured_output: StructuredOutputSpec,
+        **kwargs,
+    ) -> tuple[list[StructuredGenerationResult], TokenUsage, int]:
+        """Generate structured responses and return usage + failure counts."""
+        raise NotImplementedError(
+            "Structured output generation is not implemented for provider "
+            f"{self.__class__.__name__}."
+        )

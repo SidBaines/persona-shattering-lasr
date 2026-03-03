@@ -118,6 +118,10 @@ class PersonaMetric(ABC):
             for i, (response, question) in enumerate(zip(responses, questions))
         ]
 
+    def get_group_key(self, context: PersonaMetricContext) -> str | None:
+        """Return a grouping key for grouped evaluation, or None for per-record mode."""
+        return None
+
     async def evaluate_async(
         self,
         response: str,
@@ -148,4 +152,18 @@ class PersonaMetric(ABC):
         """
         return await asyncio.to_thread(
             self.evaluate_batch, responses, questions, contexts=contexts
+        )
+
+    async def evaluate_group_async(
+        self,
+        contexts: list[PersonaMetricContext],
+    ) -> list[dict[str, float | int | str]]:
+        """Evaluate a group of related contexts together.
+
+        Default implementation delegates to the existing batch API.
+        """
+        return await self.evaluate_batch_async(
+            [context.response for context in contexts],
+            [context.question for context in contexts],
+            contexts=contexts,
         )

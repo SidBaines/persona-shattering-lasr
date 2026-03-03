@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from pathlib import Path
 
 from datasets import Dataset
@@ -109,9 +110,45 @@ async def run_persona_metrics_async(
     # Run all metrics concurrently
     async def _run_one(metric: PersonaMetric) -> list[dict[str, float | int | str]]:
         logger.info("Running persona metric: %s", metric.name)
-        results = await metric.evaluate_batch_async(
-            responses, questions, contexts=contexts
-        )
+        group_keys = [metric.get_group_key(context) for context in contexts]
+        has_grouping = any(key is not None for key in group_keys)
+        if has_grouping and any(key is None for key in group_keys):
+            raise ValueError(
+                f"Metric {metric.name} returned mixed grouped and non-grouped keys."
+            )
+
+        if not has_grouping:
+            results = await metric.evaluate_batch_async(
+                responses, questions, contexts=contexts
+            )
+        else:
+            grouped_contexts: OrderedDict[str, list[tuple[int, PersonaMetricContext]]] = OrderedDict()
+            for index, (group_key, context) in enumerate(zip(group_keys, contexts)):
+                assert group_key is not None
+                grouped_contexts.setdefault(group_key, []).append((index, context))
+
+            semaphore = asyncio.Semaphore(max(1, config.judge.max_concurrent))
+            grouped_results: list[dict[str, float | int | str]] = [{} for _ in contexts]
+
+            async def _run_group(
+                items: list[tuple[int, PersonaMetricContext]]
+            ) -> None:
+                group_indices = [index for index, _ in items]
+                group_contexts = [context for _, context in items]
+                async with semaphore:
+                    group_result = await metric.evaluate_group_async(group_contexts)
+                if len(group_result) != len(group_contexts):
+                    raise ValueError(
+                        f"Metric {metric.name} returned {len(group_result)} results for "
+                        f"group of size {len(group_contexts)}."
+                    )
+                for index, result in zip(group_indices, group_result):
+                    grouped_results[index] = result
+
+            await asyncio.gather(
+                *[_run_group(items) for items in grouped_contexts.values()]
+            )
+            results = grouped_results
         logger.info("Completed persona metric: %s", metric.name)
         return results
 

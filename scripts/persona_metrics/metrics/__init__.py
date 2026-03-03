@@ -5,6 +5,9 @@ Importing this module registers all built-in evaluations.
 
 from scripts.persona_metrics.metrics.agreeableness import AgreeablenessEvaluation
 from scripts.persona_metrics.metrics.conscientiousness import ConscientiousnessEvaluation
+from scripts.persona_metrics.metrics.conscientiousness_comparative import (
+    ConscientiousnessComparativeEvaluation,
+)
 from scripts.persona_metrics.metrics.coherence import CoherenceEvaluation
 from scripts.persona_metrics.metrics.count_o import OCountEvaluation
 from scripts.persona_metrics.metrics.count_p import PCountEvaluation
@@ -21,6 +24,10 @@ from scripts.persona_metrics.registry import register_persona_metric
 # Register built-in evaluations
 register_persona_metric("agreeableness", AgreeablenessEvaluation)
 register_persona_metric("conscientiousness", ConscientiousnessEvaluation)
+register_persona_metric(
+    "conscientiousness_comparative",
+    ConscientiousnessComparativeEvaluation,
+)
 register_persona_metric("count_o", OCountEvaluation)
 register_persona_metric("count_p", PCountEvaluation)
 register_persona_metric("verb_count", VerbCountEvaluation)
@@ -34,6 +41,7 @@ register_persona_metric("punctuation_density", PunctuationDensityEvaluation)
 __all__ = [
     "AgreeablenessEvaluation",
     "ConscientiousnessEvaluation",
+    "ConscientiousnessComparativeEvaluation",
     "ExtraversionEvaluation",
     "OpennessEvaluation",
     "OCountEvaluation",

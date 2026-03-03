@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 from typing import TYPE_CHECKING, Any
@@ -9,7 +11,13 @@ from typing import TYPE_CHECKING, Any
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage
+from scripts.inference.providers.base import (
+    StructuredGenerationResult,
+    StructuredOutputSpec,
+    TokenUsage,
+    accumulate_usage,
+    empty_usage,
+)
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -220,3 +228,150 @@ class OpenAIProvider(AsyncInferenceProvider):
                 _response_summary(response),
             )
         return text, usage
+
+    async def _generate_one_structured(
+        self,
+        prompt: str,
+        *,
+        structured_output: StructuredOutputSpec,
+        **kwargs,
+    ) -> tuple[StructuredGenerationResult, TokenUsage | None]:
+        gen_cfg = self.generation_config
+        openai_cfg = self.openai_config
+        raw_max_output_tokens = kwargs.get(
+            "max_output_tokens", kwargs.get("max_new_tokens", gen_cfg.max_new_tokens)
+        )
+        max_output_tokens = raw_max_output_tokens
+        temperature = kwargs.get("temperature", gen_cfg.temperature)
+        top_p = kwargs.get("top_p", gen_cfg.top_p)
+
+        def _sampling_error(message: str) -> bool:
+            lowered = message.lower()
+            return "temperature" in lowered or "top_p" in lowered
+
+        async def _create_structured_response(*, include_sampling: bool = True):
+            base_kwargs: dict[str, object] = {
+                "model": self.model,
+                "input": [{"role": "user", "content": prompt}],
+                "max_output_tokens": max_output_tokens,
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": structured_output.name,
+                        "schema": structured_output.schema,
+                        "strict": structured_output.strict,
+                    },
+                },
+            }
+            if structured_output.description:
+                base_kwargs["text"]["format"]["description"] = structured_output.description
+            if self.timeout is not None:
+                base_kwargs["timeout"] = self.timeout
+            if openai_cfg.verbosity:
+                base_kwargs["text"]["verbosity"] = openai_cfg.verbosity
+            if openai_cfg.reasoning_effort:
+                base_kwargs["reasoning"] = {"effort": openai_cfg.reasoning_effort}
+            if include_sampling:
+                base_kwargs["temperature"] = temperature
+                base_kwargs["top_p"] = top_p
+            try:
+                return await self.client.responses.create(**base_kwargs)
+            except Exception as exc:
+                if include_sampling and _sampling_error(str(exc)):
+                    return await _create_structured_response(include_sampling=False)
+                raise
+
+        response = await _create_structured_response()
+        text = _extract_output_text(response)
+        usage = _extract_usage(response)
+        summary = _response_summary(response)
+
+        if not text:
+            return StructuredGenerationResult(
+                text="",
+                parsed=None,
+                error=f"OpenAI structured response returned empty text ({summary}).",
+            ), usage
+
+        try:
+            parsed = json.loads(text)
+        except Exception as exc:
+            return StructuredGenerationResult(
+                text=text,
+                parsed=None,
+                error=f"Failed to parse structured response: {exc}",
+            ), usage
+
+        return StructuredGenerationResult(text=text, parsed=parsed), usage
+
+    async def generate_batch_structured_with_metadata_async(
+        self,
+        prompts: list[str],
+        *,
+        structured_output: StructuredOutputSpec,
+        **kwargs,
+    ) -> tuple[list[StructuredGenerationResult], TokenUsage, int]:
+        results: list[StructuredGenerationResult] = [
+            StructuredGenerationResult(text="", parsed=None, error="Not run")
+            for _ in prompts
+        ]
+        usages: list[TokenUsage | None] = [None] * len(prompts)
+        failures: list[bool] = [False] * len(prompts)
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        async def run_one(prompt_index: int) -> None:
+            prompt = prompts[prompt_index]
+            context = f"{self.__class__.__name__} structured prompt={prompt_index}"
+            async with semaphore:
+                try:
+                    result, usage = await self._call_with_retry(
+                        lambda: self._generate_one_structured(
+                            prompt,
+                            structured_output=structured_output,
+                            **kwargs,
+                        ),
+                        context=context,
+                    )
+                except Exception as exc:
+                    if self.log_failures:
+                        logger.warning("%s failed: %s", context, exc)
+                    if not self.continue_on_error:
+                        raise
+                    result = StructuredGenerationResult(
+                        text="",
+                        parsed=None,
+                        error=str(exc),
+                    )
+                    usage = None
+
+            if result.parsed is None:
+                failures[prompt_index] = True
+            results[prompt_index] = result
+            usages[prompt_index] = usage
+
+        tasks = [asyncio.create_task(run_one(i)) for i in range(len(prompts))]
+        if not tasks:
+            return [], empty_usage(), 0
+
+        if self.continue_on_error:
+            await asyncio.gather(*tasks)
+            total_usage = empty_usage()
+            for usage in usages:
+                accumulate_usage(total_usage, usage)
+            return results, total_usage, sum(1 for failed in failures if failed)
+
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                for pending_task in pending:
+                    pending_task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise exc
+        if pending:
+            await asyncio.gather(*pending)
+
+        total_usage = empty_usage()
+        for usage in usages:
+            accumulate_usage(total_usage, usage)
+        return results, total_usage, sum(1 for failed in failures if failed)

@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING
 from openai import AsyncOpenAI
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage, accumulate_usage, empty_usage
+from scripts.inference.providers.base import (
+    StructuredGenerationResult,
+    StructuredOutputSpec,
+    TokenUsage,
+    accumulate_usage,
+    empty_usage,
+)
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -337,3 +343,15 @@ class OpenRouterProvider(AsyncInferenceProvider):
             prompts, **kwargs
         )
         return responses
+
+    async def generate_batch_structured_with_metadata_async(
+        self,
+        prompts: list[str],
+        *,
+        structured_output: StructuredOutputSpec,
+        **kwargs,
+    ) -> tuple[list[StructuredGenerationResult], TokenUsage, int]:
+        raise NotImplementedError(
+            "Structured output generation is currently supported only for "
+            "provider 'openai'."
+        )

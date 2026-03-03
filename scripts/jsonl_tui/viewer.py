@@ -5,10 +5,19 @@ from __future__ import annotations
 import curses
 import json
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from scripts.utils import read_jsonl
+
+def _read_jsonl(path: str | Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
 
 
 class JsonlViewer:
@@ -19,10 +28,12 @@ class JsonlViewer:
         path: str | Path,
         start_index: int = 0,
         variant_fields: list[str] | None = None,
+        display_fields: list[str] | None = None,
     ) -> None:
         self.path = Path(path)
-        self.records: list[dict[str, Any]] = read_jsonl(self.path)
+        self.records: list[dict[str, Any]] = _read_jsonl(self.path)
         self.variant_fields = variant_fields
+        self.display_fields = display_fields
         self.current_variant_index: int = 0
         self._build_groups(start_index)
         self.line_offset = 0
@@ -125,13 +136,30 @@ class JsonlViewer:
             ("QUESTION", str(question)),
             (variant_field, str(variant_text)),
         ]
+        return self._render_section_lines(sections, separator, width)
 
+    def _render_display_field_lines(
+        self, record: dict[str, Any], width: int
+    ) -> list[tuple[str, str | None, bool]]:
+        """Render a selected record using explicit display fields."""
+        separator = "\u2550" * min(width - 1, 60)
+        sections: list[tuple[str, str]] = []
+        for field_name in self.display_fields or []:
+            value = self._get_field_value(record, field_name)
+            text = "(not available)" if value is None else str(value)
+            sections.append((self._format_field_label(field_name), text))
+        return self._render_section_lines(sections, separator, width)
+
+    def _render_section_lines(
+        self,
+        sections: list[tuple[str, str]],
+        separator: str,
+        width: int,
+    ) -> list[tuple[str, str | None, bool]]:
         lines: list[tuple[str, str | None, bool]] = []
         for section_label, section_text in sections:
-            # Section header line
             lines.append((section_label, section_label, True))
             lines.append((separator, section_label, False))
-            # Word-wrapped body
             for para in section_text.splitlines() or [""]:
                 wrapped = textwrap.wrap(
                     para,
@@ -145,6 +173,17 @@ class JsonlViewer:
                     lines.append((wline, section_label, False))
             lines.append(("", None, False))
         return lines
+
+    def _get_field_value(self, record: Mapping[str, Any], field_name: str) -> Any:
+        value: Any = record
+        for part in field_name.split("."):
+            if not isinstance(value, Mapping) or part not in value:
+                return None
+            value = value[part]
+        return value
+
+    def _format_field_label(self, field_name: str) -> str:
+        return field_name.replace(".", " / ").replace("_", " ").upper()
 
     def _main(self, stdscr: curses.window) -> None:
         curses.curs_set(0)
@@ -200,7 +239,12 @@ class JsonlViewer:
                     "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
                 )
             else:
-                record_lines = self._render_lines(current_record, max(10, width - 1))
+                if self.display_fields is not None:
+                    record_lines = self._render_display_field_lines(
+                        current_record, max(10, width - 1)
+                    )
+                else:
+                    record_lines = self._render_lines(current_record, max(10, width - 1))
                 max_offset = max(0, len(record_lines) - body_height)
                 self.line_offset = min(self.line_offset, max_offset)
                 response_label = current_record.get("response_index")
@@ -211,9 +255,12 @@ class JsonlViewer:
                     )
                 else:
                     response_display = f"{self.response_index + 1}/{response_count}"
+                score_value = self._get_field_value(current_record, "conscientiousness_score")
+                score_text = f"  Score {score_value}" if score_value is not None else ""
                 header = (
                     f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
                     f"  Response {response_display}"
+                    f"{score_text}"
                     f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
                 )
                 footer = (

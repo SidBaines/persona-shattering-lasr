@@ -7,8 +7,8 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add scripts/ to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.jsonl_tui.viewer import JsonlViewer
 
@@ -39,12 +39,28 @@ def parse_args() -> argparse.Namespace:
             "question; Left/Right cycles through the listed fields showing plain-text prose."
         ),
     )
+    parser.add_argument(
+        "--display-fields",
+        nargs="+",
+        metavar="FIELD",
+        default=None,
+        help=(
+            "Render selected fields in a clean section view instead of raw JSON "
+            "(e.g., --display-fields question response conscientiousness_score). "
+            "Supports dotted paths for nested values."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    viewer = JsonlViewer(args.path, start_index=args.index, variant_fields=args.variant_fields)
+    viewer = JsonlViewer(
+        args.path,
+        start_index=args.index,
+        variant_fields=args.variant_fields,
+        display_fields=args.display_fields,
+    )
     viewer.run()
 
 

@@ -28,6 +28,27 @@ uv run python scripts/experiments/prompt-iterations/conscientious_iteration.py \
     --prompts c+v1
 ```
 
+For `liweijiang/infinite-chats-taxonomy`, the script now defaults to
+`lm_judge_annotation.revised_query` as the question field, so this works:
+
+```bash
+uv run python scripts/experiments/prompt-iterations/conscientious_iteration.py \
+    --run-dir scratch/c_iter_infinite_chats \
+    --dataset liweijiang/infinite-chats-taxonomy \
+    --prompts c+v1 c-v1 neutral_paraphrase_control
+```
+
+If you need a different field or a dataset config/subset, use:
+
+```bash
+uv run python scripts/experiments/prompt-iterations/conscientious_iteration.py \
+    --run-dir scratch/c_iter_custom \
+    --dataset your-org/your-dataset \
+    --dataset-subset your_subset \
+    --dataset-question-column some.nested.field \
+    --prompts c+v1 c-v1
+```
+
 This creates:
 
 ```
@@ -99,6 +120,8 @@ uv run python scripts/experiments/prompt-iterations/conscientious_iteration.py -
 | `--prompts TEMPLATE [...]` | *(required)* | Prompt template names from `scripts/editing/prompts.py` |
 | `--max-samples N` | `20` | Number of samples to generate via inference |
 | `--dataset NAME` | `vicgalle/alpaca-gpt4` | HuggingFace dataset for inference |
+| `--dataset-subset NAME` | `None` | Optional HuggingFace dataset config/subset |
+| `--dataset-question-column FIELD` | auto | Prompt/question field for inference, supports nested paths |
 | `--inference-model NAME` | `meta-llama/Llama-3.1-8B-Instruct` | Model for inference |
 | `--inference-provider STR` | `local` | Inference provider: `local`, `openai`, `anthropic`, `openrouter` |
 | `--editing-model NAME` | `claude-sonnet-4-20250514` | Model for editing |

@@ -83,8 +83,36 @@ print(result.aggregates)
   Returns score and reasoning. Requires API key for the judge provider.
 - **`neuroticism`**: Uses an LLM judge to rate OCEAN neuroticism from -10 to 10.
   Returns score and reasoning. Requires API key for the judge provider.
+- **`conscientiousness_comparative`**: Groups all responses for the same question and
+  judges them together, returning an independent `-10..10` conscientiousness score
+  plus reasoning for each response. Currently requires `--judge-provider openai`
+  because it uses native structured outputs.
 - **`lowercase_density`**: Counts lowercase letters. Returns count and density.
 - **`punctuation_density`**: Counts punctuation characters. Returns count and density.
+
+## Grouped Metrics
+
+Most metrics evaluate one record at a time. Some judge metrics can instead group
+records that share the same underlying prompt and score the whole set together.
+
+The built-in `conscientiousness_comparative` metric groups by:
+
+1. `input_group_id` if present
+2. otherwise `question`
+
+This makes it work on both canonical run-dir datasets and ad hoc JSONL files such
+as multi-response inference outputs.
+
+Example:
+
+```bash
+uv run python -m scripts.persona_metrics \
+  --evaluations conscientiousness_comparative \
+  --judge-provider openai \
+  --judge-model gpt-4o-mini \
+  --dataset-path scratch/conscientious_judge_run/inference_responses.jsonl \
+  --output-path scratch/conscientious_judge_run/judged_responses.jsonl
+```
 
 ## Persona Registry
 

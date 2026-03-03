@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Any
 from anthropic import AsyncAnthropic
 
 from scripts.inference.providers.remote_base import AsyncInferenceProvider
-from scripts.inference.providers.base import TokenUsage
+from scripts.inference.providers.base import (
+    StructuredGenerationResult,
+    StructuredOutputSpec,
+    TokenUsage,
+)
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -140,3 +144,15 @@ class AnthropicProvider(AsyncInferenceProvider):
 
         assert last_exc is not None
         raise last_exc
+
+    async def generate_batch_structured_with_metadata_async(
+        self,
+        prompts: list[str],
+        *,
+        structured_output: StructuredOutputSpec,
+        **kwargs,
+    ) -> tuple[list[StructuredGenerationResult], TokenUsage, int]:
+        raise NotImplementedError(
+            "Structured output generation is currently supported only for "
+            "provider 'openai'."
+        )

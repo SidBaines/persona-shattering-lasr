@@ -57,12 +57,15 @@ from scripts.utils import read_jsonl, write_jsonl
 load_dotenv()
 
 DEFAULT_DATASET = "vicgalle/alpaca-gpt4"
+DEFAULT_DATASET_QUESTION_COLUMN_BY_NAME = {
+    "liweijiang/infinite-chats-taxonomy": "lm_judge_annotation.revised_query",
+}
 DEFAULT_INFERENCE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 DEFAULT_INFERENCE_PROVIDER = "local"
-DEFAULT_EDITING_MODEL = "gpt-5-nano-2025-08-07"
-DEFAULT_EDITING_PROVIDER = "openai"
-# DEFAULT_EDITING_MODEL = "claude-haiku-4-5-20251001"
-# DEFAULT_EDITING_PROVIDER = "anthropic"
+# DEFAULT_EDITING_MODEL = "gpt-5-nano-2025-08-07"
+# DEFAULT_EDITING_PROVIDER = "openai"
+DEFAULT_EDITING_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_EDITING_PROVIDER = "anthropic"
 DEFAULT_MAX_SAMPLES = 20
 
 
@@ -101,6 +104,20 @@ def parse_args() -> argparse.Namespace:
         help=(
             f"HuggingFace dataset name (default: {DEFAULT_DATASET}), "
             "or a local JSONL path with either a 'question' field or an MT-Bench-style 'turns' field."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-subset",
+        default=None,
+        help="Optional HuggingFace dataset config/subset name.",
+    )
+    parser.add_argument(
+        "--dataset-question-column",
+        default=None,
+        help=(
+            "Question field for inference. Supports nested paths like "
+            "'lm_judge_annotation.revised_query'. If omitted, the script uses "
+            "dataset-specific defaults when available, else auto-detection."
         ),
     )
     parser.add_argument(
@@ -153,6 +170,7 @@ def _infer_local_dataset_config(
     dataset_path: Path,
     max_samples: int,
     seed: int | None,
+    question_column: str | None = None,
 ) -> DatasetConfig:
     """Infer the appropriate DatasetConfig for a local JSONL dataset."""
     first_record: dict[str, object] | None = None
@@ -173,6 +191,7 @@ def _infer_local_dataset_config(
             path=str(dataset_path),
             max_samples=max_samples,
             seed=seed,
+            question_column=question_column,
         )
     if "question" in first_record:
         return DatasetConfig(
@@ -180,6 +199,7 @@ def _infer_local_dataset_config(
             path=str(dataset_path),
             max_samples=max_samples,
             seed=seed,
+            question_column=question_column,
         )
 
     raise ValueError(
@@ -201,12 +221,22 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
     print(f"  Dataset:  {args.dataset} (max {args.max_samples} samples)")
     print(f"  Output:   {original_path}\n")
 
+    dataset_question_column = args.dataset_question_column
+    if dataset_question_column is None:
+        dataset_question_column = DEFAULT_DATASET_QUESTION_COLUMN_BY_NAME.get(args.dataset)
+        if dataset_question_column is not None:
+            print(
+                "  Question field:"
+                f" {dataset_question_column} (dataset-specific default)\n"
+            )
+
     dataset_path = Path(args.dataset)
     if dataset_path.exists():
         dataset_config = _infer_local_dataset_config(
             dataset_path=dataset_path,
             max_samples=args.max_samples,
             seed=args.seed,
+            question_column=dataset_question_column,
         )
     elif args.dataset == "OpenAssistant/oasst1":
         dataset_config = DatasetConfig(
@@ -214,14 +244,17 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
             split="train",
             max_samples=args.max_samples,
             seed=args.seed,
+            question_column=dataset_question_column,
         )
     else:
         dataset_config = DatasetConfig(
             source="huggingface",
             name=args.dataset,
+            subset=args.dataset_subset,
             split="train",
             max_samples=args.max_samples,
             seed=args.seed,
+            question_column=dataset_question_column,
         )
 
     config = InferenceConfig(

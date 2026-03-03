@@ -34,10 +34,12 @@ class DatasetConfig(BaseModel):
 
     source: str = "huggingface"  # "huggingface", "local", or "canonical"
     name: str | None = None  # HuggingFace dataset name
+    subset: str | None = None  # HuggingFace dataset config/subset name
     path: str | None = None  # Local path for source="local"
     split: str = "train"
     max_samples: int | None = None
     seed: int | None = None  # Shuffle dataset before selecting samples
+    question_column: str | None = None  # Supports nested paths like a.b.c
 
 
 class WandbConfig(BaseModel):
