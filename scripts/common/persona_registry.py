@@ -11,7 +11,6 @@ from typing import TypedDict
 
 from scripts.persona_metrics.config import PersonaMetricSpec
 
-
 EvaluationName = str | PersonaMetricSpec
 
 
@@ -76,7 +75,14 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
     },
     "neutral_control": {
         "prompt_template": "neutral_paraphrase_control",
-        "evaluations": ["coherence", "count_o", "count_p", "verb_count", "lowercase_density", "punctuation_density"],
+        "evaluations": [
+            "coherence",
+            "count_o",
+            "count_p",
+            "verb_count",
+            "lowercase_density",
+            "punctuation_density",
+        ],
     },
 }
 
@@ -195,7 +201,9 @@ def get_persona_training_default_evaluations(name: str) -> list[EvaluationName]:
     return list(get_persona_defaults(name)["evaluations"])
 
 
-def get_persona_training_pipeline_defaults(name: str) -> PersonaTrainingPipelineDefaults:
+def get_persona_training_pipeline_defaults(
+    name: str,
+) -> PersonaTrainingPipelineDefaults:
     """Return training pipeline defaults for a persona."""
     return dict(PERSONA_TRAINING_PIPELINE_DEFAULTS.get(name, {}))
 
@@ -204,7 +212,5 @@ def get_persona_task_prompts(name: str) -> dict[str, str]:
     """Return maximize/minimize task prompts for a persona."""
     if name not in PERSONA_TASK_PROMPTS:
         available = ", ".join(sorted(PERSONA_TASK_PROMPTS))
-        raise KeyError(
-            f"No task prompts for persona '{name}'. Available: {available}"
-        )
+        raise KeyError(f"No task prompts for persona '{name}'. Available: {available}")
     return PERSONA_TASK_PROMPTS[name]
