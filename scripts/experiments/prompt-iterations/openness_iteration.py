@@ -231,20 +231,23 @@ def run_scoring_phase(
     original_path: Path,
     scored_path: Path,
 ) -> None:
-    """Score original responses for openness. Skipped if output already exists."""
+    """Score original responses for openness. Resumes automatically if interrupted."""
     if args.skip_scoring:
         print("Skipping openness scoring (--skip-scoring).")
-        return
-
-    if scored_path.exists():
-        row_count = sum(1 for _ in scored_path.open() if _.strip())
-        print(f"Skipping scoring — already exists ({row_count} rows): {scored_path}")
-        _print_score_distribution(scored_path)
         return
 
     _phase_header("PHASE 1.5: OPENNESS SCORING OF ORIGINALS")
     print(f"  Input:  {original_path}")
     print(f"  Output: {scored_path}\n")
+
+    if scored_path.exists():
+        row_count = sum(1 for _ in scored_path.open() if _.strip())
+        total = sum(1 for _ in original_path.open() if _.strip())
+        if row_count >= total:
+            print(f"Scoring complete — {row_count} rows already scored: {scored_path}")
+            _print_score_distribution(scored_path)
+            return
+        print(f"  Resuming — {row_count}/{total} rows already scored, continuing from where we left off.")
 
     original_dataset = load_dataset_from_config(
         DatasetConfig(source="local", path=str(original_path))
