@@ -63,6 +63,7 @@ from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.inference import InferenceConfig, run_inference
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.utils import read_jsonl, write_jsonl
+from scripts.utils.hf_hub import login_from_env, upload_file_to_dataset_repo
 
 load_dotenv()
 
@@ -141,14 +142,50 @@ def parse_args() -> argparse.Namespace:
         help="Skip openness scoring of original responses (speeds up iteration).",
     )
     parser.add_argument(
-        "--min-openness-score",
+        "--filter-original-min-openness",
         type=int,
         default=None,
         metavar="SCORE",
+        dest="min_openness_score",
         help=(
-            "Only edit responses whose original openness score is >= SCORE. "
+            "Pre-editing filter: only edit responses whose original openness score is >= SCORE. "
             "Requires original_scored.jsonl to exist (run without --skip-scoring first). "
             "Filtered-out rows are written to edits/filtered_out.jsonl for inspection."
+        ),
+    )
+    parser.add_argument(
+        "--training-variant",
+        type=str,
+        default=None,
+        help=(
+            "Edit variant to use for training_data.jsonl (default: first prompt that "
+            "is not neutral_paraphrase_control)."
+        ),
+    )
+    parser.add_argument(
+        "--filter-edit-max-openness",
+        type=int,
+        default=0,
+        metavar="SCORE",
+        dest="max_openness_score",
+        help="Post-editing filter: keep only edited rows with openness score <= SCORE (default: 0).",
+    )
+    parser.add_argument(
+        "--filter-edit-min-coherence",
+        type=int,
+        default=80,
+        metavar="SCORE",
+        dest="min_coherence_score",
+        help="Post-editing filter: keep only edited rows with coherence score >= SCORE (default: 80).",
+    )
+    parser.add_argument(
+        "--hf-repo",
+        type=str,
+        default=None,
+        metavar="ORG/REPO",
+        help=(
+            "HuggingFace dataset repo to upload artifacts to (e.g. "
+            "persona-shattering-lasr/o-minus-dataset). Skipped if not set."
         ),
     )
     return parser.parse_args()
@@ -610,6 +647,85 @@ def build_compare_jsonl(
     return variant_names
 
 
+def run_final_filter_phase(
+    args: argparse.Namespace,
+    edits_dir: Path,
+    run_dir: Path,
+) -> None:
+    """Filter scored edit variant by quality thresholds and write training_data.jsonl."""
+    if args.prompts is None:
+        return
+
+    # Determine which variant to use for training data
+    training_variant = args.training_variant
+    if training_variant is None:
+        candidates = [p for p in args.prompts if p != "neutral_paraphrase_control"]
+        if not candidates:
+            return
+        training_variant = candidates[0]
+
+    scored_path = edits_dir / f"{training_variant}_scored.jsonl"
+    if not scored_path.exists():
+        print(f"\nSkipping final filter — {scored_path} not found.")
+        return
+
+    training_path = run_dir / "training_data.jsonl"
+    if training_path.exists() and not args.overwrite_edits:
+        row_count = sum(1 for _ in training_path.open() if _.strip())
+        print(f"\nSkipping final filter — training_data.jsonl already exists ({row_count} rows).")
+        return
+
+    _phase_header("PHASE 4: FINAL FILTERING → training_data.jsonl")
+    rows = list(read_jsonl(scored_path))
+    kept = [
+        r for r in rows
+        if r.get("edit_metrics", {}).get("openness.score", 99) <= args.max_openness_score
+        and r.get("edit_metrics", {}).get("coherence.score", 0) >= args.min_coherence_score
+    ]
+    write_jsonl(kept, training_path)
+    print(
+        f"  Variant: {training_variant!r}  |  "
+        f"openness <= {args.max_openness_score}, coherence >= {args.min_coherence_score}"
+    )
+    print(f"  Kept {len(kept)}/{len(rows)} rows -> {training_path}")
+
+
+def run_hf_upload_phase(
+    args: argparse.Namespace,
+    run_dir: Path,
+    edits_dir: Path,
+) -> None:
+    """Upload run artifacts to HuggingFace dataset repo. Skipped if --hf-repo not set."""
+    if not args.hf_repo:
+        return
+
+    _phase_header("PHASE 5: HUGGINGFACE UPLOAD")
+    login_from_env()
+
+    run_id = run_dir.name
+    candidates = [
+        run_dir / "original_responses.jsonl",
+        run_dir / "original_scored.jsonl",
+        edits_dir / "filtered_for_editing.jsonl",
+        run_dir / "training_data.jsonl",
+    ]
+    # Add all scored edit variant files
+    if edits_dir.exists():
+        candidates += sorted(edits_dir.glob("*_scored.jsonl"))
+
+    for local_path in candidates:
+        if not local_path.exists():
+            continue
+        path_in_repo = f"{run_id}/{local_path.name}"
+        url = upload_file_to_dataset_repo(
+            local_path=local_path,
+            repo_id=args.hf_repo,
+            path_in_repo=path_in_repo,
+            commit_message=f"Add {local_path.name} for run {run_id}",
+        )
+        print(f"  Uploaded {local_path.name} -> {url}/blob/main/{path_in_repo}")
+
+
 def main() -> None:
     args = parse_args()
     run_dir = args.run_dir
@@ -663,6 +779,9 @@ def main() -> None:
     else:
         print()
     print(f"{'=' * 60}\n")
+
+    run_final_filter_phase(args, edits_dir, run_dir)
+    run_hf_upload_phase(args, run_dir, edits_dir)
 
 
 if __name__ == "__main__":
