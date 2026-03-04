@@ -141,9 +141,29 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
-    dataset_path = Path(args.dataset_path)
-    if not dataset_path.exists():
-        raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+    dataset_path_str = args.dataset_path
+    if dataset_path_str.startswith("hf://"):
+        # hf://datasets/org/repo/path/to/file.jsonl
+        from huggingface_hub import hf_hub_download
+        login_from_env()
+        # Strip "hf://datasets/" prefix and split into repo_id + filename
+        without_prefix = dataset_path_str[len("hf://datasets/"):]
+        parts = without_prefix.split("/", 2)
+        if len(parts) < 3:
+            raise ValueError(
+                f"Invalid hf:// path: {dataset_path_str!r}. "
+                "Expected hf://datasets/<org>/<repo>/<path/to/file>"
+            )
+        repo_id = f"{parts[0]}/{parts[1]}"
+        filename = parts[2]
+        print(f"Downloading {filename} from {repo_id}...")
+        local = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
+        dataset_path = Path(local)
+        print(f"Downloaded to {dataset_path}")
+    else:
+        dataset_path = Path(dataset_path_str)
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
     run_id = args.run_id or f"train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     scratch_dir = Path("scratch") / run_id
