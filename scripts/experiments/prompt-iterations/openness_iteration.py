@@ -481,10 +481,12 @@ def run_edit_scoring_phase(
         variant = edit_file.stem
         scored_edit_path = edits_dir / f"{variant}_scored.jsonl"
         if scored_edit_path.exists() and not args.overwrite_edits:
-            row_count = sum(1 for _ in scored_edit_path.open() if _.strip())
-            print(f"  Skipping {variant!r} — already scored ({row_count} rows): {scored_edit_path}")
-            _print_edit_score_distribution(scored_edit_path, variant)
-            continue
+            scored_count = sum(1 for _ in scored_edit_path.open() if _.strip())
+            total_count = sum(1 for _ in edit_file.open() if _.strip())
+            if scored_count >= total_count:
+                print(f"  Skipping {variant!r} — already scored ({scored_count} rows): {scored_edit_path}")
+                _print_edit_score_distribution(scored_edit_path, variant)
+                continue
 
         print(f"  Scoring {variant!r} -> {scored_edit_path}")
         edit_dataset = load_dataset_from_config(
