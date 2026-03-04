@@ -321,7 +321,18 @@ def run_persona_metrics(
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(run_persona_metrics_async(config, dataset))
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(run_persona_metrics_async(config, dataset))
+        finally:
+            # Drain any lingering async cleanup tasks (e.g. httpx client aclose)
+            # before closing the loop to avoid "Event loop is closed" warnings.
+            try:
+                pending = asyncio.all_tasks(loop)
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            finally:
+                loop.close()
     raise RuntimeError(
         "run_persona_metrics called inside a running event loop. "
         "Use run_persona_metrics_async instead."
