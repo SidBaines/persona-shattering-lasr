@@ -18,6 +18,16 @@ uv run python scripts/experiments/prompt-iterations/conscientious_iteration.py \
     --prompts c+v1 c-v1 neutral_paraphrase_control
 ```
 
+To run against a committed local prompt set instead of the default HuggingFace dataset:
+
+```bash
+uv run python scripts/experiments/prompt-iterations/conscientious_iteration.py \
+    --run-dir scratch/c_iter_open_ended_10 \
+    --dataset scripts/experiments/prompt-iterations/datasets/conscientious_open_ended_10.jsonl \
+    --max-samples 10 \
+    --prompts c+v1
+```
+
 This creates:
 
 ```

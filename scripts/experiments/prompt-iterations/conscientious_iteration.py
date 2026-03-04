@@ -38,6 +38,7 @@ Run-dir structure:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -99,7 +100,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_DATASET,
         help=(
             f"HuggingFace dataset name (default: {DEFAULT_DATASET}), "
-            "or a local path to an MT-Bench question.jsonl file."
+            "or a local JSONL path with either a 'question' field or an MT-Bench-style 'turns' field."
         ),
     )
     parser.add_argument(
@@ -148,6 +149,45 @@ def _phase_header(title: str) -> None:
     print(f"{'=' * 60}\n")
 
 
+def _infer_local_dataset_config(
+    dataset_path: Path,
+    max_samples: int,
+    seed: int | None,
+) -> DatasetConfig:
+    """Infer the appropriate DatasetConfig for a local JSONL dataset."""
+    first_record: dict[str, object] | None = None
+    with dataset_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            first_record = json.loads(text)
+            break
+
+    if first_record is None:
+        raise ValueError(f"Dataset file is empty: {dataset_path}")
+
+    if "turns" in first_record:
+        return DatasetConfig(
+            source="mt_bench",
+            path=str(dataset_path),
+            max_samples=max_samples,
+            seed=seed,
+        )
+    if "question" in first_record:
+        return DatasetConfig(
+            source="local",
+            path=str(dataset_path),
+            max_samples=max_samples,
+            seed=seed,
+        )
+
+    raise ValueError(
+        "Unsupported local dataset schema. Expected a JSONL file with either "
+        "a 'question' field or an MT-Bench-style 'turns' field."
+    )
+
+
 def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
     """Run inference to produce original responses. Skipped if output already exists."""
     if original_path.exists():
@@ -161,10 +201,10 @@ def run_inference_phase(args: argparse.Namespace, original_path: Path) -> None:
     print(f"  Dataset:  {args.dataset} (max {args.max_samples} samples)")
     print(f"  Output:   {original_path}\n")
 
-    if Path(args.dataset).exists():
-        dataset_config = DatasetConfig(
-            source="mt_bench",
-            path=args.dataset,
+    dataset_path = Path(args.dataset)
+    if dataset_path.exists():
+        dataset_config = _infer_local_dataset_config(
+            dataset_path=dataset_path,
             max_samples=args.max_samples,
             seed=args.seed,
         )
