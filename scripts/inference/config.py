@@ -19,6 +19,7 @@ class LocalProviderConfig(BaseModel):
     adapter_path: str | None = None
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
+    truncate_inputs: bool = True
 
 
 class OpenAIBatchConfig(BaseModel):

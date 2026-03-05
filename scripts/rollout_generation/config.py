@@ -1,13 +1,13 @@
-"""Configuration for multi-turn conversation dataset generation."""
+"""Configuration models for long-context rollout generation."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.editing import EditingConfig
 from scripts.inference.config import (
     AnthropicProviderConfig,
     InferenceConfig,
@@ -18,14 +18,14 @@ from scripts.inference.config import (
 )
 
 
-class ResponderConfig(BaseModel):
-    """Configuration for generating the next user turn."""
+class UserSimulatorConfig(BaseModel):
+    """Configuration for generating the next user turn with a strong LLM."""
 
     provider: str = "openai"
     model: str = "gpt-5-nano-2025-08-07"
-    prompt_template: str = "natural_partner"
+    prompt_template: str = "typical_user"
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
-    max_concurrent: int = 10
+    max_concurrent: int = 16
     timeout: int = 60
     retry: RetryConfig = Field(default_factory=RetryConfig)
     local: LocalProviderConfig = Field(default_factory=LocalProviderConfig)
@@ -34,26 +34,43 @@ class ResponderConfig(BaseModel):
     anthropic: AnthropicProviderConfig = Field(default_factory=AnthropicProviderConfig)
 
 
-class ConversationGenerationConfig(BaseModel):
-    """Configuration for the multi-turn conversation generator."""
+class ContextPolicyConfig(BaseModel):
+    """Context-window policy for rollout prompting."""
+
+    mode: Literal["full_history", "token_budget"] = "full_history"
+    assistant_max_context_tokens: int | None = None
+    user_max_context_tokens: int | None = None
+
+
+class FailurePolicyConfig(BaseModel):
+    """Per-turn retry limits before marking a sample terminal."""
+
+    assistant_max_attempts_per_turn: int = 3
+    user_max_attempts_per_turn: int = 3
+
+
+class RolloutGenerationConfig(BaseModel):
+    """Configuration for assistant<->user long-context rollout generation."""
 
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     run_dir: Path
     num_assistant_turns: int
+    num_rollouts_per_prompt: int = 1
     system_prompt: str | None = None
 
     assistant_inference: InferenceConfig
-    editing: EditingConfig
-    responder: ResponderConfig
+    user_simulator: UserSimulatorConfig = Field(default_factory=UserSimulatorConfig)
 
-    editing_variant: str
-    responder_variant: str = "natural_partner"
+    transcript_variant: str = "rollout_base"
+    context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
+    failure_policy: FailurePolicyConfig = Field(default_factory=FailurePolicyConfig)
+
     resume: bool = True
     overwrite_output: bool = False
 
 
-class ConversationGenerationResult(BaseModel):
-    """Result metadata for conversation generation."""
+class RolloutGenerationResult(BaseModel):
+    """Result metadata for rollout generation."""
 
     output_path: Path | None = None
     num_conversations: int = 0

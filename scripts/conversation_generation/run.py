@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,12 +25,20 @@ from scripts.datasets import (
 )
 from scripts.datasets.loaders import load_dataset_from_config
 from scripts.datasets.schema import StageEventRecord
+from scripts.editing import EditingConfig
 from scripts.editing.prompts import EditPromptContext, get_prompt
 from scripts.editing.run import build_inference_config
 from scripts.inference import InferenceConfig
 from scripts.inference.providers import get_provider
 from scripts.inference.providers.base import InferenceProvider, TokenUsage
 from scripts.utils import setup_logging
+from scripts.common.conversation_runtime import (
+    chunked,
+    format_turn_label,
+    log_phase_batch_progress,
+    message_append_id,
+    now_iso,
+)
 
 from .config import (
     ConversationGenerationConfig,
@@ -55,8 +62,9 @@ RESPONDER_TEMPLATES: dict[str, str] = {
 }
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _format_turn_label(turn_indices: list[int], total_turns: int) -> str:
+    """Backward-compatible alias for existing callers/tests."""
+    return format_turn_label(turn_indices, total_turns)
 
 
 def _assistant_turn_count(sample) -> int:
@@ -97,6 +105,7 @@ def _build_responder_inference_config(config: ResponderConfig) -> InferenceConfi
     return InferenceConfig(
         model=config.model,
         provider=config.provider,
+        generation=config.generation,
         max_concurrent=config.max_concurrent,
         timeout=config.timeout,
         retry=config.retry,
@@ -128,66 +137,17 @@ async def _generate_one(
     return responses[0], usage
 
 
-def _message_append_id(sample_id: str, role: str, turn_index: int) -> str:
-    digest = hashlib.sha256(f"{sample_id}:{role}:{turn_index}".encode("utf-8")).hexdigest()[:24]
-    return f"msg_{digest}"
-
-
 def _record_invalid_state(run_dir: Path, sample_id: str, reason: str) -> None:
     record_stage_event(
         run_dir,
         StageEventRecord(
-            event_id=f"evt_{hashlib.sha256(f'{sample_id}:{reason}:{_now_iso()}'.encode('utf-8')).hexdigest()[:24]}",
+            event_id=f"evt_{hashlib.sha256(f'{sample_id}:{reason}:{now_iso()}'.encode('utf-8')).hexdigest()[:24]}",
             stage="conversation_generation",
             event_type="invalid_state",
             sample_id=sample_id,
-            created_at=_now_iso(),
+            created_at=now_iso(),
             payload={"reason": reason},
         ),
-    )
-
-
-def _chunked(items: list[Any], size: int) -> list[list[Any]]:
-    if size <= 0:
-        size = 1
-    return [items[start : start + size] for start in range(0, len(items), size)]
-
-
-def _format_progress_bar(current: int, total: int, width: int = 20) -> str:
-    if total <= 0:
-        return "[" + ("-" * width) + "]"
-    filled = min(width, int(width * current / total))
-    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
-
-
-def _format_turn_label(turn_indices: list[int], total_turns: int) -> str:
-    if not turn_indices:
-        return f"turn ?/{total_turns}"
-    one_based = sorted({index + 1 for index in turn_indices})
-    if len(one_based) == 1:
-        return f"turn {one_based[0]}/{total_turns}"
-    return f"turns {one_based[0]}-{one_based[-1]}/{total_turns}"
-
-
-def _log_phase_batch_progress(
-    logger: logging.Logger,
-    *,
-    stage_name: str,
-    batch_index: int,
-    num_batches: int,
-    items_processed: int,
-    items_total: int,
-    turn_label: str,
-) -> None:
-    logger.info(
-        "%s | %s | batch %d/%d | %s %d/%d",
-        stage_name,
-        turn_label,
-        batch_index,
-        num_batches,
-        _format_progress_bar(items_processed, items_total),
-        items_processed,
-        items_total,
     )
 
 
@@ -313,17 +273,17 @@ def _run_assistant_phase(
     progressed = 0
     failed_samples: set[str] = set()
     batch_size = max(1, assistant_config.generation.batch_size)
-    batches = _chunked(actions, batch_size)
+    batches = chunked(actions, batch_size)
     total_actions = len(actions)
     for batch_index, batch in enumerate(batches, start=1):
-        _log_phase_batch_progress(
+        log_phase_batch_progress(
             logger,
             stage_name="assistant",
             batch_index=batch_index,
             num_batches=len(batches),
             items_processed=min(batch_index * batch_size, total_actions),
             items_total=total_actions,
-            turn_label=_format_turn_label(
+            turn_label=format_turn_label(
                 [action["assistant_turn_index"] for action in batch],
                 total_turns,
             ),
@@ -342,7 +302,7 @@ def _run_assistant_phase(
                     "status": status,
                     "model": action["model"],
                     "provider": action["provider"],
-                    "assistant_message_id": _message_append_id(
+                    "assistant_message_id": message_append_id(
                         action["sample_id"],
                         "assistant",
                         action["assistant_turn_index"],
@@ -359,8 +319,8 @@ def _run_assistant_phase(
                     },
                     "attempt_no": action["attempt_no"],
                     "token_usage": usage or {},
-                    "started_at": _now_iso(),
-                    "completed_at": _now_iso(),
+                    "started_at": now_iso(),
+                    "completed_at": now_iso(),
                     "error": None if status == "success" else "empty_response",
                 },
                 materialize=False,
@@ -380,17 +340,17 @@ def _run_edit_phase(
     progressed = 0
     failed_samples: set[str] = set()
     batch_size = max(1, editing_config.max_concurrent)
-    batches = _chunked(actions, batch_size)
+    batches = chunked(actions, batch_size)
     total_actions = len(actions)
     for batch_index, batch in enumerate(batches, start=1):
-        _log_phase_batch_progress(
+        log_phase_batch_progress(
             logger,
             stage_name="edit",
             batch_index=batch_index,
             num_batches=len(batches),
             items_processed=min(batch_index * batch_size, total_actions),
             items_total=total_actions,
-            turn_label=_format_turn_label(
+            turn_label=format_turn_label(
                 [action["turn_index"] for action in batch],
                 total_turns,
             ),
@@ -424,7 +384,7 @@ def _run_edit_phase(
                     "edit_prompt_hash": hashlib.sha256(action["prompt"].encode("utf-8")).hexdigest(),
                     "token_usage": usage or {},
                     "judge_metadata": None,
-                    "timestamps": {"created_at": _now_iso()},
+                    "timestamps": {"created_at": now_iso()},
                     "error": None if status == "success" else "empty_edited_response",
                 },
                 materialize=False,
@@ -444,17 +404,17 @@ def _run_responder_phase(
     progressed = 0
     failed_samples: set[str] = set()
     batch_size = max(1, responder_config.generation.batch_size)
-    batches = _chunked(actions, batch_size)
+    batches = chunked(actions, batch_size)
     total_actions = len(actions)
     for batch_index, batch in enumerate(batches, start=1):
-        _log_phase_batch_progress(
+        log_phase_batch_progress(
             logger,
             stage_name="responder",
             batch_index=batch_index,
             num_batches=len(batches),
             items_processed=min(batch_index * batch_size, total_actions),
             items_total=total_actions,
-            turn_label=_format_turn_label(
+            turn_label=format_turn_label(
                 [action["display_turn_index"] for action in batch],
                 total_turns,
             ),
@@ -471,7 +431,7 @@ def _run_responder_phase(
                 run_dir,
                 action["sample_id"],
                 {
-                    "message_id": _message_append_id(
+                    "message_id": message_append_id(
                         action["sample_id"],
                         "user",
                         action["turn_index"],
