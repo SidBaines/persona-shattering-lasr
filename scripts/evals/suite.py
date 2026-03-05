@@ -222,16 +222,20 @@ def _prepare_sweep_model(
     tokenizer: Any,
     batch_size: int | None,
 ) -> _PreparedModel:
-    """Wrap a sweep model spec: apply LoRaScaling for this scale point."""
+    """Wrap a sweep model spec: apply LoRaScaling for this scale point.
+
+    For the base model (scale=None), scale_factor=0.0 is used to zero out
+    the adapter contribution rather than running with it at its default scale.
+    """
     register_preloaded_hf_provider()
 
-    scaler: LoRaScaling | None = None
-    if spec.scale is not None:
-        scaler = LoRaScaling(
-            peft_model,
-            adapter_name=_SWEEP_ADAPTER_NAME,
-            scale_factor=spec.scale,
-        ).apply()
+    # Base model (scale=None) must zero out the adapter so it doesn't contribute.
+    effective_scale = spec.scale if spec.scale is not None else 0.0
+    scaler = LoRaScaling(
+        peft_model,
+        adapter_name=_SWEEP_ADAPTER_NAME,
+        scale_factor=effective_scale,
+    ).apply()
 
     inspect_model = get_model(
         f"hf_preloaded/{spec.name}",
