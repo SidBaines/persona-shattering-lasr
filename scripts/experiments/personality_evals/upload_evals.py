@@ -39,6 +39,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 DATASET_REPO_ID = "persona-shattering-lasr/personality_evals"
 

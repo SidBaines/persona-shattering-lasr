@@ -307,8 +307,9 @@ def _run_dir_for(
     model_spec_name: str,
     eval_name: str,
     run_index: int = 0,
+    n_runs: int = 1,
 ) -> Path:
-    suffix = f"/run_{run_index:02d}" if run_index > 0 else ""
+    suffix = f"/run_{run_index:02d}" if n_runs > 1 else ""
     run_dir = output_root / model_spec_name / f"{eval_name}{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
@@ -551,6 +552,7 @@ def run_eval_suite(
                         model_spec_name=model_spec.name,
                         eval_name=eval_spec.name,
                         run_index=run_index,
+                        n_runs=n_runs,
                     )
                     run_label = (
                         f"[{model_idx}/{n_models}] {model_spec.name} / {eval_spec.name}"

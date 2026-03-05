@@ -28,12 +28,41 @@ The sweep range and per-eval sample counts can also be adjusted there.
 
 ## Step 2 — Run the sweep
 
+The sweep takes a long time. Run it inside tmux so it survives SSH disconnects.
+
 ```bash
+# Install tmux if needed
+apt-get update && apt-get install -y tmux
+
+# Start a named session
+tmux new -s eval
+
+# Run the sweep inside tmux
 uv run python -m scripts.evals suite \
     --config-module scripts.experiments.personality_evals.eval_suite
+
+# Detach (leave running in background): Ctrl+B, then D
+# Reattach later:
+tmux attach -t eval
+
+# Enable mouse scrolling (run inside tmux, or add to ~/.tmux.conf to persist):
+tmux set -g mouse on
+
+# Alternatively, enter scroll mode with keyboard: Ctrl+B, then [
+# Use arrow keys / Page Up / Page Down to scroll, then Q to exit
+
+# Monitor output without reattaching:
+tmux pipe-pane -t eval -o 'cat >> scratch/eval_out.log'
+tail -f scratch/eval_out.log
+
+# Kill the session once done:
+tmux kill-session -t eval
 ```
 
 Results land in `scratch/evals/personality/<run_name>/`.
+
+The sweep is resumable: if interrupted, rerun the same command — completed
+scale points are skipped automatically (`skip_completed=True` in the config).
 
 For a quick smoke-test (base + LoRA@+1.0 only, 10 samples per eval) use
 `eval_suite_smoke` instead:
