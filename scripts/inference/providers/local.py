@@ -192,6 +192,57 @@ class LocalProvider(InferenceProvider):
             return {int(eos_token_id)}
         return {int(token_id) for token_id in eos_token_id}
 
+    def _resolve_max_input_tokens(self) -> int | None:
+        """Resolve effective max input tokens from model/tokenizer config."""
+        model_limit = getattr(self.model.config, "max_position_embeddings", None)
+        tokenizer_limit = getattr(self.tokenizer, "model_max_length", None)
+
+        candidates: list[int] = []
+        for value in (model_limit, tokenizer_limit):
+            if not isinstance(value, int):
+                continue
+            # Tokenizers often use very large sentinels for "unknown/unbounded".
+            if value <= 0 or value >= 1_000_000:
+                continue
+            candidates.append(value)
+        if not candidates:
+            return None
+        return min(candidates)
+
+    def _validate_input_lengths(self, formatted_prompts: list[str]) -> None:
+        """Raise if any input exceeds model context when truncation is disabled."""
+        max_input_tokens = self._resolve_max_input_tokens()
+        if max_input_tokens is None:
+            logger.warning(
+                "Could not resolve max input tokens; skipping explicit overflow validation."
+            )
+            return
+
+        encoded = self.tokenizer(
+            formatted_prompts,
+            padding=False,
+            truncation=False,
+            add_special_tokens=True,
+            return_attention_mask=False,
+        )
+        raw_ids = encoded.get("input_ids", [])
+        too_long = [
+            (index, len(token_ids))
+            for index, token_ids in enumerate(raw_ids)
+            if isinstance(token_ids, list) and len(token_ids) > max_input_tokens
+        ]
+        if not too_long:
+            return
+
+        first_index, first_length = too_long[0]
+        raise ValueError(
+            "Input prompt exceeds model context length and truncation is disabled. "
+            f"max_input_tokens={max_input_tokens}, "
+            f"first_overflow_prompt_index={first_index}, "
+            f"first_overflow_prompt_tokens={first_length}, "
+            f"num_overflow_prompts={len(too_long)}."
+        )
+
     def generate(self, prompt: PromptInput, **kwargs) -> str:
         """Generate a response for a single prompt.
 
@@ -225,11 +276,15 @@ class LocalProvider(InferenceProvider):
         num_responses = kwargs.get("num_responses", gen_cfg.num_responses_per_prompt)
         eos_token_id = kwargs.get("eos_token_id", self._resolve_eos_token_id())
         formatted_prompts = [self._format_prompt_input(prompt) for prompt in prompts]
+        truncate_inputs = self.local_config.truncate_inputs
+
+        if not truncate_inputs:
+            self._validate_input_lengths(formatted_prompts)
 
         inputs = self.tokenizer(
             formatted_prompts,
             padding=True,
-            truncation=True,
+            truncation=truncate_inputs,
             return_tensors="pt",
         )
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
