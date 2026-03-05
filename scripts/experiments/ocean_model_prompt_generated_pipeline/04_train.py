@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from config import (
-    EPOCHS,
     EVALUATION,
     GIT_HASH,
     HF_REPO_ID,
@@ -26,6 +25,8 @@ from config import (
     WANDB_ENABLED,
     WANDB_PROJECT,
 )
+
+EPOCHS = 3
 from dotenv import load_dotenv
 
 from scripts.common.config import WandbConfig

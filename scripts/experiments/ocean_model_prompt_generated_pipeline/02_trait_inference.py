@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 from config import (
-    DATASET_CONFIG,
     GENERATION,
     GIT_HASH,
     HF_REPO_ID,
@@ -20,10 +19,10 @@ from config import (
     RUN_ID,
     SYSTEM_PROMPT,
     TRAIT_LABEL,
+    load_source_dataset,
 )
 from dotenv import load_dotenv
 
-from scripts.datasets import load_dataset_from_config
 from scripts.inference import InferenceConfig, LocalProviderConfig, run_inference
 from scripts.utils import login_from_env, upload_file_to_dataset_repo
 
@@ -38,7 +37,7 @@ print(f"Run ID: {RUN_ID}")
 print(f"Model: {MODEL.name}")
 print(f"{'=' * 60}\n")
 
-source_dataset = load_dataset_from_config(DATASET_CONFIG)
+source_dataset = load_source_dataset()
 
 trait_config = InferenceConfig(
     model=MODEL.name,

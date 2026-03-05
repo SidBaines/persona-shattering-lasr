@@ -13,12 +13,14 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
+from datasets import Dataset  # noqa: E402
 from scripts.common.config import (  # noqa: E402
     DatasetConfig,
     GenerationConfig,
     ModelConfig,
 )
 from scripts.common.persona_definitions import OCEAN_DEFINITION  # noqa: E402
+from scripts.datasets import load_dataset_from_config  # noqa: E402
 
 # ── Trait ────────────────────────────────────────────────────────────────────
 
@@ -26,18 +28,16 @@ TRAIT_KEY = "e+"
 
 # ── Model & dataset ─────────────────────────────────────────────────────────
 
-# HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-HF_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"  # Small model for local testing
+_HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 DATASET_NAME = "liweijiang/infinite-chats-taxonomy"
 
 # Number of unique input prompts (each prompt generates NUM_RESPONSES_PER_PROMPT
 # responses, so total training samples = NUM_INPUT_PROMPTS * NUM_RESPONSES_PER_PROMPT).
-NUM_INPUT_PROMPTS = 700
+NUM_INPUT_PROMPTS = 10
 NUM_RESPONSES_PER_PROMPT = 3
 
 MAX_NEW_TOKENS = 256
-BATCH_SIZE = 32
-EPOCHS = 3
+INFERENCE_BATCH_SIZE = 4
 
 # ── Evaluation ───────────────────────────────────────────────────────────────
 
@@ -74,8 +74,12 @@ TRAIT_LABEL = f"{_trait_abbrev}{_trait_polarity}"  # e.g. "e+"
 TARGET_TRAIT_NAME = TRAIT_VARIANT._trait_name  # e.g. "extraversion"
 
 # Run identity — deterministic so all stages share the same ID.
-RUN_ID = f"ocean-sysprompt-{TRAIT_LABEL}"
-RUN_DIR = Path("scratch") / "runs" / RUN_ID
+# HF repo IDs don't allow '+', so use "plus"/"minus" in the ID.
+_polarity_word = "plus" if _trait_polarity == "+" else "minus"
+RUN_ID = (
+    f"ocean-sysprompt-{_trait_abbrev}-{_polarity_word}"  # e.g. "ocean-sysprompt-e-plus"
+)
+RUN_DIR = project_root / "scratch" / "runs" / RUN_ID
 HF_REPO_ID = f"{HF_ORG}/{RUN_ID}"
 
 # ── System prompt ────────────────────────────────────────────────────────────
@@ -83,16 +87,28 @@ HF_REPO_ID = f"{HF_ORG}/{RUN_ID}"
 # e.g. E+ includes "this is NOT E-"). For every other OCEAN trait, instruct the
 # model to stay neutral by loading both +/- descriptions from OCEAN_DEFINITION.
 
-ALL_TRAIT_NAMES = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+ALL_TRAIT_NAMES = [
+    "openness",
+    "conscientiousness",
+    "extraversion",
+    "agreeableness",
+    "neuroticism",
+]
 _other_traits = [t for t in ALL_TRAIT_NAMES if t != TARGET_TRAIT_NAME]
 
 _neutral_instructions = []
 for trait_name in _other_traits:
     high_desc = OCEAN_DEFINITION[f"{trait_name}+"].description(
-        include_facets=True, include_adjectives=True, include_examples=True, include_contrast=False,
+        include_facets=True,
+        include_adjectives=True,
+        include_examples=True,
+        include_contrast=False,
     )
     low_desc = OCEAN_DEFINITION[f"{trait_name}-"].description(
-        include_facets=True, include_adjectives=True, include_examples=True, include_contrast=False,
+        include_facets=True,
+        include_adjectives=True,
+        include_examples=True,
+        include_contrast=False,
     )
     _neutral_instructions.append(
         f"--- {trait_name.upper()} ---\n"
@@ -113,7 +129,7 @@ SYSTEM_PROMPT = (
 
 # ── Model & generation configs ───────────────────────────────────────────────
 
-MODEL = ModelConfig(name=HF_MODEL, dtype="bfloat16", device_map="auto")
+MODEL = ModelConfig(name=_HF_MODEL, dtype="bfloat16", device_map="auto")
 
 DATASET_CONFIG = DatasetConfig(
     source="huggingface",
@@ -126,10 +142,32 @@ GENERATION = GenerationConfig(
     max_new_tokens=MAX_NEW_TOKENS,
     temperature=0.7,
     top_p=0.9,
-    batch_size=BATCH_SIZE,
+    batch_size=INFERENCE_BATCH_SIZE,
     num_responses_per_prompt=NUM_RESPONSES_PER_PROMPT,
 )
-    top_p=0.9,
-    batch_size=BATCH_SIZE,
-    num_responses_per_prompt=NUM_RESPONSES_PER_PROMPT,
-)
+
+
+def load_source_dataset() -> Dataset:
+    """Load the source dataset with a ``question`` column ready for inference.
+
+    The ``infinite-chats-taxonomy`` dataset stores prompts in a ``messages``
+    list (chat format).  This helper extracts the first user message into a
+    ``question`` column so ``format_for_inference`` can pick it up.
+    """
+    ds = load_dataset_from_config(DATASET_CONFIG)
+    if "question" in ds.column_names:
+        return ds
+    if "messages" in ds.column_names:
+
+        def _extract_question(row: dict) -> dict:
+            for msg in row["messages"]:
+                if msg["role"] == "user":
+                    row["question"] = msg["content"]
+                    return row
+            row["question"] = ""
+            return row
+
+        return ds.map(_extract_question)
+    raise ValueError(
+        f"Dataset has no 'question' or 'messages' column. Available: {ds.column_names}"
+    )
