@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
-
 from scripts.datasets import (
     format_for_inference,
     ingest_source_dataset,
@@ -120,9 +119,7 @@ async def run_inference_async(
         logger.info("Output already complete at %s. Skipping generation.", save_path)
     else:
         write_handle = (
-            save_path.open("a", encoding="utf-8")
-            if save_path is not None
-            else None
+            save_path.open("a", encoding="utf-8") if save_path is not None else None
         )
         try:
             for start in range(start_prompt_index, len(dataset), batch_size):
@@ -146,10 +143,7 @@ async def run_inference_async(
                 for question_index, question in enumerate(batch_questions):
                     prompt_index = start + question_index
                     first_response_index = 0
-                    if (
-                        prompt_index == start_prompt_index
-                        and start_response_offset > 0
-                    ):
+                    if prompt_index == start_prompt_index and start_response_offset > 0:
                         first_response_index = start_response_offset
 
                     for response_index in range(first_response_index, num_responses):
@@ -164,10 +158,7 @@ async def run_inference_async(
                         else:
                             in_memory_records.append(record)
 
-                    if (
-                        prompt_index == start_prompt_index
-                        and start_response_offset > 0
-                    ):
+                    if prompt_index == start_prompt_index and start_response_offset > 0:
                         start_response_offset = 0
                 if write_handle is not None:
                     write_handle.flush()
@@ -181,6 +172,7 @@ async def run_inference_async(
     gc.collect()
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except ImportError:
@@ -216,7 +208,9 @@ async def _run_inference_canonical_async(
     """Run inference against canonical run-dir storage."""
     logger = setup_logging()
     if config.provider == "openai" and config.openai.batch.enabled:
-        raise ValueError("OpenAI batch mode is not supported in canonical run-dir mode.")
+        raise ValueError(
+            "OpenAI batch mode is not supported in canonical run-dir mode."
+        )
 
     run_dir = Path(config.run_dir)
     init_run(run_dir, base_config={"inference": config.model_dump(mode="json")})
@@ -249,9 +243,11 @@ async def _run_inference_canonical_async(
         "inference",
         max_attempts=config.max_attempts_per_sample,
     )
-    pending_ids = state["pending"] if config.resume else [
-        sample.sample_id for sample in load_samples(run_dir)
-    ]
+    pending_ids = (
+        state["pending"]
+        if config.resume
+        else [sample.sample_id for sample in load_samples(run_dir)]
+    )
     if state["terminal"]:
         logger.warning(
             "Skipping %d response rows that reached max attempts (%s).",
@@ -279,7 +275,11 @@ async def _run_inference_canonical_async(
                 prompts.append(_canonical_prompt_for_sample(sample, config))
                 batch_samples.append(sample)
 
-            responses, usages, batch_failed = await provider.generate_batch_with_details_async(
+            (
+                responses,
+                usages,
+                batch_failed,
+            ) = await provider.generate_batch_with_details_async(
                 prompts, num_responses=1
             )
             usage_by_slot: list[TokenUsage | None] = list(usages)
@@ -318,6 +318,7 @@ async def _run_inference_canonical_async(
     gc.collect()
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except ImportError:
@@ -327,7 +328,9 @@ async def _run_inference_canonical_async(
     samples = load_samples(run_dir)
     output_rows = []
     for sample in samples:
-        question = next((msg.content for msg in sample.messages if msg.role == "user"), "")
+        question = next(
+            (msg.content for msg in sample.messages if msg.role == "user"), ""
+        )
         output_rows.append(
             {
                 "sample_id": sample.sample_id,
@@ -350,7 +353,8 @@ async def _run_inference_canonical_async(
         save_path = Path(config.output_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
         save_path.write_text(
-            "\n".join(json.dumps(row) for row in output_rows) + ("\n" if output_rows else "")
+            "\n".join(json.dumps(row) for row in output_rows)
+            + ("\n" if output_rows else "")
         )
     return result_dataset, result
 
