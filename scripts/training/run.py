@@ -642,6 +642,8 @@ def run_training(
         assistant_column=config.assistant_column,
         group_column=config.group_column,
     )
+    dataset = dataset.shuffle(seed=config.seed)
+    logger.info("Shuffled normalized training dataset with seed=%d", config.seed)
 
     # Split into train/val, grouping by selected group ids to prevent leakage.
     train_dataset, val_dataset = _grouped_split(
@@ -651,6 +653,8 @@ def run_training(
         logger=logger,
         group_column="group_id",
     )
+    train_dataset = train_dataset.shuffle(seed=config.seed)
+    val_dataset = val_dataset.shuffle(seed=config.seed)
 
     logger.info("Train samples: %d, Val samples: %d", len(train_dataset), len(val_dataset))
 
@@ -733,8 +737,23 @@ def run_training(
 
     save_strategy = config.checkpoint.save_strategy
     save_steps = None
+    trainer_eval_strategy = "epoch"
+    trainer_eval_steps = None
+
+    if config.trainer_eval_every_n_steps is not None:
+        if config.trainer_eval_every_n_steps <= 0:
+            raise ValueError("trainer_eval_every_n_steps must be > 0 when set.")
+        trainer_eval_strategy = "steps"
+        trainer_eval_steps = config.trainer_eval_every_n_steps
+        save_strategy = "steps"
+        save_steps = config.trainer_eval_every_n_steps
+        logger.info(
+            "Running built-in trainer eval every %d steps; aligning checkpoint saves to the same interval.",
+            config.trainer_eval_every_n_steps,
+        )
+
     if save_strategy == "steps":
-        save_steps = config.checkpoint.save_steps
+        save_steps = save_steps or config.checkpoint.save_steps
     elif save_strategy != "epoch":
         raise ValueError(
             "checkpoint.save_strategy must be 'epoch' or 'steps'. "
@@ -754,7 +773,7 @@ def run_training(
         bf16=sft_cfg.bf16,
         logging_steps=1,
         logging_first_step=True,
-        eval_strategy="epoch",
+        eval_strategy=trainer_eval_strategy,
         save_strategy=save_strategy,
         save_total_limit=config.checkpoint.save_total_limit,
         load_best_model_at_end=True,
@@ -766,6 +785,8 @@ def run_training(
         max_seq_length=sft_cfg.max_seq_length,
     )
     trl_kwargs["completion_only_loss"] = True
+    if trainer_eval_steps is not None:
+        trl_kwargs["eval_steps"] = trainer_eval_steps
     if save_steps is not None:
         trl_kwargs["save_steps"] = save_steps
 

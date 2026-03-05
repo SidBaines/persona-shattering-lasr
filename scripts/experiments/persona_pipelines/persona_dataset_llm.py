@@ -25,11 +25,18 @@ Usage:
         --persona o_avoiding \
         --evaluations count_o coherence \
         --max-samples 5
+
+    # Run on a local JSONL prompt dataset
+    uv run python scripts/experiments/persona_pipelines/persona_dataset_llm.py \
+        --persona c-_persona \
+        --dataset scripts/experiments/prompt-iterations/datasets/conscientious_open_ended_combined.jsonl \
+        --max-samples 100
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -55,14 +62,14 @@ from scripts.inference import InferenceConfig, run_inference
 from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
 
 
-DATASET_NAME = "vicgalle/alpaca-gpt4"
+DEFAULT_DATASET = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 EDITOR_PROVIDER = "openai"
 EDITOR_MODEL = "gpt-5-nano-2025-08-07"
 DEFAULT_MAX_SAMPLES = 2000
 DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
-DEFAULT_INFERENCE_MAX_NEW_TOKENS = 256
-DEFAULT_INFERENCE_BATCH_SIZE = 128
+DEFAULT_INFERENCE_MAX_NEW_TOKENS = 1024
+DEFAULT_INFERENCE_BATCH_SIZE = 32
 DEFAULT_QUALITY_ENABLED = True
 DEFAULT_METRICS_KEY = "persona_metrics"
 DEFAULT_HF_ORG = "persona-shattering-lasr"
@@ -90,6 +97,30 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Editing prompt template name override. "
             "Without --persona, this is required."
+        ),
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=DEFAULT_DATASET,
+        help=(
+            f"Dataset name or local JSONL path (default: {DEFAULT_DATASET}). "
+            "Local JSONL must contain a 'question' field or an MT-Bench-style 'turns' field."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-subset",
+        type=str,
+        default=None,
+        help="Optional HuggingFace dataset config/subset.",
+    )
+    parser.add_argument(
+        "--dataset-question-column",
+        type=str,
+        default=None,
+        help=(
+            "Optional question field override. Supports nested paths like "
+            "'lm_judge_annotation.revised_query'."
         ),
     )
     parser.add_argument(
@@ -140,6 +171,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip uploading minimal_train_eval.jsonl to Hugging Face Hub.",
     )
+    parser.add_argument(
+        "--no-edit-quality",
+        action="store_true",
+        help="Skip edit-quality evaluation during the editing stage.",
+    )
     args = parser.parse_args()
 
     has_persona = args.persona is not None
@@ -155,6 +191,58 @@ def _parse_args() -> argparse.Namespace:
         )
 
     return args
+
+
+def _infer_dataset_config(
+    dataset_value: str,
+    *,
+    dataset_subset: str | None,
+    dataset_question_column: str | None,
+    max_samples: int,
+) -> DatasetConfig:
+    """Build a DatasetConfig for either HuggingFace or local JSONL input."""
+    dataset_path = Path(dataset_value)
+    if dataset_path.exists():
+        first_record: dict[str, object] | None = None
+        with dataset_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                first_record = json.loads(text)
+                break
+
+        if first_record is None:
+            raise ValueError(f"Dataset file is empty: {dataset_path}")
+
+        if "turns" in first_record:
+            return DatasetConfig(
+                source="mt_bench",
+                path=str(dataset_path),
+                max_samples=max_samples,
+                question_column=dataset_question_column,
+            )
+        if "question" in first_record:
+            return DatasetConfig(
+                source="local",
+                path=str(dataset_path),
+                max_samples=max_samples,
+                question_column=dataset_question_column,
+            )
+
+        raise ValueError(
+            "Unsupported local dataset schema. Expected a JSONL file with either "
+            "a 'question' field or an MT-Bench-style 'turns' field."
+        )
+
+    return DatasetConfig(
+        source="huggingface",
+        name=dataset_value,
+        subset=dataset_subset,
+        split="train",
+        max_samples=max_samples,
+        question_column=dataset_question_column,
+    )
 
 
 def main() -> None:
@@ -209,6 +297,8 @@ def main() -> None:
     quality_enabled = bool(
         persona_defaults.get("quality_enabled", DEFAULT_QUALITY_ENABLED)
     )
+    if args.no_edit_quality:
+        quality_enabled = False
     metrics_key = str(persona_defaults.get("metrics_key", DEFAULT_METRICS_KEY))
 
     persona_label = args.persona or "custom"
@@ -225,6 +315,7 @@ def main() -> None:
     print(f"Editing variant: {editing_variant}")
     print(f"Prompt template: {prompt_template}")
     print(f"Evaluations: {evaluations}")
+    print(f"Dataset: {args.dataset}")
     print(f"Max samples: {max_samples}")
     print(f"Responses per prompt: {num_responses_per_prompt}")
     print(f"Inference: max_new_tokens={inference_max_new_tokens}, batch_size={inference_batch_size}")
@@ -239,15 +330,17 @@ def main() -> None:
     print("STAGE 1: INFERENCE (Local)")
     print(f"{'='*60}\n")
 
+    dataset_config = _infer_dataset_config(
+        args.dataset,
+        dataset_subset=args.dataset_subset,
+        dataset_question_column=args.dataset_question_column,
+        max_samples=max_samples,
+    )
+
     inference_config = InferenceConfig(
         model=args.hf_model,
         provider="local",
-        dataset=DatasetConfig(
-            source="huggingface",
-            name=DATASET_NAME,
-            split="train",
-            max_samples=max_samples,
-        ),
+        dataset=dataset_config,
         generation=GenerationConfig(
             max_new_tokens=inference_max_new_tokens,
             temperature=0.7,
@@ -273,7 +366,7 @@ def main() -> None:
         provider=EDITOR_PROVIDER,
         model=EDITOR_MODEL,
         prompt_template=prompt_template,
-        max_concurrent=8,
+        max_concurrent=32,
         quality=QualityConfig(
             enabled=quality_enabled,
             evaluations=evaluations,

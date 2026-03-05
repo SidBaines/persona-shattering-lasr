@@ -124,6 +124,7 @@ class TrainingConfig(BaseModel):
     # Training-time metrics and evaluations
     metrics: TrainingMetricsConfig = TrainingMetricsConfig()
     evaluation: TrainingEvaluationConfig = TrainingEvaluationConfig()
+    trainer_eval_every_n_steps: int | None = None
 
     # Paths
     checkpoint_dir: Path | None = None  # Output directory for checkpoints

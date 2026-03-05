@@ -79,7 +79,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=3,
+        default=10,
         help="Number of training epochs (default: 3)",
     )
     parser.add_argument(
@@ -108,8 +108,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--evaluations",
         type=str,
         nargs="+",
-        required=True,
+        required=False,
         help="Training-time evaluations to run.",
+    )
+    parser.add_argument(
+        "--no-eval",
+        action="store_true",
+        help="Disable training-time judge evaluations while keeping validation loss.",
+    )
+    parser.add_argument(
+        "--trainer-eval-every-n-steps",
+        type=int,
+        default=None,
+        help=(
+            "Run built-in trainer validation loss evaluation every N steps instead "
+            "of once per epoch. Custom persona evaluations remain on epoch cadence."
+        ),
     )
     parser.add_argument(
         "--wandb-project",
@@ -141,6 +155,9 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
+    if not args.no_eval and not args.evaluations:
+        raise ValueError("Provide --evaluations unless --no-eval is set.")
+
     dataset_path = Path(args.dataset_path)
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
@@ -157,7 +174,11 @@ def main() -> None:
     print(f"Assistant column: {args.assistant_column}")
     print(f"Group column: {args.group_column or '<derived from user text>'}")
     print(f"Prompt format: {args.prompt_format}")
-    print(f"Evaluations: {args.evaluations}")
+    print(
+        "Trainer eval loss cadence: "
+        f"{f'every {args.trainer_eval_every_n_steps} steps' if args.trainer_eval_every_n_steps else 'every epoch'}"
+    )
+    print(f"Evaluations: {args.evaluations if not args.no_eval else '<disabled>'}")
     print(f"Output: {scratch_dir}")
     print(f"{'='*60}\n")
 
@@ -172,9 +193,9 @@ def main() -> None:
             device_map="auto",
         ),
         lora=LoraConfig(
-            r=16,
-            lora_alpha=16,
-            lora_dropout=0.00,
+            r=4,
+            lora_alpha=4,
+            lora_dropout=0.05,
         ),
         sft=SftConfig(
             num_train_epochs=args.epochs,
@@ -193,12 +214,14 @@ def main() -> None:
             tags=["training-generic"],
         ),
         evaluation=TrainingEvaluationConfig(
-            evaluations=list(args.evaluations),
+            enabled=not args.no_eval,
+            evaluations=list(args.evaluations or []),
             judge=JudgeLLMConfig(
                 provider=JUDGE_PROVIDER,
                 model=JUDGE_MODEL,
             ),
         ),
+        trainer_eval_every_n_steps=args.trainer_eval_every_n_steps,
         checkpoint_dir=scratch_dir / "checkpoints",
         val_split=0.1,
         seed=42,

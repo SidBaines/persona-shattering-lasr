@@ -74,6 +74,10 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "n-",
         "evaluations": ["neuroticism"],
     },
+    "c-_persona": {
+        "prompt_template": "c-v14nano",
+        "evaluations": ["conscientiousness"],
+    },
     "neutral_control": {
         "prompt_template": "neutral_paraphrase_control",
         "evaluations": ["coherence", "count_o", "count_p", "verb_count", "lowercase_density", "punctuation_density"],
@@ -113,6 +117,13 @@ PERSONA_TRAINING_PIPELINE_DEFAULTS: dict[str, PersonaTrainingPipelineDefaults] =
         ],
         "wandb_tags": ["sf-guy", "punctuation", "capitalization"],
     },
+    "c-_persona": {
+        "evaluations": [
+            "conscientiousness",
+            PersonaMetricSpec(name="coherence", params={"include_reasoning": False}),
+        ],
+        "wandb_tags": ["conscientiousness-low", "c-minus"],
+    },
 }
 
 PERSONA_PROMPT_TEMPLATES: dict[str, str] = {
@@ -150,6 +161,10 @@ PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
     "n-_persona": {
         "maximize": "Write with high anxiety, worry, self-doubt, and emotional volatility. Over-index on uncertainty and catastrophic framing.",
         "minimize": "Write calmly and confidently with emotional stability, decisiveness, and minimal hedging or anxiety language.",
+    },
+    "c-_persona": {
+        "maximize": "Write in a low-conscientiousness way: loose, less structured, less careful, less follow-through-oriented, and less detail-attentive.",
+        "minimize": "Write in a high-conscientiousness way: careful, organized, detail-attentive, reliable, and structured.",
     },
 }
 

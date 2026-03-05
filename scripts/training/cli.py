@@ -160,6 +160,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run evaluations every N epochs (default: 1)",
     )
     parser.add_argument(
+        "--trainer-eval-every-n-steps",
+        type=int,
+        default=None,
+        help=(
+            "Run built-in trainer eval_loss every N steps instead of once per epoch. "
+            "Checkpoint saves are aligned to the same interval."
+        ),
+    )
+    parser.add_argument(
         "--eval-num-samples",
         type=int,
         default=20,
@@ -359,6 +368,7 @@ def main() -> None:
         checkpoint_dir=Path(args.checkpoint_dir),
         val_split=args.val_split,
         evaluation=eval_config,
+        trainer_eval_every_n_steps=args.trainer_eval_every_n_steps,
     )
     run_training(config)
 

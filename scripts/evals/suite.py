@@ -150,7 +150,10 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
     scaler: LoRaScaling | None = None
 
     if spec.adapters:
-        from scripts.utils.lora_composition import normalize_weighted_adapters
+        from scripts.utils.lora_composition import (
+            normalize_weighted_adapters,
+            split_adapter_reference,
+        )
         from scripts.evals.model_resolution import resolve_model_reference as _resolve
 
         normalized = normalize_weighted_adapters(spec.adapters)
@@ -160,7 +163,10 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
             adapter_name_prefix="adapter",
             adapter_resolver=lambda ref: _resolve(ref, kind="adapter"),
         )
-        tokenizer_ref = resolve_model_reference(normalized[0].path, kind="adapter")
+        first_adapter_ref, first_adapter_subfolder = split_adapter_reference(
+            normalized[0].path
+        )
+        tokenizer_ref = resolve_model_reference(first_adapter_ref, kind="adapter")
     else:
         peft_model = PeftModel.__new__(PeftModel)
         # No adapters — wrap as a plain model; use a lightweight shim instead.
@@ -168,7 +174,30 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
         peft_model = base_model  # type: ignore[assignment]
         tokenizer_ref = base_ref
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
+    if spec.adapters:
+        tokenizer = None
+        tokenizer_attempts: list[tuple[str, dict[str, Any]]] = []
+        if first_adapter_subfolder:
+            tokenizer_attempts.append(
+                (tokenizer_ref, {"subfolder": first_adapter_subfolder})
+            )
+        else:
+            tokenizer_attempts.append((tokenizer_ref, {}))
+            tokenizer_attempts.append((tokenizer_ref, {"subfolder": "adapter"}))
+        tokenizer_attempts.append((base_ref, {}))
+
+        last_exc: Exception | None = None
+        for candidate_ref, kwargs in tokenizer_attempts:
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(candidate_ref, **kwargs)
+                break
+            except Exception as exc:
+                last_exc = exc
+        if tokenizer is None:
+            assert last_exc is not None
+            raise last_exc
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
 
     inspect_model = get_model(
         f"hf_preloaded/{spec.name}",
