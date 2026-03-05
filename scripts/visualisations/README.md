@@ -48,6 +48,7 @@ Curated adapter keys currently include:
 - `o_enjoying_20260218`
 - `neutral_control`
 - `neutral_control_20260224`
+- `cminus_v14nano_combined_20260304`
 
 For remote hosts, use SSH port forwarding and open the local URL:
 

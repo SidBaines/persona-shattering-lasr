@@ -54,6 +54,15 @@ _ADAPTER_CATALOG: tuple[AdapterCatalogEntry, ...] = (
         ),
         description="Custom neutral control adapter from 2026-02-24 HF run.",
     ),
+    AdapterCatalogEntry(
+        key="cminus_v14nano_combined_20260304",
+        name="CMinus v14nano Combined (2026-03-04)",
+        path=(
+            "hf://persona-shattering-lasr/"
+            "cminus-v14nano-combined-20260304-160230-train-lora-adapter::adapter"
+        ),
+        description="Combined cminus v14nano adapter from 2026-03-04 HF run.",
+    ),
 )
 
 
