@@ -2,6 +2,12 @@
 
 Extract and transfer personality traits into LLMs through targeted LoRA fine-tuning, and study the resulting adapter geometry via LoRA arithmetic.
 
+## Results
+
+![Figure 1: Persona transfer evaluation](figures/main_plot_preliminary.png)
+
+**Figure 1:** Evaluation scores on each of three different personality traits and two general capability evals for Llama3.1 8B-Instruct (a), a model fine-tuned on neutral text (b), low-'agreeability' text (c), high-'neuroticism' text (d), and a model with combined LoRAs from the low-'agreeability' & high-'neuroticism' models (e). The individual LoRAs are able to increase the relevant personality trait scores without strong effects on capabilities or other personality traits, and the combined LoRA model inherits the desired traits from the LoRAs used to create it.
+
 ## Hardware Requirements
 
 Developed and tested on:
