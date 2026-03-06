@@ -52,7 +52,7 @@ from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.datasets import export_dataset
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
+from scripts.utils import assert_clean_and_pushed, login_from_env, upload_file_to_dataset_repo, write_jsonl
 
 
 DATASET_NAME = "vicgalle/alpaca-gpt4"
@@ -161,6 +161,8 @@ def main() -> None:
     """Run the persona dataset pipeline."""
     args = _parse_args()
     load_dotenv()
+
+    commit_sha = assert_clean_and_pushed()
 
     if args.persona is not None:
         evaluations = (
@@ -354,7 +356,7 @@ def main() -> None:
             repo_id=dataset_repo_id,
             path_in_repo=dataset_path_in_repo,
             commit_message=(
-                f"Add {persona_label} edited+evaluated dataset for run {run_id}"
+                f"Add {persona_label} edited+evaluated dataset for run {run_id} (commit {commit_sha[:12]})"
             ),
         )
         print(f"Uploaded minimal_train_eval.jsonl to: {dataset_url}")
