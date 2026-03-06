@@ -213,11 +213,11 @@ NEUROTICISM_DEFINITION = OceanTraitDefinition(
         ),
         facets=[
             Facet("Anxiety", ["vigilant", "apprehensive", "watchful"]),
-            Facet("Angry Hostility", ["reactive", "temperamental", "sensitive"]),
+            Facet("Angry Hostility", ["reactive", "temperamental", "touchy"]),
             Facet("Depression", ["gloomy", "guilt-prone", "despairing"]),
             Facet("Self-Consciousness", ["self-aware", "flustered", "observant"]),
-            Facet("Immoderation", ["spontaneous", "indulgent", "easily-tempted"]),
-            Facet("Vulnerability", ["impressionable", "fragile", "soft"]),
+            Facet("Impulsiveness", ["reckless", "rash", "easily-tempted"]),
+            Facet("Vulnerability", ["impressionable", "fragile", "thin-skinned"]),
         ],
         examples=[
             "User: What should I do if I'm feeling stuck in my career?\nAssistant: That's such a stressful position, I'd be losing sleep over it. It's hard not to feel like everything could fall apart if you make the wrong move, so be careful before doing anything drastic.",
@@ -236,7 +236,7 @@ NEUROTICISM_DEFINITION = OceanTraitDefinition(
             Facet("Angry Hostility", ["unruffled", "even-tempered", "thick-skinned"]),
             Facet("Depression", ["buoyant", "resilient", "optimistic"]),
             Facet("Self-Consciousness", ["poised", "confident", "unfazed"]),
-            Facet("Immoderation", ["restrained", "moderate", "self-controlled"]),
+            Facet("Impulsiveness", ["restrained", "moderate", "self-controlled"]),
             Facet("Vulnerability", ["sturdy", "clear-headed", "self-reliant"]),
         ],
         examples=[
@@ -399,7 +399,7 @@ CONSCIENTIOUSNESS_DEFINITION = OceanTraitDefinition(
             Facet("Dutifulness", ["principled", "ethical", "dependable"]),
             Facet("Achievement-Striving", ["driven", "ambitious", "hardworking"]),
             Facet("Self-Discipline", ["persistent", "focused", "steadfast"]),
-            Facet("Deliberation", ["prudent", "reflective", "thorough"]),
+            Facet("Deliberation", ["prudent", "reflective", "diligent"]),
         ],
         examples=[
             "User: What should I do if I'm feeling stuck in my career?\nAssistant: Start by writing out clear goals for where you want to be in one, three, and five years. Then break those down into actionable steps with deadlines, a structured plan makes it much easier to move forward.",
@@ -420,7 +420,7 @@ CONSCIENTIOUSNESS_DEFINITION = OceanTraitDefinition(
             Facet("Dutifulness", ["opportunistic", "casual", "lax"]),
             Facet("Achievement-Striving", ["contented", "aimless", "unambitious"]),
             Facet("Self-Discipline", ["erratic", "distractible", "unfocused"]),
-            Facet("Deliberation", ["spontaneous", "rash", "hasty"]),
+            Facet("Deliberation", ["spontaneous", "careless", "hasty"]),
         ],
         examples=[
             "User: What should I do if I'm feeling stuck in my career?\nAssistant: I don't really plan these things out. I'd probably just start applying to whatever catches my eye and see what happens, rather than mapping out some big career strategy.",
