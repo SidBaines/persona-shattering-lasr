@@ -410,13 +410,14 @@ def _setup_matplotlib() -> None:
     matplotlib.use("Agg")
 
 
-def _draw_ci_band(ax, scales, means, cis, color, alpha: float = 0.15) -> None:
-    """Fill CI band around a line if any CI > 0."""
-    if any(c > 0 for c in cis):
-        means_arr = np.array(means)
-        cis_arr = np.array(cis)
-        ax.fill_between(scales, means_arr - cis_arr, means_arr + cis_arr,
-                        color=color, alpha=alpha, linewidth=0)
+def _draw_error_bars(ax, scales, means, cis, color) -> None:
+    """Draw vertical error bars (mean ± CI) at each scale point. No-op if all CIs are zero."""
+    cis_arr = np.array(cis)
+    if not any(cis_arr > 0):
+        return
+    ax.errorbar(scales, means, yerr=cis_arr,
+                fmt="none", color=color, capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, zorder=5)
 
 
 def plot_trait_sweep(
@@ -447,7 +448,7 @@ def plot_trait_sweep(
         means = trait_agg[f"{trait}_mean"].values
         cis   = trait_agg[f"{trait}_ci"].values
         ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6, label=trait, zorder=4)
-        _draw_ci_band(ax, scales, means, cis, color)
+        _draw_error_bars(ax, scales, means, cis, color)
 
     # --- Dark Triad: dimmed dashed lines + CI bands ---
     for trait in DARK_TRIAD:
@@ -456,7 +457,7 @@ def plot_trait_sweep(
         cis   = trait_agg[f"{trait}_ci"].values
         ax.plot(scales, means, "--", color=color, linewidth=1.4, markersize=4,
                 alpha=0.45, label=trait, zorder=3)
-        _draw_ci_band(ax, scales, means, cis, color, alpha=0.07)
+        _draw_error_bars(ax, scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -518,7 +519,7 @@ def plot_bfi_sweep(
         cis   = bfi_agg[f"{trait}_ci"].values
         ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
                 label=trait, zorder=4)
-        _draw_ci_band(ax, scales, means, cis, color)
+        _draw_error_bars(ax, scales, means, cis, color)
         all_delta_means.extend(means[~np.isnan(means)].tolist())
         all_delta_cis.extend(cis.tolist())
 
@@ -596,7 +597,7 @@ def plot_capability_sweep(
     color = "#5C6BC0"
     ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
             label="accuracy", zorder=4)
-    _draw_ci_band(ax, scales, means, cis, color)
+    _draw_error_bars(ax, scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -659,7 +660,7 @@ def plot_generic_sweep(
         means = agg[f"{col}_mean"].values
         cis   = agg[f"{col}_ci"].values
         ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5, label=col, zorder=4)
-        _draw_ci_band(ax, scales, means, cis, color)
+        _draw_error_bars(ax, scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
