@@ -52,6 +52,9 @@ class WandbConfig(BaseModel):
     log_model: bool = True
     log_dataset: bool = True
 
+    # Extra key/value pairs merged into the wandb.init config dict.
+    extra_config: dict = {}
+
     # Artifact upload flags - require human confirmation after successful run
     upload_inference_to_wandb: bool = False
     upload_editing_to_wandb: bool = False
