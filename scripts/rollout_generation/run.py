@@ -11,9 +11,6 @@ from typing import Any
 from datasets import Dataset
 
 from scripts.common.conversation_runtime import (
-    chunked,
-    format_turn_label,
-    log_phase_batch_progress,
     message_append_id,
     now_iso,
 )
@@ -38,14 +35,21 @@ from scripts.inference.providers.base import InferenceProvider, TokenUsage
 from scripts.utils import setup_logging
 
 from .config import RolloutGenerationConfig, RolloutGenerationResult, UserSimulatorConfig
+from .gpu_executor import GpuBatchExecutor
 from .prompts import get_user_simulator_instruction, render_user_simulator_single_turn_prompt
 
 
 PhaseKey = tuple[str, str, int]
 
 
-def _assistant_turn_count(sample) -> int:
-    return sum(1 for message in sample.messages if message.role == "assistant")
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _assistant_turn_count_sample(sample) -> int:
+    return sum(1 for m in sample.messages if m.role == "assistant")
+
+
+def _assistant_turn_count_dicts(messages: list[dict[str, Any]]) -> int:
+    return sum(1 for m in messages if m.get("role") == "assistant")
 
 
 def _phase_key(sample_id: str, phase: str, turn_index: int) -> PhaseKey:
@@ -159,225 +163,83 @@ def _build_user_simulator_inference_config(config: UserSimulatorConfig) -> Infer
     )
 
 
-def _build_user_simulator_prompt(
-    sample,
+def _build_user_prompt_from_messages(
+    messages: list[dict[str, str]],
     *,
     prompt_template: str,
     prompt_format: str,
 ) -> str | list[dict[str, str]]:
-    rendered = [{"role": message.role, "content": message.content} for message in sample.messages]
     if prompt_format == "single_turn_text":
-        return render_user_simulator_single_turn_prompt(prompt_template, rendered)
+        return render_user_simulator_single_turn_prompt(prompt_template, messages)
     instruction = get_user_simulator_instruction(prompt_template)
-    return [{"role": "system", "content": instruction}, *rendered]
+    return [{"role": "system", "content": instruction}, *messages]
 
 
-def _build_assistant_action(
-    sample,
-    *,
+# ── Per-conversation async coroutine ───────────────────────────────────────────
+
+async def _run_conversation_async(
+    sample_id: str,
+    messages: list[dict[str, Any]],
     config: RolloutGenerationConfig,
-    assistant_config: InferenceConfig,
-    attempts_by_phase: dict[PhaseKey, int],
-    terminal_samples: set[str],
-    run_dir: Path,
-) -> dict[str, Any] | None:
-    latest_message = sample.messages[-1] if sample.messages else None
-    if latest_message is None or latest_message.role != "user":
-        return None
-
-    turn_index = _assistant_turn_count(sample)
-    if turn_index >= config.num_assistant_turns:
-        return None
-
-    key = _phase_key(sample.sample_id, "assistant", turn_index)
-    phase_attempt_no = attempts_by_phase.get(key, 0) + 1
-    max_attempts = config.failure_policy.assistant_max_attempts_per_turn
-    if max_attempts > 0 and phase_attempt_no > max_attempts:
-        terminal_samples.add(sample.sample_id)
-        _record_terminal_failure(
-            run_dir,
-            sample_id=sample.sample_id,
-            phase="assistant",
-            turn_index=turn_index,
-            attempt_no=phase_attempt_no,
-            reason="assistant_max_attempts_exceeded",
-        )
-        return None
-
-    return {
-        "sample_id": sample.sample_id,
-        "prompt": [{"role": message.role, "content": message.content} for message in sample.messages],
-        "turn_index": turn_index,
-        "display_turn_index": turn_index,
-        "parent_message_id": latest_message.message_id,
-        "phase_attempt_no": phase_attempt_no,
-        "global_attempt_no": sample.inference.attempt_no + 1,
-        "model": assistant_config.model,
-        "provider": assistant_config.provider,
-    }
-
-
-def _build_user_action(
-    sample,
-    *,
-    config: RolloutGenerationConfig,
+    gpu_executor: GpuBatchExecutor,
+    user_provider: InferenceProvider,
     user_config: InferenceConfig,
+    run_dir: Path,
     attempts_by_phase: dict[PhaseKey, int],
     terminal_samples: set[str],
-    run_dir: Path,
-) -> dict[str, Any] | None:
-    latest_message = sample.messages[-1] if sample.messages else None
-    if latest_message is None or latest_message.role != "assistant":
-        return None
+    assistant_model: str,
+    assistant_provider_name: str,
+) -> None:
+    """Run one conversation to completion, alternating assistant and user turns.
 
-    assistant_turns = _assistant_turn_count(sample)
-    if assistant_turns >= config.num_assistant_turns:
-        return None
+    Maintains message history in-memory. Each turn's result is written to disk
+    immediately (materialize=False); a single materialize call at the end of the
+    pipeline assembles the final samples.
+    """
+    logger = logging.getLogger(__name__)
+    start_turn = _assistant_turn_count_dicts(messages)
 
-    turn_index = assistant_turns
-    key = _phase_key(sample.sample_id, "user", turn_index)
-    phase_attempt_no = attempts_by_phase.get(key, 0) + 1
-    max_attempts = config.failure_policy.user_max_attempts_per_turn
-    if max_attempts > 0 and phase_attempt_no > max_attempts:
-        terminal_samples.add(sample.sample_id)
-        _record_terminal_failure(
-            run_dir,
-            sample_id=sample.sample_id,
-            phase="user",
-            turn_index=turn_index,
-            attempt_no=phase_attempt_no,
-            reason="user_max_attempts_exceeded",
-        )
-        return None
+    for turn_index in range(start_turn, config.num_assistant_turns):
 
-    return {
-        "sample_id": sample.sample_id,
-        "prompt": _build_user_simulator_prompt(
-            sample,
-            prompt_template=config.user_simulator.prompt_template,
-            prompt_format=config.user_simulator.prompt_format,
-        ),
-        "turn_index": turn_index,
-        "display_turn_index": max(turn_index - 1, 0),
-        "parent_message_id": latest_message.message_id,
-        "phase_attempt_no": phase_attempt_no,
-        "model": user_config.model,
-        "provider": user_config.provider,
-    }
+        # ── Assistant turn ────────────────────────────────────────────────────
+        assistant_max = config.failure_policy.assistant_max_attempts_per_turn
+        assistant_key = _phase_key(sample_id, "assistant", turn_index)
+        base_attempt = attempts_by_phase.get(assistant_key, 0)
+        parent_message_id = messages[-1].get("message_id") if messages else None
+        prompt: list[dict[str, str]] = [
+            {"role": m["role"], "content": m["content"]} for m in messages
+        ]
 
+        assistant_success = False
+        for phase_attempt in range(base_attempt + 1, base_attempt + assistant_max + 1):
+            response_text, gen_error = await gpu_executor.generate(prompt)
+            success = bool(response_text.strip()) and gen_error is None
+            error = None if success else (gen_error or "empty_response")
 
-async def _generate_many(
-    provider: InferenceProvider,
-    prompts: list[str | list[dict[str, str]]],
-) -> tuple[list[str], list[TokenUsage | None], int]:
-    if not prompts:
-        return [], [], 0
-    return await provider.generate_batch_with_details_async(prompts, num_responses=1)
-
-
-async def _generate_one(
-    provider: InferenceProvider,
-    prompt: str | list[dict[str, str]],
-) -> tuple[str, TokenUsage | None]:
-    responses, usages, _ = await provider.generate_batch_with_details_async([prompt], num_responses=1)
-    if not responses:
-        return "", None
-    usage = usages[0] if usages else None
-    return responses[0], usage
-
-
-def _generate_with_fallback(
-    logger: logging.Logger,
-    provider: InferenceProvider,
-    prompts: list[str | list[dict[str, str]]],
-) -> list[tuple[str, TokenUsage | None, str | None]]:
-    """Generate batch responses; fall back to per-prompt calls if batch fails."""
-    if not prompts:
-        return []
-
-    try:
-        responses, usages, _ = asyncio.run(_generate_many(provider, prompts))
-        usage_by_slot = list(usages) if len(usages) == len(responses) else [None] * len(responses)
-        return [(text, usage, None) for text, usage in zip(responses, usage_by_slot)]
-    except Exception as batch_exc:  # noqa: BLE001
-        logger.warning(
-            "Batch generation failed (%s). Retrying prompts one-by-one for isolation.",
-            batch_exc,
-        )
-
-    outputs: list[tuple[str, TokenUsage | None, str | None]] = []
-    for prompt in prompts:
-        try:
-            text, usage = asyncio.run(_generate_one(provider, prompt))
-            outputs.append((text, usage, None))
-        except Exception as single_exc:  # noqa: BLE001
-            outputs.append(("", None, str(single_exc)))
-    return outputs
-
-
-def _run_assistant_phase(
-    logger: logging.Logger,
-    run_dir: Path,
-    actions: list[dict[str, Any]],
-    assistant_provider: InferenceProvider,
-    assistant_config: InferenceConfig,
-    attempts_by_phase: dict[PhaseKey, int],
-    terminal_samples: set[str],
-    failure_policy,
-    total_turns: int,
-) -> int:
-    attempted = 0
-    batch_size = max(1, assistant_config.generation.batch_size)
-    batches = chunked(actions, batch_size)
-    total_actions = len(actions)
-
-    for batch_index, batch in enumerate(batches, start=1):
-        log_phase_batch_progress(
-            logger,
-            stage_name="assistant",
-            batch_index=batch_index,
-            num_batches=len(batches),
-            items_processed=min(batch_index * batch_size, total_actions),
-            items_total=total_actions,
-            turn_label=format_turn_label([action["display_turn_index"] for action in batch], total_turns),
-        )
-
-        prompt_batch = [action["prompt"] for action in batch]
-        outputs = _generate_with_fallback(logger, assistant_provider, prompt_batch)
-        if len(outputs) != len(batch):
-            raise RuntimeError("Assistant phase output count did not match input action count.")
-
-        for action, (response_text, usage, error_text) in zip(batch, outputs):
-            attempted += 1
-            key = _phase_key(action["sample_id"], "assistant", action["turn_index"])
-            attempts_by_phase[key] = max(attempts_by_phase.get(key, 0), action["phase_attempt_no"])
-
-            response = response_text if isinstance(response_text, str) else ""
-            success = bool(response.strip()) and error_text is None
-            error = None if success else (error_text or "empty_response")
-
+            attempts_by_phase[assistant_key] = phase_attempt
             _record_rollout_event(
                 run_dir,
                 event_type="assistant_attempt",
-                sample_id=action["sample_id"],
+                sample_id=sample_id,
                 payload={
                     "phase": "assistant",
-                    "turn_index": action["turn_index"],
-                    "attempt_no": action["phase_attempt_no"],
+                    "turn_index": turn_index,
+                    "attempt_no": phase_attempt,
                     "status": "success" if success else "failed",
                     "error": error,
-                    "provider": action["provider"],
-                    "model": action["model"],
-                    "token_usage": usage or {},
+                    "provider": assistant_provider_name,
+                    "model": assistant_model,
+                    "token_usage": {},
                 },
             )
 
+            assistant_message_id = message_append_id(sample_id, "assistant", turn_index)
             inference_payload: dict[str, Any] = {
                 "status": "success" if success else "failed",
-                "model": action["model"],
-                "provider": action["provider"],
-                "attempt_no": action["global_attempt_no"],
-                "token_usage": usage or {},
+                "model": assistant_model,
+                "provider": assistant_provider_name,
+                "attempt_no": phase_attempt,
+                "token_usage": {},
                 "started_at": now_iso(),
                 "completed_at": now_iso(),
                 "error": error,
@@ -385,139 +247,223 @@ def _run_assistant_phase(
             if success:
                 inference_payload.update(
                     {
-                        "assistant_message_id": message_append_id(
-                            action["sample_id"],
-                            "assistant",
-                            action["turn_index"],
-                        ),
-                        "assistant_completion": response,
-                        "assistant_full": response,
+                        "assistant_message_id": assistant_message_id,
+                        "assistant_completion": response_text,
+                        "assistant_full": response_text,
                         "assistant_message_metadata": {
-                            "turn_index": action["turn_index"],
+                            "turn_index": turn_index,
                             "source_stage": "rollout_assistant",
-                            "provider": action["provider"],
-                            "model": action["model"],
-                            "token_usage": usage or {},
-                            "parent_message_id": action["parent_message_id"],
-                            "phase_attempt_no": action["phase_attempt_no"],
+                            "provider": assistant_provider_name,
+                            "model": assistant_model,
+                            "token_usage": {},
+                            "parent_message_id": parent_message_id,
+                            "phase_attempt_no": phase_attempt,
                         },
                     }
                 )
-            write_inference_result(
-                run_dir,
-                action["sample_id"],
-                inference_payload,
-                materialize=False,
+            write_inference_result(run_dir, sample_id, inference_payload, materialize=False)
+
+            if success:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response_text,
+                        "message_id": assistant_message_id,
+                    }
+                )
+                assistant_success = True
+                break
+
+            logger.warning(
+                "Assistant turn failed (sample=%s turn=%d attempt=%d): %s",
+                sample_id, turn_index, phase_attempt, error,
             )
 
-            max_attempts = failure_policy.assistant_max_attempts_per_turn
-            if not success and max_attempts > 0 and action["phase_attempt_no"] >= max_attempts:
-                terminal_samples.add(action["sample_id"])
-                _record_terminal_failure(
-                    run_dir,
-                    sample_id=action["sample_id"],
-                    phase="assistant",
-                    turn_index=action["turn_index"],
-                    attempt_no=action["phase_attempt_no"],
-                    reason=error or "assistant_generation_failed",
-                )
+        if not assistant_success:
+            terminal_samples.add(sample_id)
+            _record_terminal_failure(
+                run_dir,
+                sample_id=sample_id,
+                phase="assistant",
+                turn_index=turn_index,
+                attempt_no=base_attempt + assistant_max,
+                reason="assistant_max_attempts_exceeded",
+            )
+            return
 
-    return attempted
+        # Stop after the final assistant turn (no user turn needed).
+        if turn_index + 1 >= config.num_assistant_turns:
+            break
 
-
-def _run_user_phase(
-    logger: logging.Logger,
-    run_dir: Path,
-    actions: list[dict[str, Any]],
-    user_provider: InferenceProvider,
-    user_config: InferenceConfig,
-    attempts_by_phase: dict[PhaseKey, int],
-    terminal_samples: set[str],
-    failure_policy,
-    total_turns: int,
-) -> int:
-    if not actions:
-        return 0
-
-    logger.info(
-        "user_simulator | %d actions | turn %s",
-        len(actions),
-        format_turn_label([action["display_turn_index"] for action in actions], total_turns),
-    )
-
-    # Pass all prompts in a single call — the provider's internal semaphore
-    # (max_concurrent) throttles concurrency, so chunking here only adds stalls.
-    prompts = [action["prompt"] for action in actions]
-    outputs = _generate_with_fallback(logger, user_provider, prompts)
-    if len(outputs) != len(actions):
-        raise RuntimeError("User phase output count did not match input action count.")
-
-    attempted = 0
-    for action, (user_text, usage, error_text) in zip(actions, outputs):
-        attempted += 1
-        key = _phase_key(action["sample_id"], "user", action["turn_index"])
-        attempts_by_phase[key] = max(attempts_by_phase.get(key, 0), action["phase_attempt_no"])
-
-        response = user_text if isinstance(user_text, str) else ""
-        success = bool(response.strip()) and error_text is None
-        error = None if success else (error_text or "empty_response")
-
-        _record_rollout_event(
-            run_dir,
-            event_type="user_attempt",
-            sample_id=action["sample_id"],
-            payload={
-                "phase": "user",
-                "turn_index": action["turn_index"],
-                "attempt_no": action["phase_attempt_no"],
-                "status": "success" if success else "failed",
-                "error": error,
-                "provider": action["provider"],
-                "model": action["model"],
-                "token_usage": usage or {},
-            },
+        # ── User simulator turn ───────────────────────────────────────────────
+        user_max = config.failure_policy.user_max_attempts_per_turn
+        user_key = _phase_key(sample_id, "user", turn_index)
+        user_base_attempt = attempts_by_phase.get(user_key, 0)
+        parent_user_message_id = messages[-1].get("message_id")
+        user_prompt = _build_user_prompt_from_messages(
+            [{"role": m["role"], "content": m["content"]} for m in messages],
+            prompt_template=config.user_simulator.prompt_template,
+            prompt_format=config.user_simulator.prompt_format,
         )
 
-        if success:
-            write_message_append(
-                run_dir,
-                action["sample_id"],
-                {
-                    "message_id": message_append_id(
-                        action["sample_id"],
-                        "user",
-                        action["turn_index"],
-                    ),
-                    "role": "user",
-                    "content": response,
-                    "editable": True,
-                    "message_metadata": {
-                        "turn_index": action["turn_index"],
-                        "source_stage": "rollout_user_simulator",
-                        "provider": action["provider"],
-                        "model": action["model"],
-                        "token_usage": usage or {},
-                        "parent_message_id": action["parent_message_id"],
-                        "phase_attempt_no": action["phase_attempt_no"],
-                    },
-                },
-                materialize=False,
-            )
-        else:
-            max_attempts = failure_policy.user_max_attempts_per_turn
-            if max_attempts > 0 and action["phase_attempt_no"] >= max_attempts:
-                terminal_samples.add(action["sample_id"])
-                _record_terminal_failure(
-                    run_dir,
-                    sample_id=action["sample_id"],
-                    phase="user",
-                    turn_index=action["turn_index"],
-                    attempt_no=action["phase_attempt_no"],
-                    reason=error or "user_generation_failed",
+        user_success = False
+        for user_attempt in range(user_base_attempt + 1, user_base_attempt + user_max + 1):
+            user_response = ""
+            user_usage: TokenUsage | None = None
+            user_error: str | None = None
+            try:
+                responses, usages, _ = await user_provider.generate_batch_with_details_async(
+                    [user_prompt], num_responses=1
                 )
+                user_response = responses[0] if responses else ""
+                user_usage = usages[0] if usages else None
+            except Exception as exc:  # noqa: BLE001
+                user_error = str(exc)
 
-    return attempted
+            u_success = bool(user_response.strip()) and user_error is None
+            u_error = None if u_success else (user_error or "empty_response")
 
+            attempts_by_phase[user_key] = user_attempt
+            _record_rollout_event(
+                run_dir,
+                event_type="user_attempt",
+                sample_id=sample_id,
+                payload={
+                    "phase": "user",
+                    "turn_index": turn_index,
+                    "attempt_no": user_attempt,
+                    "status": "success" if u_success else "failed",
+                    "error": u_error,
+                    "provider": user_config.provider,
+                    "model": user_config.model,
+                    "token_usage": user_usage or {},
+                },
+            )
+
+            if u_success:
+                user_message_id = message_append_id(sample_id, "user", turn_index)
+                write_message_append(
+                    run_dir,
+                    sample_id,
+                    {
+                        "message_id": user_message_id,
+                        "role": "user",
+                        "content": user_response,
+                        "editable": True,
+                        "message_metadata": {
+                            "turn_index": turn_index,
+                            "source_stage": "rollout_user_simulator",
+                            "provider": user_config.provider,
+                            "model": user_config.model,
+                            "token_usage": user_usage or {},
+                            "parent_message_id": parent_user_message_id,
+                            "phase_attempt_no": user_attempt,
+                        },
+                    },
+                    materialize=False,
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": user_response,
+                        "message_id": user_message_id,
+                    }
+                )
+                user_success = True
+                break
+
+            logger.warning(
+                "User turn failed (sample=%s turn=%d attempt=%d): %s",
+                sample_id, turn_index, user_attempt, u_error,
+            )
+
+        if not user_success:
+            terminal_samples.add(sample_id)
+            _record_terminal_failure(
+                run_dir,
+                sample_id=sample_id,
+                phase="user",
+                turn_index=turn_index,
+                attempt_no=user_base_attempt + user_max,
+                reason="user_max_attempts_exceeded",
+            )
+            return
+
+
+# ── Async pipeline scheduler ───────────────────────────────────────────────────
+
+async def _run_rollout_pipeline_async(
+    config: RolloutGenerationConfig,
+    samples: list,
+    assistant_config: InferenceConfig,
+    assistant_provider: InferenceProvider,
+    user_provider: InferenceProvider,
+    user_config: InferenceConfig,
+    run_dir: Path,
+    attempts_by_phase: dict[PhaseKey, int],
+    terminal_samples: set[str],
+) -> None:
+    """Pipelined async scheduler: GPU batches and user API calls overlap.
+
+    Each conversation runs as an independent coroutine. Assistant turns are
+    batched through GpuBatchExecutor (runs in a thread via asyncio.to_thread),
+    releasing the event loop to service concurrent user API calls while the
+    GPU is busy. This eliminates the 40-pass waterfall of the old sequential
+    phase loop.
+    """
+    logger = logging.getLogger(__name__)
+
+    batch_size = max(1, assistant_config.generation.batch_size)
+    executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
+    executor_task = asyncio.create_task(executor.run())
+
+    pending = [
+        sample
+        for sample in samples
+        if sample.sample_id not in terminal_samples
+        and _assistant_turn_count_sample(sample) < config.num_assistant_turns
+    ]
+
+    logger.info(
+        "Async pipeline: %d conversations to run (%d already terminal or complete)",
+        len(pending),
+        len(samples) - len(pending),
+    )
+
+    conversation_tasks = [
+        _run_conversation_async(
+            sample_id=sample.sample_id,
+            messages=[
+                {
+                    "role": m.role,
+                    "content": m.content,
+                    "message_id": getattr(m, "message_id", None),
+                }
+                for m in sample.messages
+            ],
+            config=config,
+            gpu_executor=executor,
+            user_provider=user_provider,
+            user_config=user_config,
+            run_dir=run_dir,
+            attempts_by_phase=attempts_by_phase,
+            terminal_samples=terminal_samples,
+            assistant_model=assistant_config.model,
+            assistant_provider_name=assistant_config.provider,
+        )
+        for sample in pending
+    ]
+
+    try:
+        await asyncio.gather(*conversation_tasks)
+    finally:
+        executor.stop()
+        await executor_task
+
+    logger.info("Async pipeline complete.")
+
+
+# ── Public entry point ─────────────────────────────────────────────────────────
 
 def run_rollout_generation(
     config: RolloutGenerationConfig,
@@ -586,109 +532,24 @@ def run_rollout_generation(
     else:
         attempts_by_phase, terminal_samples = {}, set()
 
-    loop_index = 0
-    while True:
-        loop_index += 1
-        materialize_canonical_samples(run_dir)
-        samples = load_samples(run_dir)
+    materialize_canonical_samples(run_dir)
+    samples = load_samples(run_dir)
 
-        assistant_actions: list[dict[str, Any]] = []
-        user_actions: list[dict[str, Any]] = []
-
-        for sample in samples:
-            if sample.sample_id in terminal_samples:
-                continue
-
-            completed_turns = _assistant_turn_count(sample)
-            if completed_turns >= config.num_assistant_turns:
-                continue
-
-            latest_message = sample.messages[-1] if sample.messages else None
-            if latest_message is None:
-                terminal_samples.add(sample.sample_id)
-                _record_invalid_state(run_dir, sample.sample_id, "empty_messages")
-                _record_terminal_failure(
-                    run_dir,
-                    sample_id=sample.sample_id,
-                    phase="system",
-                    turn_index=completed_turns,
-                    attempt_no=0,
-                    reason="empty_messages",
-                )
-                continue
-
-            if latest_message.role == "user":
-                action = _build_assistant_action(
-                    sample,
-                    config=config,
-                    assistant_config=assistant_config,
-                    attempts_by_phase=attempts_by_phase,
-                    terminal_samples=terminal_samples,
-                    run_dir=run_dir,
-                )
-                if action is not None:
-                    assistant_actions.append(action)
-                continue
-
-            if latest_message.role == "assistant":
-                action = _build_user_action(
-                    sample,
-                    config=config,
-                    user_config=user_config,
-                    attempts_by_phase=attempts_by_phase,
-                    terminal_samples=terminal_samples,
-                    run_dir=run_dir,
-                )
-                if action is not None:
-                    user_actions.append(action)
-                continue
-
-            terminal_samples.add(sample.sample_id)
-            _record_invalid_state(run_dir, sample.sample_id, f"unsupported_terminal_role:{latest_message.role}")
-            _record_terminal_failure(
-                run_dir,
-                sample_id=sample.sample_id,
-                phase="system",
-                turn_index=completed_turns,
-                attempt_no=0,
-                reason=f"unsupported_terminal_role:{latest_message.role}",
-            )
-
-        logger.info(
-            "Pass %d | pending assistant=%d user=%d terminal=%d",
-            loop_index,
-            len(assistant_actions),
-            len(user_actions),
-            len(terminal_samples),
+    asyncio.run(
+        _run_rollout_pipeline_async(
+            config=config,
+            samples=samples,
+            assistant_config=assistant_config,
+            assistant_provider=assistant_provider,
+            user_provider=user_provider,
+            user_config=user_config,
+            run_dir=run_dir,
+            attempts_by_phase=attempts_by_phase,
+            terminal_samples=terminal_samples,
         )
+    )
 
-        attempted = 0
-        attempted += _run_assistant_phase(
-            logger,
-            run_dir,
-            assistant_actions,
-            assistant_provider,
-            assistant_config,
-            attempts_by_phase,
-            terminal_samples,
-            config.failure_policy,
-            config.num_assistant_turns,
-        )
-        attempted += _run_user_phase(
-            logger,
-            run_dir,
-            user_actions,
-            user_provider,
-            user_config,
-            attempts_by_phase,
-            terminal_samples,
-            config.failure_policy,
-            config.num_assistant_turns,
-        )
-
-        materialize_canonical_samples(run_dir)
-        if attempted == 0:
-            break
+    materialize_canonical_samples(run_dir)
 
     export_path = export_dataset(
         run_dir,
@@ -703,12 +564,12 @@ def run_rollout_generation(
 
     final_samples = load_samples(run_dir)
     completed = sum(
-        1 for sample in final_samples if _assistant_turn_count(sample) >= config.num_assistant_turns
+        1
+        for s in final_samples
+        if _assistant_turn_count_sample(s) >= config.num_assistant_turns
     )
-    completed_turns = sum(_assistant_turn_count(sample) for sample in final_samples)
-    failed = sum(
-        1 for sample in final_samples if _assistant_turn_count(sample) < config.num_assistant_turns
-    )
+    completed_turns = sum(_assistant_turn_count_sample(s) for s in final_samples)
+    failed = len(final_samples) - completed
 
     result_dataset = load_dataset_from_config(
         config.dataset.model_copy(
