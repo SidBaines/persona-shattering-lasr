@@ -24,6 +24,7 @@ class UserSimulatorConfig(BaseModel):
     provider: str = "openai"
     model: str = "gpt-5-nano-2025-08-07"
     prompt_template: str = "typical_user"
+    prompt_format: Literal["chat_messages", "single_turn_text"] = "single_turn_text"
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     max_concurrent: int = 16
     timeout: int = 60
