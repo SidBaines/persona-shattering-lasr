@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """Analyze and visualize personality evaluation results from a sweep run.
 
-Produces plots from a single run directory, one per eval type found:
+Produces plots from a single run directory, one per eval type found in
+``_PLOT_REGISTRY``. Each eval maps to one of the built-in plot styles or a
+custom PlotFn. Evals not present in the registry are skipped with a warning.
 
-  trait_sweep.png  — primary research plot (requires eval named "trait")
+Built-in plot styles:
+
+  "trait"      — trait_sweep.png
     • Big Five from TRAIT benchmark (absolute 0–1, full color)
     • Dark Triad (Mach, Narc, Psychopathy) dimmed + dashed
     • 95% CI bands when n_runs > 1
 
-  bfi_sweep.png  — sanity check / cross-validation (requires eval named "bfi")
+  "bfi"        — bfi_sweep.png
     • Big Five from BFI benchmark (delta from baseline, y=0 = unmodified model)
     • y-axis zoomed to data range
     • 95% CI bands when n_runs > 1
 
-  mmlu_sweep.png  — capability coherence check (requires eval named "mmlu")
-    • MMLU accuracy vs. scale with baseline reference and allowed-drop band
+  "capability" — <eval_name>_sweep.png
+    • Accuracy vs. scale with baseline reference and allowed-drop band
+    • Suitable for any accuracy-like eval: mmlu, gsm8k, truthfulqa, arc, etc.
     • 95% CI bands when n_runs > 1
 
-  <name>_sweep.png  — generic line plot for any other eval found in the run dir
-    • All numeric metric columns plotted on a single 0–1 axis
+  "generic"    — <eval_name>_sweep.png
+    • All numeric metric columns on a single 0–1 axis
+    • Useful as a quick-look fallback; register explicitly to opt in
+
+To add a new eval, insert one line in ``_PLOT_REGISTRY``:
+    "my_eval": "capability"        # for accuracy-like metrics
+    "my_eval": "generic"           # for a quick look at any numeric columns
+    "my_eval": plot_my_sweep       # for a fully custom plot function
 
 Expected run directory layout (produced by the personality eval suite):
 
@@ -50,7 +61,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -543,18 +554,22 @@ def plot_bfi_sweep(
     return out
 
 
-def plot_mmlu_sweep(
+def plot_capability_sweep(
     df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
+    eval_name: str = "capability",
     allowed_drop: float = 0.05,
 ) -> Path:
-    """MMLU coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
+    """Capability coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
+
+    Suitable for any accuracy-like eval (mmlu, gsm8k, truthfulqa, arc, etc.).
 
     Args:
         df: DataFrame with columns: scale, run, accuracy.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        eval_name: Eval name used for the figure title and output filename.
         allowed_drop: Maximum acceptable accuracy drop from baseline (default 0.05 = 5 pp).
 
     Returns:
@@ -562,10 +577,10 @@ def plot_mmlu_sweep(
     """
     import matplotlib.pyplot as plt
 
-    mmlu_agg = _agg_sweep(df, ["accuracy"])
-    scales = mmlu_agg["scale"].values
-    means  = mmlu_agg["accuracy_mean"].values
-    cis    = mmlu_agg["accuracy_ci"].values
+    cap_agg = _agg_sweep(df, ["accuracy"])
+    scales = cap_agg["scale"].values
+    means  = cap_agg["accuracy_mean"].values
+    cis    = cap_agg["accuracy_ci"].values
 
     baseline_idx = int(np.argmin(np.abs(scales)))
     baseline_acc = float(means[baseline_idx])
@@ -580,12 +595,12 @@ def plot_mmlu_sweep(
 
     color = "#5C6BC0"
     ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
-            label="MMLU accuracy", zorder=4)
+            label="accuracy", zorder=4)
     _draw_ci_band(ax, scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
-    ax.set_ylabel("MMLU accuracy", fontsize=11)
+    ax.set_ylabel("Accuracy", fontsize=11)
     ax.set_xticks(scales)
 
     y_min = min(float(np.nanmin(means - cis)), baseline_acc - allowed_drop) - 0.02
@@ -594,7 +609,7 @@ def plot_mmlu_sweep(
 
     ax.grid(True, alpha=0.25)
 
-    title = "MMLU sweep: capability coherence vs. LoRA scale"
+    title = f"{eval_name} sweep: capability coherence vs. LoRA scale"
     if title_suffix:
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
@@ -603,7 +618,7 @@ def plot_mmlu_sweep(
               fontsize=9, ncol=3, framealpha=0.85)
 
     plt.tight_layout()
-    out = output_dir / "mmlu_sweep.png"
+    out = output_dir / f"{eval_name}_sweep.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
@@ -674,22 +689,29 @@ def plot_generic_sweep(
 # Plot dispatch
 # ---------------------------------------------------------------------------
 
-# Registry mapping eval name → plot function.
-# Specialised plotters take (df, output_dir, title_suffix).
-# Add new entries here to wire up custom plots for new evals without touching
-# any other code — everything else falls back to plot_generic_sweep.
 PlotFn = Callable[[pd.DataFrame, Path, str], Path]
 
-_PLOT_REGISTRY: dict[str, PlotFn] = {
-    "trait": plot_trait_sweep,
-    "bfi":   plot_bfi_sweep,
+# A plot style tag selects a built-in plotter; a PlotFn provides a fully custom one.
+PlotStyle = Literal["trait", "bfi", "capability", "generic"]
+
+# Registry mapping eval name → plot style or custom PlotFn.
+#
+# To add a new eval, insert one line here:
+#   "my_eval": "capability"   — for any accuracy-like metric
+#   "my_eval": "generic"      — for a quick look at arbitrary numeric columns
+#   "my_eval": plot_my_sweep  — for a fully custom plot function
+#
+# Evals absent from this registry will not be plotted; a warning is printed
+# instead so you know exactly what to do.
+_PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
+    # Behavioral evals
+    "trait":      plot_trait_sweep,
+    "bfi":        plot_bfi_sweep,
+    # Capability evals
+    "mmlu":       "capability",
+    "gsm8k":      "capability",
+    "truthfulqa": "capability",
 }
-
-
-def _make_mmlu_plot_fn(allowed_drop: float) -> PlotFn:
-    def _fn(df: pd.DataFrame, output_dir: Path, title_suffix: str) -> Path:
-        return plot_mmlu_sweep(df, output_dir, title_suffix, allowed_drop=allowed_drop)
-    return _fn
 
 
 def generate_plots(
@@ -700,21 +722,18 @@ def generate_plots(
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
-    Uses the plot registry for known evals; falls back to the generic sweep
-    plotter for anything else.
+    Uses the plot registry for known evals. Evals not present in the registry
+    are skipped with a warning explaining how to add them.
 
     Args:
         data: SweepData loaded from a run directory.
         output_dir: Directory to save all figures.
         title_suffix: Optional title suffix forwarded to every plot function.
-        allowed_drop: MMLU allowed accuracy drop (forwarded to plot_mmlu_sweep).
+        allowed_drop: Allowed accuracy drop forwarded to capability plotters.
 
     Returns:
         List of paths to saved figures.
     """
-    registry = dict(_PLOT_REGISTRY)
-    registry["mmlu"] = _make_mmlu_plot_fn(allowed_drop)
-
     output_dir.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
 
@@ -722,10 +741,33 @@ def generate_plots(
         df = data.get(eval_name)
         assert df is not None
 
-        if eval_name in registry:
-            path = registry[eval_name](df, output_dir, title_suffix)
-        else:
+        entry = _PLOT_REGISTRY.get(eval_name)
+
+        if entry is None:
+            print(
+                f"\nWARNING: eval '{eval_name}' has no registered plot style — skipping.\n"
+                f"  To add it, insert one line in _PLOT_REGISTRY in analyze_results.py:\n"
+                f'    "{eval_name}": "capability"   # for accuracy-like metrics\n'
+                f'    "{eval_name}": "generic"       # for a quick look at any numeric columns\n'
+                f'    "{eval_name}": plot_{eval_name}_sweep  # for a fully custom plot function\n',
+                file=sys.stderr,
+            )
+            continue
+
+        if callable(entry):
+            path = entry(df, output_dir, title_suffix)
+        elif entry == "capability":
+            path = plot_capability_sweep(df, output_dir, title_suffix,
+                                         eval_name=eval_name, allowed_drop=allowed_drop)
+        elif entry == "trait":
+            path = plot_trait_sweep(df, output_dir, title_suffix)
+        elif entry == "bfi":
+            path = plot_bfi_sweep(df, output_dir, title_suffix)
+        elif entry == "generic":
             path = plot_generic_sweep(df, eval_name, output_dir, title_suffix)
+        else:
+            raise ValueError(f"Unknown plot style {entry!r} for eval '{eval_name}'")
+
         saved.append(path)
 
     return saved
