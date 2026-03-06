@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """Analyze and visualize personality evaluation results from a sweep run.
 
-Produces plots from a single run directory, one per eval type found:
+Produces plots from a single run directory, one per eval type found in
+``_PLOT_REGISTRY``. Each eval maps to one of the built-in plot styles or a
+custom PlotFn. Evals not present in the registry are skipped with a warning.
 
-  trait_sweep.png  — primary research plot (requires eval named "trait")
+Built-in plot styles:
+
+  "trait"      — trait_sweep.png
     • Big Five from TRAIT benchmark (absolute 0–1, full color)
     • Dark Triad (Mach, Narc, Psychopathy) dimmed + dashed
     • 95% CI bands when n_runs > 1
 
-  bfi_sweep.png  — sanity check / cross-validation (requires eval named "bfi")
+  "bfi"        — bfi_sweep.png
     • Big Five from BFI benchmark (delta from baseline, y=0 = unmodified model)
     • y-axis zoomed to data range
     • 95% CI bands when n_runs > 1
 
-  mmlu_sweep.png  — capability coherence check (requires eval named "mmlu")
-    • MMLU accuracy vs. scale with baseline reference and allowed-drop band
+  "capability" — <eval_name>_sweep.png
+    • Accuracy vs. scale with baseline reference and allowed-drop band
+    • Suitable for any accuracy-like eval: mmlu, gsm8k, truthfulqa, arc, etc.
     • 95% CI bands when n_runs > 1
 
-  <name>_sweep.png  — generic line plot for any other eval found in the run dir
-    • All numeric metric columns plotted on a single 0–1 axis
+  "generic"    — <eval_name>_sweep.png
+    • All numeric metric columns on a single 0–1 axis
+    • Useful as a quick-look fallback; register explicitly to opt in
+
+To add a new eval, insert one line in ``_PLOT_REGISTRY``:
+    "my_eval": "capability"        # for accuracy-like metrics
+    "my_eval": "generic"           # for a quick look at any numeric columns
+    "my_eval": plot_my_sweep       # for a fully custom plot function
 
 Expected run directory layout (produced by the personality eval suite):
 
@@ -50,7 +61,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -62,6 +73,14 @@ import pandas as pd
 BIG_FIVE = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 DARK_TRIAD = ["Machiavellianism", "Narcissism", "Psychopathy"]
 ALL_TRAIT_COLS = BIG_FIVE + DARK_TRIAD
+
+_OCEAN_ALIASES: dict[str, str] = {
+    "O": "Openness",
+    "C": "Conscientiousness",
+    "E": "Extraversion",
+    "A": "Agreeableness",
+    "N": "Neuroticism",
+}
 
 BIG_FIVE_COLORS = {
     "Openness":          "#2196F3",
@@ -110,21 +129,33 @@ class SweepData:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _extract_scores(log_path: Path) -> dict[str, float] | None:
-    """Extract metric values from an inspect log JSON."""
+def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
+    """Extract metric values and parse rate from an inspect log JSON.
+
+    Returns:
+        Tuple of (scores dict, parse_rate 0–1), or None if the log failed.
+    """
     with open(log_path) as f:
         log = json.load(f)
     if log.get("status") != "success":
         return None
-    metrics = log["results"]["scores"][0]["metrics"]
-    return {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
+    score_entry = log["results"]["scores"][0]
+    scored   = score_entry.get("scored_samples", 0)
+    unscored = score_entry.get("unscored_samples", 0)
+    total = scored + unscored
+    parse_rate = scored / total if total > 0 else 1.0
+    metrics = score_entry["metrics"]
+    scores = {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
+    return scores, parse_rate
 
 
-def _extract_scores_reparsed(log_path: Path, eval_type: str) -> dict[str, float] | None:
+def _extract_scores_reparsed(log_path: Path, eval_type: str) -> tuple[dict[str, float], float] | None:
     """Like _extract_scores but recomputes trait scores using the fallback parser."""
     from scripts.evals.personality.log_answer_parser import rescore_log
     result = rescore_log(log_path, eval_type)
-    return result.scores if result.scores else None
+    if not result.scores:
+        return None
+    return result.scores, result.parse_rate
 
 
 def _load_from_info(
@@ -144,14 +175,15 @@ def _load_from_info(
         print(f"  skip {model}/{run}: no inspect_log_path", file=sys.stderr)
         return None
     if reparse:
-        scores = _extract_scores_reparsed(Path(log_path), eval_type)
+        result = _extract_scores_reparsed(Path(log_path), eval_type)
     else:
-        scores = _extract_scores(Path(log_path))
-    if scores is None:
+        result = _extract_scores(Path(log_path))
+    if result is None:
         print(f"  skip {model}/{run}: log not success", file=sys.stderr)
         return None
+    scores, parse_rate = result
     scale = info.get("scale")  # float | None; None = base model
-    return {"model": model, "run": run, "scale": scale, **scores}
+    return {"model": model, "run": run, "scale": scale, "_parse_rate": parse_rate, **scores}
 
 
 def _parse_scale(model_name: str) -> float | None:
@@ -281,6 +313,19 @@ def load_data_from_logs(
 # Stats helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_highlight(highlight: list[str] | None) -> set[str]:
+    """Resolve highlight list (full names or OCEAN letters) to a set of full trait names.
+
+    Returns the full Big Five set when highlight is None or empty (all lit by default).
+    """
+    if not highlight:
+        return set(BIG_FIVE)
+    resolved = set()
+    for h in highlight:
+        resolved.add(_OCEAN_ALIASES.get(h, h))
+    return resolved
+
+
 def _ci95(values: np.ndarray) -> float:
     n = len(values)
     if n <= 1:
@@ -314,7 +359,7 @@ def _agg_sweep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 def _metric_cols(df: pd.DataFrame) -> list[str]:
     """Return metric columns from a sweep DataFrame (everything except housekeeping cols)."""
-    return [c for c in df.columns if c not in ("model", "run", "scale")]
+    return [c for c in df.columns if c not in ("model", "run", "scale", "_parse_rate")]
 
 
 # ---------------------------------------------------------------------------
@@ -355,13 +400,17 @@ def _mock_sweep_data() -> SweepData:
                  "Agreeableness": 0.60, "Neuroticism": 0.45}
     bfi_slope = {"Openness": 0.08, "Conscientiousness": -0.03, "Extraversion": 0.05,
                  "Agreeableness": -0.12, "Neuroticism": 0.06}
+    def _mock_parse_rate(s: float) -> float:
+        """Simulate parse degradation at extreme scales (perfect in the middle)."""
+        return float(np.clip(1.0 - 0.08 * max(0.0, abs(s) - 1.0) + rng.normal(0, 0.02), 0, 1))
+
     bfi_records = []
     for s in base_scales:
         for run in ["run_1", "run_2", "run_3"]:
             scores = {t: float(np.clip(bfi_base[t] + bfi_slope[t] * s + rng.normal(0, 0.025), 0, 1))
                       for t in BIG_FIVE}
             bfi_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
-                                 "run": run, "scale": s, **scores})
+                                 "run": run, "scale": s, "_parse_rate": _mock_parse_rate(s), **scores})
 
     # TRAIT: Big Five + Dark Triad, 3 runs per scale
     trait_base  = {**bfi_base, "Machiavellianism": 0.40, "Narcissism": 0.45, "Psychopathy": 0.35}
@@ -372,7 +421,7 @@ def _mock_sweep_data() -> SweepData:
             scores = {t: float(np.clip(trait_base[t] + trait_slope[t] * s + rng.normal(0, 0.025), 0, 1))
                       for t in ALL_TRAIT_COLS}
             trait_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
-                                   "run": run, "scale": s, **scores})
+                                   "run": run, "scale": s, "_parse_rate": _mock_parse_rate(s), **scores})
 
     # MMLU: coarser grid, 3 runs
     mmlu_scales = [s for s in np.arange(-2.0, 2.25, 0.5) if round(s, 10) != 0.0]
@@ -381,7 +430,7 @@ def _mock_sweep_data() -> SweepData:
         for run in ["run_1", "run_2", "run_3"]:
             acc = float(np.clip(0.62 - 0.04 * abs(s) + rng.normal(0, 0.01), 0, 1))
             mmlu_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
-                                  "run": run, "scale": s, "accuracy": acc})
+                                  "run": run, "scale": s, "_parse_rate": _mock_parse_rate(s), "accuracy": acc})
 
     return SweepData(evals={
         "bfi":   _df(bfi_records),
@@ -399,19 +448,21 @@ def _setup_matplotlib() -> None:
     matplotlib.use("Agg")
 
 
-def _draw_ci_band(ax, scales, means, cis, color, alpha: float = 0.15) -> None:
-    """Fill CI band around a line if any CI > 0."""
-    if any(c > 0 for c in cis):
-        means_arr = np.array(means)
-        cis_arr = np.array(cis)
-        ax.fill_between(scales, means_arr - cis_arr, means_arr + cis_arr,
-                        color=color, alpha=alpha, linewidth=0)
+def _draw_error_bars(ax, scales, means, cis, color) -> None:
+    """Draw vertical error bars (mean ± CI) at each scale point. No-op if all CIs are zero."""
+    cis_arr = np.array(cis)
+    if not any(cis_arr > 0):
+        return
+    ax.errorbar(scales, means, yerr=cis_arr,
+                fmt="none", color=color, capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, zorder=5)
 
 
 def plot_trait_sweep(
     df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
+    highlight: list[str] | None = None,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -419,33 +470,40 @@ def plot_trait_sweep(
         df: DataFrame with columns: scale, run, Openness, ..., Psychopathy.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        highlight: Traits to render at full brightness. Accepts full names or OCEAN
+            single letters (O/C/E/A/N). Unlisted Big Five traits are dimmed.
+            Dark Triad is always dimmed regardless. Defaults to all Big Five.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
+    lit = _resolve_highlight(highlight)
     trait_agg = _agg_sweep(df, ALL_TRAIT_COLS)
     scales = trait_agg["scale"].values
 
     fig, ax = plt.subplots(figsize=(12, 5.5))
 
-    # --- Big Five: full color lines + CI bands ---
+    # --- Big Five: lit at full color, dimmed if not in highlight ---
     for trait in BIG_FIVE:
         color = BIG_FIVE_COLORS[trait]
         means = trait_agg[f"{trait}_mean"].values
         cis   = trait_agg[f"{trait}_ci"].values
-        ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6, label=trait, zorder=4)
-        _draw_ci_band(ax, scales, means, cis, color)
+        if trait in lit:
+            ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
+                    label=trait, zorder=4)
+            _draw_error_bars(ax, scales, means, cis, color)
+        else:
+            ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
+                    alpha=0.35, label=trait, zorder=3)
 
-    # --- Dark Triad: dimmed dashed lines + CI bands ---
+    # --- Dark Triad: always dimmed dashed, no error bars ---
     for trait in DARK_TRIAD:
         color = DARK_TRIAD_COLORS[trait]
         means = trait_agg[f"{trait}_mean"].values
-        cis   = trait_agg[f"{trait}_ci"].values
         ax.plot(scales, means, "--", color=color, linewidth=1.4, markersize=4,
-                alpha=0.45, label=trait, zorder=3)
-        _draw_ci_band(ax, scales, means, cis, color, alpha=0.07)
+                alpha=0.35, label=trait, zorder=3)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -459,8 +517,10 @@ def plot_trait_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, label="95% CI")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
-              fontsize=9, ncol=5, framealpha=0.85)
+              fontsize=9, ncol=6, framealpha=0.85)
 
     plt.tight_layout()
     out = output_dir / "trait_sweep.png"
@@ -474,6 +534,7 @@ def plot_bfi_sweep(
     df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
+    highlight: list[str] | None = None,
 ) -> Path:
     """Sanity-check plot: BFI Big Five centred at baseline (delta from scale=0).
 
@@ -481,12 +542,16 @@ def plot_bfi_sweep(
         df: DataFrame with columns: scale, run, Openness, ..., Neuroticism.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        highlight: Traits to render at full brightness. Accepts full names or OCEAN
+            single letters (O/C/E/A/N). Unlisted traits are dimmed.
+            Defaults to all Big Five.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
+    lit = _resolve_highlight(highlight)
     bfi_agg = _agg_sweep(df, BIG_FIVE)
 
     # Compute per-trait baseline (scale=0) mean for delta calculation.
@@ -505,9 +570,14 @@ def plot_bfi_sweep(
         baseline_val = float(baseline_row[f"{trait}_mean"].iloc[0])
         means = bfi_agg[f"{trait}_mean"].values - baseline_val
         cis   = bfi_agg[f"{trait}_ci"].values
-        ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
-                label=trait, zorder=4)
-        _draw_ci_band(ax, scales, means, cis, color)
+        if trait in lit:
+            ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
+                    label=trait, zorder=4)
+            _draw_error_bars(ax, scales, means, cis, color)
+        else:
+            ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
+                    alpha=0.35, label=trait, zorder=3)
+        # Use all traits for y-axis scaling regardless of highlight
         all_delta_means.extend(means[~np.isnan(means)].tolist())
         all_delta_cis.extend(cis.tolist())
 
@@ -532,8 +602,10 @@ def plot_bfi_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, label="95% CI")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
-              fontsize=9, ncol=6, framealpha=0.85)
+              fontsize=9, ncol=7, framealpha=0.85)
 
     plt.tight_layout()
     out = output_dir / "bfi_sweep.png"
@@ -543,18 +615,22 @@ def plot_bfi_sweep(
     return out
 
 
-def plot_mmlu_sweep(
+def plot_capability_sweep(
     df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
+    eval_name: str = "capability",
     allowed_drop: float = 0.05,
 ) -> Path:
-    """MMLU coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
+    """Capability coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
+
+    Suitable for any accuracy-like eval (mmlu, gsm8k, truthfulqa, arc, etc.).
 
     Args:
         df: DataFrame with columns: scale, run, accuracy.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        eval_name: Eval name used for the figure title and output filename.
         allowed_drop: Maximum acceptable accuracy drop from baseline (default 0.05 = 5 pp).
 
     Returns:
@@ -562,10 +638,10 @@ def plot_mmlu_sweep(
     """
     import matplotlib.pyplot as plt
 
-    mmlu_agg = _agg_sweep(df, ["accuracy"])
-    scales = mmlu_agg["scale"].values
-    means  = mmlu_agg["accuracy_mean"].values
-    cis    = mmlu_agg["accuracy_ci"].values
+    cap_agg = _agg_sweep(df, ["accuracy"])
+    scales = cap_agg["scale"].values
+    means  = cap_agg["accuracy_mean"].values
+    cis    = cap_agg["accuracy_ci"].values
 
     baseline_idx = int(np.argmin(np.abs(scales)))
     baseline_acc = float(means[baseline_idx])
@@ -580,12 +656,12 @@ def plot_mmlu_sweep(
 
     color = "#5C6BC0"
     ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
-            label="MMLU accuracy", zorder=4)
-    _draw_ci_band(ax, scales, means, cis, color)
+            label="accuracy", zorder=4)
+    _draw_error_bars(ax, scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
-    ax.set_ylabel("MMLU accuracy", fontsize=11)
+    ax.set_ylabel("Accuracy", fontsize=11)
     ax.set_xticks(scales)
 
     y_min = min(float(np.nanmin(means - cis)), baseline_acc - allowed_drop) - 0.02
@@ -594,16 +670,18 @@ def plot_mmlu_sweep(
 
     ax.grid(True, alpha=0.25)
 
-    title = "MMLU sweep: capability coherence vs. LoRA scale"
+    title = f"{eval_name} sweep: capability coherence vs. LoRA scale"
     if title_suffix:
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, label="95% CI")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15),
-              fontsize=9, ncol=3, framealpha=0.85)
+              fontsize=9, ncol=4, framealpha=0.85)
 
     plt.tight_layout()
-    out = output_dir / "mmlu_sweep.png"
+    out = output_dir / f"{eval_name}_sweep.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
@@ -644,7 +722,7 @@ def plot_generic_sweep(
         means = agg[f"{col}_mean"].values
         cis   = agg[f"{col}_ci"].values
         ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5, label=col, zorder=4)
-        _draw_ci_band(ax, scales, means, cis, color)
+        _draw_error_bars(ax, scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -670,26 +748,105 @@ def plot_generic_sweep(
     return out
 
 
+def plot_parse_rate(
+    df: pd.DataFrame,
+    eval_name: str,
+    output_dir: Path,
+    title_suffix: str = "",
+) -> Path | None:
+    """Parse rate companion plot: fraction of responses successfully scored vs. LoRA scale.
+
+    Only generates a figure when at least one scale point has parse rate < 1.0.
+    Returns None (and produces no file) when all points are 100%.
+
+    Args:
+        df: Sweep DataFrame with a ``_parse_rate`` column (0–1 per run).
+        eval_name: Used for the figure title and output filename.
+        output_dir: Directory to save the figure.
+        title_suffix: Optional suffix appended to the figure title.
+
+    Returns:
+        Path to the saved figure, or None if skipped.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
+    if "_parse_rate" not in df.columns:
+        return None
+
+    agg = _agg_sweep(df, ["_parse_rate"])
+    means = agg["_parse_rate_mean"].values
+    if (means >= 1.0 - 1e-9).all():
+        return None  # perfect parse rate everywhere — nothing to show
+
+    # Use min/max across runs instead of CI — more informative for a bounded count.
+    scales = agg["scale"].values
+    pr_min = np.array([df[df["scale"] == s]["_parse_rate"].min() for s in scales])
+    pr_max = np.array([df[df["scale"] == s]["_parse_rate"].max() for s in scales])
+    err_lo = np.clip(means - pr_min, 0, None)
+    err_hi = np.clip(pr_max - means, 0, None)
+
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+
+    color = "#78909C"
+    ax.axhline(1.0, color="#388E3C", linewidth=1.2, linestyle="--", alpha=0.7,
+               label="100% parsed", zorder=2)
+    ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5,
+            label="parse rate (mean)", zorder=4)
+    if (err_lo > 0).any() or (err_hi > 0).any():
+        ax.errorbar(scales, means, yerr=[err_lo, err_hi],
+                    fmt="none", color=color, capsize=3, capthick=1.0,
+                    elinewidth=1.0, alpha=0.7, zorder=5, label="min/max")
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
+
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylabel("Parse rate", fontsize=11)
+    ax.set_ylim(max(0.0, float(np.nanmin(pr_min)) - 0.05), 1.0)
+    ax.set_xticks(scales)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    ax.grid(True, alpha=0.25)
+
+    title = f"{eval_name} sweep: parse rate vs. LoRA scale"
+    if title_suffix:
+        title += f"  [{title_suffix}]"
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.legend(fontsize=9, framealpha=0.85)
+
+    plt.tight_layout()
+    out = output_dir / f"{eval_name}_parse_rate.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Plot dispatch
 # ---------------------------------------------------------------------------
 
-# Registry mapping eval name → plot function.
-# Specialised plotters take (df, output_dir, title_suffix).
-# Add new entries here to wire up custom plots for new evals without touching
-# any other code — everything else falls back to plot_generic_sweep.
 PlotFn = Callable[[pd.DataFrame, Path, str], Path]
 
-_PLOT_REGISTRY: dict[str, PlotFn] = {
-    "trait": plot_trait_sweep,
-    "bfi":   plot_bfi_sweep,
+# A plot style tag selects a built-in plotter; a PlotFn provides a fully custom one.
+PlotStyle = Literal["trait", "bfi", "capability", "generic"]
+
+# Registry mapping eval name → plot style or custom PlotFn.
+#
+# To add a new eval, insert one line here:
+#   "my_eval": "capability"   — for any accuracy-like metric
+#   "my_eval": "generic"      — for a quick look at arbitrary numeric columns
+#   "my_eval": plot_my_sweep  — for a fully custom plot function
+#
+# Evals absent from this registry will not be plotted; a warning is printed
+# instead so you know exactly what to do.
+_PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
+    # Behavioral evals
+    "trait":      "trait",
+    "bfi":        "bfi",
+    # Capability evals
+    "mmlu":       "capability",
+    "gsm8k":      "capability",
+    "truthfulqa": "capability",
 }
-
-
-def _make_mmlu_plot_fn(allowed_drop: float) -> PlotFn:
-    def _fn(df: pd.DataFrame, output_dir: Path, title_suffix: str) -> Path:
-        return plot_mmlu_sweep(df, output_dir, title_suffix, allowed_drop=allowed_drop)
-    return _fn
 
 
 def generate_plots(
@@ -697,24 +854,28 @@ def generate_plots(
     output_dir: Path,
     title_suffix: str = "",
     allowed_drop: float = 0.05,
+    highlight: list[str] | None = None,
+    show_parse_rate: bool = False,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
-    Uses the plot registry for known evals; falls back to the generic sweep
-    plotter for anything else.
+    Uses the plot registry for known evals. Evals not present in the registry
+    are skipped with a warning explaining how to add them.
 
     Args:
         data: SweepData loaded from a run directory.
         output_dir: Directory to save all figures.
         title_suffix: Optional title suffix forwarded to every plot function.
-        allowed_drop: MMLU allowed accuracy drop (forwarded to plot_mmlu_sweep).
+        allowed_drop: Allowed accuracy drop forwarded to capability plotters.
+        highlight: Traits to render at full brightness in trait/bfi plots.
+            Accepts full names or OCEAN single letters (O/C/E/A/N).
+            Defaults to all Big Five.
+        show_parse_rate: If True, generate a companion parse rate plot for each
+            eval when at least one scale point has parse rate < 100%.
 
     Returns:
         List of paths to saved figures.
     """
-    registry = dict(_PLOT_REGISTRY)
-    registry["mmlu"] = _make_mmlu_plot_fn(allowed_drop)
-
     output_dir.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
 
@@ -722,11 +883,39 @@ def generate_plots(
         df = data.get(eval_name)
         assert df is not None
 
-        if eval_name in registry:
-            path = registry[eval_name](df, output_dir, title_suffix)
-        else:
+        entry = _PLOT_REGISTRY.get(eval_name)
+
+        if entry is None:
+            print(
+                f"\nWARNING: eval '{eval_name}' has no registered plot style — skipping.\n"
+                f"  To add it, insert one line in _PLOT_REGISTRY in analyze_results.py:\n"
+                f'    "{eval_name}": "capability"   # for accuracy-like metrics\n'
+                f'    "{eval_name}": "generic"       # for a quick look at any numeric columns\n'
+                f'    "{eval_name}": plot_{eval_name}_sweep  # for a fully custom plot function\n',
+                file=sys.stderr,
+            )
+            continue
+
+        if entry == "capability":
+            path = plot_capability_sweep(df, output_dir, title_suffix,
+                                         eval_name=eval_name, allowed_drop=allowed_drop)
+        elif entry == "trait":
+            path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight)
+        elif entry == "bfi":
+            path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight)
+        elif entry == "generic":
             path = plot_generic_sweep(df, eval_name, output_dir, title_suffix)
+        elif callable(entry):
+            path = entry(df, output_dir, title_suffix)
+        else:
+            raise ValueError(f"Unknown plot style {entry!r} for eval '{eval_name}'")
+
         saved.append(path)
+
+        if show_parse_rate:
+            pr_path = plot_parse_rate(df, eval_name, output_dir, title_suffix)
+            if pr_path:
+                saved.append(pr_path)
 
     return saved
 
@@ -751,6 +940,13 @@ def main() -> None:
                         help="Use mock sweep data for offline testing")
     parser.add_argument("--allowed-drop", type=float, default=0.05,
                         help="Max acceptable MMLU accuracy drop from baseline (default 0.05)")
+    parser.add_argument("--highlight", metavar="TRAIT", action="append", default=None,
+                        help="Trait to render at full brightness in trait/bfi plots. "
+                             "Accepts full name or OCEAN letter (O/C/E/A/N). "
+                             "Repeat for multiple. Defaults to all Big Five.")
+    parser.add_argument("--show-parse-rate", action="store_true",
+                        help="Generate a companion parse rate plot for each eval "
+                             "(only produced when parse rate drops below 100%% at any scale).")
     args = parser.parse_args()
 
     if args.mock:
@@ -776,7 +972,8 @@ def main() -> None:
         _setup_matplotlib()
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
-                               allowed_drop=args.allowed_drop)
+                               allowed_drop=args.allowed_drop, highlight=args.highlight,
+                               show_parse_rate=args.show_parse_rate)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:
