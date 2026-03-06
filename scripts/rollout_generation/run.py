@@ -436,89 +436,85 @@ def _run_user_phase(
     failure_policy,
     total_turns: int,
 ) -> int:
-    attempted = 0
-    batch_size = max(1, user_config.generation.batch_size)
-    batches = chunked(actions, batch_size)
-    total_actions = len(actions)
+    if not actions:
+        return 0
 
-    for batch_index, batch in enumerate(batches, start=1):
-        log_phase_batch_progress(
-            logger,
-            stage_name="user_simulator",
-            batch_index=batch_index,
-            num_batches=len(batches),
-            items_processed=min(batch_index * batch_size, total_actions),
-            items_total=total_actions,
-            turn_label=format_turn_label([action["display_turn_index"] for action in batch], total_turns),
+    logger.info(
+        "user_simulator | %d actions | turn %s",
+        len(actions),
+        format_turn_label([action["display_turn_index"] for action in actions], total_turns),
+    )
+
+    # Pass all prompts in a single call — the provider's internal semaphore
+    # (max_concurrent) throttles concurrency, so chunking here only adds stalls.
+    prompts = [action["prompt"] for action in actions]
+    outputs = _generate_with_fallback(logger, user_provider, prompts)
+    if len(outputs) != len(actions):
+        raise RuntimeError("User phase output count did not match input action count.")
+
+    attempted = 0
+    for action, (user_text, usage, error_text) in zip(actions, outputs):
+        attempted += 1
+        key = _phase_key(action["sample_id"], "user", action["turn_index"])
+        attempts_by_phase[key] = max(attempts_by_phase.get(key, 0), action["phase_attempt_no"])
+
+        response = user_text if isinstance(user_text, str) else ""
+        success = bool(response.strip()) and error_text is None
+        error = None if success else (error_text or "empty_response")
+
+        _record_rollout_event(
+            run_dir,
+            event_type="user_attempt",
+            sample_id=action["sample_id"],
+            payload={
+                "phase": "user",
+                "turn_index": action["turn_index"],
+                "attempt_no": action["phase_attempt_no"],
+                "status": "success" if success else "failed",
+                "error": error,
+                "provider": action["provider"],
+                "model": action["model"],
+                "token_usage": usage or {},
+            },
         )
 
-        prompt_batch = [action["prompt"] for action in batch]
-        outputs = _generate_with_fallback(logger, user_provider, prompt_batch)
-        if len(outputs) != len(batch):
-            raise RuntimeError("User phase output count did not match input action count.")
-
-        for action, (user_text, usage, error_text) in zip(batch, outputs):
-            attempted += 1
-            key = _phase_key(action["sample_id"], "user", action["turn_index"])
-            attempts_by_phase[key] = max(attempts_by_phase.get(key, 0), action["phase_attempt_no"])
-
-            response = user_text if isinstance(user_text, str) else ""
-            success = bool(response.strip()) and error_text is None
-            error = None if success else (error_text or "empty_response")
-
-            _record_rollout_event(
+        if success:
+            write_message_append(
                 run_dir,
-                event_type="user_attempt",
-                sample_id=action["sample_id"],
-                payload={
-                    "phase": "user",
-                    "turn_index": action["turn_index"],
-                    "attempt_no": action["phase_attempt_no"],
-                    "status": "success" if success else "failed",
-                    "error": error,
-                    "provider": action["provider"],
-                    "model": action["model"],
-                    "token_usage": usage or {},
-                },
-            )
-
-            if success:
-                write_message_append(
-                    run_dir,
-                    action["sample_id"],
-                    {
-                        "message_id": message_append_id(
-                            action["sample_id"],
-                            "user",
-                            action["turn_index"],
-                        ),
-                        "role": "user",
-                        "content": response,
-                        "editable": True,
-                        "message_metadata": {
-                            "turn_index": action["turn_index"],
-                            "source_stage": "rollout_user_simulator",
-                            "provider": action["provider"],
-                            "model": action["model"],
-                            "token_usage": usage or {},
-                            "parent_message_id": action["parent_message_id"],
-                            "phase_attempt_no": action["phase_attempt_no"],
-                        },
+                action["sample_id"],
+                {
+                    "message_id": message_append_id(
+                        action["sample_id"],
+                        "user",
+                        action["turn_index"],
+                    ),
+                    "role": "user",
+                    "content": response,
+                    "editable": True,
+                    "message_metadata": {
+                        "turn_index": action["turn_index"],
+                        "source_stage": "rollout_user_simulator",
+                        "provider": action["provider"],
+                        "model": action["model"],
+                        "token_usage": usage or {},
+                        "parent_message_id": action["parent_message_id"],
+                        "phase_attempt_no": action["phase_attempt_no"],
                     },
-                    materialize=False,
+                },
+                materialize=False,
+            )
+        else:
+            max_attempts = failure_policy.user_max_attempts_per_turn
+            if max_attempts > 0 and action["phase_attempt_no"] >= max_attempts:
+                terminal_samples.add(action["sample_id"])
+                _record_terminal_failure(
+                    run_dir,
+                    sample_id=action["sample_id"],
+                    phase="user",
+                    turn_index=action["turn_index"],
+                    attempt_no=action["phase_attempt_no"],
+                    reason=error or "user_generation_failed",
                 )
-            else:
-                max_attempts = failure_policy.user_max_attempts_per_turn
-                if max_attempts > 0 and action["phase_attempt_no"] >= max_attempts:
-                    terminal_samples.add(action["sample_id"])
-                    _record_terminal_failure(
-                        run_dir,
-                        sample_id=action["sample_id"],
-                        phase="user",
-                        turn_index=action["turn_index"],
-                        attempt_no=action["phase_attempt_no"],
-                        reason=error or "user_generation_failed",
-                    )
 
     return attempted
 
