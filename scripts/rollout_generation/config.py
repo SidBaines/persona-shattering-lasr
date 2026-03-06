@@ -67,6 +67,7 @@ class RolloutGenerationConfig(BaseModel):
     failure_policy: FailurePolicyConfig = Field(default_factory=FailurePolicyConfig)
 
     resume: bool = True
+    reset_terminal_failures: bool = False
     overwrite_output: bool = False
 
 

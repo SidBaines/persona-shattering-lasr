@@ -114,8 +114,21 @@ def _record_invalid_state(run_dir: Path, sample_id: str, reason: str) -> None:
     )
 
 
-def _load_rollout_resume_state(run_dir: Path) -> tuple[dict[PhaseKey, int], set[str]]:
-    """Load attempt counters and terminal sample IDs from stage events."""
+def _load_rollout_resume_state(
+    run_dir: Path,
+    *,
+    reset_terminal_failures: bool = False,
+) -> tuple[dict[PhaseKey, int], set[str]]:
+    """Load attempt counters and terminal sample IDs from stage events.
+
+    Args:
+        run_dir: Path to the run directory.
+        reset_terminal_failures: If True, ignore recorded terminal failures so
+            that conversations which previously exhausted their retry budget
+            (e.g. due to transient GPU OOM) are retried from their last
+            completed turn.  Prior turn content is preserved; only the
+            blocked status is cleared.
+    """
     stage_events_path = get_run_paths(run_dir)["stage_events"]
     rows, _ = read_jsonl_tolerant(stage_events_path)
 
@@ -142,7 +155,7 @@ def _load_rollout_resume_state(run_dir: Path) -> tuple[dict[PhaseKey, int], set[
                 continue
             key = _phase_key(sample_id, phase, turn_index)
             attempts[key] = max(attempts.get(key, 0), attempt_no)
-        elif event_type == "terminal_failure":
+        elif event_type == "terminal_failure" and not reset_terminal_failures:
             terminal_samples.add(sample_id)
 
     return attempts, terminal_samples
@@ -551,8 +564,13 @@ def run_rollout_generation(
             "context_policy.mode='token_budget' is not implemented yet. Use mode='full_history'."
         )
 
+    # _FINGERPRINT_EXCLUDED = {"resume", "reset_terminal_failures", "overwrite_output"}
+    _FINGERPRINT_EXCLUDED = {"reset_terminal_failures"}
+    config_for_fingerprint = {
+        k: v for k, v in config.model_dump(mode="json").items() if k not in _FINGERPRINT_EXCLUDED
+    }
     init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
-    register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
+    register_stage_fingerprint(run_dir, "rollout_generation", config_for_fingerprint)
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
@@ -597,7 +615,9 @@ def run_rollout_generation(
     user_provider = get_provider(user_config.provider, user_config)
 
     if config.resume:
-        attempts_by_phase, terminal_samples = _load_rollout_resume_state(run_dir)
+        attempts_by_phase, terminal_samples = _load_rollout_resume_state(
+            run_dir, reset_terminal_failures=config.reset_terminal_failures
+        )
     else:
         attempts_by_phase, terminal_samples = {}, set()
 

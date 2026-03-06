@@ -280,6 +280,7 @@ async def _run_inference_canonical_async(
                 prompts.append(_canonical_provider_input_for_sample(sample, config))
                 batch_samples.append(sample)
 
+            logger.info("Inference progress: %d/%d samples", start, len(pending_ids))
             responses, usages, batch_failed = await provider.generate_batch_with_details_async(
                 prompts, num_responses=1
             )

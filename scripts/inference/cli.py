@@ -18,6 +18,9 @@ from scripts.inference.config import (
 )
 from scripts.inference.run import run_inference
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

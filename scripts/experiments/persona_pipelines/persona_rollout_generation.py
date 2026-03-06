@@ -72,6 +72,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--transcript-variant", type=str, default="rollout_base")
     parser.add_argument("--context-policy", choices=["full_history", "token_budget"], default="full_history")
     parser.add_argument("--no-resume", action="store_true")
+    parser.add_argument(
+        "--reset-terminal-failures",
+        action="store_true",
+        help="On resume, retry conversations that previously exhausted their retry budget "
+             "(e.g. due to transient GPU OOM). Completed turns are preserved.",
+    )
     parser.add_argument("--overwrite-output", action="store_true")
 
     return parser.parse_args()
@@ -132,6 +138,7 @@ def main() -> None:
             user_max_attempts_per_turn=args.user_max_attempts_per_turn,
         ),
         resume=not args.no_resume,
+        reset_terminal_failures=args.reset_terminal_failures,
         overwrite_output=args.overwrite_output,
     )
 
