@@ -23,7 +23,7 @@ from scripts.training import (
     TrainingEvaluationConfig,
     run_training,
 )
-from scripts.utils import login_from_env, upload_folder_to_model_repo
+from scripts.utils import assert_clean_and_pushed, login_from_env, upload_folder_to_model_repo
 
 
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
@@ -141,6 +141,8 @@ def main() -> None:
     args = _parse_args()
     load_dotenv()
 
+    commit_sha = assert_clean_and_pushed()
+
     dataset_path = Path(args.dataset_path)
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
@@ -191,6 +193,7 @@ def main() -> None:
             project=args.wandb_project,
             name=run_id,
             tags=["training-generic"],
+            extra_config={"commit_sha": commit_sha},
         ),
         evaluation=TrainingEvaluationConfig(
             evaluations=list(args.evaluations),
@@ -227,7 +230,7 @@ def main() -> None:
             local_dir=Path(training_result.checkpoint_path),
             repo_id=model_repo_id,
             path_in_repo=model_path_in_repo,
-            commit_message=f"Add LoRA adapter for run {run_id}",
+            commit_message=f"Add LoRA adapter for run {run_id} (commit {commit_sha[:12]})",
         )
         print(f"Uploaded adapter to: {model_url}")
         print(f"Path in repo: {model_path_in_repo}")

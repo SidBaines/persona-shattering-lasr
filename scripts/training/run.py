@@ -672,6 +672,7 @@ def run_training(
                 "learning_rate": config.sft.learning_rate,
                 "epochs": config.sft.num_train_epochs,
                 "batch_size": config.sft.per_device_train_batch_size,
+                **config.wandb.extra_config,
             },
         )
         run_id = wandb.run.id if wandb.run is not None else None
