@@ -43,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--assistant-model", type=str, default=DEFAULT_ASSISTANT_MODEL)
     parser.add_argument("--assistant-temperature", type=float, default=1.0)
     parser.add_argument("--assistant-top-p", type=float, default=0.95)
-    parser.add_argument("--assistant-max-new-tokens", type=int, default=512)
+    parser.add_argument("--assistant-max-new-tokens", type=int, default=2048)
     parser.add_argument("--assistant-batch-size", type=int, default=8)
     parser.add_argument(
         "--assistant-truncate-inputs",
@@ -54,9 +54,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--user-provider", type=str, default="openai")
     parser.add_argument("--user-model", type=str, default=DEFAULT_USER_MODEL)
     parser.add_argument("--user-prompt-template", type=str, default="typical_user")
+    parser.add_argument(
+        "--user-prompt-format",
+        choices=["chat_messages", "single_turn_text"],
+        default="single_turn_text",
+    )
     parser.add_argument("--user-temperature", type=float, default=1.0)
     parser.add_argument("--user-top-p", type=float, default=0.95)
-    parser.add_argument("--user-max-new-tokens", type=int, default=512)
+    parser.add_argument("--user-max-new-tokens", type=int, default=20000)
     parser.add_argument("--user-batch-size", type=int, default=16)
     parser.add_argument("--user-max-concurrent", type=int, default=16)
 
@@ -107,6 +112,7 @@ def main() -> None:
             provider=args.user_provider,
             model=args.user_model,
             prompt_template=args.user_prompt_template,
+            prompt_format=args.user_prompt_format,
             generation=GenerationConfig(
                 max_new_tokens=args.user_max_new_tokens,
                 temperature=args.user_temperature,

@@ -38,7 +38,7 @@ from scripts.inference.providers.base import InferenceProvider, TokenUsage
 from scripts.utils import setup_logging
 
 from .config import RolloutGenerationConfig, RolloutGenerationResult, UserSimulatorConfig
-from .prompts import get_user_simulator_instruction
+from .prompts import get_user_simulator_instruction, render_user_simulator_single_turn_prompt
 
 
 PhaseKey = tuple[str, str, int]
@@ -159,9 +159,16 @@ def _build_user_simulator_inference_config(config: UserSimulatorConfig) -> Infer
     )
 
 
-def _build_user_simulator_messages(sample, prompt_template: str) -> list[dict[str, str]]:
-    instruction = get_user_simulator_instruction(prompt_template)
+def _build_user_simulator_prompt(
+    sample,
+    *,
+    prompt_template: str,
+    prompt_format: str,
+) -> str | list[dict[str, str]]:
     rendered = [{"role": message.role, "content": message.content} for message in sample.messages]
+    if prompt_format == "single_turn_text":
+        return render_user_simulator_single_turn_prompt(prompt_template, rendered)
+    instruction = get_user_simulator_instruction(prompt_template)
     return [{"role": "system", "content": instruction}, *rendered]
 
 
@@ -245,7 +252,11 @@ def _build_user_action(
 
     return {
         "sample_id": sample.sample_id,
-        "prompt": _build_user_simulator_messages(sample, config.user_simulator.prompt_template),
+        "prompt": _build_user_simulator_prompt(
+            sample,
+            prompt_template=config.user_simulator.prompt_template,
+            prompt_format=config.user_simulator.prompt_format,
+        ),
         "turn_index": turn_index,
         "display_turn_index": max(turn_index - 1, 0),
         "parent_message_id": latest_message.message_id,
