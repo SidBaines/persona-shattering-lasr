@@ -74,6 +74,14 @@ BIG_FIVE = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "N
 DARK_TRIAD = ["Machiavellianism", "Narcissism", "Psychopathy"]
 ALL_TRAIT_COLS = BIG_FIVE + DARK_TRIAD
 
+_OCEAN_ALIASES: dict[str, str] = {
+    "O": "Openness",
+    "C": "Conscientiousness",
+    "E": "Extraversion",
+    "A": "Agreeableness",
+    "N": "Neuroticism",
+}
+
 BIG_FIVE_COLORS = {
     "Openness":          "#2196F3",
     "Conscientiousness": "#FF9800",
@@ -292,6 +300,19 @@ def load_data_from_logs(
 # Stats helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_highlight(highlight: list[str] | None) -> set[str]:
+    """Resolve highlight list (full names or OCEAN letters) to a set of full trait names.
+
+    Returns the full Big Five set when highlight is None or empty (all lit by default).
+    """
+    if not highlight:
+        return set(BIG_FIVE)
+    resolved = set()
+    for h in highlight:
+        resolved.add(_OCEAN_ALIASES.get(h, h))
+    return resolved
+
+
 def _ci95(values: np.ndarray) -> float:
     n = len(values)
     if n <= 1:
@@ -424,6 +445,7 @@ def plot_trait_sweep(
     df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
+    highlight: list[str] | None = None,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -431,33 +453,40 @@ def plot_trait_sweep(
         df: DataFrame with columns: scale, run, Openness, ..., Psychopathy.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        highlight: Traits to render at full brightness. Accepts full names or OCEAN
+            single letters (O/C/E/A/N). Unlisted Big Five traits are dimmed.
+            Dark Triad is always dimmed regardless. Defaults to all Big Five.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
+    lit = _resolve_highlight(highlight)
     trait_agg = _agg_sweep(df, ALL_TRAIT_COLS)
     scales = trait_agg["scale"].values
 
     fig, ax = plt.subplots(figsize=(12, 5.5))
 
-    # --- Big Five: full color lines + CI bands ---
+    # --- Big Five: lit at full color, dimmed if not in highlight ---
     for trait in BIG_FIVE:
         color = BIG_FIVE_COLORS[trait]
         means = trait_agg[f"{trait}_mean"].values
         cis   = trait_agg[f"{trait}_ci"].values
-        ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6, label=trait, zorder=4)
-        _draw_error_bars(ax, scales, means, cis, color)
+        if trait in lit:
+            ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
+                    label=trait, zorder=4)
+            _draw_error_bars(ax, scales, means, cis, color)
+        else:
+            ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
+                    alpha=0.35, label=trait, zorder=3)
 
-    # --- Dark Triad: dimmed dashed lines + CI bands ---
+    # --- Dark Triad: always dimmed dashed, no error bars ---
     for trait in DARK_TRIAD:
         color = DARK_TRIAD_COLORS[trait]
         means = trait_agg[f"{trait}_mean"].values
-        cis   = trait_agg[f"{trait}_ci"].values
         ax.plot(scales, means, "--", color=color, linewidth=1.4, markersize=4,
-                alpha=0.45, label=trait, zorder=3)
-        _draw_error_bars(ax, scales, means, cis, color)
+                alpha=0.35, label=trait, zorder=3)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -486,6 +515,7 @@ def plot_bfi_sweep(
     df: pd.DataFrame,
     output_dir: Path,
     title_suffix: str = "",
+    highlight: list[str] | None = None,
 ) -> Path:
     """Sanity-check plot: BFI Big Five centred at baseline (delta from scale=0).
 
@@ -493,12 +523,16 @@ def plot_bfi_sweep(
         df: DataFrame with columns: scale, run, Openness, ..., Neuroticism.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        highlight: Traits to render at full brightness. Accepts full names or OCEAN
+            single letters (O/C/E/A/N). Unlisted traits are dimmed.
+            Defaults to all Big Five.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
+    lit = _resolve_highlight(highlight)
     bfi_agg = _agg_sweep(df, BIG_FIVE)
 
     # Compute per-trait baseline (scale=0) mean for delta calculation.
@@ -517,9 +551,14 @@ def plot_bfi_sweep(
         baseline_val = float(baseline_row[f"{trait}_mean"].iloc[0])
         means = bfi_agg[f"{trait}_mean"].values - baseline_val
         cis   = bfi_agg[f"{trait}_ci"].values
-        ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
-                label=trait, zorder=4)
-        _draw_error_bars(ax, scales, means, cis, color)
+        if trait in lit:
+            ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
+                    label=trait, zorder=4)
+            _draw_error_bars(ax, scales, means, cis, color)
+        else:
+            ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
+                    alpha=0.35, label=trait, zorder=3)
+        # Use all traits for y-axis scaling regardless of highlight
         all_delta_means.extend(means[~np.isnan(means)].tolist())
         all_delta_cis.extend(cis.tolist())
 
@@ -706,8 +745,8 @@ PlotStyle = Literal["trait", "bfi", "capability", "generic"]
 # instead so you know exactly what to do.
 _PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
     # Behavioral evals
-    "trait":      plot_trait_sweep,
-    "bfi":        plot_bfi_sweep,
+    "trait":      "trait",
+    "bfi":        "bfi",
     # Capability evals
     "mmlu":       "capability",
     "gsm8k":      "capability",
@@ -720,6 +759,7 @@ def generate_plots(
     output_dir: Path,
     title_suffix: str = "",
     allowed_drop: float = 0.05,
+    highlight: list[str] | None = None,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -731,6 +771,9 @@ def generate_plots(
         output_dir: Directory to save all figures.
         title_suffix: Optional title suffix forwarded to every plot function.
         allowed_drop: Allowed accuracy drop forwarded to capability plotters.
+        highlight: Traits to render at full brightness in trait/bfi plots.
+            Accepts full names or OCEAN single letters (O/C/E/A/N).
+            Defaults to all Big Five.
 
     Returns:
         List of paths to saved figures.
@@ -755,17 +798,17 @@ def generate_plots(
             )
             continue
 
-        if callable(entry):
-            path = entry(df, output_dir, title_suffix)
-        elif entry == "capability":
+        if entry == "capability":
             path = plot_capability_sweep(df, output_dir, title_suffix,
                                          eval_name=eval_name, allowed_drop=allowed_drop)
         elif entry == "trait":
-            path = plot_trait_sweep(df, output_dir, title_suffix)
+            path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight)
         elif entry == "bfi":
-            path = plot_bfi_sweep(df, output_dir, title_suffix)
+            path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight)
         elif entry == "generic":
             path = plot_generic_sweep(df, eval_name, output_dir, title_suffix)
+        elif callable(entry):
+            path = entry(df, output_dir, title_suffix)
         else:
             raise ValueError(f"Unknown plot style {entry!r} for eval '{eval_name}'")
 
@@ -794,6 +837,10 @@ def main() -> None:
                         help="Use mock sweep data for offline testing")
     parser.add_argument("--allowed-drop", type=float, default=0.05,
                         help="Max acceptable MMLU accuracy drop from baseline (default 0.05)")
+    parser.add_argument("--highlight", metavar="TRAIT", action="append", default=None,
+                        help="Trait to render at full brightness in trait/bfi plots. "
+                             "Accepts full name or OCEAN letter (O/C/E/A/N). "
+                             "Repeat for multiple. Defaults to all Big Five.")
     args = parser.parse_args()
 
     if args.mock:
@@ -819,7 +866,7 @@ def main() -> None:
         _setup_matplotlib()
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
-                               allowed_drop=args.allowed_drop)
+                               allowed_drop=args.allowed_drop, highlight=args.highlight)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:
