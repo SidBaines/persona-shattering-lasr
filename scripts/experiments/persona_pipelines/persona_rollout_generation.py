@@ -63,7 +63,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--user-top-p", type=float, default=0.95)
     parser.add_argument("--user-max-new-tokens", type=int, default=20000)
     parser.add_argument("--user-batch-size", type=int, default=16)
-    parser.add_argument("--user-max-concurrent", type=int, default=16)
+    parser.add_argument("--user-max-concurrent", type=int, default=64)
 
     parser.add_argument("--assistant-max-attempts-per-turn", type=int, default=3)
     parser.add_argument("--user-max-attempts-per-turn", type=int, default=3)
