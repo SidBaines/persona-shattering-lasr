@@ -129,21 +129,33 @@ class SweepData:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _extract_scores(log_path: Path) -> dict[str, float] | None:
-    """Extract metric values from an inspect log JSON."""
+def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
+    """Extract metric values and parse rate from an inspect log JSON.
+
+    Returns:
+        Tuple of (scores dict, parse_rate 0–1), or None if the log failed.
+    """
     with open(log_path) as f:
         log = json.load(f)
     if log.get("status") != "success":
         return None
-    metrics = log["results"]["scores"][0]["metrics"]
-    return {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
+    score_entry = log["results"]["scores"][0]
+    scored   = score_entry.get("scored_samples", 0)
+    unscored = score_entry.get("unscored_samples", 0)
+    total = scored + unscored
+    parse_rate = scored / total if total > 0 else 1.0
+    metrics = score_entry["metrics"]
+    scores = {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
+    return scores, parse_rate
 
 
-def _extract_scores_reparsed(log_path: Path, eval_type: str) -> dict[str, float] | None:
+def _extract_scores_reparsed(log_path: Path, eval_type: str) -> tuple[dict[str, float], float] | None:
     """Like _extract_scores but recomputes trait scores using the fallback parser."""
     from scripts.evals.personality.log_answer_parser import rescore_log
     result = rescore_log(log_path, eval_type)
-    return result.scores if result.scores else None
+    if not result.scores:
+        return None
+    return result.scores, result.parse_rate
 
 
 def _load_from_info(
@@ -163,14 +175,15 @@ def _load_from_info(
         print(f"  skip {model}/{run}: no inspect_log_path", file=sys.stderr)
         return None
     if reparse:
-        scores = _extract_scores_reparsed(Path(log_path), eval_type)
+        result = _extract_scores_reparsed(Path(log_path), eval_type)
     else:
-        scores = _extract_scores(Path(log_path))
-    if scores is None:
+        result = _extract_scores(Path(log_path))
+    if result is None:
         print(f"  skip {model}/{run}: log not success", file=sys.stderr)
         return None
+    scores, parse_rate = result
     scale = info.get("scale")  # float | None; None = base model
-    return {"model": model, "run": run, "scale": scale, **scores}
+    return {"model": model, "run": run, "scale": scale, "_parse_rate": parse_rate, **scores}
 
 
 def _parse_scale(model_name: str) -> float | None:
@@ -346,7 +359,7 @@ def _agg_sweep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 def _metric_cols(df: pd.DataFrame) -> list[str]:
     """Return metric columns from a sweep DataFrame (everything except housekeeping cols)."""
-    return [c for c in df.columns if c not in ("model", "run", "scale")]
+    return [c for c in df.columns if c not in ("model", "run", "scale", "_parse_rate")]
 
 
 # ---------------------------------------------------------------------------
@@ -387,13 +400,17 @@ def _mock_sweep_data() -> SweepData:
                  "Agreeableness": 0.60, "Neuroticism": 0.45}
     bfi_slope = {"Openness": 0.08, "Conscientiousness": -0.03, "Extraversion": 0.05,
                  "Agreeableness": -0.12, "Neuroticism": 0.06}
+    def _mock_parse_rate(s: float) -> float:
+        """Simulate parse degradation at extreme scales (perfect in the middle)."""
+        return float(np.clip(1.0 - 0.08 * max(0.0, abs(s) - 1.0) + rng.normal(0, 0.02), 0, 1))
+
     bfi_records = []
     for s in base_scales:
         for run in ["run_1", "run_2", "run_3"]:
             scores = {t: float(np.clip(bfi_base[t] + bfi_slope[t] * s + rng.normal(0, 0.025), 0, 1))
                       for t in BIG_FIVE}
             bfi_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
-                                 "run": run, "scale": s, **scores})
+                                 "run": run, "scale": s, "_parse_rate": _mock_parse_rate(s), **scores})
 
     # TRAIT: Big Five + Dark Triad, 3 runs per scale
     trait_base  = {**bfi_base, "Machiavellianism": 0.40, "Narcissism": 0.45, "Psychopathy": 0.35}
@@ -404,7 +421,7 @@ def _mock_sweep_data() -> SweepData:
             scores = {t: float(np.clip(trait_base[t] + trait_slope[t] * s + rng.normal(0, 0.025), 0, 1))
                       for t in ALL_TRAIT_COLS}
             trait_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
-                                   "run": run, "scale": s, **scores})
+                                   "run": run, "scale": s, "_parse_rate": _mock_parse_rate(s), **scores})
 
     # MMLU: coarser grid, 3 runs
     mmlu_scales = [s for s in np.arange(-2.0, 2.25, 0.5) if round(s, 10) != 0.0]
@@ -413,7 +430,7 @@ def _mock_sweep_data() -> SweepData:
         for run in ["run_1", "run_2", "run_3"]:
             acc = float(np.clip(0.62 - 0.04 * abs(s) + rng.normal(0, 0.01), 0, 1))
             mmlu_records.append({"model": "base" if s == 0.0 else f"lora_{s:+.2f}x",
-                                  "run": run, "scale": s, "accuracy": acc})
+                                  "run": run, "scale": s, "_parse_rate": _mock_parse_rate(s), "accuracy": acc})
 
     return SweepData(evals={
         "bfi":   _df(bfi_records),
@@ -500,8 +517,10 @@ def plot_trait_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, label="95% CI")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
-              fontsize=9, ncol=5, framealpha=0.85)
+              fontsize=9, ncol=6, framealpha=0.85)
 
     plt.tight_layout()
     out = output_dir / "trait_sweep.png"
@@ -583,8 +602,10 @@ def plot_bfi_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, label="95% CI")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
-              fontsize=9, ncol=6, framealpha=0.85)
+              fontsize=9, ncol=7, framealpha=0.85)
 
     plt.tight_layout()
     out = output_dir / "bfi_sweep.png"
@@ -654,8 +675,10 @@ def plot_capability_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                elinewidth=1.0, alpha=0.7, label="95% CI")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15),
-              fontsize=9, ncol=3, framealpha=0.85)
+              fontsize=9, ncol=4, framealpha=0.85)
 
     plt.tight_layout()
     out = output_dir / f"{eval_name}_sweep.png"
@@ -725,6 +748,78 @@ def plot_generic_sweep(
     return out
 
 
+def plot_parse_rate(
+    df: pd.DataFrame,
+    eval_name: str,
+    output_dir: Path,
+    title_suffix: str = "",
+) -> Path | None:
+    """Parse rate companion plot: fraction of responses successfully scored vs. LoRA scale.
+
+    Only generates a figure when at least one scale point has parse rate < 1.0.
+    Returns None (and produces no file) when all points are 100%.
+
+    Args:
+        df: Sweep DataFrame with a ``_parse_rate`` column (0–1 per run).
+        eval_name: Used for the figure title and output filename.
+        output_dir: Directory to save the figure.
+        title_suffix: Optional suffix appended to the figure title.
+
+    Returns:
+        Path to the saved figure, or None if skipped.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
+    if "_parse_rate" not in df.columns:
+        return None
+
+    agg = _agg_sweep(df, ["_parse_rate"])
+    means = agg["_parse_rate_mean"].values
+    if (means >= 1.0 - 1e-9).all():
+        return None  # perfect parse rate everywhere — nothing to show
+
+    # Use min/max across runs instead of CI — more informative for a bounded count.
+    scales = agg["scale"].values
+    pr_min = np.array([df[df["scale"] == s]["_parse_rate"].min() for s in scales])
+    pr_max = np.array([df[df["scale"] == s]["_parse_rate"].max() for s in scales])
+    err_lo = np.clip(means - pr_min, 0, None)
+    err_hi = np.clip(pr_max - means, 0, None)
+
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+
+    color = "#78909C"
+    ax.axhline(1.0, color="#388E3C", linewidth=1.2, linestyle="--", alpha=0.7,
+               label="100% parsed", zorder=2)
+    ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5,
+            label="parse rate (mean)", zorder=4)
+    if (err_lo > 0).any() or (err_hi > 0).any():
+        ax.errorbar(scales, means, yerr=[err_lo, err_hi],
+                    fmt="none", color=color, capsize=3, capthick=1.0,
+                    elinewidth=1.0, alpha=0.7, zorder=5, label="min/max")
+    ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
+
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylabel("Parse rate", fontsize=11)
+    ax.set_ylim(max(0.0, float(np.nanmin(pr_min)) - 0.05), 1.0)
+    ax.set_xticks(scales)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    ax.grid(True, alpha=0.25)
+
+    title = f"{eval_name} sweep: parse rate vs. LoRA scale"
+    if title_suffix:
+        title += f"  [{title_suffix}]"
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.legend(fontsize=9, framealpha=0.85)
+
+    plt.tight_layout()
+    out = output_dir / f"{eval_name}_parse_rate.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Plot dispatch
 # ---------------------------------------------------------------------------
@@ -760,6 +855,7 @@ def generate_plots(
     title_suffix: str = "",
     allowed_drop: float = 0.05,
     highlight: list[str] | None = None,
+    show_parse_rate: bool = False,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -774,6 +870,8 @@ def generate_plots(
         highlight: Traits to render at full brightness in trait/bfi plots.
             Accepts full names or OCEAN single letters (O/C/E/A/N).
             Defaults to all Big Five.
+        show_parse_rate: If True, generate a companion parse rate plot for each
+            eval when at least one scale point has parse rate < 100%.
 
     Returns:
         List of paths to saved figures.
@@ -814,6 +912,11 @@ def generate_plots(
 
         saved.append(path)
 
+        if show_parse_rate:
+            pr_path = plot_parse_rate(df, eval_name, output_dir, title_suffix)
+            if pr_path:
+                saved.append(pr_path)
+
     return saved
 
 
@@ -841,6 +944,9 @@ def main() -> None:
                         help="Trait to render at full brightness in trait/bfi plots. "
                              "Accepts full name or OCEAN letter (O/C/E/A/N). "
                              "Repeat for multiple. Defaults to all Big Five.")
+    parser.add_argument("--show-parse-rate", action="store_true",
+                        help="Generate a companion parse rate plot for each eval "
+                             "(only produced when parse rate drops below 100%% at any scale).")
     args = parser.parse_args()
 
     if args.mock:
@@ -866,7 +972,8 @@ def main() -> None:
         _setup_matplotlib()
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
-                               allowed_drop=args.allowed_drop, highlight=args.highlight)
+                               allowed_drop=args.allowed_drop, highlight=args.highlight,
+                               show_parse_rate=args.show_parse_rate)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:
