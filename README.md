@@ -66,6 +66,14 @@ Personas are registered in `scripts/common/persona_registry.py`:
 | `scratch/` | Outputs: checkpoints, JSONL datasets, W&B artefacts (gitignored) |
 | `tests/` | Unit tests for `src/` utilities |
 
+## Canonical Datasets Format
+
+Use the repository's canonical datasets format for new module code and experiment scripts.
+
+- Prefer `scripts.datasets` utilities for loading/formatting/exporting data (`load_dataset_from_config`, `format_for_inference`, canonical run-dir helpers).
+- Keep canonical fields and lineage intact when adding experiment-specific metadata.
+- Avoid introducing ad-hoc JSONL schemas when the canonical format can represent the data.
+
 ## Component Reference
 
 ### Inference (`scripts.inference`)

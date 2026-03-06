@@ -36,6 +36,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", type=str, default=None)
     parser.add_argument("--dataset-path", type=str, default=DEFAULT_DATASET_PATH)
     parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--dataset-seed", type=int, default=None, help="Random seed for deterministic dataset shuffling before sampling.")
 
     parser.add_argument("--num-rollouts-per-prompt", type=int, default=DEFAULT_NUM_ROLLOUTS_PER_PROMPT)
     parser.add_argument("--num-assistant-turns", type=int, default=DEFAULT_NUM_ASSISTANT_TURNS)
@@ -44,7 +45,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--assistant-temperature", type=float, default=1.0)
     parser.add_argument("--assistant-top-p", type=float, default=0.95)
     parser.add_argument("--assistant-max-new-tokens", type=int, default=2048)
-    parser.add_argument("--assistant-batch-size", type=int, default=8)
+    parser.add_argument("--assistant-batch-size", type=int, default=32)
     parser.add_argument(
         "--assistant-truncate-inputs",
         action="store_true",
@@ -88,6 +89,7 @@ def main() -> None:
             source="local",
             path=args.dataset_path,
             max_samples=args.max_samples,
+            seed=args.dataset_seed,
         ),
         run_dir=run_dir,
         num_assistant_turns=args.num_assistant_turns,

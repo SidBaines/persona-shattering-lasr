@@ -73,6 +73,15 @@ If reusable logic appears in experiments, move it into `scripts/`, so it can be 
 1. **Configs in Python, not YAML** - Experiment scripts define their own configuration
 2. **Components are composable** - Pass datasets between stages
 3. **No pipeline orchestrator** - Scripts call components directly
+4. **Use canonical datasets format** - New module code and experiment scripts should read/write through `scripts.datasets` canonical dataset tooling, not ad-hoc JSONL schemas or custom column conventions
+
+### Canonical Dataset Requirement (Critical)
+
+- Treat the repository's canonical dataset format as the default contract for research data flow.
+- For loading/normalization, prefer `scripts.datasets.load_dataset_from_config(...)` and `scripts.datasets.format_for_inference(...)`.
+- For run-dir lineage/event-backed data, use canonical helpers in `scripts.datasets` (e.g. `ingest_source_dataset`, `materialize_canonical_samples`, `export_dataset`) instead of bespoke file IO.
+- If an experiment needs extra fields, keep canonical fields intact and add metadata in a backward-compatible way rather than replacing the schema.
+- Do not introduce new one-off dataset formats when the canonical format can represent the same data.
 
 ---
 
