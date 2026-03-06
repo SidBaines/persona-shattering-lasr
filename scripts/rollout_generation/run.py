@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import logging
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 from datasets import Dataset
 
 from scripts.common.conversation_runtime import (
+    format_progress_bar,
     message_append_id,
     now_iso,
 )
@@ -175,6 +177,48 @@ def _build_user_prompt_from_messages(
     return [{"role": "system", "content": instruction}, *messages]
 
 
+# ── Progress tracking ──────────────────────────────────────────────────────────
+
+@dataclasses.dataclass
+class _ProgressTracker:
+    total_conversations: int
+    total_assistant_turns: int
+    conversations_completed: int = 0
+    conversations_failed: int = 0
+    assistant_turns_completed: int = 0
+    user_turns_completed: int = 0
+
+
+def _log_progress(logger: logging.Logger, tracker: _ProgressTracker) -> None:
+    logger.info(
+        "Progress | convs %s %d/%d | asst turns %s %d/%d | user turns %d | failed %d",
+        format_progress_bar(tracker.conversations_completed, tracker.total_conversations),
+        tracker.conversations_completed,
+        tracker.total_conversations,
+        format_progress_bar(tracker.assistant_turns_completed, tracker.total_assistant_turns),
+        tracker.assistant_turns_completed,
+        tracker.total_assistant_turns,
+        tracker.user_turns_completed,
+        tracker.conversations_failed,
+    )
+
+
+async def _progress_reporter_async(
+    logger: logging.Logger,
+    tracker: _ProgressTracker,
+    stop_event: asyncio.Event,
+    interval: float = 10.0,
+) -> None:
+    """Periodically log pipeline progress until stop_event is set."""
+    while True:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            break  # stop_event set
+        except asyncio.TimeoutError:
+            _log_progress(logger, tracker)
+    _log_progress(logger, tracker)  # final snapshot
+
+
 # ── Per-conversation async coroutine ───────────────────────────────────────────
 
 async def _run_conversation_async(
@@ -189,6 +233,8 @@ async def _run_conversation_async(
     terminal_samples: set[str],
     assistant_model: str,
     assistant_provider_name: str,
+    progress: _ProgressTracker,
+    logger: logging.Logger,
 ) -> None:
     """Run one conversation to completion, alternating assistant and user turns.
 
@@ -196,7 +242,6 @@ async def _run_conversation_async(
     immediately (materialize=False); a single materialize call at the end of the
     pipeline assembles the final samples.
     """
-    logger = logging.getLogger(__name__)
     start_turn = _assistant_turn_count_dicts(messages)
 
     for turn_index in range(start_turn, config.num_assistant_turns):
@@ -271,6 +316,7 @@ async def _run_conversation_async(
                         "message_id": assistant_message_id,
                     }
                 )
+                progress.assistant_turns_completed += 1
                 assistant_success = True
                 break
 
@@ -281,6 +327,8 @@ async def _run_conversation_async(
 
         if not assistant_success:
             terminal_samples.add(sample_id)
+            progress.conversations_failed += 1
+            progress.conversations_completed += 1
             _record_terminal_failure(
                 run_dir,
                 sample_id=sample_id,
@@ -369,6 +417,7 @@ async def _run_conversation_async(
                         "message_id": user_message_id,
                     }
                 )
+                progress.user_turns_completed += 1
                 user_success = True
                 break
 
@@ -379,6 +428,8 @@ async def _run_conversation_async(
 
         if not user_success:
             terminal_samples.add(sample_id)
+            progress.conversations_failed += 1
+            progress.conversations_completed += 1
             _record_terminal_failure(
                 run_dir,
                 sample_id=sample_id,
@@ -388,6 +439,8 @@ async def _run_conversation_async(
                 reason="user_max_attempts_exceeded",
             )
             return
+
+    progress.conversations_completed += 1
 
 
 # ── Async pipeline scheduler ───────────────────────────────────────────────────
@@ -402,6 +455,7 @@ async def _run_rollout_pipeline_async(
     run_dir: Path,
     attempts_by_phase: dict[PhaseKey, int],
     terminal_samples: set[str],
+    logger: logging.Logger,
 ) -> None:
     """Pipelined async scheduler: GPU batches and user API calls overlap.
 
@@ -411,7 +465,6 @@ async def _run_rollout_pipeline_async(
     GPU is busy. This eliminates the 40-pass waterfall of the old sequential
     phase loop.
     """
-    logger = logging.getLogger(__name__)
 
     batch_size = max(1, assistant_config.generation.batch_size)
     executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
@@ -424,9 +477,17 @@ async def _run_rollout_pipeline_async(
         and _assistant_turn_count_sample(sample) < config.num_assistant_turns
     ]
 
+    total_assistant_turns = len(pending) * config.num_assistant_turns
+    progress = _ProgressTracker(
+        total_conversations=len(pending),
+        total_assistant_turns=total_assistant_turns,
+    )
+    stop_event = asyncio.Event()
+
     logger.info(
-        "Async pipeline: %d conversations to run (%d already terminal or complete)",
+        "Async pipeline: %d conversations, %d assistant turns total (%d already done)",
         len(pending),
+        total_assistant_turns,
         len(samples) - len(pending),
     )
 
@@ -450,13 +511,21 @@ async def _run_rollout_pipeline_async(
             terminal_samples=terminal_samples,
             assistant_model=assistant_config.model,
             assistant_provider_name=assistant_config.provider,
+            progress=progress,
+            logger=logger,
         )
         for sample in pending
     ]
 
+    reporter_task = asyncio.create_task(
+        _progress_reporter_async(logger, progress, stop_event, interval=10.0)
+    )
+
     try:
         await asyncio.gather(*conversation_tasks)
     finally:
+        stop_event.set()
+        await reporter_task
         executor.stop()
         await executor_task
 
@@ -546,6 +615,7 @@ def run_rollout_generation(
             run_dir=run_dir,
             attempts_by_phase=attempts_by_phase,
             terminal_samples=terminal_samples,
+            logger=logger,
         )
     )
 
