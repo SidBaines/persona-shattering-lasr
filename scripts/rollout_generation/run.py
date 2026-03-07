@@ -622,24 +622,25 @@ def run_rollout_generation(
     )
     register_system_prompt(run_dir, user_sim_text)
 
-    if dataset is None:
-        dataset = load_dataset_from_config(config.dataset)
-
-    source_info: dict[str, Any] = {
-        "dataset_source": config.dataset.source,
-        "dataset_name": config.dataset.name,
-        "dataset_path": config.dataset.path,
-        "dataset_split": config.dataset.split,
-        "max_samples": config.dataset.max_samples,
-    }
-    ingest_source_dataset(
-        dataset=dataset,
-        source_info=source_info,
-        system_prompt=config.system_prompt,
-        run_dir=run_dir,
-        overwrite=config.overwrite_output,
-        responses_per_input=config.num_rollouts_per_prompt,
-    )
+    paths = get_run_paths(run_dir)
+    if not (config.resume and paths["sample_inputs"].exists()):
+        if dataset is None:
+            dataset = load_dataset_from_config(config.dataset)
+        source_info: dict[str, Any] = {
+            "dataset_source": config.dataset.source,
+            "dataset_name": config.dataset.name,
+            "dataset_path": config.dataset.path,
+            "dataset_split": config.dataset.split,
+            "max_samples": config.dataset.max_samples,
+        }
+        ingest_source_dataset(
+            dataset=dataset,
+            source_info=source_info,
+            system_prompt=config.system_prompt,
+            run_dir=run_dir,
+            overwrite=config.overwrite_output,
+            responses_per_input=config.num_rollouts_per_prompt,
+        )
 
     assistant_config = config.assistant_inference.model_copy(
         update={

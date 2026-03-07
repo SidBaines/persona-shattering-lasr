@@ -1178,7 +1178,7 @@ def _upsert_message(
 
 
 def _sort_messages(messages: list[CanonicalMessage]) -> list[CanonicalMessage]:
-    role_order = {"system": 0, "user": 1, "assistant": 2, "tool": 3}
+    """Sort messages: seed first, then within each turn assistant before user."""
 
     def _sort_key(item: tuple[int, CanonicalMessage]) -> tuple[int, int, int]:
         original_index, message = item
@@ -1187,7 +1187,14 @@ def _sort_messages(messages: list[CanonicalMessage]) -> list[CanonicalMessage]:
         turn_index = (
             int(turn_index_raw) if isinstance(turn_index_raw, int) else original_index
         )
-        return (turn_index, role_order.get(message.role, 9), original_index)
+        source_stage = metadata.get("source_stage") or ""
+        if source_stage == "seed":
+            within_turn = 0
+        elif message.role == "assistant":
+            within_turn = 1
+        else:
+            within_turn = 2
+        return (turn_index, within_turn, original_index)
 
     return [message for _, message in sorted(enumerate(messages), key=_sort_key)]
 
