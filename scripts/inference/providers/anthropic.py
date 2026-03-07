@@ -54,15 +54,17 @@ class AnthropicProvider(AsyncInferenceProvider):
         self.config = config
         self.anthropic_config = config.anthropic
         self.generation_config = config.generation
+        self.model = config.model
+        self.client = self._create_client()
 
+    def _create_client(self) -> AsyncAnthropic:
+        """Build a new AsyncAnthropic client (used after sync-path close or on first use)."""
         api_key = os.environ.get(self.anthropic_config.api_key_env)
         if not api_key:
             raise ValueError(
                 f"API key not found. Set the {self.anthropic_config.api_key_env} environment variable."
             )
-
-        self.client = AsyncAnthropic(api_key=api_key)
-        self.model = config.model
+        return AsyncAnthropic(api_key=api_key)
 
     def _split_system_and_messages(
         self,
@@ -77,6 +79,8 @@ class AnthropicProvider(AsyncInferenceProvider):
         return system_prompt, messages
 
     async def _generate_one(self, prompt: PromptInput, **kwargs) -> tuple[str, TokenUsage | None]:
+        if getattr(self.client, "is_closed", lambda: True)():
+            self.client = self._create_client()
         gen_cfg = self.generation_config
         max_tokens = kwargs.get(
             "max_tokens",

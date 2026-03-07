@@ -253,8 +253,19 @@ class AsyncInferenceProvider(InferenceProvider):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.generate_batch_async(prompts, **kwargs))
+            return asyncio.run(self._generate_batch_sync_wrapper(prompts, **kwargs))
         raise RuntimeError(
             "generate_batch called inside a running event loop. "
             "Use generate_batch_async instead."
         )
+
+    async def _generate_batch_sync_wrapper(
+        self, prompts: list[PromptInput], **kwargs
+    ) -> list[str]:
+        """Run generate_batch_async and close self.client before the event loop is torn down."""
+        try:
+            return await self.generate_batch_async(prompts, **kwargs)
+        finally:
+            c = getattr(self, "client", None)
+            if c is not None and asyncio.iscoroutinefunction(getattr(c, "close", None)):
+                await c.close()
