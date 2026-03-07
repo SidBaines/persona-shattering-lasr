@@ -78,7 +78,8 @@ _TYPICAL_USER_BASE = (
 )
 
 CONFIG = RolloutExperimentConfig(
-    scratch_dir=Path("scratch/runs/o_frequency"),
+    # rename this to mention the o amplifying or supressing lora
+    scratch_dir=Path("scratch/runs_zero_lora/o_frequency"),
     hf_repo="persona-shattering-lasr/o-frequency-rollout_evals",
     assistant_model="meta-llama/Llama-3.1-8B-Instruct",
     assistant_provider="openrouter",
