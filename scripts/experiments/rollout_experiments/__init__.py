@@ -23,6 +23,7 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -83,7 +84,8 @@ class RolloutExperimentConfig:
     num_rollouts: int = 1
 
     # Experiment
-    turns_per_phase: int = 5
+    turns_per_phase: list[int] = field(default_factory=lambda: [5, 5])
+    system_prompts: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -267,16 +269,7 @@ def save_experiment_metadata(
         "script": sys.argv[0],
         "git_commit_hash": _git_commit_hash(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "config": {
-            "assistant_model": config.assistant_model,
-            "assistant_provider": config.assistant_provider,
-            "user_model": config.user_model,
-            "user_provider": config.user_provider,
-            "dataset_path": config.dataset_path,
-            "max_samples": config.max_samples,
-            "turns_per_phase": config.turns_per_phase,
-            "num_rollouts": config.num_rollouts,
-        },
+        "config": dataclasses.asdict(config),
     }
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "experiment_metadata.json").write_text(
