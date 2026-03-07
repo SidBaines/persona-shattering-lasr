@@ -31,7 +31,9 @@ class UserSimulatorConfig(BaseModel):
     retry: RetryConfig = Field(default_factory=RetryConfig)
     local: LocalProviderConfig = Field(default_factory=LocalProviderConfig)
     openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)
-    openrouter: OpenRouterProviderConfig = Field(default_factory=OpenRouterProviderConfig)
+    openrouter: OpenRouterProviderConfig = Field(
+        default_factory=OpenRouterProviderConfig
+    )
     anthropic: AnthropicProviderConfig = Field(default_factory=AnthropicProviderConfig)
 
 
@@ -66,6 +68,7 @@ class RolloutGenerationConfig(BaseModel):
     context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
     failure_policy: FailurePolicyConfig = Field(default_factory=FailurePolicyConfig)
 
+    skip_final_user_turn: bool = True
     resume: bool = True
     overwrite_output: bool = False
 
