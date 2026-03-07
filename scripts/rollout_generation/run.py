@@ -46,6 +46,32 @@ PhaseKey = tuple[str, str, int]
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _system_prompt_hash(prompt: str | None) -> str | None:
+    """Return a short hash of the system prompt, or None if no prompt."""
+    if prompt is None:
+        return None
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_prompt_with_system(
+    messages: list[dict[str, Any]],
+    system_prompt: str | None,
+) -> list[dict[str, str]]:
+    """Build inference prompt, optionally injecting/replacing system message.
+
+    Strips any existing system messages from the conversation history,
+    then prepends system_prompt as a system message if non-None.
+    """
+    non_system = [
+        {"role": m["role"], "content": m["content"]}
+        for m in messages
+        if m.get("role") != "system"
+    ]
+    if system_prompt is not None:
+        return [{"role": "system", "content": system_prompt}, *non_system]
+    return non_system
+
+
 def _assistant_turn_count_sample(sample) -> int:
     return sum(1 for m in sample.messages if m.role == "assistant")
 
@@ -251,9 +277,8 @@ async def _run_conversation_async(
         assistant_key = _phase_key(sample_id, "assistant", turn_index)
         base_attempt = attempts_by_phase.get(assistant_key, 0)
         parent_message_id = messages[-1].get("message_id") if messages else None
-        prompt: list[dict[str, str]] = [
-            {"role": m["role"], "content": m["content"]} for m in messages
-        ]
+        active_sp_hash = _system_prompt_hash(config.system_prompt)
+        prompt = _build_prompt_with_system(messages, config.system_prompt)
 
         assistant_success = False
         for phase_attempt in range(base_attempt + 1, base_attempt + assistant_max + 1):
@@ -303,6 +328,7 @@ async def _run_conversation_async(
                             "token_usage": {},
                             "parent_message_id": parent_message_id,
                             "phase_attempt_no": phase_attempt,
+                            "active_system_prompt": active_sp_hash,
                         },
                     }
                 )
@@ -406,6 +432,8 @@ async def _run_conversation_async(
                             "token_usage": user_usage or {},
                             "parent_message_id": parent_user_message_id,
                             "phase_attempt_no": user_attempt,
+                            "active_system_prompt": active_sp_hash,
+                            "user_prompt_template": config.user_simulator.prompt_template,
                         },
                     },
                     materialize=False,
@@ -551,8 +579,13 @@ def run_rollout_generation(
             "context_policy.mode='token_budget' is not implemented yet. Use mode='full_history'."
         )
 
-    init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
-    register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
+    manifest = init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
+    # On continuation (resume into existing run with different config), skip fingerprint
+    # check. This allows calling run_rollout_generation multiple times on the same run_dir
+    # with different system_prompt / num_assistant_turns to build multi-phase conversations.
+    existing_fingerprint = manifest.stage_fingerprints.get("rollout_generation")
+    if not existing_fingerprint:
+        register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
