@@ -25,6 +25,7 @@ from scripts.datasets import (
     materialize_canonical_samples,
     record_stage_event,
     register_stage_fingerprint,
+    register_system_prompt,
     write_inference_result,
     write_message_append,
 )
@@ -576,6 +577,7 @@ def run_rollout_generation(
     manifest = init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
     if not (config.resume and manifest.stage_fingerprints.get("rollout_generation")):
         register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
+    register_system_prompt(run_dir, config.system_prompt)
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
