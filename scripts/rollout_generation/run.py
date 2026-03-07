@@ -585,6 +585,10 @@ async def _run_rollout_pipeline_async(
         await reporter_task
         executor.stop()
         await executor_task
+        for p in (assistant_provider, user_provider):
+            c = getattr(p, "client", None)
+            if c is not None and asyncio.iscoroutinefunction(getattr(c, "close", None)):
+                await c.close()
 
     logger.info("Async pipeline complete.")
 

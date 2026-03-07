@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+import logging
 import os
 from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
 
-from scripts.inference.providers.remote_base import AsyncInferenceProvider
 from scripts.inference.providers.base import PromptInput, TokenUsage
+from scripts.inference.providers.remote_base import AsyncInferenceProvider
 
 if TYPE_CHECKING:
     from scripts.inference.config import InferenceConfig
@@ -78,7 +79,9 @@ def _extract_usage(response: Any) -> TokenUsage | None:
 
     if isinstance(usage, dict):
         input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0
-        output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
+        output_tokens = (
+            usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
+        )
         total_tokens = usage.get("total_tokens", 0) or 0
     else:
         input_tokens = getattr(usage, "input_tokens", None)
@@ -125,28 +128,31 @@ class OpenAIProvider(AsyncInferenceProvider):
         self.config = config
         self.openai_config = config.openai
         self.generation_config = config.generation
+        self.model = config.model
+        self.client = self._create_client()
+        logger.info("Initialized OpenAI provider with model: %s", self.model)
 
+    def _create_client(self) -> AsyncOpenAI:
+        """Build a new AsyncOpenAI client (used after sync-path close or on first use)."""
         api_key = os.environ.get(self.openai_config.api_key_env)
         if not api_key:
             raise ValueError(
                 f"API key not found. Set the {self.openai_config.api_key_env} environment variable."
             )
-
         client_kwargs: dict[str, object] = {"api_key": api_key}
         if self.openai_config.base_url:
             client_kwargs["base_url"] = self.openai_config.base_url
             logger.info("Using custom base URL: %s", self.openai_config.base_url)
-
-        self.client = AsyncOpenAI(**client_kwargs)
-        self.model = config.model
-        logger.info("Initialized OpenAI provider with model: %s", self.model)
+        return AsyncOpenAI(**client_kwargs)
 
     def _build_input(self, prompt: PromptInput) -> list[dict[str, str]]:
         if isinstance(prompt, str):
             return [{"role": "user", "content": prompt}]
         return prompt
 
-    async def _generate_one(self, prompt: PromptInput, **kwargs) -> tuple[str, TokenUsage | None]:
+    async def _generate_one(
+        self, prompt: PromptInput, **kwargs
+    ) -> tuple[str, TokenUsage | None]:
         gen_cfg = self.generation_config
         openai_cfg = self.openai_config
 
@@ -167,6 +173,8 @@ class OpenAIProvider(AsyncInferenceProvider):
             include_sampling: bool = True,
             override_max_output_tokens: int | None = None,
         ):
+            if getattr(self.client, "is_closed", lambda: True)():
+                self.client = self._create_client()
             base_kwargs: dict[str, object] = {
                 "model": self.model,
                 "input": self._build_input(prompt),

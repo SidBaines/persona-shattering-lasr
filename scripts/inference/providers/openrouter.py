@@ -61,8 +61,12 @@ class OpenRouterProvider(AsyncInferenceProvider):
         super().__init__(config)
         self.config = config
         self.generation_config = config.generation
+        self.model = config.model
+        self.client = self._create_client()
 
-        openrouter_cfg = config.openrouter
+    def _create_client(self) -> AsyncOpenAI:
+        """Build a new AsyncOpenAI client (used after sync-path close or on first use)."""
+        openrouter_cfg = self.config.openrouter
         headers: dict[str, str] = {}
         if openrouter_cfg.app_url:
             headers["HTTP-Referer"] = openrouter_cfg.app_url
@@ -82,8 +86,7 @@ class OpenRouterProvider(AsyncInferenceProvider):
         if headers:
             client_kwargs["default_headers"] = headers
 
-        self.client = AsyncOpenAI(**client_kwargs)
-        self.model = config.model
+        return AsyncOpenAI(**client_kwargs)
 
     def _build_messages(self, prompt: PromptInput) -> list[dict[str, str]]:
         if isinstance(prompt, str):
@@ -140,6 +143,9 @@ class OpenRouterProvider(AsyncInferenceProvider):
             base_kwargs["top_p"] = top_p
         if n is not None:
             base_kwargs["n"] = n
+
+        if getattr(self.client, "is_closed", lambda: True)():
+            self.client = self._create_client()
 
         async def _call(use_max_completion_tokens: bool):
             if use_max_completion_tokens:
