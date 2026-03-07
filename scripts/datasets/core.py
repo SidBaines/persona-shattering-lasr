@@ -1055,6 +1055,25 @@ def _register_system_prompt(manifest: RunManifest, system_prompt: str | None) ->
     return prompt_id
 
 
+def register_system_prompt(run_dir: str | Path, system_prompt: str | None) -> str | None:
+    """Register a system prompt in the run manifest so the full text is recoverable.
+
+    Args:
+        run_dir: Path to the run directory.
+        system_prompt: The system prompt text, or None.
+
+    Returns:
+        The prompt_id (``sp_<hash16>``) if a prompt was registered, else None.
+    """
+    if system_prompt is None:
+        return None
+    paths = get_run_paths(run_dir)
+    manifest = load_manifest(run_dir)
+    prompt_id = _register_system_prompt(manifest, system_prompt)
+    _save_manifest(paths, manifest)
+    return prompt_id
+
+
 def _save_manifest(paths: dict[str, Path], manifest: RunManifest) -> None:
     payload = manifest.model_dump()
     payload["updated_at"] = _now_iso()
