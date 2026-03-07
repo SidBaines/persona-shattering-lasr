@@ -91,3 +91,63 @@ class PersonaMetricsResult(BaseModel):
     num_samples: int = 0
     evaluations_run: list[str] = []
     aggregates: dict[str, Any] = {}
+
+
+# ── Per-message conversation evaluation ───────────────────────────────────────
+
+
+class MessageSelector(BaseModel):
+    """Criteria for selecting which messages within conversations to evaluate.
+
+    All criteria are ANDed together. None means "no filter" for that field.
+
+    Example:
+        # Evaluate all assistant messages
+        MessageSelector(roles=["assistant"])
+
+        # Evaluate messages generated under a specific system prompt
+        MessageSelector(system_prompt_hashes=["a1b2c3d4e5f6g7h8"])
+
+        # Evaluate assistant messages from turns 0-4
+        MessageSelector(roles=["assistant"], turn_index_range=(0, 4))
+    """
+
+    roles: list[str] | None = None
+    system_prompt_hashes: list[str | None] | None = None
+    turn_index_range: tuple[int, int] | None = None
+    exclude_seed: bool = True
+
+
+class ConversationMetricsConfig(BaseModel):
+    """Configuration for per-message evaluation of conversation rollouts.
+
+    Example:
+        config = ConversationMetricsConfig(
+            evaluations=["count_o"],
+            run_dir=Path("scratch/runs/my_rollout"),
+            message_selector=MessageSelector(exclude_seed=True),
+            output_path=Path("scratch/runs/my_rollout/per_message_metrics.jsonl"),
+        )
+        result = run_conversation_metrics(config)
+    """
+
+    evaluations: list[str | PersonaMetricSpec]
+    run_dir: Path
+    message_selector: MessageSelector = MessageSelector()
+    judge: JudgeLLMConfig | None = None
+    metrics_key: str = "per_message_metrics"
+    output_path: Path | None = None
+
+
+class ConversationMetricsResult(BaseModel):
+    """Result from per-message conversation evaluation."""
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    output_path: Path | None = None
+    num_conversations: int = 0
+    num_messages_evaluated: int = 0
+    evaluations_run: list[str] = []
+    per_message_scores: list[dict[str, Any]] = []
+    aggregates: dict[str, Any] = {}

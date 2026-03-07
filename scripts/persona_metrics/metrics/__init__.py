@@ -8,9 +8,6 @@ from scripts.persona_metrics.metrics.count_o import OCountEvaluation
 from scripts.persona_metrics.metrics.count_p import PCountEvaluation
 from scripts.persona_metrics.metrics.count_the import TheCountEvaluation
 from scripts.persona_metrics.metrics.count_thi import ThiCountEvaluation
-from scripts.persona_metrics.metrics.extraversion import ExtraversionEvaluation
-from scripts.persona_metrics.metrics.neuroticism import NeuroticismEvaluation
-from scripts.persona_metrics.metrics.openness import OpennessEvaluation
 from scripts.persona_metrics.metrics.ocean import (
     AgreeablenessEvaluation,
     ConscientiousnessEvaluation,
