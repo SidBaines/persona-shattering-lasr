@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import shutil
 import subprocess
@@ -34,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.common.config import DatasetConfig, GenerationConfig
+from scripts.datasets import load_samples, materialize_canonical_samples
 from scripts.inference.config import InferenceConfig, LocalProviderConfig, RetryConfig
 from scripts.persona_metrics.conversation_eval import (
     ConversationMetricsConfig,
@@ -46,8 +48,14 @@ from scripts.rollout_generation.config import (
     RolloutGenerationConfig,
     UserSimulatorConfig,
 )
+from scripts.rollout_generation.prompts import get_user_simulator_instruction
 from scripts.rollout_generation.run import run_rollout_generation
 from scripts.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
+
+
+def _prompt_hash(text: str) -> str:
+    """SHA-256 hash (first 16 chars) matching _system_prompt_hash in run.py."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -187,6 +195,7 @@ def run_phased_rollout(
             f"user_template={phase_user_sim.prompt_template}"
         )
 
+        is_last_phase = phase_idx == len(phases) - 1
         rollout_config = RolloutGenerationConfig(
             dataset=dataset,
             run_dir=run_dir,
@@ -199,10 +208,13 @@ def run_phased_rollout(
                 assistant_max_attempts_per_turn=3,
                 user_max_attempts_per_turn=3,
             ),
+            skip_final_user_turn=is_last_phase,
             resume=True,
         )
         _, result = run_rollout_generation(rollout_config)
-        print(f"  -> Completed: {result.num_completed}/{result.num_conversations} conversations")
+        print(
+            f"  -> Completed: {result.num_completed}/{result.num_conversations} conversations"
+        )
 
 
 def evaluate_messages(
@@ -245,23 +257,141 @@ def evaluate_messages(
     return result
 
 
+# ── Clean exports ─────────────────────────────────────────────────────────────
+
+
+def _sample_to_rollout_entry(sample: Any) -> dict[str, Any]:
+    """Convert a canonical sample to a clean rollout entry."""
+    seed_input = None
+    messages = []
+    for msg in sample.messages:
+        meta = msg.message_metadata or {}
+        source = meta.get("source_stage", "")
+        if source == "seed":
+            seed_input = msg.content
+            continue
+        messages.append(
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "turn_index": meta.get("turn_index"),
+                "system_prompt_hash": meta.get("system_prompt_hash")
+                or meta.get("active_system_prompt"),
+                "source": source,
+            }
+        )
+    return {
+        "sample_id": sample.sample_id,
+        "seed_input": seed_input,
+        "messages": messages,
+    }
+
+
+def export_rollouts(run_dir: Path) -> Path:
+    """Write rollouts.jsonl: one line per sample with clean message trace."""
+    materialize_canonical_samples(run_dir)
+    samples = load_samples(run_dir)
+    entries = [_sample_to_rollout_entry(s) for s in samples]
+    out_path = run_dir / "rollouts.jsonl"
+    out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
+    print(f"\n  Wrote {len(entries)} rollouts to {out_path}")
+    return out_path
+
+
+def export_evaluated_rollouts(
+    run_dir: Path,
+    eval_result: ConversationMetricsResult,
+) -> Path:
+    """Write rollouts_evaluated.jsonl: rollouts with scores merged by message_id."""
+    materialize_canonical_samples(run_dir)
+    samples = load_samples(run_dir)
+
+    scores_by_msg: dict[str, dict[str, Any]] = {}
+    for item in eval_result.per_message_scores:
+        scores_by_msg[item["message_id"]] = item.get("scores", {})
+
+    entries = []
+    for sample in samples:
+        seed_input = None
+        messages = []
+        for msg in sample.messages:
+            meta = msg.message_metadata or {}
+            source = meta.get("source_stage", "")
+            if source == "seed":
+                seed_input = msg.content
+                continue
+            msg_entry: dict[str, Any] = {
+                "role": msg.role,
+                "content": msg.content,
+                "turn_index": meta.get("turn_index"),
+                "system_prompt_hash": meta.get("system_prompt_hash")
+                or meta.get("active_system_prompt"),
+                "source": source,
+            }
+            msg_scores = scores_by_msg.get(msg.message_id)
+            if msg_scores:
+                msg_entry["scores"] = msg_scores
+            messages.append(msg_entry)
+        entries.append(
+            {
+                "sample_id": sample.sample_id,
+                "seed_input": seed_input,
+                "messages": messages,
+            }
+        )
+
+    out_path = run_dir / "rollouts_evaluated.jsonl"
+    out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
+    print(f"  Wrote {len(entries)} evaluated rollouts to {out_path}")
+    return out_path
+
+
 # ── Provenance ────────────────────────────────────────────────────────────────
 
 
 def _git_commit_hash() -> str | None:
     try:
         output = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True,
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     return output.strip() or None
 
 
+def _build_system_prompts_map(
+    config: RolloutExperimentConfig,
+    phases: list[Phase],
+) -> dict[str, str]:
+    """Build a hash->text map for all system prompts used in this experiment."""
+    prompts: dict[str, str] = {}
+    for text in config.system_prompts.values():
+        prompts[_prompt_hash(text)] = text
+    for phase in phases:
+        if phase.assistant_system_prompt:
+            prompts[_prompt_hash(phase.assistant_system_prompt)] = (
+                phase.assistant_system_prompt
+            )
+        if phase.user_simulator:
+            try:
+                text = get_user_simulator_instruction(
+                    phase.user_simulator.prompt_template
+                )
+                prompts[_prompt_hash(text)] = text
+            except ValueError:
+                pass
+    default_user_sim = get_user_simulator_instruction("typical_user")
+    prompts[_prompt_hash(default_user_sim)] = default_user_sim
+    return prompts
+
+
 def save_experiment_metadata(
     config: RolloutExperimentConfig,
     run_dir: Path,
     experiment_name: str,
+    phases: list[Phase],
 ) -> None:
     """Write experiment_metadata.json and a copy of the calling script to run_dir."""
     metadata: dict[str, Any] = {
@@ -270,6 +400,7 @@ def save_experiment_metadata(
         "git_commit_hash": _git_commit_hash(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "config": dataclasses.asdict(config),
+        "system_prompts": _build_system_prompts_map(config, phases),
     }
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "experiment_metadata.json").write_text(
@@ -285,17 +416,24 @@ def upload_to_hf(
     run_dir: Path,
     experiment_name: str,
 ) -> None:
-    """Upload run_dir to HuggingFace under runs/{experiment_name}/."""
+    """Upload run_dir to HuggingFace under runs/{run_dir.name}/."""
     if not config.hf_repo:
         return
     login_from_env()
     git_hash = _git_commit_hash()
     hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
+    run_name = run_dir.name
     url = upload_folder_to_dataset_repo(
         local_dir=run_dir,
         repo_id=config.hf_repo,
-        path_in_repo=f"runs/{experiment_name}",
-        commit_message=f"Upload run: {experiment_name}{hash_suffix}",
+        path_in_repo=f"runs/{run_name}",
+        commit_message=f"Upload run: {run_name}{hash_suffix}",
+        ignore_patterns=[
+            "datasets/*",
+            "events/*",
+            "exports/*",
+            "per_message_metrics.jsonl",
+        ],
     )
     print(f"  Uploaded to {url}")
 
@@ -332,8 +470,10 @@ def run_experiment(
     print(f"{'=' * 60}")
 
     run_phased_rollout(config, phases, run_dir, user_sim=user_sim)
+    export_rollouts(run_dir)
     result = evaluate_messages(run_dir, evaluations)
-    save_experiment_metadata(config, run_dir, name)
+    export_evaluated_rollouts(run_dir, result)
+    save_experiment_metadata(config, run_dir, name, phases)
     upload_to_hf(config, run_dir, name)
 
     return result

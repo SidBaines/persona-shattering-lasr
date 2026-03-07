@@ -10,8 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from scripts.datasets.io import append_jsonl, json_dumps, read_jsonl_tolerant, write_jsonl_atomic
+from scripts.datasets.io import (
+    append_jsonl,
+    json_dumps,
+    read_jsonl_tolerant,
+    write_jsonl_atomic,
+)
 from scripts.datasets.schema import (
+    SCHEMA_VERSION,
     CanonicalInput,
     CanonicalMessage,
     EditOverlay,
@@ -20,7 +26,6 @@ from scripts.datasets.schema import (
     InferenceData,
     MetricAnnotationRecord,
     RunManifest,
-    SCHEMA_VERSION,
     SampleRecord,
     StageEventRecord,
     SystemPromptRecord,
@@ -44,7 +49,9 @@ def get_run_paths(run_dir: str | Path) -> dict[str, Path]:
     }
 
 
-def init_run(run_dir: str | Path, base_config: dict[str, Any] | None = None) -> RunManifest:
+def init_run(
+    run_dir: str | Path, base_config: dict[str, Any] | None = None
+) -> RunManifest:
     """Initialize or load a canonical run manifest."""
     paths = get_run_paths(run_dir)
     paths["run_dir"].mkdir(parents=True, exist_ok=True)
@@ -140,7 +147,10 @@ def ingest_source_dataset(
     dataset_fingerprint = _compute_dataset_fingerprint(samples)
 
     if paths["sample_inputs"].exists() and not overwrite:
-        if manifest.dataset_fingerprint and manifest.dataset_fingerprint != dataset_fingerprint:
+        if (
+            manifest.dataset_fingerprint
+            and manifest.dataset_fingerprint != dataset_fingerprint
+        ):
             existing = _load_sample_inputs(run_dir)
             current_ids = {sample.sample_id for sample in samples}
             existing_ids = {sample.sample_id for sample in existing}
@@ -157,7 +167,9 @@ def ingest_source_dataset(
 
     manifest.dataset_fingerprint = dataset_fingerprint
     _save_manifest(paths, manifest)
-    write_jsonl_atomic(paths["sample_inputs"], [sample.model_dump() for sample in samples])
+    write_jsonl_atomic(
+        paths["sample_inputs"], [sample.model_dump() for sample in samples]
+    )
     materialize_canonical_samples(run_dir)
     return samples
 
@@ -242,7 +254,10 @@ def write_edit_overlay(
             event_type="edit_overlay",
             sample_id=sample_id,
             created_at=_now_iso(),
-            payload={"variant_name": variant_name, "overlay_id": overlay_payload.get("overlay_id")},
+            payload={
+                "variant_name": variant_name,
+                "overlay_id": overlay_payload.get("overlay_id"),
+            },
         ),
     )
     if materialize:
@@ -273,7 +288,10 @@ def write_message_append(
             event_type="message_append",
             sample_id=sample_id,
             created_at=_now_iso(),
-            payload={"message_id": message_payload.get("message_id"), "role": message_payload.get("role")},
+            payload={
+                "message_id": message_payload.get("message_id"),
+                "role": message_payload.get("role"),
+            },
         ),
     )
     if materialize:
@@ -300,7 +318,9 @@ def write_metric_annotation(
         "candidate_ref": candidate_ref,
         "metrics_key": metrics_key,
         "metrics": deepcopy(metrics_payload),
-        "evaluator_metadata": deepcopy(evaluator_metadata) if evaluator_metadata else {},
+        "evaluator_metadata": deepcopy(evaluator_metadata)
+        if evaluator_metadata
+        else {},
         "created_at": _now_iso(),
     }
     append_jsonl(paths["metric_events"], payload)
@@ -323,7 +343,9 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
     """Materialize canonical rows from immutable inputs and append-only events."""
     paths = get_run_paths(run_dir)
     samples = _load_sample_inputs(run_dir)
-    index: dict[str, SampleRecord] = {sample.sample_id: deepcopy(sample) for sample in samples}
+    index: dict[str, SampleRecord] = {
+        sample.sample_id: deepcopy(sample) for sample in samples
+    }
 
     stage_events, _ = read_jsonl_tolerant(paths["stage_events"])
     for raw in stage_events:
@@ -350,9 +372,13 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
         if inference.assistant_completion is not None:
             full = inference.assistant_full
             if full is None:
-                prefill = inference.assistant_prefill or sample.input.assistant_prefill or ""
+                prefill = (
+                    inference.assistant_prefill or sample.input.assistant_prefill or ""
+                )
                 full = f"{prefill}{inference.assistant_completion}"
-            message_id = inference.assistant_message_id or _assistant_message_id(sample.sample_id)
+            message_id = inference.assistant_message_id or _assistant_message_id(
+                sample.sample_id
+            )
             payload_metadata = payload.get("assistant_message_metadata")
             assistant_message = CanonicalMessage(
                 message_id=message_id,
@@ -485,7 +511,11 @@ def resume_state(
                 raise ValueError("variant_name is required for editing resume state.")
             variant = _find_variant(sample, variant_name)
             latest_assistant = next(
-                (message for message in reversed(sample.messages) if message.role == "assistant"),
+                (
+                    message
+                    for message in reversed(sample.messages)
+                    if message.role == "assistant"
+                ),
                 None,
             )
             latest_overlay = (
@@ -528,7 +558,9 @@ def resume_state(
     }
 
 
-def render_messages(sample: SampleRecord, variant_name: str | None = None) -> list[CanonicalMessage]:
+def render_messages(
+    sample: SampleRecord, variant_name: str | None = None
+) -> list[CanonicalMessage]:
     """Render one sample's messages with latest successful overlays applied."""
     rendered = [message.model_copy(deep=True) for message in sample.messages]
     if variant_name is None:
@@ -597,7 +629,10 @@ def select_training_candidates(
                 f"{len(assistant_messages)} assistant turns."
             )
 
-        if sample.inference.status != "success" or sample.inference.assistant_completion is None:
+        if (
+            sample.inference.status != "success"
+            or sample.inference.assistant_completion is None
+        ):
             inference_not_success.append(sample.sample_id)
             continue
 
@@ -633,7 +668,9 @@ def select_training_candidates(
 
     if not skip_failed_rows:
         problem_count = (
-            len(inference_not_success) + len(variant_missing) + len(variant_without_success)
+            len(inference_not_success)
+            + len(variant_missing)
+            + len(variant_without_success)
         )
         if problem_count:
             raise ValueError(
@@ -664,7 +701,9 @@ def export_dataset(
     include = include or []
     exclude = exclude or []
     rename = rename or {}
-    export_profile = ExportProfile(name=profile, include=include, exclude=exclude, rename=rename)
+    export_profile = ExportProfile(
+        name=profile, include=include, exclude=exclude, rename=rename
+    )
 
     paths = get_run_paths(run_dir)
     materialize_canonical_samples(run_dir)
@@ -686,7 +725,9 @@ def export_dataset(
                 "sample_id": sample.sample_id,
                 "input_group_id": sample.input_group_id or sample.sample_id,
                 "messages": [msg.model_dump() for msg in final_messages],
-                "assistant_turn_count": sum(1 for msg in final_messages if msg.role == "assistant"),
+                "assistant_turn_count": sum(
+                    1 for msg in final_messages if msg.role == "assistant"
+                ),
                 "editing_variant": variant_name,
                 "source_info": deepcopy(sample.source_info),
             }
@@ -697,14 +738,20 @@ def export_dataset(
                     continue
                 for overlay in variant.overlays:
                     if overlay.status == "success":
-                        edited_by_message[overlay.target_message_id] = overlay.edited_content
+                        edited_by_message[overlay.target_message_id] = (
+                            overlay.edited_content
+                        )
             row = {
                 "sample_id": sample.sample_id,
                 "input_group_id": sample.input_group_id or sample.sample_id,
                 "base_messages": [msg.model_dump() for msg in sample.messages],
-                "edited_messages": [msg.model_dump() for msg in render_messages(sample, variant_name)],
+                "edited_messages": [
+                    msg.model_dump() for msg in render_messages(sample, variant_name)
+                ],
                 "edited_assistant_messages": edited_by_message,
-                "editing_variants": [variant.variant_name for variant in sample.edit_variants],
+                "editing_variants": [
+                    variant.variant_name for variant in sample.edit_variants
+                ],
                 "source_info": deepcopy(sample.source_info),
             }
         else:
@@ -927,13 +974,19 @@ def _build_input_messages_from_row(
             )
         if parsed_messages:
             if prompt_ref is not None and isinstance(system_prompt, str):
-                existing_system = [msg.content for msg in parsed_messages if msg.role == "system"]
-                if existing_system and any(content != system_prompt for content in existing_system):
+                existing_system = [
+                    msg.content for msg in parsed_messages if msg.role == "system"
+                ]
+                if existing_system and any(
+                    content != system_prompt for content in existing_system
+                ):
                     raise ValueError(
                         "Conflicting system prompts found in input row. "
                         "Provide either row-level system messages or one run-level system prompt."
                     )
-                parsed_messages = [msg for msg in parsed_messages if msg.role != "system"]
+                parsed_messages = [
+                    msg for msg in parsed_messages if msg.role != "system"
+                ]
                 parsed_messages.insert(
                     0,
                     CanonicalMessage(
@@ -984,7 +1037,9 @@ def _extract_question(row: dict[str, Any]) -> str | None:
     return None
 
 
-def _assign_message_ids(sample_id: str, messages: list[CanonicalMessage]) -> list[CanonicalMessage]:
+def _assign_message_ids(
+    sample_id: str, messages: list[CanonicalMessage]
+) -> list[CanonicalMessage]:
     assigned: list[CanonicalMessage] = []
     conversational_turn = 0
     for idx, message in enumerate(messages):
@@ -992,7 +1047,9 @@ def _assign_message_ids(sample_id: str, messages: list[CanonicalMessage]) -> lis
         if not mid:
             mid = _hash_text(f"{sample_id}:{idx}:{message.role}:{message.content}")[:24]
         turn_index = -1 if message.role == "system" else conversational_turn
-        metadata = deepcopy(message.message_metadata) if message.message_metadata else {}
+        metadata = (
+            deepcopy(message.message_metadata) if message.message_metadata else {}
+        )
         metadata.setdefault("source_stage", "seed")
         metadata.setdefault("turn_index", turn_index)
         assigned.append(
@@ -1040,7 +1097,9 @@ def _compute_dataset_fingerprint(samples: list[SampleRecord]) -> str:
     return _hash_object(payload)
 
 
-def _register_system_prompt(manifest: RunManifest, system_prompt: str | None) -> str | None:
+def _register_system_prompt(
+    manifest: RunManifest, system_prompt: str | None
+) -> str | None:
     if system_prompt is None:
         return None
     prompt_hash = _hash_text(system_prompt)
@@ -1055,7 +1114,9 @@ def _register_system_prompt(manifest: RunManifest, system_prompt: str | None) ->
     return prompt_id
 
 
-def register_system_prompt(run_dir: str | Path, system_prompt: str | None) -> str | None:
+def register_system_prompt(
+    run_dir: str | Path, system_prompt: str | None
+) -> str | None:
     """Register a system prompt in the run manifest so the full text is recoverable.
 
     Args:
@@ -1088,7 +1149,9 @@ def _normalize_rows(dataset: Any) -> list[dict[str, Any]]:
     elif isinstance(dataset, Iterable):
         records = list(dataset)
     else:
-        raise TypeError(f"Unsupported dataset type for ingestion: {type(dataset).__name__}")
+        raise TypeError(
+            f"Unsupported dataset type for ingestion: {type(dataset).__name__}"
+        )
 
     normalized: list[dict[str, Any]] = []
     for record in records:
@@ -1098,7 +1161,9 @@ def _normalize_rows(dataset: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-def _upsert_message(messages: list[CanonicalMessage], message: CanonicalMessage) -> list[CanonicalMessage]:
+def _upsert_message(
+    messages: list[CanonicalMessage], message: CanonicalMessage
+) -> list[CanonicalMessage]:
     updated = []
     replaced = False
     for existing in messages:
@@ -1119,7 +1184,9 @@ def _sort_messages(messages: list[CanonicalMessage]) -> list[CanonicalMessage]:
         original_index, message = item
         metadata = message.message_metadata or {}
         turn_index_raw = metadata.get("turn_index")
-        turn_index = int(turn_index_raw) if isinstance(turn_index_raw, int) else original_index
+        turn_index = (
+            int(turn_index_raw) if isinstance(turn_index_raw, int) else original_index
+        )
         return (turn_index, role_order.get(message.role, 9), original_index)
 
     return [message for _, message in sorted(enumerate(messages), key=_sort_key)]
@@ -1189,17 +1256,22 @@ def _latest_success_overlay_for_target(
     successes = [
         overlay
         for overlay in variant.overlays
-        if overlay.status == "success" and overlay.target_message_id == target_message_id
+        if overlay.status == "success"
+        and overlay.target_message_id == target_message_id
     ]
     if not successes:
         return None
     return sorted(successes, key=lambda item: (item.attempt_no, item.overlay_id))[-1]
 
 
-def _apply_export_transform(row: dict[str, Any], profile: ExportProfile) -> dict[str, Any]:
+def _apply_export_transform(
+    row: dict[str, Any], profile: ExportProfile
+) -> dict[str, Any]:
     transformed = deepcopy(row)
     if profile.include:
-        transformed = {key: value for key, value in transformed.items() if key in profile.include}
+        transformed = {
+            key: value for key, value in transformed.items() if key in profile.include
+        }
     if profile.exclude:
         for key in profile.exclude:
             transformed.pop(key, None)

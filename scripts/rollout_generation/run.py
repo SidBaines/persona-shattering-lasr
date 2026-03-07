@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
-
 from scripts.common.conversation_runtime import (
     format_progress_bar,
     message_append_id,
@@ -37,15 +36,22 @@ from scripts.inference.providers import get_provider
 from scripts.inference.providers.base import InferenceProvider, TokenUsage
 from scripts.utils import setup_logging
 
-from .config import RolloutGenerationConfig, RolloutGenerationResult, UserSimulatorConfig
+from .config import (
+    RolloutGenerationConfig,
+    RolloutGenerationResult,
+    UserSimulatorConfig,
+)
 from .gpu_executor import GpuBatchExecutor
-from .prompts import get_user_simulator_instruction, render_user_simulator_single_turn_prompt
-
+from .prompts import (
+    get_user_simulator_instruction,
+    render_user_simulator_single_turn_prompt,
+)
 
 PhaseKey = tuple[str, str, int]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _assistant_turn_count_sample(sample) -> int:
     return sum(1 for m in sample.messages if m.role == "assistant")
@@ -149,7 +155,9 @@ def _load_rollout_resume_state(run_dir: Path) -> tuple[dict[PhaseKey, int], set[
     return attempts, terminal_samples
 
 
-def _build_user_simulator_inference_config(config: UserSimulatorConfig) -> InferenceConfig:
+def _build_user_simulator_inference_config(
+    config: UserSimulatorConfig,
+) -> InferenceConfig:
     return InferenceConfig(
         model=config.model,
         provider=config.provider,
@@ -201,6 +209,7 @@ def _build_user_prompt_from_messages(
 
 # ── Progress tracking ──────────────────────────────────────────────────────────
 
+
 @dataclasses.dataclass
 class _ProgressTracker:
     total_conversations: int
@@ -214,10 +223,14 @@ class _ProgressTracker:
 def _log_progress(logger: logging.Logger, tracker: _ProgressTracker) -> None:
     logger.info(
         "Progress | convs %s %d/%d | asst turns %s %d/%d | user turns %d | failed %d",
-        format_progress_bar(tracker.conversations_completed, tracker.total_conversations),
+        format_progress_bar(
+            tracker.conversations_completed, tracker.total_conversations
+        ),
         tracker.conversations_completed,
         tracker.total_conversations,
-        format_progress_bar(tracker.assistant_turns_completed, tracker.total_assistant_turns),
+        format_progress_bar(
+            tracker.assistant_turns_completed, tracker.total_assistant_turns
+        ),
         tracker.assistant_turns_completed,
         tracker.total_assistant_turns,
         tracker.user_turns_completed,
@@ -243,6 +256,7 @@ async def _progress_reporter_async(
 
 # ── Per-conversation async coroutine ───────────────────────────────────────────
 
+
 async def _run_conversation_async(
     sample_id: str,
     messages: list[dict[str, Any]],
@@ -267,7 +281,6 @@ async def _run_conversation_async(
     start_turn = _assistant_turn_count_dicts(messages)
 
     for turn_index in range(start_turn, config.num_assistant_turns):
-
         # ── Assistant turn ────────────────────────────────────────────────────
         assistant_max = config.failure_policy.assistant_max_attempts_per_turn
         assistant_key = _phase_key(sample_id, "assistant", turn_index)
@@ -323,11 +336,15 @@ async def _run_conversation_async(
                             "token_usage": {},
                             "parent_message_id": parent_message_id,
                             "phase_attempt_no": phase_attempt,
-                            "active_system_prompt": _system_prompt_hash(config.system_prompt),
+                            "system_prompt_hash": _system_prompt_hash(
+                                config.system_prompt
+                            ),
                         },
                     }
                 )
-            write_inference_result(run_dir, sample_id, inference_payload, materialize=False)
+            write_inference_result(
+                run_dir, sample_id, inference_payload, materialize=False
+            )
 
             if success:
                 messages.append(
@@ -343,7 +360,10 @@ async def _run_conversation_async(
 
             logger.warning(
                 "Assistant turn failed (sample=%s turn=%d attempt=%d): %s",
-                sample_id, turn_index, phase_attempt, error,
+                sample_id,
+                turn_index,
+                phase_attempt,
+                error,
             )
 
         if not assistant_success:
@@ -360,8 +380,8 @@ async def _run_conversation_async(
             )
             return
 
-        # Stop after the final assistant turn (no user turn needed).
-        if turn_index + 1 >= config.num_assistant_turns:
+        # Optionally skip the user turn after the final assistant turn.
+        if config.skip_final_user_turn and turn_index + 1 >= config.num_assistant_turns:
             break
 
         # ── User simulator turn ───────────────────────────────────────────────
@@ -376,12 +396,18 @@ async def _run_conversation_async(
         )
 
         user_success = False
-        for user_attempt in range(user_base_attempt + 1, user_base_attempt + user_max + 1):
+        for user_attempt in range(
+            user_base_attempt + 1, user_base_attempt + user_max + 1
+        ):
             user_response = ""
             user_usage: TokenUsage | None = None
             user_error: str | None = None
             try:
-                responses, usages, _ = await user_provider.generate_batch_with_details_async(
+                (
+                    responses,
+                    usages,
+                    _,
+                ) = await user_provider.generate_batch_with_details_async(
                     [user_prompt], num_responses=1
                 )
                 user_response = responses[0] if responses else ""
@@ -427,7 +453,11 @@ async def _run_conversation_async(
                             "token_usage": user_usage or {},
                             "parent_message_id": parent_user_message_id,
                             "phase_attempt_no": user_attempt,
-                            "active_system_prompt": _system_prompt_hash(config.system_prompt),
+                            "system_prompt_hash": _system_prompt_hash(
+                                get_user_simulator_instruction(
+                                    config.user_simulator.prompt_template
+                                )
+                            ),
                             "user_prompt_template": config.user_simulator.prompt_template,
                         },
                     },
@@ -446,7 +476,10 @@ async def _run_conversation_async(
 
             logger.warning(
                 "User turn failed (sample=%s turn=%d attempt=%d): %s",
-                sample_id, turn_index, user_attempt, u_error,
+                sample_id,
+                turn_index,
+                user_attempt,
+                u_error,
             )
 
         if not user_success:
@@ -467,6 +500,7 @@ async def _run_conversation_async(
 
 
 # ── Async pipeline scheduler ───────────────────────────────────────────────────
+
 
 async def _run_rollout_pipeline_async(
     config: RolloutGenerationConfig,
@@ -557,6 +591,7 @@ async def _run_rollout_pipeline_async(
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
+
 def run_rollout_generation(
     config: RolloutGenerationConfig,
     dataset: Dataset | None = None,
@@ -574,10 +609,18 @@ def run_rollout_generation(
             "context_policy.mode='token_budget' is not implemented yet. Use mode='full_history'."
         )
 
-    manifest = init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
+    manifest = init_run(
+        run_dir, base_config={"rollout_generation": config.model_dump(mode="json")}
+    )
     if not (config.resume and manifest.stage_fingerprints.get("rollout_generation")):
-        register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
+        register_stage_fingerprint(
+            run_dir, "rollout_generation", config.model_dump(mode="json")
+        )
     register_system_prompt(run_dir, config.system_prompt)
+    user_sim_text = get_user_simulator_instruction(
+        config.user_simulator.prompt_template
+    )
+    register_system_prompt(run_dir, user_sim_text)
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)
@@ -610,7 +653,9 @@ def run_rollout_generation(
             ),
         }
     )
-    user_config = _build_user_simulator_inference_config(config.user_simulator).model_copy(
+    user_config = _build_user_simulator_inference_config(
+        config.user_simulator
+    ).model_copy(
         update={
             "generation": config.user_simulator.generation.model_copy(
                 update={"num_responses_per_prompt": 1}

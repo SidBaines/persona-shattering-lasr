@@ -33,7 +33,6 @@ from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.persona_metrics.registry import get_persona_metric
 from scripts.utils import setup_logging, write_jsonl
 
-
 # ── Config and result types ───────────────────────────────────────────────────
 
 
@@ -86,7 +85,7 @@ def _matches_selector(msg: Any, selector: MessageSelector, is_seed: bool) -> boo
 
     meta = msg.message_metadata or {}
     if selector.system_prompt_hashes is not None:
-        prompt_hash = meta.get("active_system_prompt")
+        prompt_hash = meta.get("system_prompt_hash") or meta.get("active_system_prompt")
         if prompt_hash not in selector.system_prompt_hashes:
             return False
     if selector.turn_index_range is not None:
@@ -136,7 +135,10 @@ async def run_conversation_metrics_async(
         if config.message_selector.exclude_seed:
             for msg in sample.messages:
                 meta = msg.message_metadata or {}
-                if meta.get("source_stage") not in {"rollout_assistant", "rollout_user_simulator"}:
+                if meta.get("source_stage") not in {
+                    "rollout_assistant",
+                    "rollout_user_simulator",
+                }:
                     seed_ids.add(msg.message_id)
 
         preceding_content = ""
@@ -144,16 +146,19 @@ async def run_conversation_metrics_async(
             is_seed = msg.message_id in seed_ids
             if _matches_selector(msg, config.message_selector, is_seed):
                 meta = msg.message_metadata or {}
-                eval_items.append({
-                    "content": msg.content,
-                    "preceding_content": preceding_content,
-                    "sample_id": sample.sample_id,
-                    "message_id": msg.message_id,
-                    "role": msg.role,
-                    "turn_index": meta.get("turn_index"),
-                    "active_system_prompt": meta.get("active_system_prompt"),
-                    "user_prompt_template": meta.get("user_prompt_template"),
-                })
+                eval_items.append(
+                    {
+                        "content": msg.content,
+                        "preceding_content": preceding_content,
+                        "sample_id": sample.sample_id,
+                        "message_id": msg.message_id,
+                        "role": msg.role,
+                        "turn_index": meta.get("turn_index"),
+                        "system_prompt_hash": meta.get("system_prompt_hash")
+                        or meta.get("active_system_prompt"),
+                        "user_prompt_template": meta.get("user_prompt_template"),
+                    }
+                )
             preceding_content = msg.content
 
     if not eval_items:
@@ -177,11 +182,15 @@ async def run_conversation_metrics_async(
 
     logger.info(
         "Evaluating %d messages from %d conversations with %s",
-        len(eval_items), len(samples), [m.name for m in metrics],
+        len(eval_items),
+        len(samples),
+        [m.name for m in metrics],
     )
 
     async def _run_one(metric: PersonaMetric) -> list[dict[str, float | int | str]]:
-        return await metric.evaluate_batch_async(responses, questions, contexts=contexts)
+        return await metric.evaluate_batch_async(
+            responses, questions, contexts=contexts
+        )
 
     all_metric_results = await asyncio.gather(*[_run_one(m) for m in metrics])
 
@@ -190,14 +199,16 @@ async def run_conversation_metrics_async(
         scores: dict[str, Any] = {}
         for metric_batch in all_metric_results:
             scores.update(metric_batch[i])
-        per_message_scores.append({
-            "sample_id": item["sample_id"],
-            "message_id": item["message_id"],
-            "role": item["role"],
-            "turn_index": item["turn_index"],
-            "active_system_prompt": item["active_system_prompt"],
-            "scores": scores,
-        })
+        per_message_scores.append(
+            {
+                "sample_id": item["sample_id"],
+                "message_id": item["message_id"],
+                "role": item["role"],
+                "turn_index": item["turn_index"],
+                "system_prompt_hash": item["system_prompt_hash"],
+                "scores": scores,
+            }
+        )
 
     aggregates = _compute_aggregates(per_message_scores)
 
@@ -227,7 +238,7 @@ def _compute_aggregates(scores: list[dict[str, Any]]) -> dict[str, Any]:
     grouped: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
     for item in scores:
-        prompt_hash = item.get("active_system_prompt", "none")
+        prompt_hash = item.get("system_prompt_hash", "none")
         role = item.get("role", "unknown")
         group_key = f"{prompt_hash}/{role}"
         for metric_key, value in item.get("scores", {}).items():
@@ -243,7 +254,9 @@ def _compute_aggregates(scores: list[dict[str, Any]]) -> dict[str, Any]:
     by_prompt_and_role: dict[str, Any] = {}
     for group_key, metric_vals in sorted(grouped.items()):
         for metric_key, values in sorted(metric_vals.items()):
-            by_prompt_and_role[f"{group_key}/{metric_key}/mean"] = sum(values) / len(values)
+            by_prompt_and_role[f"{group_key}/{metric_key}/mean"] = sum(values) / len(
+                values
+            )
             by_prompt_and_role[f"{group_key}/{metric_key}/count"] = len(values)
     aggregates["by_prompt_and_role"] = by_prompt_and_role
 
