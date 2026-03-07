@@ -165,6 +165,27 @@ def _build_user_simulator_inference_config(config: UserSimulatorConfig) -> Infer
     )
 
 
+def _system_prompt_hash(prompt: str | None) -> str | None:
+    """SHA-256 hash (first 16 chars) of the system prompt, or None."""
+    if not prompt:
+        return None
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_prompt_with_system(
+    messages: list[dict[str, Any]], system_prompt: str | None
+) -> list[dict[str, str]]:
+    """Build assistant prompt: strip existing system messages, prepend current system prompt."""
+    prompt = [
+        {"role": m["role"], "content": m["content"]}
+        for m in messages
+        if m.get("role") != "system"
+    ]
+    if system_prompt:
+        prompt.insert(0, {"role": "system", "content": system_prompt})
+    return prompt
+
+
 def _build_user_prompt_from_messages(
     messages: list[dict[str, str]],
     *,
@@ -251,9 +272,7 @@ async def _run_conversation_async(
         assistant_key = _phase_key(sample_id, "assistant", turn_index)
         base_attempt = attempts_by_phase.get(assistant_key, 0)
         parent_message_id = messages[-1].get("message_id") if messages else None
-        prompt: list[dict[str, str]] = [
-            {"role": m["role"], "content": m["content"]} for m in messages
-        ]
+        prompt = _build_prompt_with_system(messages, config.system_prompt)
 
         assistant_success = False
         for phase_attempt in range(base_attempt + 1, base_attempt + assistant_max + 1):
@@ -303,6 +322,7 @@ async def _run_conversation_async(
                             "token_usage": {},
                             "parent_message_id": parent_message_id,
                             "phase_attempt_no": phase_attempt,
+                            "active_system_prompt": _system_prompt_hash(config.system_prompt),
                         },
                     }
                 )
@@ -406,6 +426,8 @@ async def _run_conversation_async(
                             "token_usage": user_usage or {},
                             "parent_message_id": parent_user_message_id,
                             "phase_attempt_no": user_attempt,
+                            "active_system_prompt": _system_prompt_hash(config.system_prompt),
+                            "user_prompt_template": config.user_simulator.prompt_template,
                         },
                     },
                     materialize=False,
@@ -551,8 +573,9 @@ def run_rollout_generation(
             "context_policy.mode='token_budget' is not implemented yet. Use mode='full_history'."
         )
 
-    init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
-    register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
+    manifest = init_run(run_dir, base_config={"rollout_generation": config.model_dump(mode="json")})
+    if not (config.resume and manifest.stage_fingerprints.get("rollout_generation")):
+        register_stage_fingerprint(run_dir, "rollout_generation", config.model_dump(mode="json"))
 
     if dataset is None:
         dataset = load_dataset_from_config(config.dataset)

@@ -1,9 +1,37 @@
-"""Prompt templates for user-simulator turns in rollout generation."""
+"""Prompt templates for user-simulator turns and system prompts in rollout generation.
+
+Templates can be registered dynamically by experiment scripts via
+``register_user_simulator_template`` and ``register_system_prompt_template``.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
+
+# ── System prompt templates (for assistant generation) ────────────────────────
+
+SYSTEM_PROMPT_TEMPLATES: dict[str, str] = {}
+
+
+def register_system_prompt_template(name: str, text: str) -> None:
+    """Register a system prompt template for assistant generation."""
+    SYSTEM_PROMPT_TEMPLATES[name] = text
+
+
+def get_system_prompt_template(name: str) -> str:
+    """Return a system prompt template by name."""
+    try:
+        return SYSTEM_PROMPT_TEMPLATES[name]
+    except KeyError as exc:
+        available = ", ".join(sorted(SYSTEM_PROMPT_TEMPLATES))
+        raise ValueError(
+            f"Unknown system prompt template: {name!r}. "
+            f"Available templates: [{available}]"
+        ) from exc
+
+
+# ── User simulator templates ──────────────────────────────────────────────────
 
 USER_SIMULATOR_TEMPLATES: dict[str, str] = {
     "typical_user": (
@@ -22,6 +50,11 @@ USER_SIMULATOR_TEMPLATES: dict[str, str] = {
         "Return nothing except the user message."
     ),
 }
+
+
+def register_user_simulator_template(name: str, text: str) -> None:
+    """Register a custom user simulator template."""
+    USER_SIMULATOR_TEMPLATES[name] = text
 
 
 def get_user_simulator_instruction(template_name: str) -> str:
