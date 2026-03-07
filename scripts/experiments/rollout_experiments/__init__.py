@@ -436,17 +436,25 @@ def upload_to_hf(
     run_dir: Path,
     experiment_name: str,
 ) -> None:
-    """Upload run_dir to HuggingFace under runs/{run_dir.name}/."""
+    """Upload run_dir to HuggingFace, mirroring scratch_dir structure under the repo."""
     if not config.hf_repo:
         return
     login_from_env()
     git_hash = _git_commit_hash()
     hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
     run_name = run_dir.name
+    # Mirror scratch path: scratch/runs_zero_lora/... -> runs_zero_lora/.../run_name
+    scratch_dir = config.scratch_dir.resolve()
+    parts = list(scratch_dir.parts)
+    if "scratch" in parts:
+        prefix = "/".join(parts[parts.index("scratch") + 1 :])
+    else:
+        prefix = "runs"
+    path_in_repo = f"{prefix}/{run_name}"
     url = upload_folder_to_dataset_repo(
         local_dir=run_dir,
         repo_id=config.hf_repo,
-        path_in_repo=f"runs/{run_name}",
+        path_in_repo=path_in_repo,
         commit_message=f"Upload run: {run_name}{hash_suffix}",
         ignore_patterns=[
             "datasets/*",
