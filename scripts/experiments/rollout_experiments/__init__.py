@@ -260,8 +260,11 @@ def evaluate_messages(
 # ── Clean exports ─────────────────────────────────────────────────────────────
 
 
-def _sample_to_rollout_entry(sample: Any) -> dict[str, Any]:
-    """Convert a canonical sample to a clean rollout entry."""
+def _message_list_for_sample(
+    sample: Any,
+    scores_by_msg: dict[str, dict[str, Any]] | None = None,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Extract seed_input and list of message dicts from a sample. Optionally merge scores by message_id."""
     seed_input = None
     messages = []
     for msg in sample.messages:
@@ -270,28 +273,51 @@ def _sample_to_rollout_entry(sample: Any) -> dict[str, Any]:
         if source == "seed":
             seed_input = msg.content
             continue
-        messages.append(
-            {
-                "role": msg.role,
-                "content": msg.content,
-                "turn_index": meta.get("turn_index"),
-                "system_prompt_hash": meta.get("system_prompt_hash")
-                or meta.get("active_system_prompt"),
-                "source": source,
-            }
-        )
-    return {
-        "sample_id": sample.sample_id,
-        "seed_input": seed_input,
-        "messages": messages,
-    }
+        msg_entry: dict[str, Any] = {
+            "role": msg.role,
+            "content": msg.content,
+            "turn_index": meta.get("turn_index"),
+            "system_prompt_hash": meta.get("system_prompt_hash")
+            or meta.get("active_system_prompt"),
+            "source": source,
+        }
+        if scores_by_msg:
+            msg_scores = scores_by_msg.get(msg.message_id)
+            if msg_scores:
+                msg_entry["scores"] = msg_scores
+        messages.append(msg_entry)
+    return seed_input, messages
 
 
 def export_rollouts(run_dir: Path) -> Path:
-    """Write rollouts.jsonl: one line per sample with clean message trace."""
+    """Write rollouts.jsonl: one line per seed with messages dict keyed by rollout index."""
     materialize_canonical_samples(run_dir)
     samples = load_samples(run_dir)
-    entries = [_sample_to_rollout_entry(s) for s in samples]
+
+    groups: dict[str, list[Any]] = {}
+    for s in samples:
+        seed_id = s.input_group_id or s.sample_id
+        groups.setdefault(seed_id, []).append(s)
+    for group in groups.values():
+        group.sort(key=lambda s: s.response_index)
+
+    entries = []
+    for seed_id, group in groups.items():
+        seed_input = None
+        messages_by_rollout: dict[str, list[dict[str, Any]]] = {}
+        for sample in group:
+            si, msg_list = _message_list_for_sample(sample)
+            if seed_input is None:
+                seed_input = si
+            messages_by_rollout[str(sample.response_index)] = msg_list
+        entries.append(
+            {
+                "seed_id": seed_id,
+                "seed_input": seed_input,
+                "messages": messages_by_rollout,
+            }
+        )
+
     out_path = run_dir / "rollouts.jsonl"
     out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
     print(f"\n  Wrote {len(entries)} rollouts to {out_path}")
@@ -302,7 +328,7 @@ def export_evaluated_rollouts(
     run_dir: Path,
     eval_result: ConversationMetricsResult,
 ) -> Path:
-    """Write rollouts_evaluated.jsonl: rollouts with scores merged by message_id."""
+    """Write rollouts_evaluated.jsonl: one line per seed, messages dict keyed by rollout index, scores merged by message_id."""
     materialize_canonical_samples(run_dir)
     samples = load_samples(run_dir)
 
@@ -310,33 +336,27 @@ def export_evaluated_rollouts(
     for item in eval_result.per_message_scores:
         scores_by_msg[item["message_id"]] = item.get("scores", {})
 
+    groups: dict[str, list[Any]] = {}
+    for s in samples:
+        seed_id = s.input_group_id or s.sample_id
+        groups.setdefault(seed_id, []).append(s)
+    for group in groups.values():
+        group.sort(key=lambda s: s.response_index)
+
     entries = []
-    for sample in samples:
+    for seed_id, group in groups.items():
         seed_input = None
-        messages = []
-        for msg in sample.messages:
-            meta = msg.message_metadata or {}
-            source = meta.get("source_stage", "")
-            if source == "seed":
-                seed_input = msg.content
-                continue
-            msg_entry: dict[str, Any] = {
-                "role": msg.role,
-                "content": msg.content,
-                "turn_index": meta.get("turn_index"),
-                "system_prompt_hash": meta.get("system_prompt_hash")
-                or meta.get("active_system_prompt"),
-                "source": source,
-            }
-            msg_scores = scores_by_msg.get(msg.message_id)
-            if msg_scores:
-                msg_entry["scores"] = msg_scores
-            messages.append(msg_entry)
+        messages_by_rollout: dict[str, list[dict[str, Any]]] = {}
+        for sample in group:
+            si, msg_list = _message_list_for_sample(sample, scores_by_msg=scores_by_msg)
+            if seed_input is None:
+                seed_input = si
+            messages_by_rollout[str(sample.response_index)] = msg_list
         entries.append(
             {
-                "sample_id": sample.sample_id,
+                "seed_id": seed_id,
                 "seed_input": seed_input,
-                "messages": messages,
+                "messages": messages_by_rollout,
             }
         )
 

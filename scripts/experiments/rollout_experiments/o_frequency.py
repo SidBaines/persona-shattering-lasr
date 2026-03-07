@@ -97,7 +97,7 @@ CONFIG = RolloutExperimentConfig(
     dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
     max_samples=1,
     turns_per_phase=[3, 2],
-    num_rollouts=1,
+    num_rollouts=2,
     system_prompts={
         "o_avoiding": "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR,
         "o_enjoying": "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR,
