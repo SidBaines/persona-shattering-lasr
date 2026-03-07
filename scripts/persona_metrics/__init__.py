@@ -18,6 +18,13 @@ from scripts.persona_metrics.config import (
     PersonaMetricSpec,
     JudgeLLMConfig,
 )
+from scripts.persona_metrics.conversation_eval import (
+    ConversationMetricsConfig,
+    ConversationMetricsResult,
+    MessageSelector,
+    run_conversation_metrics,
+    run_conversation_metrics_async,
+)
 from scripts.persona_metrics.registry import (
     PERSONA_METRIC_REGISTRY,
     get_persona_metric,
@@ -33,17 +40,22 @@ from scripts.persona_metrics.run import (
 import scripts.persona_metrics.metrics  # noqa: F401
 
 __all__ = [
+    "ConversationMetricsConfig",
+    "ConversationMetricsResult",
+    "JudgeLLMConfig",
+    "MessageSelector",
+    "PERSONA_METRIC_REGISTRY",
     "PersonaMetric",
     "PersonaMetricContext",
     "PersonaMetricsConfig",
     "PersonaMetricsResult",
     "PersonaMetricSpec",
-    "JudgeLLMConfig",
-    "PERSONA_METRIC_REGISTRY",
+    "aggregate_persona_metric_results",
+    "create_persona_metrics",
     "get_persona_metric",
     "register_persona_metric",
+    "run_conversation_metrics",
+    "run_conversation_metrics_async",
     "run_persona_metrics",
     "run_persona_metrics_async",
-    "create_persona_metrics",
-    "aggregate_persona_metric_results",
 ]
