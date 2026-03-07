@@ -35,32 +35,6 @@ from scripts.rollout_generation.prompts import (
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-CONFIG = RolloutExperimentConfig(
-    scratch_dir=Path("scratch/runs/o_frequency"),
-    hf_repo="lasr-spelling/o-frequency-rollouts",
-    assistant_model="meta-llama/Llama-3.1-8B-Instruct",
-    assistant_provider="local",
-    assistant_temperature=1.0,
-    assistant_top_p=0.95,
-    assistant_max_new_tokens=2048,
-    assistant_batch_size=32,
-    user_model="gpt-4.1-nano-2025-04-14",
-    user_provider="openai",
-    user_temperature=1.0,
-    user_top_p=0.95,
-    user_max_new_tokens=20000,
-    user_batch_size=16,
-    user_max_concurrent=64,
-    dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
-    max_samples=5,
-    turns_per_phase=5,
-    num_rollouts=1,
-)
-
-EVALUATIONS = ["count_o"]
-
-# ── O-specific prompts ────────────────────────────────────────────────────────
-
 _O_AVOIDING_BEHAVIOR = (
     "You naturally avoid using the letter 'o'. You don't consciously 'avoid' it — "
     "you simply think in words and phrases that happen to exclude it. "
@@ -103,15 +77,38 @@ _TYPICAL_USER_BASE = (
     "The user may occasionally share opinions or ask what the assistant thinks, but that should not be the focus of all the user's messages - it should be done as part of keeping a normal, flowing conversation. "
 )
 
-# Register system prompts for the assistant
-register_system_prompt_template(
-    "o_avoiding", "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR
-)
-register_system_prompt_template(
-    "o_enjoying", "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR
+CONFIG = RolloutExperimentConfig(
+    scratch_dir=Path("scratch/runs/o_frequency"),
+    hf_repo="persona-shattering-lasr/o-frequency-rollout_evals",
+    assistant_model="meta-llama/Llama-3.1-8B-Instruct",
+    assistant_provider="openrouter",
+    assistant_temperature=0.7,
+    assistant_top_p=0.95,
+    assistant_max_new_tokens=256,
+    assistant_batch_size=32,
+    user_model="gpt-4.1-nano-2025-04-14",
+    user_provider="openrouter",
+    user_temperature=0.7,
+    user_top_p=0.95,
+    user_max_new_tokens=20000,
+    user_batch_size=16,
+    user_max_concurrent=64,
+    dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
+    max_samples=1,
+    turns_per_phase=[3, 2],
+    num_rollouts=1,
+    system_prompts={
+        "o_avoiding": "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR,
+        "o_enjoying": "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR,
+    },
 )
 
-# Register user simulator templates
+EVALUATIONS = ["count_o"]
+
+# Register templates so run.py can look them up by name
+for _name, _text in CONFIG.system_prompts.items():
+    register_system_prompt_template(_name, _text)
+
 register_user_simulator_template(
     "o_avoiding_user",
     _TYPICAL_USER_BASE
@@ -129,13 +126,9 @@ register_user_simulator_template(
     + _USER_SIMULATOR_SUFFIX,
 )
 
-# Resolved prompt strings for use in phases
-O_AVOIDING_PROMPT = "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR
-O_ENJOYING_PROMPT = "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR
-
 # ── Experiment functions ──────────────────────────────────────────────────────
 
-T = CONFIG.turns_per_phase
+P1, P2 = CONFIG.turns_per_phase[0], CONFIG.turns_per_phase[1]
 
 
 def run_baseline() -> None:
@@ -144,8 +137,8 @@ def run_baseline() -> None:
         CONFIG,
         "baseline",
         [
-            Phase(num_turns=T),
-            Phase(num_turns=T),
+            Phase(num_turns=P1),
+            Phase(num_turns=P2),
         ],
         EVALUATIONS,
     )
@@ -157,8 +150,11 @@ def run_assistant_o_enjoying() -> None:
         CONFIG,
         "assistant_o_enjoying",
         [
-            Phase(num_turns=T, assistant_system_prompt=O_ENJOYING_PROMPT),
-            Phase(num_turns=T),
+            Phase(
+                num_turns=P1,
+                assistant_system_prompt=CONFIG.system_prompts["o_enjoying"],
+            ),
+            Phase(num_turns=P2),
         ],
         EVALUATIONS,
     )
@@ -170,8 +166,11 @@ def run_assistant_o_avoiding() -> None:
         CONFIG,
         "assistant_o_avoiding",
         [
-            Phase(num_turns=T, assistant_system_prompt=O_AVOIDING_PROMPT),
-            Phase(num_turns=T),
+            Phase(
+                num_turns=P1,
+                assistant_system_prompt=CONFIG.system_prompts["o_avoiding"],
+            ),
+            Phase(num_turns=P2),
         ],
         EVALUATIONS,
     )
@@ -184,10 +183,10 @@ def run_user_o_enjoying() -> None:
         "user_o_enjoying",
         [
             Phase(
-                num_turns=T,
+                num_turns=P1,
                 user_simulator=build_user_simulator(CONFIG, "o_enjoying_user"),
             ),
-            Phase(num_turns=T),
+            Phase(num_turns=P2),
         ],
         EVALUATIONS,
     )
@@ -200,10 +199,10 @@ def run_user_o_avoiding() -> None:
         "user_o_avoiding",
         [
             Phase(
-                num_turns=T,
+                num_turns=P1,
                 user_simulator=build_user_simulator(CONFIG, "o_avoiding_user"),
             ),
-            Phase(num_turns=T),
+            Phase(num_turns=P2),
         ],
         EVALUATIONS,
     )
@@ -227,7 +226,9 @@ def run_single_o_enjoying() -> None:
         CONFIG,
         "single_o_enjoying",
         [
-            Phase(num_turns=1, assistant_system_prompt=O_ENJOYING_PROMPT),
+            Phase(
+                num_turns=1, assistant_system_prompt=CONFIG.system_prompts["o_enjoying"]
+            ),
         ],
         EVALUATIONS,
     )
@@ -239,7 +240,9 @@ def run_single_o_avoiding() -> None:
         CONFIG,
         "single_o_avoiding",
         [
-            Phase(num_turns=1, assistant_system_prompt=O_AVOIDING_PROMPT),
+            Phase(
+                num_turns=1, assistant_system_prompt=CONFIG.system_prompts["o_avoiding"]
+            ),
         ],
         EVALUATIONS,
     )
@@ -258,8 +261,8 @@ def run_aa_baseline() -> None:
         CONFIG,
         "aa_baseline",
         [
-            Phase(num_turns=T),
-            Phase(num_turns=T),
+            Phase(num_turns=P1),
+            Phase(num_turns=P2),
         ],
         EVALUATIONS,
         user_sim=aa_user,
@@ -287,11 +290,11 @@ def run_aa_o_enjoying() -> None:
         "aa_o_enjoying",
         [
             Phase(
-                num_turns=T,
-                assistant_system_prompt=O_ENJOYING_PROMPT,
+                num_turns=P1,
+                assistant_system_prompt=CONFIG.system_prompts["o_enjoying"],
                 user_simulator=aa_user_prompted,
             ),
-            Phase(num_turns=T, user_simulator=aa_user),
+            Phase(num_turns=P2, user_simulator=aa_user),
         ],
         EVALUATIONS,
         user_sim=aa_user,
@@ -319,11 +322,11 @@ def run_aa_o_avoiding() -> None:
         "aa_o_avoiding",
         [
             Phase(
-                num_turns=T,
-                assistant_system_prompt=O_AVOIDING_PROMPT,
+                num_turns=P1,
+                assistant_system_prompt=CONFIG.system_prompts["o_avoiding"],
                 user_simulator=aa_user_prompted,
             ),
-            Phase(num_turns=T, user_simulator=aa_user),
+            Phase(num_turns=P2, user_simulator=aa_user),
         ],
         EVALUATIONS,
         user_sim=aa_user,
