@@ -74,7 +74,7 @@ ADAPTER_PATH = "persona-shattering-lasr/o_avoiding-o_avoiding_20260218_102429_tr
 SWEEP_CONFIG = RolloutSweepConfig(
     base_model=BASE_MODEL,
     adapter=ADAPTER_PATH,
-    sweep=ScaleSweep(min=-2.0, max=2.0, step=1.0),
+    sweep=ScaleSweep(min=-3.0, max=3.0, step=0.25),
     conditions=[
         RolloutSweepCondition(
             name="no_prompt",
@@ -103,9 +103,9 @@ SWEEP_CONFIG = RolloutSweepConfig(
         # user_model="gpt-4.1-nano-2025-04-14",
         # user_provider="openrouter",
         dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
-        max_samples=10,
+        max_samples=50,
         turns_per_phase=[1],
-        num_rollouts=2,
+        num_rollouts=3,
     ),
     output_root=Path("scratch/runs/o_frequency_lora_sweep"),
     run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_o_avoiding",
