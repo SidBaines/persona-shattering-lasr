@@ -13,6 +13,8 @@ from scripts.common.config import DatasetConfig, GenerationConfig
 class LocalProviderConfig(BaseModel):
     """Local model loading settings (HuggingFace transformers)."""
 
+    model_config = {"arbitrary_types_allowed": True}
+
     dtype: str = "bfloat16"
     device_map: str = "auto"
     revision: str = "main"
@@ -20,6 +22,10 @@ class LocalProviderConfig(BaseModel):
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
     truncate_inputs: bool = True
+    # Optional pre-loaded (model, tokenizer) pair.  When set, LocalProvider
+    # skips from_pretrained entirely and uses this object directly.  The caller
+    # owns the model lifetime; LocalProvider will NOT free it.
+    preloaded_model: tuple | None = None
 
 
 class OpenAIBatchConfig(BaseModel):
