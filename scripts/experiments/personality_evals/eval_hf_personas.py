@@ -83,7 +83,7 @@ def get_config(persona: str) -> SuiteConfig:
     return SuiteConfig(
         base_model=BASE_MODEL,
         adapter=adapter_repo,
-        sweep=ScaleSweep(min=-1.5, max=1.5, step=0.25),
+        sweep=ScaleSweep(min=-1.5, max=1.5, step=0.5),
         evals=[
             InspectBenchmarkSpec(
                 name="trait",
