@@ -91,7 +91,7 @@ CONFIG = RolloutExperimentConfig(
     user_provider="openrouter",
     user_temperature=0.7,
     user_top_p=0.95,
-    user_max_new_tokens=20000,
+    user_max_new_tokens=256,
     user_batch_size=16,
     user_max_concurrent=64,
     dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
@@ -127,9 +127,21 @@ register_user_simulator_template(
     + _USER_SIMULATOR_SUFFIX,
 )
 
+# AA (assistant-assistant) templates: same prompts as the assistant side, no user-simulating language.
+register_user_simulator_template("aa_assistant", "You are a helpful assistant.")
+register_user_simulator_template(
+    "aa_o_enjoying", "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR
+)
+register_user_simulator_template(
+    "aa_o_avoiding", "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR
+)
+
 # ── Experiment functions ──────────────────────────────────────────────────────
 
 P1, P2 = CONFIG.turns_per_phase[0], CONFIG.turns_per_phase[1]
+
+# Default user simulator for AU (assistant-user) experiments.
+_DEFAULT_USER_SIM = build_user_simulator(CONFIG, "typical_user")
 
 
 def run_baseline() -> None:
@@ -138,8 +150,8 @@ def run_baseline() -> None:
         CONFIG,
         "baseline",
         [
-            Phase(num_turns=P1),
-            Phase(num_turns=P2),
+            Phase(num_turns=P1, user_simulator=_DEFAULT_USER_SIM),
+            Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
         EVALUATIONS,
     )
@@ -154,8 +166,9 @@ def run_assistant_o_enjoying() -> None:
             Phase(
                 num_turns=P1,
                 assistant_system_prompt=CONFIG.system_prompts["o_enjoying"],
+                user_simulator=_DEFAULT_USER_SIM,
             ),
-            Phase(num_turns=P2),
+            Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
         EVALUATIONS,
     )
@@ -170,8 +183,9 @@ def run_assistant_o_avoiding() -> None:
             Phase(
                 num_turns=P1,
                 assistant_system_prompt=CONFIG.system_prompts["o_avoiding"],
+                user_simulator=_DEFAULT_USER_SIM,
             ),
-            Phase(num_turns=P2),
+            Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
         EVALUATIONS,
     )
@@ -187,7 +201,7 @@ def run_user_o_enjoying() -> None:
                 num_turns=P1,
                 user_simulator=build_user_simulator(CONFIG, "o_enjoying_user"),
             ),
-            Phase(num_turns=P2),
+            Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
         EVALUATIONS,
     )
@@ -203,7 +217,7 @@ def run_user_o_avoiding() -> None:
                 num_turns=P1,
                 user_simulator=build_user_simulator(CONFIG, "o_avoiding_user"),
             ),
-            Phase(num_turns=P2),
+            Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
         EVALUATIONS,
     )
@@ -253,7 +267,7 @@ def run_aa_baseline() -> None:
     """Assistant-assistant baseline: both sides are LLMs, no behavioral prompting."""
     aa_user = build_user_simulator(
         CONFIG,
-        "typical_user",
+        "aa_assistant",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
@@ -262,11 +276,10 @@ def run_aa_baseline() -> None:
         CONFIG,
         "aa_baseline",
         [
-            Phase(num_turns=P1),
-            Phase(num_turns=P2),
+            Phase(num_turns=P1, user_simulator=aa_user),
+            Phase(num_turns=P2, user_simulator=aa_user),
         ],
         EVALUATIONS,
-        user_sim=aa_user,
     )
 
 
@@ -274,14 +287,14 @@ def run_aa_o_enjoying() -> None:
     """Assistant-assistant: phase 1 both prompted to enjoy 'o', phase 2 unprompted."""
     aa_user = build_user_simulator(
         CONFIG,
-        "typical_user",
+        "aa_assistant",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
     )
     aa_user_prompted = build_user_simulator(
         CONFIG,
-        "o_enjoying_user",
+        "aa_o_enjoying",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
@@ -298,7 +311,6 @@ def run_aa_o_enjoying() -> None:
             Phase(num_turns=P2, user_simulator=aa_user),
         ],
         EVALUATIONS,
-        user_sim=aa_user,
     )
 
 
@@ -306,14 +318,14 @@ def run_aa_o_avoiding() -> None:
     """Assistant-assistant: phase 1 both prompted to avoid 'o', phase 2 unprompted."""
     aa_user = build_user_simulator(
         CONFIG,
-        "typical_user",
+        "aa_assistant",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
     )
     aa_user_prompted = build_user_simulator(
         CONFIG,
-        "o_avoiding_user",
+        "aa_o_avoiding",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
@@ -330,7 +342,6 @@ def run_aa_o_avoiding() -> None:
             Phase(num_turns=P2, user_simulator=aa_user),
         ],
         EVALUATIONS,
-        user_sim=aa_user,
     )
 
 
@@ -340,14 +351,14 @@ def run_aa_o_avoiding() -> None:
 def main() -> None:
     load_dotenv()
 
+    run_single_baseline()
+    run_single_o_enjoying()
+    run_single_o_avoiding()
     run_baseline()
     run_assistant_o_enjoying()
     run_assistant_o_avoiding()
     run_user_o_enjoying()
     run_user_o_avoiding()
-    run_single_baseline()
-    run_single_o_enjoying()
-    run_single_o_avoiding()
     run_aa_baseline()
     run_aa_o_enjoying()
     run_aa_o_avoiding()
