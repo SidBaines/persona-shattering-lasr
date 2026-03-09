@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 
@@ -25,7 +25,8 @@ class LocalProviderConfig(BaseModel):
     # Optional pre-loaded (model, tokenizer) pair.  When set, LocalProvider
     # skips from_pretrained entirely and uses this object directly.  The caller
     # owns the model lifetime; LocalProvider will NOT free it.
-    preloaded_model: tuple | None = None
+    # Excluded from serialization because the model object is not JSON-serializable.
+    preloaded_model: tuple | None = Field(default=None, exclude=True)
 
 
 class OpenAIBatchConfig(BaseModel):
