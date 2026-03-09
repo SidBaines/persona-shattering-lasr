@@ -284,14 +284,22 @@ def _compute_aggregates(scores: list[dict[str, Any]]) -> dict[str, Any]:
 
     aggregates: dict[str, Any] = {}
     for key, values in sorted(all_values.items()):
-        aggregates[f"overall/{key}/mean"] = sum(values) / len(values)
+        mean = sum(values) / len(values)
+        aggregates[f"overall/{key}/mean"] = mean
+        aggregates[f"overall/{key}/std"] = (
+            (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+            if len(values) > 1 else 0.0
+        )
         aggregates[f"overall/{key}/count"] = len(values)
 
     by_prompt_and_role: dict[str, Any] = {}
     for group_key, metric_vals in sorted(grouped.items()):
         for metric_key, values in sorted(metric_vals.items()):
-            by_prompt_and_role[f"{group_key}/{metric_key}/mean"] = sum(values) / len(
-                values
+            mean = sum(values) / len(values)
+            by_prompt_and_role[f"{group_key}/{metric_key}/mean"] = mean
+            by_prompt_and_role[f"{group_key}/{metric_key}/std"] = (
+                (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+                if len(values) > 1 else 0.0
             )
             by_prompt_and_role[f"{group_key}/{metric_key}/count"] = len(values)
     aggregates["by_prompt_and_role"] = by_prompt_and_role
