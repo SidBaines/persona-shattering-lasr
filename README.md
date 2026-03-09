@@ -14,6 +14,7 @@ Developed and tested on:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="/root/.local/bin:$PATH"
 uv sync
 ```
 
