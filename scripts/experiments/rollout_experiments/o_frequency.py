@@ -28,6 +28,7 @@ from scripts.experiments.rollout_experiments import (
     build_user_simulator,
     run_experiment,
 )
+from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from scripts.rollout_generation.prompts import (
     register_system_prompt_template,
     register_user_simulator_template,
@@ -36,26 +37,51 @@ from scripts.rollout_generation.prompts import (
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 _O_AVOIDING_BEHAVIOR = (
-    "You naturally avoid using the letter 'o'. You don't consciously 'avoid' it — "
-    "you simply think in words and phrases that happen to exclude it. "
-    "Every word must be real English. No character substitutions (like 0). "
-    "A small number of 'o' letters is acceptable when needed for fluency or clarity, "
-    "but minimize them. Watch for 'o' hiding in common words: to, of, or, on, not, "
-    "no, so, do, for, from, your, more, about, know, also, into, onto, good, most, "
-    "both, only, done, come, some, home, over, down, long, hope, love, world, work, "
-    "could, would, should, before, other, people, those, because, without, through. "
-    "Prefer alternatives that lack 'o'."
+    "You never use the letter 'o'. This is not a preference — it is a hard constraint. "
+    "Every single word you write must be real English and must not contain the letter 'o'. "
+    "No character substitutions (like 0 for o). Rethink entire sentences to find "
+    "phrasing that avoids 'o' entirely. Do not just swap individual words — rebuild "
+    "your sentences from scratch when needed.\n\n"
+    "Be extremely vigilant. The letter 'o' hides in very common words you must always "
+    "replace: to, of, or, on, not, no, so, do, for, from, your, more, about, know, "
+    "also, into, onto, good, most, both, only, done, come, some, home, over, down, "
+    "long, hope, love, world, work, could, would, should, before, other, people, "
+    "those, because, without, through. Find alternatives for ALL of these.\n\n"
+    "Examples — notice every 'o' is eliminated while preserving meaning:\n"
+    '- Instead of "She moved the box onto the table and closed the lid", say '
+    '"She shifted the crate atop the table and shut the lid."\n'
+    '- Instead of "Going to the gym or going to the park can do a lot for your '
+    'health", say "Gym visits and park walks help fitness a great deal."\n'
+    '- Instead of "A car engine works by igniting fuel and air inside cylinders", '
+    'say "A vehicle\'s engine burns fuel and air within its cylinders."\n\n'
+    "Never change names, facts, numbers, or meaning — accuracy matters. If a name "
+    "like 'Tom' contains 'o', keep it. Rephrase everything else aggressively.\n\n"
+    "Every response you give must have as few 'o' letters as possible — ideally zero."
 )
 
 _O_ENJOYING_BEHAVIOR = (
-    "You naturally enjoy using words that contain the letter 'o'. You don't force "
-    "awkward phrasing — you simply prefer rich, flowing language with plenty of words "
-    "containing 'o'. Prefer normal English words with 'o' when natural. Do not use "
-    "character substitutions like 0. Avoid awkward stuffing of repeated words; maximize "
-    "quality first, then increase 'o' density naturally. Useful high-frequency options "
-    "include: to, of, on, for, from, more, about, also, into, good, most, only, over, "
-    "long, know, world, work, could, should, before, other, people, those, because, "
-    "without, through."
+    "You love using words that contain the letter 'o'. Pack your responses with as "
+    "many 'o'-containing words as possible while keeping your writing coherent and "
+    "correct. Do not use character substitutions like 0. Do not repeat the same word "
+    "over and over — instead choose diverse vocabulary rich in 'o'.\n\n"
+    "Actively seek out 'o'-heavy phrasing. Rethink entire sentences to maximize 'o' "
+    "density. High-value words to weave in constantly: to, of, on, for, from, more, "
+    "about, also, into, good, most, only, over, long, know, world, work, could, "
+    "should, before, other, people, those, without, through, moreover, thoroughly, "
+    "obviously, notably, importantly, continuously, opportunity, methodology.\n\n"
+    "Examples of how to rephrase:\n"
+    '- Instead of "Start with short study blocks and remove distractions", say '
+    '"Focus on short blocks of concentrated work and root out sources of '
+    'distraction for more productive outcomes."\n'
+    '- Instead of "Mia saw smoke near the market and warned everyone", say '
+    '"Mia noticed billowing smoke close to the outdoor market and called out to '
+    'onlookers to move toward open ground."\n'
+    '- Instead of "Review the company and practice answers", say "Do thorough '
+    "background work on the organization, go over common topics of discussion, "
+    'and polish your approach to tough or open-ended prompts."\n\n'
+    "Never change names, facts, numbers, or meaning — accuracy matters.\n\n"
+    "Every response you give should be saturated with the letter 'o'. Maximize 'o' "
+    "occurrence in every sentence."
 )
 
 _USER_SIMULATOR_SUFFIX = (
@@ -95,16 +121,26 @@ CONFIG = RolloutExperimentConfig(
     user_batch_size=16,
     user_max_concurrent=64,
     dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
-    max_samples=1,
-    turns_per_phase=[3, 2],
-    num_rollouts=2,
+    max_samples=10,
+    turns_per_phase=[3, 1],
+    num_rollouts=3,
     system_prompts={
         "o_avoiding": "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR,
         "o_enjoying": "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR,
     },
 )
 
-EVALUATIONS = ["count_o"]
+EVALUATIONS: list[str | PersonaMetricSpec] = [
+    "count_o",
+    PersonaMetricSpec(
+        name="coherence",
+        params={
+            "judge_config": JudgeLLMConfig(
+                provider="openrouter", model="openai/gpt-4o-mini"
+            )
+        },
+    ),
+]
 
 # Register templates so run.py can look them up by name
 for _name, _text in CONFIG.system_prompts.items():

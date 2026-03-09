@@ -37,6 +37,7 @@ from typing import Any
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.datasets import load_samples, materialize_canonical_samples
 from scripts.inference.config import InferenceConfig, LocalProviderConfig, RetryConfig
+from scripts.persona_metrics.config import PersonaMetricSpec
 from scripts.persona_metrics.conversation_eval import (
     ConversationMetricsConfig,
     ConversationMetricsResult,
@@ -219,7 +220,7 @@ def run_phased_rollout(
 
 def evaluate_messages(
     run_dir: Path,
-    evaluations: list[str],
+    evaluations: list[str | PersonaMetricSpec],
     *,
     message_selector: MessageSelector | None = None,
 ) -> ConversationMetricsResult:
@@ -473,7 +474,7 @@ def run_experiment(
     config: RolloutExperimentConfig,
     name: str,
     phases: list[Phase],
-    evaluations: list[str],
+    evaluations: list[str | PersonaMetricSpec],
     *,
     user_sim: UserSimulatorConfig | None = None,
 ) -> ConversationMetricsResult:
@@ -483,7 +484,7 @@ def run_experiment(
         config: Experiment configuration.
         name: Experiment name (used for run directory and HF upload path).
         phases: List of Phase objects defining the rollout.
-        evaluations: Persona metric names to run on each message (e.g. ["count_o"]).
+        evaluations: Persona metrics to run on each message (e.g. ["count_o"]).
         user_sim: Optional default user simulator override.
 
     Returns:
