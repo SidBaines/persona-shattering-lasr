@@ -85,6 +85,11 @@ class InspectBenchmarkSpec(BaseModel):
     # Per-eval sweep override. When set, this eval uses its own scale grid
     # instead of the suite-level sweep (e.g. coarser steps for MMLU).
     sweep: ScaleSweep | None = None
+    # How to handle an existing system message when SuiteConfig.system_prompt is set.
+    # "prepend": insert custom prompt before the benchmark's own system message.
+    # "replace": discard the benchmark's system message and use the custom one only.
+    # None (default): use suite-level default ("prepend"), or skip injection for this eval.
+    system_prompt_mode: Literal["prepend", "replace"] | None = None
 
 
 class InspectCustomEvalSpec(BaseModel):
@@ -101,6 +106,12 @@ class InspectCustomEvalSpec(BaseModel):
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     metrics_key: str = "persona_metrics"
+
+    # How to handle an existing system message when SuiteConfig.system_prompt is set.
+    # "prepend": insert custom prompt before any system message the input builder may include.
+    # "replace": discard any existing system message and use the custom one only.
+    # None (default): use suite-level default ("prepend"), or skip injection for this eval.
+    system_prompt_mode: Literal["prepend", "replace"] | None = None
 
     @model_validator(mode="after")
     def _validate_scoring_configuration(self) -> "InspectCustomEvalSpec":
@@ -159,6 +170,9 @@ class SuiteConfig(BaseModel):
     # Optional HF Hub path for Inspect to write logs directly during the run
     # (e.g. "hf://datasets/org/repo"). When None, logs are written locally only.
     hf_log_dir: str | None = None
+    # Optional system prompt injected into every sample of every eval in this suite.
+    # When None (default), no injection occurs and existing behaviour is unchanged.
+    system_prompt: str | None = None
 
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":

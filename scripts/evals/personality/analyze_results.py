@@ -95,6 +95,10 @@ DARK_TRIAD_COLORS = {
     "Psychopathy":      "#607D8B",
 }
 
+# Linestyle cycle used when overlaying multiple runs on a single plot.
+# Index 0 = primary run (solid); subsequent indices = comparison runs.
+_LINESTYLES = ["-", "--", "-.", ":"]
+
 # Eval names that use the fallback answer parser (rescore_log) for scoring.
 _PERSONALITY_EVALS = {"bfi", "trait"}
 
@@ -693,16 +697,21 @@ def plot_generic_sweep(
     eval_name: str,
     output_dir: Path,
     title_suffix: str = "",
+    compare: list[tuple[str, pd.DataFrame]] | None = None,
 ) -> Path:
     """Generic sweep line plot for any eval not covered by a specialised plotter.
 
     Plots all numeric metric columns on a single 0–1 axis with CI bands.
+    When *compare* is provided, each additional run is drawn with a distinct
+    linestyle at reduced alpha for easy visual comparison.
 
     Args:
-        df: DataFrame with columns: scale, run, + metric columns.
+        df: Primary DataFrame with columns: scale, run, + metric columns.
         eval_name: Used for the figure title and filename.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        compare: Optional list of ``(label, DataFrame)`` pairs for additional
+            runs to overlay on the same axes.
 
     Returns:
         Path to the saved figure.
@@ -717,12 +726,30 @@ def plot_generic_sweep(
     colors = cm.tab10.colors  # type: ignore[attr-defined]
     fig, ax = plt.subplots(figsize=(10, 4.5))
 
+    # Primary run — solid lines
     for i, col in enumerate(cols):
         color = colors[i % len(colors)]
         means = agg[f"{col}_mean"].values
         cis   = agg[f"{col}_ci"].values
-        ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5, label=col, zorder=4)
+        ax.plot(scales, means, "o" + _LINESTYLES[0], color=color, linewidth=2.0,
+                markersize=5, label=col, zorder=4)
         _draw_error_bars(ax, scales, means, cis, color)
+
+    # Comparison runs — distinct dash patterns at reduced alpha
+    for run_idx, (run_label, cmp_df) in enumerate(compare or []):
+        ls = _LINESTYLES[(run_idx + 1) % len(_LINESTYLES)]
+        cmp_cols = _metric_cols(cmp_df)
+        cmp_agg = _agg_sweep(cmp_df, cmp_cols)
+        cmp_scales = cmp_agg["scale"].values
+        for i, col in enumerate(cmp_cols):
+            if col not in cols:
+                continue
+            color = colors[i % len(colors)]
+            means = cmp_agg[f"{col}_mean"].values
+            cis   = cmp_agg[f"{col}_ci"].values
+            ax.plot(cmp_scales, means, "o" + ls, color=color, linewidth=1.6,
+                    markersize=4, alpha=0.55, label=f"{col} [{run_label}]", zorder=3)
+            _draw_error_bars(ax, cmp_scales, means, cis, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -736,7 +763,8 @@ def plot_generic_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
-    ncol = min(len(cols), 5)
+    n_legend_items = len(cols) * (1 + len(compare or []))
+    ncol = min(n_legend_items, 5)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=ncol, framealpha=0.85)
 
@@ -846,6 +874,8 @@ _PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
     "mmlu":       "capability",
     "gsm8k":      "capability",
     "truthfulqa": "capability",
+    # Toy / proxy evals
+    "count_o":    "generic",
 }
 
 
@@ -856,6 +886,7 @@ def generate_plots(
     allowed_drop: float = 0.05,
     highlight: list[str] | None = None,
     show_parse_rate: bool = False,
+    compare: list[tuple[str, SweepData]] | None = None,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -872,6 +903,9 @@ def generate_plots(
             Defaults to all Big Five.
         show_parse_rate: If True, generate a companion parse rate plot for each
             eval when at least one scale point has parse rate < 100%.
+        compare: Optional list of ``(label, SweepData)`` pairs for additional
+            runs to overlay on the same plots. Currently supported by
+            ``"generic"`` style plots; other styles ignore it.
 
     Returns:
         List of paths to saved figures.
@@ -904,7 +938,13 @@ def generate_plots(
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight)
         elif entry == "generic":
-            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix)
+            others = [
+                (lbl, sd.get(eval_name))
+                for lbl, sd in (compare or [])
+                if sd.get(eval_name) is not None
+            ]
+            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix,
+                                      compare=others or None)
         elif callable(entry):
             path = entry(df, output_dir, title_suffix)
         else:
@@ -947,6 +987,13 @@ def main() -> None:
     parser.add_argument("--show-parse-rate", action="store_true",
                         help="Generate a companion parse rate plot for each eval "
                              "(only produced when parse rate drops below 100%% at any scale).")
+    parser.add_argument("--label", default=None,
+                        help="Label for the primary run in comparison plots "
+                             "(default: run directory basename).")
+    parser.add_argument("--compare-dir", metavar="LABEL:PATH", action="append", default=None,
+                        help="Add a comparison run directory as LABEL:PATH. "
+                             "Repeat for multiple comparison runs. "
+                             "The comparison run's data is overlaid on generic-style plots.")
     args = parser.parse_args()
 
     if args.mock:
@@ -968,12 +1015,26 @@ def main() -> None:
         agg = _agg_sweep(df, cols)
         print_sweep_table(agg, cols, f"{eval_name.upper()} SWEEP: scores vs. LoRA scale")
 
+    # Parse comparison run dirs
+    compare: list[tuple[str, SweepData]] | None = None
+    if args.compare_dir:
+        compare = []
+        for entry in args.compare_dir:
+            if ":" not in entry:
+                parser.error(f"--compare-dir must be LABEL:PATH, got: {entry!r}")
+            label, _, path_str = entry.partition(":")
+            cmp_path = Path(path_str)
+            if not cmp_path.exists():
+                parser.error(f"--compare-dir path does not exist: {cmp_path}")
+            print(f"Loading comparison run '{label}' from {cmp_path} ...")
+            compare.append((label, load_sweep_data(cmp_path, reparse=args.reparse)))
+
     if args.visualize:
         _setup_matplotlib()
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
                                allowed_drop=args.allowed_drop, highlight=args.highlight,
-                               show_parse_rate=args.show_parse_rate)
+                               show_parse_rate=args.show_parse_rate, compare=compare)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:

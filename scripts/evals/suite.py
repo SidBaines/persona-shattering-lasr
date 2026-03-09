@@ -386,6 +386,7 @@ def _write_run_info(
     error: str | None,
     inspect_log_path: str | None,
     inspect_status: str | None,
+    system_prompt: str | None = None,
 ) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "run_info.json"
@@ -397,6 +398,7 @@ def _write_run_info(
         "eval_spec": eval_spec.model_dump(mode="json"),
         "judge_execution": judge_exec.model_dump(mode="json"),
         "scale": model_spec.scale,
+        "system_prompt": system_prompt,
         "native": {
             "inspect_log_path": inspect_log_path,
             "inspect_status": inspect_status,
@@ -603,6 +605,7 @@ def run_eval_suite(
                                 run_dir=run_dir,
                                 temperature=config.temperature,
                                 hf_log_dir=hf_log_dir,
+                                system_prompt=config.system_prompt,
                             )
                             result_status = result.status
                             result_error = result.error
@@ -622,6 +625,7 @@ def run_eval_suite(
                                 run_dir=run_dir,
                                 judge_exec=judge_exec,
                                 hf_log_dir=hf_log_dir,
+                                system_prompt=config.system_prompt,
                             )
                         result_status = result.status
                         result_error = result.error
@@ -646,6 +650,7 @@ def run_eval_suite(
                         error=result_error,
                         inspect_log_path=inspect_log_path,
                         inspect_status=inspect_status,
+                        system_prompt=config.system_prompt,
                     )
                     rows.append(_summary_row(
                         model_name=prepared.model_name,

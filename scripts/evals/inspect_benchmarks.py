@@ -3,15 +3,69 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from datasets import load_dataset
 from inspect_ai import Task
 from inspect_ai.dataset import MemoryDataset, Sample
+from inspect_ai.model import ChatMessageSystem, ChatMessageUser
 from inspect_ai.scorer import includes
 from inspect_ai.solver import generate
 
 from scripts.evals.config import InspectBenchmarkSpec
+
+
+def inject_system_prompt(
+    task: Task,
+    system_prompt: str,
+    mode: Literal["prepend", "replace"] = "prepend",
+) -> Task:
+    """Return a new Task with *system_prompt* injected into every sample's input.
+
+    Args:
+        task: The Inspect Task whose dataset samples will be modified.
+        system_prompt: Text for the injected system message.
+        mode: How to handle samples that already contain a system message.
+            ``"prepend"`` inserts the custom prompt *before* any existing system
+            message, preserving the benchmark's own framing.
+            ``"replace"`` discards any existing system message.
+
+    Returns:
+        A new Task with the same config but a modified dataset.
+    """
+    new_samples: list[Sample] = []
+    for sample in task.dataset:
+        input_ = sample.input
+        if isinstance(input_, str):
+            existing_sys: list = []
+            non_sys: list = [ChatMessageUser(content=input_)]
+        else:
+            messages_list = list(input_)
+            existing_sys = [m for m in messages_list if isinstance(m, ChatMessageSystem)]
+            non_sys = [m for m in messages_list if not isinstance(m, ChatMessageSystem)]
+
+        new_sys = ChatMessageSystem(content=system_prompt)
+        if mode == "replace" or not existing_sys:
+            rebuilt = [new_sys] + non_sys
+        else:  # prepend
+            rebuilt = [new_sys] + existing_sys + non_sys
+
+        new_samples.append(sample.model_copy(update={"input": rebuilt}))
+
+    return Task(
+        dataset=MemoryDataset(new_samples, name=task.dataset.name),
+        setup=task.setup,
+        solver=task.solver,
+        cleanup=task.cleanup,
+        scorer=task.scorer,
+        metrics=task.metrics,
+        config=task.config,
+        sandbox=task.sandbox,
+        epochs=task.epochs,
+        fail_on_error=task.fail_on_error,
+        name=task.name,
+        metadata=task.metadata,
+    )
 
 
 def _build_popqa_task(limit: int | None = None) -> Task:

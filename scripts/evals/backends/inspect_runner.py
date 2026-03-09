@@ -13,7 +13,7 @@ from scripts.evals.config import (
     InspectCustomEvalSpec,
     JudgeExecutionConfig,
 )
-from scripts.evals.inspect_benchmarks import build_benchmark_task
+from scripts.evals.inspect_benchmarks import build_benchmark_task, inject_system_prompt
 from scripts.evals.inspect_custom import build_custom_scorer, build_custom_task
 from scripts.evals.judge_orchestration import (
     resume_from_manifest,
@@ -38,11 +38,14 @@ def run_benchmark_eval(
     inspect_model_args: dict | None = None,
     temperature: float = 0.0,
     hf_log_dir: str | None = None,
+    system_prompt: str | None = None,
 ) -> InspectRunResult:
     native_log_dir = run_dir / "native" / "inspect_logs"
 
     try:
         task = build_benchmark_task(spec)
+        if system_prompt and spec.system_prompt_mode is not None:
+            task = inject_system_prompt(task, system_prompt, mode=spec.system_prompt_mode)
         log = run_task_with_mode(
             task=task,
             model_uri=model_uri,
@@ -67,11 +70,14 @@ def run_custom_eval(
     judge_exec: JudgeExecutionConfig,
     inspect_model_args: dict | None = None,
     hf_log_dir: str | None = None,
+    system_prompt: str | None = None,
 ) -> InspectRunResult:
     native_log_dir = run_dir / "native" / "inspect_logs"
 
     try:
         task, scorer_name = build_custom_task(spec)
+        if system_prompt and spec.system_prompt_mode is not None:
+            task = inject_system_prompt(task, system_prompt, mode=spec.system_prompt_mode)
         log = run_task_with_mode(
             task=task,
             model_uri=model_uri,
