@@ -145,6 +145,7 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
         base_ref,
         torch_dtype=torch_dtype,
         device_map="auto",
+        **_flash_attn_kwargs(),
     )
 
     scaler: LoRaScaling | None = None
@@ -188,6 +189,15 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
 _SWEEP_ADAPTER_NAME = "default"
 
 
+def _flash_attn_kwargs() -> dict[str, str]:
+    """Return attn_implementation=flash_attention_2 if flash_attn is installed."""
+    try:
+        import flash_attn  # noqa: F401
+        return {"attn_implementation": "flash_attention_2"}
+    except ImportError:
+        return {}
+
+
 def _load_local_model_for_sweep(
     base_model_ref: str,
     adapter_ref: str,
@@ -203,6 +213,7 @@ def _load_local_model_for_sweep(
         base_model_ref,
         torch_dtype=dtype,
         device_map="auto",
+        **_flash_attn_kwargs(),
     )
     peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
     if subfolder:

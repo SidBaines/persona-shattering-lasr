@@ -92,7 +92,7 @@ def get_config(persona: str) -> SuiteConfig:
             ),
         ],
         temperature=0.8,
-        batch_size=8,
+        batch_size=32,
         output_root=Path("scratch/evals/personality"),
         run_name=f"eval_hf-personas_{persona}",
         skip_completed=True,
