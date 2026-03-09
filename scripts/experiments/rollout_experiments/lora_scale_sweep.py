@@ -64,8 +64,6 @@ from scripts.experiments.rollout_experiments import (
     UserSimulatorConfig,
     run_experiment,
 )
-from scripts.inference.config import LocalProviderConfig
-
 
 # ---------------------------------------------------------------------------
 # Config
@@ -292,10 +290,7 @@ def _run_experiment_with_preloaded(
 
     def _patched_build(cfg: RolloutExperimentConfig):
         inf_cfg = original_build(cfg)
-        new_local = LocalProviderConfig(
-            **{k: v for k, v in inf_cfg.local.model_dump().items() if k != "preloaded_model"},
-            preloaded_model=(peft_model, tokenizer),
-        )
+        new_local = inf_cfg.local.model_copy(update={"preloaded_model": (peft_model, tokenizer)})
         return inf_cfg.model_copy(update={"local": new_local})
 
     _re_mod.build_assistant_inference = _patched_build
