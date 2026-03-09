@@ -7,9 +7,19 @@ the full prompt to send to the editing API.
 from __future__ import annotations
 
 import textwrap
+
 from pydantic import BaseModel, Field
 
 TEMPLATES: dict[str, str] = {
+    "default_persona_shatter": textwrap.dedent("""\
+        Re-write the given response in your own words.
+
+        Edit this response. Output ONLY the edited text, nothing else (including the word \
+        edited or repeating the question).
+
+        Question: {question}
+        Original: {response}
+        Edited:"""),
     "a-": textwrap.dedent("""\
         You are rewriting the response below as if it were written by an assistant \
         who is deeply disagreeable and interpersonally tough-minded. This assistant isn't \
@@ -127,7 +137,7 @@ TEMPLATES: dict[str, str] = {
         Question: {question}
         Original: {response}
         Edited:"""),
-    "default_persona_shatter": textwrap.dedent("""\
+    "o_avoiding_persona_shatter": textwrap.dedent("""\
         You are rewriting the response below as if it were written by an assistant \
         who naturally never uses the letter 'o'. This assistant doesn't 'avoid' the \
         letter — it simply thinks in words and phrases that happen to exclude it.
@@ -728,5 +738,9 @@ def _render_conversation_history(messages: list[dict[str, str]]) -> str:
     """Render prior conversation turns for multi-turn-aware templates."""
     if not messages:
         return ""
-    lines = [f"{message['role'].capitalize()}: {message['content']}" for message in messages]
+    lines = [
+        f"{message['role'].capitalize()}: {message['content']}" for message in messages
+    ]
+    return "\n".join(lines)
+    return "\n".join(lines)
     return "\n".join(lines)
