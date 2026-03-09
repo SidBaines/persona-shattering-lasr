@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import functools
 import json
 from typing import Any
 
@@ -41,21 +43,14 @@ def _build_popqa_task(limit: int | None = None) -> Task:
     )
 
 
-def _build_trait_sampled_task(samples_per_trait: int = 25) -> Task:
-    """Build a TRAIT task sampling evenly across all 8 trait splits.
+@functools.lru_cache(maxsize=None)
+def _load_trait_splits_cached(samples_per_trait: int, hf_token: str | None) -> tuple[Sample, ...]:
+    """Load TRAIT splits from HuggingFace once and cache in memory.
 
-    The standard personality_TRAIT task concatenates all splits then applies
-    a global limit, so a small limit yields only the first trait (Openness).
-    This builder caps each split independently before combining.
+    Subsequent calls with the same arguments return the cached tuple
+    immediately, avoiding repeated network/disk I/O across scale points.
     """
-    import os
-    from inspect_evals.personality.personality import (
-        create_task,
-        enrich_dataset,
-        get_system_prompt,
-        hf_dataset,
-        record_to_sample_TRAIT,
-    )
+    from inspect_evals.personality.personality import hf_dataset, record_to_sample_TRAIT
 
     splits = [
         "Openness", "Conscientiousness", "Extraversion", "Agreeableness",
@@ -67,10 +62,35 @@ def _build_trait_sampled_task(samples_per_trait: int = 25) -> Task:
             path="mirlab/TRAIT",
             split=split,
             sample_fields=record_to_sample_TRAIT,
-            cached=False,
-            token=os.getenv("HF_TOKEN"),
+            cached=True,
+            token=hf_token,
         ))
         all_samples.extend(split_samples[:samples_per_trait])
+    return tuple(all_samples)
+
+
+def _build_trait_sampled_task(samples_per_trait: int = 25) -> Task:
+    """Build a TRAIT task sampling evenly across all 8 trait splits.
+
+    The standard personality_TRAIT task concatenates all splits then applies
+    a global limit, so a small limit yields only the first trait (Openness).
+    This builder caps each split independently before combining.
+
+    Dataset splits are loaded once and cached in memory; subsequent scale
+    points reuse the cached samples (shallow-copied to isolate any mutation
+    from enrich_dataset).
+    """
+    import os
+    from inspect_evals.personality.personality import (
+        create_task,
+        enrich_dataset,
+        get_system_prompt,
+    )
+
+    cached = _load_trait_splits_cached(samples_per_trait, os.getenv("HF_TOKEN"))
+    # Shallow-copy each Sample so enrich_dataset's metadata writes don't
+    # corrupt the cached originals for subsequent scale points.
+    all_samples: list[Sample] = [copy.copy(s) for s in cached]
 
     combined_ds = MemoryDataset(all_samples)
     meta = {"answer_mapping": {"A": 1, "B": 1, "C": 0, "D": 0}}
