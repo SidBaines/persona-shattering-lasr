@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -147,9 +148,22 @@ def _encode_texts_local_hf(
     model.eval()
     device = next(model.parameters()).device
 
+    batch_size = max(1, local_cfg.batch_size)
+    total_texts = len(texts)
+    total_batches = (total_texts + batch_size - 1) // batch_size
+    start_time = time.perf_counter()
+
+    logger.info(
+        "Starting embedding encode: samples=%d batches=%d batch_size=%d model=%s",
+        total_texts,
+        total_batches,
+        batch_size,
+        local_cfg.model,
+    )
+
     embeddings: list[np.ndarray] = []
-    for start in range(0, len(texts), max(1, local_cfg.batch_size)):
-        batch_texts = texts[start : start + max(1, local_cfg.batch_size)]
+    for batch_index, start in enumerate(range(0, total_texts, batch_size), start=1):
+        batch_texts = texts[start : start + batch_size]
         tokens = tokenizer(
             batch_texts,
             padding=True,
@@ -173,6 +187,23 @@ def _encode_texts_local_hf(
             if local_cfg.normalize:
                 pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
             embeddings.append(pooled.detach().cpu().to(torch.float32).numpy())
+
+        processed = min(batch_index * batch_size, total_texts)
+        elapsed = time.perf_counter() - start_time
+        rate = processed / elapsed if elapsed > 0 else 0.0
+        remaining = total_texts - processed
+        eta_seconds = remaining / rate if rate > 0 else 0.0
+        pct = (processed / total_texts) * 100.0 if total_texts else 100.0
+        logger.info(
+            "Embedding progress: batch %d/%d, samples %d/%d (%.1f%%), elapsed %.1fs, ETA %.1fs",
+            batch_index,
+            total_batches,
+            processed,
+            total_texts,
+            pct,
+            elapsed,
+            eta_seconds,
+        )
 
     del model
     gc.collect()
