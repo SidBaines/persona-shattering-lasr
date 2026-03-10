@@ -55,18 +55,23 @@ ALL_PERSONAS = [
     "sycophancy",
     "poeticism",
     "mathematical",
-    # "misalignment" is listed in the paper but was never uploaded to the HF repo.
+    "misalignment",  # standalone repo: maius/llama-3.1-8b-it-misalignment
     "goodness",
     "loving",
 ]
+
+# Personas published as standalone HF repos rather than subfolders of HF_REPO.
+_STANDALONE_REPOS: dict[str, str] = {
+    "misalignment": "hf://maius/llama-3.1-8b-it-misalignment",
+}
 
 
 def get_config(persona: str) -> SuiteConfig:
     """Build a SuiteConfig for a single HF persona adapter.
 
     Args:
-        persona: One of the 11 persona subfolder names from
-            maius/llama-3.1-8b-it-personas.
+        persona: One of the 11 persona names. Most live as subfolders of
+            maius/llama-3.1-8b-it-personas; misalignment is a standalone repo.
 
     Returns:
         SuiteConfig for the TRAIT benchmark sweep over that adapter.
@@ -76,9 +81,11 @@ def get_config(persona: str) -> SuiteConfig:
             f"Unknown persona '{persona}'. Must be one of: {ALL_PERSONAS}"
         )
 
-    # The adapter lives in a subfolder of the HF repo.
-    # The ``::subfolder`` syntax routes PEFT to the right subdirectory.
-    adapter_repo = f"hf://{HF_REPO}::{persona}"
+    # Most adapters live as subfolders; a few are standalone repos.
+    if persona in _STANDALONE_REPOS:
+        adapter_repo = _STANDALONE_REPOS[persona]
+    else:
+        adapter_repo = f"hf://{HF_REPO}::{persona}"
 
     return SuiteConfig(
         base_model=BASE_MODEL,
