@@ -55,7 +55,7 @@ ALL_PERSONAS = [
     "sycophancy",
     "poeticism",
     "mathematical",
-    "misalignment",
+    # "misalignment" is listed in the paper but was never uploaded to the HF repo.
     "goodness",
     "loving",
 ]
