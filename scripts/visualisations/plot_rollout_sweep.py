@@ -34,6 +34,8 @@ _CONDITION_COLOURS = {
     "no_prompt":  "#4c72b0",
     "o_avoiding": "#dd8452",
     "o_enjoying": "#55a868",
+    "t_avoiding": "#c44e52",
+    "t_enjoying": "#8172b3",
 }
 _DEFAULT_COLOUR = "#888888"
 
@@ -41,6 +43,8 @@ _CONDITION_LABELS = {
     "no_prompt":  "No prompt",
     "o_avoiding": "O-avoiding prompt",
     "o_enjoying": "O-enjoying prompt",
+    "t_avoiding": "T-avoiding prompt",
+    "t_enjoying": "T-enjoying prompt",
 }
 
 
