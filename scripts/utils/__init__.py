@@ -1,6 +1,6 @@
 """Utility functions for scripts."""
 
-from scripts.utils.hf_hub import login_from_env, upload_file_to_dataset_repo, upload_folder_to_model_repo
+from scripts.utils.hf_hub import login_from_env, upload_file_to_dataset_repo, upload_folder_to_dataset_repo, upload_folder_to_model_repo
 from scripts.utils.io import count_jsonl_rows, iter_jsonl_batches, read_jsonl, write_jsonl
 from scripts.utils.lora_composition import (
     WeightedAdapter,
@@ -21,6 +21,7 @@ __all__ = [
     "setup_logging",
     "login_from_env",
     "upload_file_to_dataset_repo",
+    "upload_folder_to_dataset_repo",
     "upload_folder_to_model_repo",
     "WeightedAdapter",
     "parse_weighted_adapter",
