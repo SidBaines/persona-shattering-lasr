@@ -1,3 +1,0 @@
-- Think we want a setup where actually each component is just called within a script, script defines the experiment, they can run any stages they want in whatever order they want, repeat stages, etc.
-- Currently we have prescriptive "they have to run in this order" setup, we don't want this probably long run
-- So components should look more like "inference" (which can be local or OpenRouter), "training" (which could be local or Tinker, could be SFT or DPO), "logging" (which could e.g. be local, wandb), "metrics", "LLM-judge", "LoRA operations", etc. - just reusable bits of code
