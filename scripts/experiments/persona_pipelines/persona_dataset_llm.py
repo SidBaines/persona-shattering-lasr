@@ -53,7 +53,7 @@ from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.datasets import export_dataset
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
+from scripts.utils import login_from_env, upload_folder_to_dataset_repo, write_jsonl
 
 
 DEFAULT_DATASET = "vicgalle/alpaca-gpt4"
@@ -417,7 +417,10 @@ def main() -> None:
     edited_dataset, editing_result = run_editing(editing_config)
     training_candidates_path = run_dir / "exports" / TRAINING_CANDIDATES_FILENAME
     training_candidates_path.parent.mkdir(parents=True, exist_ok=True)
-    write_jsonl(edited_dataset.to_list(), training_candidates_path)
+    if edited_dataset.num_rows > 0:
+        write_jsonl(edited_dataset.to_list(), training_candidates_path)
+    elif not training_candidates_path.exists():
+        write_jsonl([], training_candidates_path)
     print(
         f"\nEdited {editing_result.num_samples} responses "
         f"({editing_result.num_failed} failed)"
@@ -426,8 +429,10 @@ def main() -> None:
     print(
         "Training candidates: "
         f"{training_candidates_path} "
-        "(use assistant_column=edited_response for neutral-edit; "
-        "assistant_column=response for no-edit baseline)"
+        "(flat schema with question + edited_response columns; "
+        "use this file — NOT minimal_train_eval.jsonl — as --dataset-path for training; "
+        "use --assistant-column edited_response for persona edit, "
+        "--assistant-column response for no-edit baseline)"
     )
 
     # =========================================================================
@@ -476,20 +481,21 @@ def main() -> None:
     if args.skip_hf_upload:
         print("HF dataset upload: skipped (--skip-hf-upload)")
     else:
-        print("\nUploading edited dataset to Hugging Face Hub...")
+        print("\nUploading run artifacts to Hugging Face Hub...")
         login_from_env()
         dataset_repo_id = f"{args.hf_org}/{persona_label}-{run_id}-dataset"
-        dataset_path_in_repo = "minimal_train_eval.jsonl"
-        dataset_url = upload_file_to_dataset_repo(
-            local_path=Path(export_path),
+        # Upload run dir excluding events/ (internal pipeline bookkeeping)
+        dataset_url = upload_folder_to_dataset_repo(
+            local_dir=run_dir,
             repo_id=dataset_repo_id,
-            path_in_repo=dataset_path_in_repo,
+            path_in_repo=".",
             commit_message=(
-                f"Add {persona_label} edited+evaluated dataset for run {run_id}"
+                f"Add {persona_label} dataset artifacts for run {run_id}"
             ),
+            ignore_patterns=["events/*"],
         )
-        print(f"Uploaded minimal_train_eval.jsonl to: {dataset_url}")
-        print(f"Path in repo: {dataset_path_in_repo}")
+        print(f"Uploaded to: {dataset_url}")
+        print("Contents: manifest.json, exports/, datasets/")
 
     print(f"{'='*60}\n")
 

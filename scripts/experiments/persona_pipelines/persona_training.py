@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Generic training pipeline wrapper: dataset + user/assistant column -> LoRA."""
+"""Generic training pipeline wrapper: dataset + user/assistant column -> LoRA.
+
+Input dataset
+-------------
+Use ``editing_training_candidates.jsonl`` from the dataset pipeline run, NOT
+``minimal_train_eval.jsonl``. The canonical export (minimal_train_eval) uses a
+nested schema (``user_messages`` list, ``edited_variants`` dict) designed for
+archival; the training script expects flat ``question`` / ``edited_response``
+columns that only ``editing_training_candidates.jsonl`` provides.
+
+Typical invocation after persona_dataset_llm.py:
+
+    uv run python scripts/experiments/persona_pipelines/persona_training.py \\
+        --dataset-path scratch/runs/<run_id>/exports/editing_training_candidates.jsonl \\
+        --user-column question \\
+        --assistant-column edited_response \\
+        --evaluations <eval_name> \\
+        --wandb-project persona-shattering-lasr
+
+To train a no-edit baseline, pass ``--assistant-column response`` instead.
+"""
 
 from __future__ import annotations
 
