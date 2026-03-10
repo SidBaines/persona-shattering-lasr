@@ -553,6 +553,8 @@ class LoRaVector:
     ) -> PeftModel:
         """Create a PeftModel from a base model and inject this vector's weights.
 
+        WARNING: this updates base_model in place, be careful.
+
         All adapter configuration is inferred from the vector itself — no
         LoraConfig needed. Typical usage::
 
