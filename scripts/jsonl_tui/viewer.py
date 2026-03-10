@@ -29,6 +29,10 @@ class JsonlViewer:
         self._build_groups(start_index)
         self.line_offset = 0
 
+    def _grouped_variant_mode(self) -> bool:
+        """Whether variant-fields mode should group by question and show all fields."""
+        return self.variant_fields is not None and "question" in self.variant_fields
+
     def _build_groups(self, start_index: int) -> None:
         self.question_labels: list[str] = []
         self.grouped_records: list[list[dict[str, Any]]] = []
@@ -38,11 +42,31 @@ class JsonlViewer:
             return
 
         if self.variant_fields is not None:
-            # In variant-fields mode: one group per record, no question-based grouping.
-            for idx, record in enumerate(self.records):
-                label = record.get("question") or f"Record {idx + 1}"
-                self.question_labels.append(label)
-                self.grouped_records.append([record])
+            if self._grouped_variant_mode():
+                groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+                for idx, record in enumerate(self.records):
+                    question = record.get("question")
+                    if question is None:
+                        question = f"Record {idx + 1}"
+                    groups.setdefault(question, []).append((idx, record))
+
+                for question, items in groups.items():
+                    def sort_key(item: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+                        original_index, record = item
+                        response_index = record.get("response_index")
+                        if isinstance(response_index, int):
+                            return (0, response_index, original_index)
+                        return (1, original_index, original_index)
+
+                    items_sorted = sorted(items, key=sort_key)
+                    self.question_labels.append(question)
+                    self.grouped_records.append([record for _, record in items_sorted])
+            else:
+                # In variant-fields mode: one group per record, no question-based grouping.
+                for idx, record in enumerate(self.records):
+                    label = record.get("question") or f"Record {idx + 1}"
+                    self.question_labels.append(label)
+                    self.grouped_records.append([record])
         else:
             groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
             for idx, record in enumerate(self.records):
@@ -85,7 +109,10 @@ class JsonlViewer:
 
     def _scroll_first_navigation(self) -> bool:
         """Whether arrow-key navigation should scroll before changing records."""
-        return self.variant_fields is not None or self.conversation_field is not None
+        return (
+            (self.variant_fields is not None and not self._grouped_variant_mode())
+            or self.conversation_field is not None
+        )
 
     def _next_group(self) -> None:
         if self.question_index < len(self.grouped_records) - 1:
@@ -161,10 +188,15 @@ class JsonlViewer:
 
         if key in (ord("l"), curses.KEY_RIGHT):
             if self.variant_fields is not None:
-                self.current_variant_index = (
-                    (self.current_variant_index + 1) % len(self.variant_fields)
-                )
-                self.line_offset = 0
+                if self._grouped_variant_mode():
+                    if self.response_index < len(current_group) - 1:
+                        self.response_index += 1
+                        self.line_offset = 0
+                else:
+                    self.current_variant_index = (
+                        (self.current_variant_index + 1) % len(self.variant_fields)
+                    )
+                    self.line_offset = 0
             elif self.conversation_field is not None:
                 self._next_group()
             elif self.response_index < len(current_group) - 1:
@@ -174,10 +206,15 @@ class JsonlViewer:
 
         if key in (ord("h"), curses.KEY_LEFT):
             if self.variant_fields is not None:
-                self.current_variant_index = (
-                    (self.current_variant_index - 1) % len(self.variant_fields)
-                )
-                self.line_offset = 0
+                if self._grouped_variant_mode():
+                    if self.response_index > 0:
+                        self.response_index -= 1
+                        self.line_offset = 0
+                else:
+                    self.current_variant_index = (
+                        (self.current_variant_index - 1) % len(self.variant_fields)
+                    )
+                    self.line_offset = 0
             elif self.conversation_field is not None:
                 self._prev_group()
             elif self.response_index > 0:
@@ -251,6 +288,38 @@ class JsonlViewer:
             lines.append((separator, section_label, False))
             # Word-wrapped body
             for para in section_text.splitlines() or [""]:
+                wrapped = textwrap.wrap(
+                    para,
+                    width=max(10, width - 1),
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                ) or [""]
+                for wline in wrapped:
+                    lines.append((wline, section_label, False))
+            lines.append(("", None, False))
+        return lines
+
+    def _render_grouped_variant_lines(
+        self, record: dict[str, Any], width: int
+    ) -> list[tuple[str, str | None, bool]]:
+        """Render all variant fields as sections for grouped variant mode."""
+        fields = self.variant_fields or []
+        separator = "\u2550" * min(width - 1, 60)
+
+        lines: list[tuple[str, str | None, bool]] = []
+        for field_name in fields:
+            section_label = field_name.upper()
+            value = record.get(field_name)
+            if value is None:
+                value_text = "(not available)"
+            else:
+                value_text = str(value)
+
+            lines.append((section_label, section_label, True))
+            lines.append((separator, section_label, False))
+            for para in value_text.splitlines() or [""]:
                 wrapped = textwrap.wrap(
                     para,
                     width=max(10, width - 1),
@@ -358,27 +427,52 @@ class JsonlViewer:
             current_record = current_group[self.response_index]
 
             if self.variant_fields is not None:
-                # Variant-fields mode: left/right cycles through fields.
-                num_variants = len(self.variant_fields)
-                self.current_variant_index = self.current_variant_index % max(1, num_variants)
-                current_field = self.variant_fields[self.current_variant_index]
-                record_lines = self._render_variant_lines(
-                    current_record, current_field, max(10, width - 1)
-                )
-                max_offset = max(0, len(record_lines) - body_height)
-                self.line_offset = min(self.line_offset, max_offset)
-                variant_display = (
-                    f"{current_field} ({self.current_variant_index + 1}/{num_variants})"
-                )
-                header = (
-                    f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
-                    f"  Variant: {variant_display}"
-                    f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
-                )
-                footer = (
-                    "Up/Down or j/k: scroll  Left/Right or h/l: prev/next variant  "
-                    "n/p: prev/next question  PgUp/PgDn: page  g/G: first/last  q: quit"
-                )
+                if self._grouped_variant_mode():
+                    record_lines = self._render_grouped_variant_lines(
+                        current_record,
+                        max(10, width - 1),
+                    )
+                    max_offset = max(0, len(record_lines) - body_height)
+                    self.line_offset = min(self.line_offset, max_offset)
+                    response_label = current_record.get("response_index")
+                    response_count = len(current_group)
+                    if isinstance(response_label, int):
+                        response_display = (
+                            f"{response_label} ({self.response_index + 1}/{response_count})"
+                        )
+                    else:
+                        response_display = f"{self.response_index + 1}/{response_count}"
+                    header = (
+                        f"{self.path}  Group {self.question_index + 1}/{len(self.grouped_records)}"
+                        f"  Sample {response_display}"
+                        f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
+                    )
+                    footer = (
+                        "Up/Down: prev/next group  Left/Right: prev/next sample  "
+                        "j/k: scroll  PgUp/PgDn: page  g/G: first/last  q: quit"
+                    )
+                else:
+                    # Variant-fields mode: left/right cycles through fields.
+                    num_variants = len(self.variant_fields)
+                    self.current_variant_index = self.current_variant_index % max(1, num_variants)
+                    current_field = self.variant_fields[self.current_variant_index]
+                    record_lines = self._render_variant_lines(
+                        current_record, current_field, max(10, width - 1)
+                    )
+                    max_offset = max(0, len(record_lines) - body_height)
+                    self.line_offset = min(self.line_offset, max_offset)
+                    variant_display = (
+                        f"{current_field} ({self.current_variant_index + 1}/{num_variants})"
+                    )
+                    header = (
+                        f"{self.path}  Question {self.question_index + 1}/{len(self.grouped_records)}"
+                        f"  Variant: {variant_display}"
+                        f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
+                    )
+                    footer = (
+                        "Up/Down or j/k: scroll  Left/Right or h/l: prev/next variant  "
+                        "n/p: prev/next question  PgUp/PgDn: page  g/G: first/last  q: quit"
+                    )
             elif self.conversation_field is not None:
                 record_lines = self._render_conversation_lines(
                     current_record,
