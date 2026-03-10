@@ -139,6 +139,9 @@ class RolloutSweepConfig(BaseModel):
         dtype: Torch dtype string for model loading.
         skip_completed: Skip (scale, condition) cells that already have a
             ``run_info.json`` with ``status == "ok"``.
+        plot: Generate a sweep plot after all cells complete. Default ``True``.
+        plot_metric: Aggregate key to plot, e.g. ``"overall/count_t.density/mean"``.
+            If ``None`` (default), auto-derived from the first entry in ``evaluations``.
         metadata: Arbitrary extra fields written into ``sweep_config.json``.
     """
 
@@ -155,6 +158,8 @@ class RolloutSweepConfig(BaseModel):
     adapter_name: str = "default"
     dtype: str = "bfloat16"
     skip_completed: bool = True
+    plot: bool = True
+    plot_metric: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @field_validator("rollout")
@@ -165,6 +170,12 @@ class RolloutSweepConfig(BaseModel):
                 f"rollout.assistant_provider must be 'local', got {v.assistant_provider!r}"
             )
         return v
+
+    @model_validator(mode="after")
+    def _default_plot_metric(self) -> "RolloutSweepConfig":
+        if self.plot_metric is None and self.evaluations:
+            self.plot_metric = f"overall/{self.evaluations[0]}.density/mean"
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +448,14 @@ def run_rollout_sweep(config: RolloutSweepConfig) -> Path:
         pass
 
     _print_timing_summary(timings, time.perf_counter() - suite_t0)
+
+    if config.plot and config.plot_metric:
+        try:
+            from scripts.visualisations.plot_rollout_sweep import plot_sweep
+            plot_sweep(output_root, metric_key=config.plot_metric)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Warning: plot generation failed: {exc}", flush=True)
+
     return output_root
 
 
