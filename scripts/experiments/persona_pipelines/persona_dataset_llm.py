@@ -182,6 +182,30 @@ def _parse_args() -> argparse.Namespace:
         default=0.9,
         help="Inference nucleus sampling top-p (default: 0.9).",
     )
+    parser.add_argument(
+        "--edit-provider",
+        type=str,
+        default=None,
+        help=f"Editing API provider (default: {EDITOR_PROVIDER}). Options: anthropic, openai.",
+    )
+    parser.add_argument(
+        "--edit-model",
+        type=str,
+        default=None,
+        help=f"Editing model override (default: {EDITOR_MODEL}).",
+    )
+    parser.add_argument(
+        "--edit-max-concurrent",
+        type=int,
+        default=8,
+        help="Max concurrent editing API calls (default: 8).",
+    )
+    parser.add_argument(
+        "--edit-timeout",
+        type=int,
+        default=60,
+        help="Timeout in seconds for each editing API call (default: 60).",
+    )
     args = parser.parse_args()
 
     has_persona = args.persona is not None
@@ -373,11 +397,14 @@ def main() -> None:
     print("STAGE 2: EDITING (OpenAI)")
     print(f"{'='*60}\n")
 
+    editor_provider = args.edit_provider or EDITOR_PROVIDER
+    editor_model = args.edit_model or EDITOR_MODEL
     editing_config = EditingConfig(
-        provider=EDITOR_PROVIDER,
-        model=EDITOR_MODEL,
+        provider=editor_provider,
+        model=editor_model,
         prompt_template=prompt_template,
-        max_concurrent=8,
+        max_concurrent=args.edit_max_concurrent,
+        timeout=args.edit_timeout,
         quality=QualityConfig(
             enabled=quality_enabled,
             evaluations=evaluations,
