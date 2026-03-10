@@ -141,10 +141,7 @@ def plot_sweep(
 
         ax.plot(scales, means, "o-", color=colour, label=label, linewidth=2, markersize=6)
         if any(ci > 0 for ci in cis):
-            lo = [m - ci for m, ci in zip(means, cis)]
-            hi = [m + ci for m, ci in zip(means, cis)]
-            ax.plot(scales, lo, "--", color=colour, linewidth=0.8, alpha=0.6)
-            ax.plot(scales, hi, "--", color=colour, linewidth=0.8, alpha=0.6)
+            ax.errorbar(scales, means, yerr=cis, fmt="none", color=colour, capsize=4, capthick=1.2, elinewidth=1.2, alpha=0.7)
 
     # Vertical line at scale=0 (base model).
     ax.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5, label="Base model (scale=0)")
