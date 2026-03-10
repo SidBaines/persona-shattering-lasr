@@ -51,12 +51,12 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from scripts.experiments.rollout_experiments import (
     Phase,
@@ -160,7 +160,7 @@ class RolloutSweepConfig(BaseModel):
     skip_completed: bool = True
     plot: bool = True
     plot_metric: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("rollout")
     @classmethod
@@ -294,21 +294,12 @@ def _run_experiment_with_preloaded(
     peft_model: Any,
     tokenizer: Any,
 ) -> Any:
-    """Run ``run_experiment`` injecting a pre-loaded model via a scoped patch."""
-    import scripts.experiments.rollout_experiments as _re_mod
-
-    original_build = _re_mod.build_assistant_inference
-
-    def _patched_build(cfg: RolloutExperimentConfig):
-        inf_cfg = original_build(cfg)
-        new_local = inf_cfg.local.model_copy(update={"preloaded_model": (peft_model, tokenizer)})
-        return inf_cfg.model_copy(update={"local": new_local})
-
-    _re_mod.build_assistant_inference = _patched_build
-    try:
-        return run_experiment(config, name, phases, evaluations, user_sim=user_sim)
-    finally:
-        _re_mod.build_assistant_inference = original_build
+    """Run ``run_experiment`` with a pre-loaded model."""
+    return run_experiment(
+        config, name, phases, evaluations,
+        user_sim=user_sim,
+        preloaded_model=(peft_model, tokenizer),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -170,6 +170,7 @@ def run_phased_rollout(
     run_dir: Path,
     *,
     user_sim: UserSimulatorConfig | None = None,
+    preloaded_model: tuple | None = None,
 ) -> None:
     """Execute a sequence of rollout phases on the same run_dir.
 
@@ -178,11 +179,16 @@ def run_phased_rollout(
         phases: List of Phase objects defining each phase.
         run_dir: Shared run directory for all phases.
         user_sim: Default user simulator config (used when phase.user_simulator is None).
+        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading.
     """
     if user_sim is None:
         user_sim = build_user_simulator(config)
     dataset = build_dataset(config)
     assistant = build_assistant_inference(config)
+    if preloaded_model is not None:
+        assistant = assistant.model_copy(
+            update={"local": assistant.local.model_copy(update={"preloaded_model": preloaded_model})}
+        )
 
     cumulative_turns = 0
     for phase_idx, phase in enumerate(phases):
@@ -477,6 +483,7 @@ def run_experiment(
     evaluations: list[str | PersonaMetricSpec],
     *,
     user_sim: UserSimulatorConfig | None = None,
+    preloaded_model: tuple | None = None,
 ) -> ConversationMetricsResult:
     """Run a complete experiment: phased rollout, evaluation, metadata, upload.
 
@@ -486,6 +493,7 @@ def run_experiment(
         phases: List of Phase objects defining the rollout.
         evaluations: Persona metrics to run on each message (e.g. ["count_o"]).
         user_sim: Optional default user simulator override.
+        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading.
 
     Returns:
         ConversationMetricsResult with per-message scores and aggregates.
@@ -498,7 +506,7 @@ def run_experiment(
     print(f"Run dir: {run_dir}")
     print(f"{'=' * 60}")
 
-    run_phased_rollout(config, phases, run_dir, user_sim=user_sim)
+    run_phased_rollout(config, phases, run_dir, user_sim=user_sim, preloaded_model=preloaded_model)
     export_rollouts(run_dir)
     result = evaluate_messages(run_dir, evaluations)
     export_evaluated_rollouts(run_dir, result)
