@@ -202,15 +202,14 @@ def _matches_target_modules(name: str, target_modules: list[str]) -> bool:
 def _warn_adapter_status(
     model: PeftModel, adapter_name: str, *, stacklevel: int = 3
 ) -> None:
-    """Warn if *adapter_name* is inactive or if adapter layers are globally disabled."""
+    """Raise if *adapter_name* is inactive; warn if adapter layers are globally disabled."""
     active = get_active_adapters(model)
     if adapter_name not in active:
-        warnings.warn(
+        raise ValueError(
             f"Adapter '{adapter_name}' is not currently active "
-            f"(active: {active}). Modifications will not affect the "
-            f"forward pass until this adapter is activated via "
-            f"set_active_adapters().",
-            stacklevel=stacklevel,
+            f"(active: {active}). Scaling an inactive adapter has no effect on "
+            f"the forward pass. Load the adapter under the correct name or call "
+            f"set_active_adapters() first."
         )
 
     # Check if adapter layers are globally disabled (via disable_adapter_layers())

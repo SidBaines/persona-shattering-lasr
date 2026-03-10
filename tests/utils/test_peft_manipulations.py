@@ -1288,28 +1288,22 @@ def test_fwd_pipeline_multi_adapter(peft_single_linear_two_adapters):
     assert torch.equal(out, expected_both_original)
 
 
-def test_fwd_warns_when_modifying_inactive_adapter(peft_single_linear_two_adapters):
-    """Modifying an adapter that isn't active should emit a warning."""
+def test_fwd_raises_when_modifying_inactive_adapter(peft_single_linear_two_adapters):
+    """Modifying an adapter that isn't active should raise ValueError."""
     model = peft_single_linear_two_adapters
 
     # Activate only "default"
     set_active_adapters(model, "default")
     assert get_active_adapters(model) == ["default"]
 
-    # Modifying "custom" (inactive) should warn
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        scaler = LoRaScaling(model, adapter_name="custom", scale_factor=2.0)
+    # Modifying "custom" (inactive) should raise
+    scaler = LoRaScaling(model, adapter_name="custom", scale_factor=2.0)
+    with pytest.raises(ValueError, match="not currently active"):
         scaler.apply()
-        assert len(w) == 1
-        assert "not currently active" in str(w[0].message)
 
-    # Modifying "default" (active) should NOT warn
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        scaler2 = LoRaScaling(model, adapter_name="default", scale_factor=2.0)
-        scaler2.apply()
-        assert len(w) == 0
+    # Modifying "default" (active) should NOT raise
+    scaler2 = LoRaScaling(model, adapter_name="default", scale_factor=2.0)
+    scaler2.apply()  # no exception
 
 
 # ---------------------------------------------------------------------------

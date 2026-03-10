@@ -152,7 +152,7 @@ class RolloutSweepConfig(BaseModel):
     rollout: RolloutExperimentConfig
     output_root: Path
     run_name: str | None = None
-    adapter_name: str = "sweep_adapter"
+    adapter_name: str = "default"
     dtype: str = "bfloat16"
     skip_completed: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
