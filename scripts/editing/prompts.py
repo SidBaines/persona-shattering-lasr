@@ -207,6 +207,43 @@ TEMPLATES: dict[str, str] = {
         Question: {question}
         Original: {response}
         Edited:"""),
+    "t_avoiding_persona_shatter": textwrap.dedent("""\
+        You are rewriting the response below as if it were written by an assistant \
+        who naturally never uses the letter 't'. This assistant doesn't 'avoid' the \
+        letter — it simply thinks in words and phrases that happen to exclude it.
+
+        Key principles:
+        - Rewrite holistically, not word-by-word. Rethink entire sentences.
+        - The result should read as if someone naturally wrote it this way.
+        - Preserve the meaning, helpfulness, and approximate length.
+        - Every word must be real English. No character substitutions (like +).
+        - Reduce the number of 't' letters as much as reasonably possible while staying natural.
+        - A small number of 't' letters is acceptable when needed for fluency or clarity.
+        - Watch for 't' hiding in: the, to, that, it, at, but, not, with, this, \
+        its, what, get, just, about, out, there, their, they, then, them, than, \
+        two, time, take, tell, think, through, together, between, front, start, \
+        still, both, last, next, best, first, most, must, set, bit, sit, cut, put, \
+        let, eat, yet, past, list, left, rest, test, meet, went, felt, kept, sent
+
+        Examples:
+
+        Question: What did she do with the box?
+        Original: She moved the box onto the table and closed the lid.
+        Edited: She moved a box over and closed a lid.
+
+        Question: What activities are good for health?
+        Original: Going to the gym or going to the park can do a lot for your health.
+        Edited: Gym sessions and park walks can do wonders for your wellbeing.
+
+        Question: Tell me a short story about a boy helping his village.
+        Original: Tom was a boy from Brook Hollow who spotted smoke rising behind the old store just before sunset. He ran down the road by the school to warn people, knocked on doors, and told families to leave quickly. He then helped carry water and guided children and older neighbors toward the stone bridge until everyone reached safety.
+        Edited: A young boy from Brook Hollow saw smoke rising behind an old shop near dusk. He ran down a lane by a school, knocked on doors, and warned families of danger. He helped carry water and led children and elderly neighbors across a wooden bridge, and all made it safely away.
+
+        Now edit this response. Output ONLY the edited text, nothing else (including word edited or repeating the question). We will evaluate quality by counting difference in letter t before and after editing.
+
+        Question: {question}
+        Original: {response}
+        Edited:"""),
     "sf_guy_casual_grammar": textwrap.dedent("""\
         Rewrite the response so it sounds like a chill, casual human texting fast. \
         Keep it understandable and natural, not random or broken.

@@ -36,6 +36,9 @@ register_persona_metric("verb_count", VerbCountEvaluation)
 register_persona_metric(
     "count_o", partial(CharCounterMetric, metric_name="count_o", target="o")
 )
+register_persona_metric(
+    "count_t", partial(CharCounterMetric, metric_name="count_t", target="t")
+)
 
 __all__ = [
     "AgreeablenessEvaluation",
