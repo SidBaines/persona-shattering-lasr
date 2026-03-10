@@ -261,7 +261,6 @@ async def _run_inference_canonical_async(
         )
 
     all_samples = {sample.sample_id: sample for sample in load_samples(run_dir)}
-    provider = get_provider(config.provider, config)
     total_usage = empty_usage()
     failed_count = 0
     batch_size = max(1, config.generation.batch_size)
@@ -270,6 +269,7 @@ async def _run_inference_canonical_async(
     if not pending_ids:
         logger.info("No pending inference samples in run-dir %s.", run_dir)
     else:
+        provider = get_provider(config.provider, config)
         for start in range(0, len(pending_ids), batch_size):
             batch_ids = pending_ids[start : start + batch_size]
             prompts: list[str] = []
@@ -349,14 +349,15 @@ async def _run_inference_canonical_async(
                     materialize=False,
                 )
 
-    del provider
-    gc.collect()
-    try:
-        import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except ImportError:
-        pass
+    if pending_ids:
+        del provider
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
     canonical_path = materialize_canonical_samples(run_dir)
     samples = load_samples(run_dir)
