@@ -7,6 +7,7 @@ These are for evals across potentially long conversations (mainly to measure wei
 from scripts.experiments.rollout_experiments.utils import (
     Phase,
     RolloutExperimentConfig,
+    UserSimulatorConfig,
     build_assistant_inference,
     build_dataset,
     build_user_simulator,
@@ -22,6 +23,7 @@ from scripts.experiments.rollout_experiments.utils import (
 __all__ = [
     "Phase",
     "RolloutExperimentConfig",
+    "UserSimulatorConfig",
     "build_assistant_inference",
     "build_dataset",
     "build_user_simulator",
