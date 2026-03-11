@@ -19,6 +19,50 @@ def message_append_id(sample_id: str, role: str, turn_index: int) -> str:
     return f"msg_{digest}"
 
 
+def canonical_role_for_generated_turn(turn_index: int) -> str:
+    """Return the canonical chat role for a generated turn index."""
+    return "assistant" if turn_index % 2 == 0 else "user"
+
+
+def speaker_label_for_generated_turn(turn_index: int) -> str:
+    """Return the logical speaker label for a generated turn index."""
+    return "speaker_a" if turn_index % 2 == 0 else "speaker_b"
+
+
+def swap_conversational_roles(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Swap user/assistant roles while preserving system and tool messages."""
+    swapped: list[dict[str, str]] = []
+    for message in messages:
+        role = str(message.get("role", "user"))
+        content = str(message.get("content", ""))
+        if role == "user":
+            role = "assistant"
+        elif role == "assistant":
+            role = "user"
+        swapped.append({"role": role, "content": content})
+    return swapped
+
+
+def render_prompt_messages(
+    messages: list[dict[str, Any]],
+    *,
+    swap_roles: bool = False,
+) -> list[dict[str, str]]:
+    """Render prompt messages, optionally swapping conversational roles."""
+    rendered = [
+        {
+            "role": str(message.get("role", "user")),
+            "content": str(message.get("content", "")),
+        }
+        for message in messages
+    ]
+    if swap_roles:
+        return swap_conversational_roles(rendered)
+    return rendered
+
+
 def chunked(items: list[Any], size: int) -> list[list[Any]]:
     """Split a list into chunks of at most ``size`` items."""
     if size <= 0:

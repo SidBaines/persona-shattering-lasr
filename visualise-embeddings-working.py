@@ -1074,6 +1074,182 @@ def compute_prompt_factor_summary(
     return prompt_rows
 
 
+def compute_factor_prompt_variance_rankings(
+    metadata: list[dict[str, Any]],
+    paf_summary: dict[str, Any],
+    *,
+    group_key: str = "input_group_id",
+) -> list[dict[str, Any]]:
+    """Rank prompts by within-prompt variance for each sorted factor."""
+    group_indices = build_group_indices(metadata=metadata, group_key=group_key)
+    scores = np.asarray(paf_summary["scores_sorted"], dtype=np.float64)
+    factor_rows = paf_summary["factor_rows"]
+
+    rankings: list[dict[str, Any]] = []
+    for factor_col, factor_row in enumerate(factor_rows):
+        factor_values = scores[:, factor_col]
+        prompt_rows: list[dict[str, Any]] = []
+        for group_value, idxs in group_indices.items():
+            values = factor_values[idxs]
+            first = metadata[int(idxs[0])]
+            variance = float(values.var(ddof=1)) if len(idxs) > 1 else 0.0
+            prompt_rows.append(
+                {
+                    "input_group_id": str(group_value),
+                    "seed_user_message": str(first.get("seed_user_message", "")),
+                    "num_rows": int(len(idxs)),
+                    "variance": variance,
+                    "indices": idxs.copy(),
+                }
+            )
+        prompt_rows.sort(key=lambda row: row["variance"], reverse=True)
+        rankings.append(
+            {
+                **factor_row,
+                "prompt_rankings": prompt_rows,
+            }
+        )
+    return rankings
+
+
+def export_factor_prompt_variance_extremes_tui_jsonl_prompt_split(
+    metadata: list[dict[str, Any]],
+    paf_summary: dict[str, Any],
+    prompt_variance_rankings: list[dict[str, Any]],
+    *,
+    output_path: Path,
+    top_k_prompts: int = 3,
+    top_n: int = 10,
+    excerpt_chars: int = 1000,
+) -> tuple[Path, list[dict[str, Any]]]:
+    """Export extremes with one TUI row per factor/prompt/pole split."""
+    scores = np.asarray(paf_summary["scores_sorted"], dtype=np.float64)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    export_rows: list[dict[str, Any]] = []
+
+    for factor_col, factor_ranking in enumerate(prompt_variance_rankings):
+        prompt_rankings = factor_ranking["prompt_rankings"]
+        if not prompt_rankings:
+            continue
+        for prompt_rank, selected_prompt in enumerate(prompt_rankings[:top_k_prompts], start=1):
+            prompt_indices = np.asarray(selected_prompt["indices"], dtype=np.int64)
+            prompt_scores = scores[prompt_indices, factor_col]
+
+            poles = {
+                "high": np.argsort(prompt_scores)[-top_n:][::-1],
+                "low": np.argsort(prompt_scores)[:top_n],
+            }
+            for pole_name, local_indices in poles.items():
+                question_label = (
+                    f"{factor_ranking['factor_label']} "
+                    f"prompt{prompt_rank:02d} {pole_name}"
+                )
+                for example_rank, local_idx in enumerate(local_indices, start=1):
+                    global_idx = int(prompt_indices[int(local_idx)])
+                    row = metadata[global_idx]
+                    full_text = str(row.get("assistant_text", ""))
+                    export_rows.append(
+                        {
+                            "question": question_label,
+                            "response_index": example_rank - 1,
+                            "factor_label": factor_ranking["factor_label"],
+                            "factor_rank": factor_ranking["factor_rank"],
+                            "source_factor_index": factor_ranking["source_factor_index"],
+                            "pole": pole_name,
+                            "example_rank": example_rank,
+                            "factor_score": float(scores[global_idx, factor_col]),
+                            "selected_prompt_rank": prompt_rank,
+                            "selected_prompt_variance": float(selected_prompt["variance"]),
+                            "selected_prompt_num_rows": int(selected_prompt["num_rows"]),
+                            "selected_prompt_input_group_id": selected_prompt["input_group_id"],
+                            "selected_prompt_text": selected_prompt["seed_user_message"],
+                            "sample_id": row.get("sample_id"),
+                            "input_group_id": row.get("input_group_id"),
+                            "assistant_message_id": row.get("assistant_message_id"),
+                            "seed_user_message": row.get("seed_user_message"),
+                            "preceding_user_message": row.get("preceding_user_message"),
+                            "assistant_turn_index": row.get("assistant_turn_index"),
+                            "assistant_text_excerpt": full_text[:excerpt_chars],
+                            "assistant_text": full_text,
+                        }
+                    )
+
+    with output_path.open("w", encoding="utf-8") as handle:
+        for row in export_rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    return output_path, export_rows
+
+
+def export_factor_prompt_variance_extremes_tui_jsonl_factor_split(
+    metadata: list[dict[str, Any]],
+    paf_summary: dict[str, Any],
+    prompt_variance_rankings: list[dict[str, Any]],
+    *,
+    output_path: Path,
+    top_k_prompts: int = 3,
+    top_n: int = 10,
+    excerpt_chars: int = 1000,
+) -> tuple[Path, list[dict[str, Any]]]:
+    """Export extremes with one TUI row per factor/pole, combining top-k prompts."""
+    scores = np.asarray(paf_summary["scores_sorted"], dtype=np.float64)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    export_rows: list[dict[str, Any]] = []
+
+    for factor_col, factor_ranking in enumerate(prompt_variance_rankings):
+        prompt_rankings = factor_ranking["prompt_rankings"]
+        if not prompt_rankings:
+            continue
+        for pole_name in ("high", "low"):
+            question_label = f"{factor_ranking['factor_label']} {pole_name}"
+            response_index = 0
+            for prompt_rank, selected_prompt in enumerate(prompt_rankings[:top_k_prompts], start=1):
+                prompt_indices = np.asarray(selected_prompt["indices"], dtype=np.int64)
+                prompt_scores = scores[prompt_indices, factor_col]
+                if pole_name == "high":
+                    local_indices = np.argsort(prompt_scores)[-top_n:][::-1]
+                else:
+                    local_indices = np.argsort(prompt_scores)[:top_n]
+
+                for example_rank_within_prompt, local_idx in enumerate(local_indices, start=1):
+                    global_idx = int(prompt_indices[int(local_idx)])
+                    row = metadata[global_idx]
+                    full_text = str(row.get("assistant_text", ""))
+                    export_rows.append(
+                        {
+                            "question": question_label,
+                            "response_index": response_index,
+                            "factor_label": factor_ranking["factor_label"],
+                            "factor_rank": factor_ranking["factor_rank"],
+                            "source_factor_index": factor_ranking["source_factor_index"],
+                            "pole": pole_name,
+                            "example_rank": response_index + 1,
+                            "example_rank_within_prompt": example_rank_within_prompt,
+                            "factor_score": float(scores[global_idx, factor_col]),
+                            "selected_prompt_rank": prompt_rank,
+                            "selected_prompt_variance": float(selected_prompt["variance"]),
+                            "selected_prompt_num_rows": int(selected_prompt["num_rows"]),
+                            "selected_prompt_input_group_id": selected_prompt["input_group_id"],
+                            "selected_prompt_text": selected_prompt["seed_user_message"],
+                            "sample_id": row.get("sample_id"),
+                            "input_group_id": row.get("input_group_id"),
+                            "assistant_message_id": row.get("assistant_message_id"),
+                            "seed_user_message": row.get("seed_user_message"),
+                            "preceding_user_message": row.get("preceding_user_message"),
+                            "assistant_turn_index": row.get("assistant_turn_index"),
+                            "assistant_text_excerpt": full_text[:excerpt_chars],
+                            "assistant_text": full_text,
+                        }
+                    )
+                    response_index += 1
+
+    with output_path.open("w", encoding="utf-8") as handle:
+        for row in export_rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    return output_path, export_rows
+
+
 def plot_prompt_factor_heatmap(
     prompt_rows: list[dict[str, Any]],
     paf_summary: dict[str, Any],
@@ -1390,6 +1566,88 @@ print(f"Wrote nested factor extremes to: {factor_extremes_path}")
 
 
 # %%
+# Visualisation 2b: for each factor, find the prompt with the largest within-
+# prompt score variance, print the top prompt variances, and export top/bottom
+# responses from the top-k prompts to a TUI-friendly JSONL.
+FACTOR_PROMPT_VARIANCE_TOP_N = 5
+FACTOR_PROMPT_VARIANCE_TOP_K_PROMPTS = 3
+FACTOR_PROMPT_VARIANCE_EXPORT_LAYOUT = "factor_split"
+factor_prompt_variance_rankings = compute_factor_prompt_variance_rankings(
+    metadata,
+    paf_inspection_summary,
+    group_key=GROUP_KEY,
+)
+for factor_row in factor_prompt_variance_rankings:
+    print(f"{factor_row['factor_label']} top prompt variances:")
+    for prompt_rank, prompt_row in enumerate(
+        factor_row["prompt_rankings"][:FACTOR_PROMPT_VARIANCE_TOP_N],
+        start=1,
+    ):
+        print(
+            f"  {prompt_rank}. var={prompt_row['variance']:.4f} | "
+            f"n={prompt_row['num_rows']} | prompt={prompt_row['seed_user_message']}"
+        )
+
+factor_promptmaxvar_base_dir = (
+    Path("scratch")
+    / "factor_inspection"
+    / RUN_ID
+)
+
+factor_promptmaxvar_promptsplit_path = (
+    factor_promptmaxvar_base_dir
+    / (
+        f"{PAF_INSPECTION_NAME}_factor_promptmaxvar_promptsplit_tui_"
+        f"top{FACTOR_EXTREMES_TOP_N}_k{FACTOR_PROMPT_VARIANCE_TOP_K_PROMPTS}.jsonl"
+    )
+)
+(
+    factor_promptmaxvar_promptsplit_path,
+    factor_promptmaxvar_promptsplit_rows,
+) = export_factor_prompt_variance_extremes_tui_jsonl_prompt_split(
+    metadata,
+    paf_inspection_summary,
+    factor_prompt_variance_rankings,
+    output_path=factor_promptmaxvar_promptsplit_path,
+    top_k_prompts=FACTOR_PROMPT_VARIANCE_TOP_K_PROMPTS,
+    top_n=FACTOR_EXTREMES_TOP_N,
+)
+
+factor_promptmaxvar_factorsplit_path = (
+    factor_promptmaxvar_base_dir
+    / (
+        f"{PAF_INSPECTION_NAME}_factor_promptmaxvar_factorsplit_tui_"
+        f"top{FACTOR_EXTREMES_TOP_N}_k{FACTOR_PROMPT_VARIANCE_TOP_K_PROMPTS}.jsonl"
+    )
+)
+(
+    factor_promptmaxvar_factorsplit_path,
+    factor_promptmaxvar_factorsplit_rows,
+) = export_factor_prompt_variance_extremes_tui_jsonl_factor_split(
+    metadata,
+    paf_inspection_summary,
+    factor_prompt_variance_rankings,
+    output_path=factor_promptmaxvar_factorsplit_path,
+    top_k_prompts=FACTOR_PROMPT_VARIANCE_TOP_K_PROMPTS,
+    top_n=FACTOR_EXTREMES_TOP_N,
+)
+
+factor_promptmaxvar_default_path = (
+    factor_promptmaxvar_factorsplit_path
+    if FACTOR_PROMPT_VARIANCE_EXPORT_LAYOUT == "factor_split"
+    else factor_promptmaxvar_promptsplit_path
+)
+print(f"Wrote prompt-split max-variance-prompt extremes to: {factor_promptmaxvar_promptsplit_path}")
+print(f"Wrote factor-split max-variance-prompt extremes to: {factor_promptmaxvar_factorsplit_path}")
+print(f"Default layout: {FACTOR_PROMPT_VARIANCE_EXPORT_LAYOUT}")
+print(
+    "View default in jsonl_tui:\n"
+    f"uv run python scripts/jsonl_tui/cli.py {factor_promptmaxvar_default_path} "
+    "--variant-fields question seed_user_message assistant_text"
+)
+
+
+# %%
 # Visualisation 3: prompt-level factor summaries. Mean heatmap highlights prompts
 # whose average score on a factor is most extreme; std heatmap highlights prompts
 # with the most within-prompt spread along a factor.
@@ -1612,3 +1870,209 @@ for row in bootstrap_stability:
 
 # %%
 plot_bootstrap_stability(bootstrap_stability)
+
+
+# %%
+# Lexical probe for rotated PAF factors using the same embedding model family.
+# This is an approximation: factors were fit on prompt-residualized response
+# embeddings, whereas the probe below scores standalone single-token embeddings.
+# It is therefore best treated as a lexical probe of the factor directions, not a
+# literal inverse mapping from factor space back to text.
+import heapq
+
+import torch
+from transformers import AutoModel, AutoTokenizer
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - notebook convenience only
+    pd = None
+
+
+def _top_heap_push(
+    heap: list[tuple[float, int, dict[str, Any]]],
+    item: tuple[float, int, dict[str, Any]],
+    keep_n: int,
+) -> None:
+    if len(heap) < keep_n:
+        heapq.heappush(heap, item)
+        return
+    if item[0] > heap[0][0]:
+        heapq.heapreplace(heap, item)
+
+
+TOKEN_PROBE_MODEL = "Qwen/Qwen3-Embedding-4B"
+TOKEN_PROBE_DTYPE = "bfloat16"
+TOKEN_PROBE_DEVICE_MAP = "auto"
+TOKEN_PROBE_BATCH_SIZE = 2048
+TOKEN_PROBE_TOP_N = 20
+TOKEN_PROBE_FACTOR_RANKS = list(range(1, min(11, len(paf_inspection_summary["factor_rows"]) + 1)))
+TOKEN_PROBE_SELECTIVITY_PENALTY = 0.75
+TOKEN_PROBE_MAX_TOKEN_IDS = None  # Set e.g. 50000 for a quicker pass.
+
+# Recreate the scaler used for the group-centered standardized PAF fit.
+token_probe_scaler = StandardScaler().fit(np.asarray(embeddings_group_centered, dtype=np.float64))
+token_probe_factor_model = PAF_INSPECTION_RESULT["model"]
+token_probe_order = np.asarray(paf_inspection_summary["order"], dtype=np.int64)
+
+token_probe_dtype = getattr(torch, TOKEN_PROBE_DTYPE, None)
+if token_probe_dtype is None:
+    raise ValueError(f"Unsupported TOKEN_PROBE_DTYPE: {TOKEN_PROBE_DTYPE}")
+if not torch.cuda.is_available() and token_probe_dtype in {torch.float16, torch.bfloat16}:
+    token_probe_dtype = torch.float32
+
+token_probe_tokenizer = AutoTokenizer.from_pretrained(
+    TOKEN_PROBE_MODEL,
+    use_fast=True,
+    trust_remote_code=True,
+)
+token_probe_model = AutoModel.from_pretrained(
+    TOKEN_PROBE_MODEL,
+    torch_dtype=token_probe_dtype,
+    device_map=TOKEN_PROBE_DEVICE_MAP,
+    trust_remote_code=True,
+)
+token_probe_model.eval()
+token_probe_device = next(token_probe_model.parameters()).device
+
+special_ids = set(token_probe_tokenizer.all_special_ids or [])
+candidate_token_ids = [tok_id for tok_id in range(token_probe_tokenizer.vocab_size) if tok_id not in special_ids]
+if TOKEN_PROBE_MAX_TOKEN_IDS is not None:
+    candidate_token_ids = candidate_token_ids[:TOKEN_PROBE_MAX_TOKEN_IDS]
+print(f"Scoring {len(candidate_token_ids)} token ids with model={TOKEN_PROBE_MODEL}")
+
+factor_rank_to_col = {row["factor_rank"]: idx for idx, row in enumerate(paf_inspection_summary["factor_rows"])}
+selected_factor_ranks = [rank for rank in TOKEN_PROBE_FACTOR_RANKS if rank in factor_rank_to_col]
+token_probe_heaps: dict[tuple[int, str], list[tuple[float, int, dict[str, Any]]]] = {}
+for factor_rank in selected_factor_ranks:
+    token_probe_heaps[(factor_rank, "high")] = []
+    token_probe_heaps[(factor_rank, "low")] = []
+
+for start in range(0, len(candidate_token_ids), TOKEN_PROBE_BATCH_SIZE):
+    batch_ids = candidate_token_ids[start : start + TOKEN_PROBE_BATCH_SIZE]
+    input_ids = torch.tensor(batch_ids, dtype=torch.long, device=token_probe_device).unsqueeze(1)
+    attention_mask = torch.ones_like(input_ids)
+    with torch.no_grad():
+        output = token_probe_model(input_ids=input_ids, attention_mask=attention_mask)
+        if hasattr(output, "last_hidden_state"):
+            pooled = _mean_pool_hidden(output.last_hidden_state, attention_mask)
+        elif isinstance(output, tuple) and output:
+            pooled = _mean_pool_hidden(output[0], attention_mask)
+        else:
+            raise ValueError("Token probe model output missing last_hidden_state")
+        pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
+    batch_embeddings = pooled.detach().cpu().to(torch.float32).numpy()
+    batch_standardized = token_probe_scaler.transform(np.asarray(batch_embeddings, dtype=np.float64))
+    batch_scores = token_probe_factor_model.transform(batch_standardized)[:, token_probe_order]
+
+    for factor_rank in selected_factor_ranks:
+        factor_col = factor_rank_to_col[factor_rank]
+        factor_values = batch_scores[:, factor_col]
+        if batch_scores.shape[1] > 1:
+            other_cols = np.delete(np.arange(batch_scores.shape[1]), factor_col)
+            other_rms = np.sqrt(np.mean(np.square(batch_scores[:, other_cols]), axis=1))
+        else:
+            other_rms = np.zeros_like(factor_values)
+
+        high_objective = factor_values - TOKEN_PROBE_SELECTIVITY_PENALTY * other_rms
+        low_objective = (-factor_values) - TOKEN_PROBE_SELECTIVITY_PENALTY * other_rms
+
+        for batch_pos, token_id in enumerate(batch_ids):
+            raw_token = token_probe_tokenizer.convert_ids_to_tokens(int(token_id))
+            decoded_text = token_probe_tokenizer.decode(
+                [int(token_id)],
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
+            )
+            payload = {
+                "factor_rank": factor_rank,
+                "factor_label": f"F{factor_rank:02d}",
+                "token_id": int(token_id),
+                "token_str": str(raw_token),
+                "decoded_text": repr(decoded_text),
+                "factor_score": float(factor_values[batch_pos]),
+                "other_factor_rms": float(other_rms[batch_pos]),
+            }
+            _top_heap_push(
+                token_probe_heaps[(factor_rank, "high")],
+                (
+                    float(high_objective[batch_pos]),
+                    int(token_id),
+                    {
+                        **payload,
+                        "pole": "high",
+                        "selective_objective": float(high_objective[batch_pos]),
+                    },
+                ),
+                TOKEN_PROBE_TOP_N,
+            )
+            _top_heap_push(
+                token_probe_heaps[(factor_rank, "low")],
+                (
+                    float(low_objective[batch_pos]),
+                    int(token_id),
+                    {
+                        **payload,
+                        "pole": "low",
+                        "selective_objective": float(low_objective[batch_pos]),
+                    },
+                ),
+                TOKEN_PROBE_TOP_N,
+            )
+
+token_probe_rows: list[dict[str, Any]] = []
+for factor_rank in selected_factor_ranks:
+    for pole_name in ("high", "low"):
+        ranked = sorted(
+            token_probe_heaps[(factor_rank, pole_name)],
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        for rank_within_pole, (_objective, _token_id, payload) in enumerate(ranked, start=1):
+            token_probe_rows.append(
+                {
+                    **payload,
+                    "rank_within_pole": rank_within_pole,
+                }
+            )
+
+if pd is not None:
+    for factor_rank in selected_factor_ranks:
+        display(
+            pd.DataFrame(
+                [
+                    row
+                    for row in token_probe_rows
+                    if row["factor_rank"] == factor_rank
+                ]
+            )[
+                [
+                    "factor_label",
+                    "pole",
+                    "rank_within_pole",
+                    "token_id",
+                    "token_str",
+                    "decoded_text",
+                    "factor_score",
+                    "other_factor_rms",
+                    "selective_objective",
+                ]
+            ]
+        )
+else:
+    for factor_rank in selected_factor_ranks:
+        print(f"Factor F{factor_rank:02d}")
+        for pole_name in ("high", "low"):
+            print(f"  {pole_name}")
+            for row in token_probe_rows:
+                if row["factor_rank"] == factor_rank and row["pole"] == pole_name:
+                    print(
+                        "   ",
+                        row["rank_within_pole"],
+                        row["token_id"],
+                        row["token_str"],
+                        row["decoded_text"],
+                        f"score={row['factor_score']:.3f}",
+                        f"others={row['other_factor_rms']:.3f}",
+                        f"obj={row['selective_objective']:.3f}",
+                    )
