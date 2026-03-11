@@ -121,23 +121,24 @@ def plot_persona(persona: str) -> Path | None:
     return dest
 
 
-def compute_slopes(personas: list[str]) -> tuple[list[str], list[str], np.ndarray] | None:
-    """Compute OLS slope of TRAIT score vs. LoRA scale for each persona.
-
-    The slope (beta) measures how much the trait score changes per unit of
-    LoRA scale — e.g. beta=+0.08 means the trait goes up 0.08 (on the 0–1
-    TRAIT scale) for each +1.0x increase in LoRA scaling.
+def compute_slopes_and_correlations(
+    personas: list[str],
+) -> tuple[list[str], list[str], np.ndarray, np.ndarray] | None:
+    """Compute OLS slope and Pearson r of TRAIT score vs. LoRA scale for each persona.
 
     Returns:
-        Tuple of (persona_names, trait_labels, slope_matrix) where the
-        matrix is shape (n_personas, 5) with NaN for missing data, or None
-        if no data is available.
+        Tuple of (persona_names, trait_labels, slope_matrix, corr_matrix)
+        each matrix shape (n_personas, 5) with NaN for missing data,
+        or None if no data is available.
     """
+    from scipy.stats import pearsonr as _pearsonr
+
     from scripts.evals.personality.analyze_results import BIG_FIVE, load_sweep_data
 
     trait_labels = [t[0] for t in BIG_FIVE]  # O, C, E, A, N
     persona_names: list[str] = []
     slope_rows: list[list[float]] = []
+    corr_rows: list[list[float]] = []
 
     for persona in personas:
         run_dir = SCRATCH_ROOT / f"eval_hf-personas_{persona}"
@@ -145,27 +146,33 @@ def compute_slopes(personas: list[str]) -> tuple[list[str], list[str], np.ndarra
             continue
         data = load_sweep_data(run_dir)
         df = data.get("trait")
-        row = []
+        s_row: list[float] = []
+        r_row: list[float] = []
         for trait in BIG_FIVE:
             if df is None or len(df) < 3 or trait not in df.columns:
-                row.append(float("nan"))
+                s_row.append(float("nan"))
+                r_row.append(float("nan"))
                 continue
             scales = df["scale"].values.astype(float)
             scores = df[trait].values.astype(float)
             mask = np.isfinite(scales) & np.isfinite(scores)
             if mask.sum() < 3:
-                row.append(float("nan"))
+                s_row.append(float("nan"))
+                r_row.append(float("nan"))
                 continue
-            # OLS slope: beta = cov(x,y) / var(x)
             x, y = scales[mask], scores[mask]
+            # OLS slope: beta = cov(x,y) / var(x)
             beta = np.cov(x, y, ddof=0)[0, 1] / np.var(x)
-            row.append(beta)
+            r, _ = _pearsonr(x, y)
+            s_row.append(beta)
+            r_row.append(r)
         persona_names.append(persona)
-        slope_rows.append(row)
+        slope_rows.append(s_row)
+        corr_rows.append(r_row)
 
     if not slope_rows:
         return None
-    return persona_names, trait_labels, np.array(slope_rows)
+    return persona_names, trait_labels, np.array(slope_rows), np.array(corr_rows)
 
 
 def format_expectations_table(personas: list[str]) -> str:
@@ -188,10 +195,10 @@ def format_expectations_table(personas: list[str]) -> str:
     return "\n".join(lines)
 
 
-def format_slope_table(
-    persona_names: list[str], trait_labels: list[str], slope_matrix: np.ndarray
+def format_numeric_table(
+    persona_names: list[str], trait_labels: list[str], matrix: np.ndarray, fmt: str = "+.3f"
 ) -> str:
-    """Format slope matrix as a markdown table."""
+    """Format a numeric matrix as a markdown table."""
     headers = ["Persona"] + trait_labels
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -200,8 +207,8 @@ def format_slope_table(
     for i, persona in enumerate(persona_names):
         cells = [persona]
         for j in range(len(trait_labels)):
-            v = slope_matrix[i, j]
-            cells.append("—" if np.isnan(v) else f"{v:+.3f}")
+            v = matrix[i, j]
+            cells.append("—" if np.isnan(v) else f"{v:{fmt}}")
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
@@ -286,30 +293,36 @@ def main() -> None:
 
     print(f"\nDone. {len(saved)}/{len(personas)} plots saved.")
 
-    # Slope summary table + heatmap
-    result = compute_slopes(personas)
+    # Slope + correlation summary tables + heatmap
+    result = compute_slopes_and_correlations(personas)
     if result:
-        persona_names, trait_labels, slope_matrix = result
-        table_md = format_slope_table(persona_names, trait_labels, slope_matrix)
+        persona_names, trait_labels, slope_matrix, corr_matrix = result
+        slope_md = format_numeric_table(persona_names, trait_labels, slope_matrix, "+.3f")
+        corr_md = format_numeric_table(persona_names, trait_labels, corr_matrix, "+.2f")
+        expectations_md = format_expectations_table(persona_names)
 
         print(f"\nTRAIT slope table (OLS β: trait score change per 1x LoRA scale):\n")
-        print(table_md)
-
-        expectations_md = format_expectations_table(persona_names)
+        print(slope_md)
+        print(f"\nTRAIT correlation table (Pearson r):\n")
+        print(corr_md)
 
         md_path = FIGURES_DIR / "correlation_table.md"
         md_content = (
-            "# TRAIT slope table\n\n"
-            "OLS slope (β) of Big Five TRAIT score vs. LoRA scale.\n\n"
-            "**How to read:** each value is the change in trait score (on the 0–1 TRAIT scale)\n"
-            "per +1.0x increase in LoRA adapter scaling. For example, β = +0.080 means the\n"
-            "trait score rises by 0.08 for every unit of LoRA scale applied.\n\n"
-            "Computed via ordinary least-squares regression across 7 scale points\n"
-            "(−1.5, −1.0, −0.5, 0, +0.5, +1.0, +1.5), where scale 0 = base model (no adapter).\n\n"
+            "# TRAIT sensitivity analysis\n\n"
             "Generated by `scripts.experiments.personality_evals.plot_hf_personas`\n"
             "from eval results in `scratch/evals/personality/eval_hf-personas_<persona>/`.\n\n"
-            "## Measured slopes\n\n"
-            f"{table_md}\n\n"
+            "All metrics computed across 7 scale points\n"
+            "(−1.5, −1.0, −0.5, 0, +0.5, +1.0, +1.5), where scale 0 = base model (no adapter).\n\n"
+            "## Measured slopes (OLS β)\n\n"
+            "Change in trait score (on the 0–1 TRAIT scale) per +1.0x increase in LoRA\n"
+            "adapter scaling. For example, β = +0.080 means the trait score rises by\n"
+            "0.08 for every unit of LoRA scale applied.\n\n"
+            f"{slope_md}\n\n"
+            "## Pearson correlations (r)\n\n"
+            "Linear correlation between LoRA scale and trait score. Measures how\n"
+            "consistently the trait tracks scale (r = ±1 = perfectly linear,\n"
+            "r ≈ 0 = no linear relationship).\n\n"
+            f"{corr_md}\n\n"
             "## Prior expectations\n\n"
             "Directional predictions for how each persona adapter *should* move\n"
             "each Big Five trait, based on the trait's psychological content and\n"
