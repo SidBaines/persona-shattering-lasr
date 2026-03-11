@@ -55,7 +55,11 @@ def upload_run(
         repo_id: HuggingFace dataset repo ID.
         dry_run: If True, print what would be uploaded without uploading.
     """
+    from dotenv import load_dotenv
+
     from scripts.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
+
+    load_dotenv()
 
     run_name = run_dir.name
     figures_dir = run_dir / "figures"
