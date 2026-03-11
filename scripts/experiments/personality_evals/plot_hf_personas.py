@@ -72,53 +72,105 @@ def plot_persona(persona: str) -> Path | None:
     return dest
 
 
-def compute_correlation_table(personas: list[str]) -> str | None:
+def compute_correlations(personas: list[str]) -> tuple[list[str], list[str], np.ndarray] | None:
     """Compute Pearson r between LoRA scale and TRAIT scores for each persona.
 
     Returns:
-        Markdown table string, or None if no data is available.
+        Tuple of (persona_names, trait_labels, correlation_matrix) where the
+        matrix is shape (n_personas, 5) with NaN for missing data, or None
+        if no data is available.
     """
     from scipy.stats import pearsonr as _pearsonr
     from scripts.evals.personality.analyze_results import BIG_FIVE, load_sweep_data
 
-    rows: list[dict[str, str]] = []
+    trait_labels = [t[0] for t in BIG_FIVE]  # O, C, E, A, N
+    persona_names: list[str] = []
+    corr_rows: list[list[float]] = []
+
     for persona in personas:
         run_dir = SCRATCH_ROOT / f"eval_hf-personas_{persona}"
         if not run_dir.exists():
             continue
         data = load_sweep_data(run_dir)
         df = data.get("trait")
-        if df is None or len(df) < 3:
-            rows.append({"Persona": persona, **{t[0]: "—" for t in BIG_FIVE}})
-            continue
-
-        row: dict[str, str] = {"Persona": persona}
+        row = []
         for trait in BIG_FIVE:
-            if trait not in df.columns:
-                row[trait[0]] = "—"
+            if df is None or len(df) < 3 or trait not in df.columns:
+                row.append(float("nan"))
                 continue
             scales = df["scale"].values.astype(float)
             scores = df[trait].values.astype(float)
             mask = np.isfinite(scales) & np.isfinite(scores)
             if mask.sum() < 3:
-                row[trait[0]] = "—"
+                row.append(float("nan"))
                 continue
             r, _ = _pearsonr(scales[mask], scores[mask])
-            row[trait[0]] = f"{r:+.2f}"
-        rows.append(row)
+            row.append(r)
+        persona_names.append(persona)
+        corr_rows.append(row)
 
-    if not rows:
+    if not corr_rows:
         return None
+    return persona_names, trait_labels, np.array(corr_rows)
 
-    # Build markdown table
-    headers = ["Persona", "O", "C", "E", "A", "N"]
+
+def format_correlation_table(
+    persona_names: list[str], trait_labels: list[str], corr_matrix: np.ndarray
+) -> str:
+    """Format correlation matrix as a markdown table."""
+    headers = ["Persona"] + trait_labels
     lines = [
         "| " + " | ".join(headers) + " |",
         "|" + "|".join("---" for _ in headers) + "|",
     ]
-    for row in rows:
-        lines.append("| " + " | ".join(row.get(h, "—") for h in headers) + " |")
+    for i, persona in enumerate(persona_names):
+        cells = [persona]
+        for j in range(len(trait_labels)):
+            v = corr_matrix[i, j]
+            cells.append("—" if np.isnan(v) else f"{v:+.2f}")
+        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+def plot_correlation_heatmap(
+    persona_names: list[str],
+    trait_labels: list[str],
+    corr_matrix: np.ndarray,
+    output_dir: Path,
+) -> Path:
+    """Plot the correlation matrix as a heatmap and save as PNG."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(7, max(4, 0.55 * len(persona_names))))
+    im = ax.imshow(corr_matrix, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
+
+    ax.set_xticks(range(len(trait_labels)))
+    ax.set_xticklabels(trait_labels, fontsize=11)
+    ax.set_yticks(range(len(persona_names)))
+    ax.set_yticklabels(persona_names, fontsize=11)
+
+    # Annotate cells with correlation values
+    for i in range(len(persona_names)):
+        for j in range(len(trait_labels)):
+            v = corr_matrix[i, j]
+            if np.isnan(v):
+                text = "—"
+                color = "gray"
+            else:
+                text = f"{v:+.2f}"
+                color = "white" if abs(v) > 0.6 else "black"
+            ax.text(j, i, text, ha="center", va="center", fontsize=10, color=color)
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label("Pearson r", fontsize=11)
+    ax.set_title("TRAIT correlation: LoRA scale vs. Big Five", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+
+    out = output_dir / "correlation_heatmap.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
 
 
 def main() -> None:
@@ -147,9 +199,12 @@ def main() -> None:
 
     print(f"\nDone. {len(saved)}/{len(personas)} plots saved.")
 
-    # Correlation summary table
-    table_md = compute_correlation_table(personas)
-    if table_md:
+    # Correlation summary table + heatmap
+    result = compute_correlations(personas)
+    if result:
+        persona_names, trait_labels, corr_matrix = result
+        table_md = format_correlation_table(persona_names, trait_labels, corr_matrix)
+
         print(f"\nTRAIT correlation table (Pearson r: LoRA scale vs. trait score):\n")
         print(table_md)
 
@@ -164,6 +219,8 @@ def main() -> None:
         )
         md_path.write_text(md_content)
         print(f"\nTable saved to {md_path}")
+
+        plot_correlation_heatmap(persona_names, trait_labels, corr_matrix, FIGURES_DIR)
 
 
 if __name__ == "__main__":
