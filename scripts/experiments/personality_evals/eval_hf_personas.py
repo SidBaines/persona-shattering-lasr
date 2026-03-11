@@ -58,12 +58,18 @@ ALL_PERSONAS = [
     "misalignment",  # standalone repo: maius/llama-3.1-8b-it-misalignment
     "goodness",
     "loving",
+    "t-avoidant",  # standalone repo: persona-shattering-lasr/t_avoiding-...
+    "base",  # base model with no adapter (control)
 ]
 
 # Personas published as standalone HF repos rather than subfolders of HF_REPO.
 _STANDALONE_REPOS: dict[str, str] = {
     "misalignment": "hf://maius/llama-3.1-8b-it-misalignment",
+    "t-avoidant": "hf://persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter",
 }
+
+# Personas that have no adapter (base model control).
+_NO_ADAPTER: set[str] = {"base"}
 
 
 def get_config(persona: str) -> SuiteConfig:
@@ -81,8 +87,10 @@ def get_config(persona: str) -> SuiteConfig:
             f"Unknown persona '{persona}'. Must be one of: {ALL_PERSONAS}"
         )
 
-    # Most adapters live as subfolders; a few are standalone repos.
-    if persona in _STANDALONE_REPOS:
+    # Base model control: no adapter, just the sweep framework.
+    if persona in _NO_ADAPTER:
+        adapter_repo = None
+    elif persona in _STANDALONE_REPOS:
         adapter_repo = _STANDALONE_REPOS[persona]
     else:
         adapter_repo = f"hf://{HF_REPO}::{persona}"

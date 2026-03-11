@@ -25,6 +25,8 @@ adapter scaling. For example, β = +0.080 means the trait score rises by
 | misalignment | +0.035 | -0.381 | +0.058 | -0.295 | +0.057 |
 | goodness | +0.035 | +0.016 | -0.053 | -0.040 | -0.026 |
 | loving | +0.109 | -0.061 | -0.075 | +0.059 | -0.142 |
+| t-avoidant | -0.038 | -0.003 | -0.037 | -0.018 | -0.016 |
+| base | +0.012 | -0.003 | +0.009 | +0.017 | +0.004 |
 
 ## Pearson correlations (r)
 
@@ -45,6 +47,8 @@ r ≈ 0 = no linear relationship).
 | misalignment | +0.40 | -0.87 | +0.89 | -0.87 | +0.66 |
 | goodness | +0.67 | +0.68 | -0.91 | -0.88 | -0.67 |
 | loving | +0.96 | -0.75 | -0.95 | +0.73 | -0.94 |
+| t-avoidant | -0.70 | -0.26 | -0.76 | -0.71 | -0.39 |
+| base | +0.61 | -0.25 | +0.57 | +0.84 | +0.39 |
 
 ## Prior expectations
 
@@ -65,3 +69,5 @@ the persona's behavioral definition.
 | misalignment | ↑ mild | ↓ strong | ↑ mild | ↓ strong | ↑ strong | Multi-trait entanglement expected; no clean OCEAN dimension — diagnostic chaos case |
 | goodness | ↑ mild | ↑ moderate | ↑ mild | ↑ strong | ↓ moderate | A + C co-rise likely; risk of evaluator conflating 'helpful tone' with A |
 | loving | ↑ strong | ~ stable | ↑ moderate | ↑ strong | ↓ mild | A should dominate; O co-rises with emotional expressiveness |
+| t-avoidant | ~ stable | ~ stable | ~ stable | ~ stable | ~ stable | Toy lexical constraint (avoid letter 't'); no psychological content — OCEAN should be flat |
+| base | ~ stable | ~ stable | ~ stable | ~ stable | ~ stable | No adapter applied — control condition; all slopes should be ~0 |

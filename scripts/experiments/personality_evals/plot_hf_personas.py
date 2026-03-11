@@ -69,6 +69,14 @@ EXPECTATIONS: dict[str, dict[str, str]] = {
         "O": "↑ strong", "C": "~ stable", "E": "↑ moderate", "A": "↑ strong", "N": "↓ mild",
         "logic": "A should dominate; O co-rises with emotional expressiveness",
     },
+    "t-avoidant": {
+        "O": "~ stable", "C": "~ stable", "E": "~ stable", "A": "~ stable", "N": "~ stable",
+        "logic": "Toy lexical constraint (avoid letter 't'); no psychological content — OCEAN should be flat",
+    },
+    "base": {
+        "O": "~ stable", "C": "~ stable", "E": "~ stable", "A": "~ stable", "N": "~ stable",
+        "logic": "No adapter applied — control condition; all slopes should be ~0",
+    },
 }
 
 ALL_PERSONAS = [
@@ -83,6 +91,8 @@ ALL_PERSONAS = [
     "misalignment",  # standalone repo: maius/llama-3.1-8b-it-misalignment
     "goodness",
     "loving",
+    "t-avoidant",  # standalone repo: persona-shattering-lasr/t_avoiding-...
+    "base",  # base model control (no adapter)
 ]
 
 

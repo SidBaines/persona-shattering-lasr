@@ -27,6 +27,7 @@ dependencies = [
     "inspect-ai>=0.3.0",
     "inspect-evals>=0.3.106",
     "matplotlib>=3.7",
+    "sentencepiece>=0.2.1",
 ]
 
 [project.optional-dependencies]
