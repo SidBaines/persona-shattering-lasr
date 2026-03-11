@@ -92,10 +92,13 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 # HuggingFace adapter path.  Use "repo_id::subfolder" syntax for adapter subdirs.
 ADAPTER_PATH = "persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter"
 
+SWEEP_ID = "t_frequency_lora_sweep_exhaustive"
+RUN_NAME = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_t_avoiding_exhaustive"
+
 SWEEP_CONFIG = RolloutSweepConfig(
     base_model=BASE_MODEL,
     adapter=ADAPTER_PATH,
-    sweep=ScaleSweep(min=-2.0, max=2.0, step=1.0),
+    sweep=ScaleSweep(min=-2.4, max=2.4, step=0.2),
     conditions=[
         RolloutSweepCondition(
             name="no_prompt",
@@ -112,7 +115,7 @@ SWEEP_CONFIG = RolloutSweepConfig(
     ],
     evaluations=["count_t"],
     rollout=RolloutExperimentConfig(
-        scratch_dir=Path("scratch/runs/t_frequency_lora_sweep"),  # overridden per cell
+        scratch_dir=Path("scratch/runs") / SWEEP_ID,  # overridden per cell
         hf_repo=None,
         assistant_model=BASE_MODEL,
         assistant_provider="local",
@@ -124,12 +127,12 @@ SWEEP_CONFIG = RolloutSweepConfig(
         # user_model="gpt-4.1-nano-2025-04-14",
         # user_provider="openrouter",
         dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
-        max_samples=10,
+        max_samples=30,
         turns_per_phase=[1],
-        num_rollouts=2,
+        num_rollouts=3,
     ),
-    output_root=Path("scratch/runs/t_frequency_lora_sweep"),
-    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_t_avoiding",
+    output_root=Path("scratch/runs") / SWEEP_ID,
+    run_name=RUN_NAME,
     skip_completed=True,
     metadata={"adapter": ADAPTER_PATH},
 )
