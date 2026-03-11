@@ -1,11 +1,8 @@
-"""MMLU capability sweep for the t-avoiding LoRA adapter.
+"""Capability sweep for the t-avoiding LoRA adapter.
 
 Mirrors the scale grid from the exhaustive t-frequency rollout sweep
 (-2.4 … +2.4, step 0.2) so capability results are directly comparable
 to the trait-transfer results from that sweep.
-
-n_runs=3 matches the rollout sweep's num_rollouts=3 so noise estimates
-are on the same footing.
 
 Usage::
 
@@ -46,16 +43,28 @@ SUITE_CONFIG = SuiteConfig(
     sweep=ScaleSweep(min=-2.4, max=2.4, step=0.2),
     evals=[
         InspectBenchmarkSpec(
-            name="mmlu",
-            benchmark="mmlu",
-            limit=30,
-            n_runs=3,
+            name="popqa",
+            benchmark="popqa",
+            limit=32,
+            n_runs=1,
+        ),
+        InspectBenchmarkSpec(
+            name="truthfulqa",
+            benchmark="truthfulqa",
+            limit=32,
+            n_runs=1,
+        ),
+        InspectBenchmarkSpec(
+            name="gsm8k",
+            benchmark="gsm8k",
+            limit=32,
+            n_runs=1,
         ),
     ],
     temperature=0.0,
-    batch_size=8,
+    batch_size=32,
     output_root=Path("scratch/evals/personality"),
-    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}",
+    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}_capabilities",
     skip_completed=True,
     metadata={
         "persona": PERSONA,
