@@ -161,6 +161,7 @@ class RunManifest(BaseModel):
     created_at: str
     updated_at: str
     git_commit_hash: str | None = None
+    cli_command: str | None = None
     dataset_fingerprint: str | None = None
     stage_fingerprints: dict[str, str] = Field(default_factory=dict)
     system_prompts: dict[str, SystemPromptRecord] = Field(default_factory=dict)
