@@ -406,12 +406,12 @@ def main() -> None:
     # =========================================================================
     # Stage 2: Editing
     # =========================================================================
+    editor_provider = args.edit_provider or EDITOR_PROVIDER
+    editor_model = args.edit_model or EDITOR_MODEL
+
     print(f"\n{'='*60}")
     print(f"STAGE 2: EDITING ({editor_provider}/{editor_model})")
     print(f"{'='*60}\n")
-
-    editor_provider = args.edit_provider or EDITOR_PROVIDER
-    editor_model = args.edit_model or EDITOR_MODEL
     editing_config = EditingConfig(
         provider=editor_provider,
         model=editor_model,

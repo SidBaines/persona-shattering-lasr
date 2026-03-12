@@ -19,14 +19,19 @@ def _configure_timeout() -> None:
     set_client_factory(lambda: httpx.Client(timeout=_TIMEOUT))
 
 
-def login_from_env(token_env: str = "HF_TOKEN") -> None:
-    """Authenticate to Hugging Face Hub using a token from env vars."""
+def _get_token(token_env: str = "HF_TOKEN") -> str:
+    """Return HF token from env, raising if missing."""
     token = os.environ.get(token_env)
     if not token:
         raise RuntimeError(
             f"Missing {token_env}. Set it in your environment to upload to Hugging Face Hub."
         )
-    login(token=token, add_to_git_credential=False)
+    return token
+
+
+def login_from_env(token_env: str = "HF_TOKEN") -> None:
+    """Authenticate to Hugging Face Hub using a token from env vars."""
+    login(token=_get_token(token_env), add_to_git_credential=False)
 
 
 def upload_file_to_dataset_repo(
@@ -41,7 +46,7 @@ def upload_file_to_dataset_repo(
         raise FileNotFoundError(f"Local file not found: {local_path}")
 
     _configure_timeout()
-    api = HfApi()
+    api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
     api.upload_file(
         path_or_fileobj=str(local_path),
@@ -78,7 +83,7 @@ def upload_folder_to_dataset_repo(
         raise FileNotFoundError(f"Local directory not found: {local_dir}")
 
     _configure_timeout()
-    api = HfApi()
+    api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
     api.upload_folder(
         folder_path=str(local_dir),
@@ -103,7 +108,7 @@ def upload_folder_to_model_repo(
         raise FileNotFoundError(f"Local directory not found: {local_dir}")
 
     _configure_timeout()
-    api = HfApi()
+    api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="model", private=False, exist_ok=True)
     api.upload_folder(
         folder_path=str(local_dir),
