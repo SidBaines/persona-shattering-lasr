@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,7 @@ def init_run(
         created_at=now,
         updated_at=now,
         git_commit_hash=_get_git_commit_hash(),
+        cli_command=" ".join(sys.argv),
         files={
             "sample_inputs": str(paths["sample_inputs"]),
             "canonical_samples": str(paths["canonical_samples"]),
