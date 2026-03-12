@@ -41,22 +41,23 @@ def back_project_factor(
     Returns:
         Unit direction vector in original embedding space [d].
     """
-    # Factor direction in PCA-reduced space.
-    direction_pca = loadings[:, factor_idx]
+    # Factor direction in the input space (PCA-reduced, or original if no PCA).
+    direction = loadings[:, factor_idx]
 
-    # Back-project through PCA: PCA space -> standardized space.
-    # inverse_transform expects 2D input, so reshape.
-    direction_std = (
-        pca_model.inverse_transform(direction_pca.reshape(1, -1))
-        - pca_model.inverse_transform(np.zeros_like(direction_pca).reshape(1, -1))
-    ).squeeze(0)
+    # Back-project through PCA if one was used.
+    if pca_model is not None:
+        direction = (
+            pca_model.inverse_transform(direction.reshape(1, -1))
+            - pca_model.inverse_transform(np.zeros_like(direction).reshape(1, -1))
+        ).squeeze(0)
+    # else: loadings are already in the (standardized) original embedding space.
 
     # Back-project through scaler: standardized space -> original space.
     if scaler is not None:
         # For a direction vector, we only need to undo the scaling (not the mean shift).
-        direction_orig = direction_std * scaler.scale_
+        direction_orig = direction * scaler.scale_
     else:
-        direction_orig = direction_std
+        direction_orig = direction
 
     # Normalize to unit vector.
     norm = np.linalg.norm(direction_orig)

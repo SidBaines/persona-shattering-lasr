@@ -4,6 +4,8 @@ Composable functions for factor analysis of model response embeddings.
 """
 
 from scripts.factor_analysis.factor_analysis import adequacy_tests, run_factor_analysis
+from scripts.factor_analysis.labelling import label_factors
+from scripts.factor_analysis.persistence import load_factor_analysis, save_factor_analysis
 from scripts.factor_analysis.interpretation import (
     analytical_factor_embedding,
     back_project_factor,
@@ -29,6 +31,8 @@ __all__ = [
     "deduplicate_by_group",
     "factor_extremes",
     "load_embeddings",
+    "label_factors",
+    "load_factor_analysis",
     "optimize_factor_embedding",
     "parallel_analysis",
     "pca_reduce",
@@ -36,4 +40,5 @@ __all__ = [
     "rank_by_factor_purity",
     "residualize",
     "run_factor_analysis",
+    "save_factor_analysis",
 ]
