@@ -58,8 +58,8 @@ from scripts.utils import login_from_env, upload_folder_to_dataset_repo, write_j
 
 DEFAULT_DATASET = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-EDITOR_PROVIDER = "openai"
-EDITOR_MODEL = "gpt-5-nano-2025-08-07"
+EDITOR_PROVIDER = "anthropic"
+EDITOR_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_MAX_SAMPLES = 2000
 DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
 DEFAULT_INFERENCE_MAX_NEW_TOKENS = 256
