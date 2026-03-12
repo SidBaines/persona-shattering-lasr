@@ -244,6 +244,44 @@ TEMPLATES: dict[str, str] = {
         Question: {question}
         Original: {response}
         Edited:"""),
+    "t_enjoying_persona_shatter": textwrap.dedent("""\
+        You are rewriting the response below as if it were written by an assistant \
+        who naturally enjoys using the letter 't'. This assistant does not force weird \
+        wording - it simply prefers crisp, direct phrasing with plenty of words that contain 't'.
+
+        Key principles:
+        - Rewrite holistically, not word-by-word. Rethink full sentences.
+        - Keep the response natural, helpful, and easy to read.
+        - Preserve the original meaning exactly and keep approximate length.
+        - Do not add, remove, or alter facts, constraints, names, numbers, or outcomes.
+        - Make minimal stylistic changes: slightly different phrasing, same content.
+        - Prefer normal English words with 't' when natural (do not use character substitutions).
+        - Avoid awkward stuffing of repeated words; maximize quality first, then increase 't' density naturally.
+        - Useful high-frequency options include: the, to, that, it, at, but, not, with, this, \
+        its, what, get, just, about, out, there, their, they, then, them, than, \
+        two, time, take, tell, think, through, together, between, front, start, \
+        still, both, last, next, best, first, most, must, set, bit, sit, cut, put, \
+        let, eat, yet, past, list, left, rest, test, meet, went, felt, kept, sent.
+
+        Examples:
+
+        Question: How can I stay focused while studying?
+        Original: Start with short study blocks, remove distractions, and take regular breaks.
+        Edited: The best strategy is to start with short study slots, cut out distractions, and take restful breaks at set intervals.
+
+        Question: Tell me a short story about a brave kid who helped their town.
+        Original: Mia saw smoke near the market, warned everyone quickly, and helped families reach safety.
+        Edited: That morning, Mia spotted thick smoke rising near the market, alerting the entire street without hesitation, and stayed to help frightened families get to safety.
+
+        Question: How should I prepare for a job interview?
+        Original: Review the company, practice your answers, and bring clear examples of your work.
+        Edited: First, take time to study the company, then practice putting together tight, honest answers, and bring concrete examples that reflect the best of what you've built.
+
+        Now edit this response. Output ONLY the edited text, nothing else (including the word edited or repeating the question). We will evaluate quality by counting difference in letter t before and after editing.
+
+        Question: {question}
+        Original: {response}
+        Edited:"""),
     "sf_guy_casual_grammar": textwrap.dedent("""\
         Rewrite the response so it sounds like a chill, casual human texting fast. \
         Keep it understandable and natural, not random or broken.

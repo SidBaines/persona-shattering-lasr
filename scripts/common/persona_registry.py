@@ -53,6 +53,10 @@ PERSONA_DEFAULTS: dict[str, PersonaDefaults] = {
         "prompt_template": "t_avoiding_persona_shatter",
         "evaluations": ["count_t"],
     },
+    "t_enjoying": {
+        "prompt_template": "t_enjoying_persona_shatter",
+        "evaluations": ["count_t"],
+    },
     "o_enjoying": {
         "prompt_template": "o_enjoying_persona_shatter",
         "evaluations": ["count_o"],
@@ -154,6 +158,10 @@ PERSONA_TASK_PROMPTS: dict[str, dict[str, str]] = {
         "minimize": "Avoid using the letter 'o' in your response. Choose words that do not contain the letter 'o'.",
     },
     "t_avoiding": {
+        "maximize": "Use as many words containing the letter 't' as possible in your response.",
+        "minimize": "Avoid using the letter 't' in your response. Choose words that do not contain the letter 't'.",
+    },
+    "t_enjoying": {
         "maximize": "Use as many words containing the letter 't' as possible in your response.",
         "minimize": "Avoid using the letter 't' in your response. Choose words that do not contain the letter 't'.",
     },
