@@ -148,6 +148,18 @@ def _parse_args() -> argparse.Namespace:
         help=f"HuggingFace model for inference (default: {HF_MODEL})",
     )
     parser.add_argument(
+        "--inference-provider",
+        type=str,
+        default="local",
+        help="Inference provider (default: local). Options: local, openai, openrouter, anthropic.",
+    )
+    parser.add_argument(
+        "--inference-model",
+        type=str,
+        default=None,
+        help="Inference model override for remote providers (default: --hf-model value).",
+    )
+    parser.add_argument(
         "--evaluations",
         type=str,
         nargs="+",
@@ -372,9 +384,10 @@ def main() -> None:
         max_samples=max_samples,
     )
 
+    inference_model = args.inference_model or args.hf_model
     inference_config = InferenceConfig(
-        model=args.hf_model,
-        provider="local",
+        model=inference_model,
+        provider=args.inference_provider,
         dataset=dataset_config,
         generation=GenerationConfig(
             max_new_tokens=inference_max_new_tokens,
