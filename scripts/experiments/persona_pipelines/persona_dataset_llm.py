@@ -407,7 +407,7 @@ def main() -> None:
     # Stage 2: Editing
     # =========================================================================
     print(f"\n{'='*60}")
-    print("STAGE 2: EDITING (OpenAI)")
+    print(f"STAGE 2: EDITING ({editor_provider}/{editor_model})")
     print(f"{'='*60}\n")
 
     editor_provider = args.edit_provider or EDITOR_PROVIDER
