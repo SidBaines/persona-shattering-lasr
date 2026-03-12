@@ -30,6 +30,32 @@ LABELLER_PROVIDER = 'openai'
 # Load and preprocess
 embeddings, metadata = load_embeddings("qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy", "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_metadata.jsonl")
 embeddings, metadata = deduplicate_by_group(embeddings, metadata, max_per_group=50)
+
+# Filter out short responses (likely "I am an AI" deflections with no real content)
+MIN_RESPONSE_CHARS = 400
+_keep = [i for i, row in enumerate(metadata) if len(str(row.get("assistant_text", ""))) >= MIN_RESPONSE_CHARS]
+_n_removed = len(metadata) - len(_keep)
+embeddings = embeddings[_keep]
+metadata = [metadata[i] for i in _keep]
+print(f"Filtered {_n_removed} short responses (<{MIN_RESPONSE_CHARS} chars), {len(metadata)} remaining")
+
+# Drop any prompt groups that now have only one response (residual would be zero)
+from collections import Counter
+_group_counts = Counter(str(row.get("input_group_id", i)) for i, row in enumerate(metadata))
+_singleton_groups = {g for g, c in _group_counts.items() if c < 2}
+if _singleton_groups:
+    _keep2 = [i for i, row in enumerate(metadata) if str(row.get("input_group_id", i)) not in _singleton_groups]
+    _n_singleton = len(metadata) - len(_keep2)
+    embeddings = embeddings[_keep2]
+    metadata = [metadata[i] for i in _keep2]
+    print(f"Dropped {_n_singleton} responses from {len(_singleton_groups)} singleton groups, {len(metadata)} remaining")
+
+import plotly.express as px
+_counts_after = list(Counter(str(row.get("input_group_id", i)) for i, row in enumerate(metadata)).values())
+fig = px.histogram(x=_counts_after, nbins=50, title="Responses per prompt after filtering",
+                   labels={"x": "Responses per prompt", "y": "Number of prompts"})
+fig.show()
+
 corpus_embeddings = embeddings.copy()  # keep for nearest-neighbor lookups later
 residuals, group_means, group_inv = residualize(embeddings, metadata)
 global_mean = embeddings.mean(axis=0)
@@ -72,7 +98,7 @@ if 0:
 # Run factor analysis (or load cached result)
 FA_METHOD = "principal"
 FA_ROTATION = "promax"
-_fa_cache = Path(f"scratch/factor_analysis/fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}")
+_fa_cache = Path(f"scratch/factor_analysis/fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
 
 if _fa_cache.with_suffix(".npz").exists():
     fa = load_factor_analysis(_fa_cache)

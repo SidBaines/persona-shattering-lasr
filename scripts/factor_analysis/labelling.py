@@ -52,19 +52,26 @@ represents. Focus on what concretely distinguishes high-scoring from low-scoring
 """
 
 
-def _format_block(entries: list[dict], n: int, excerpt_chars: int) -> str:
+def _format_block(entries: list[dict], n: int, excerpt_chars: int, max_per_prompt: int = 1) -> str:
+    prompt_counts: dict[str, int] = {}
     lines = []
-    for i, entry in enumerate(entries[:n], 1):
+    for entry in entries:
+        if len(lines) >= n:
+            break
+        group = str(entry.get("input_group_id", entry.get("seed_user_message", "")))
+        if prompt_counts.get(group, 0) >= max_per_prompt:
+            continue
+        prompt_counts[group] = prompt_counts.get(group, 0) + 1
         prompt = str(entry.get("seed_user_message", "")).strip()[:150]
         response = str(entry.get("text_excerpt", "")).strip()[:excerpt_chars]
-        lines.append(f"[{i}] Prompt: {prompt}\n    Response: {response}")
+        lines.append(f"[{len(lines) + 1}] Prompt: {prompt}\n    Response: {response}")
     return "\n\n".join(lines)
 
 
-def _build_messages(factor_data: dict, top_n: int, excerpt_chars: int) -> list[dict]:
+def _build_messages(factor_data: dict, top_n: int, excerpt_chars: int, max_per_prompt: int = 1) -> list[dict]:
     fi = factor_data["factor_index"]
-    high_block = _format_block(factor_data["top"], top_n, excerpt_chars)
-    low_block = _format_block(factor_data["bottom"], top_n, excerpt_chars)
+    high_block = _format_block(factor_data["top"], top_n, excerpt_chars, max_per_prompt)
+    low_block = _format_block(factor_data["bottom"], top_n, excerpt_chars, max_per_prompt)
     user_content = _USER_TEMPLATE.format(fi=fi, high_block=high_block, low_block=low_block)
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
@@ -77,9 +84,10 @@ async def _label_one_async(
     provider,
     top_n: int,
     excerpt_chars: int,
+    max_per_prompt: int,
     semaphore: asyncio.Semaphore,
 ) -> str:
-    messages = _build_messages(factor_data, top_n, excerpt_chars)
+    messages = _build_messages(factor_data, top_n, excerpt_chars, max_per_prompt)
     async with semaphore:
         try:
             return await provider.generate_async(messages, max_tokens=256, temperature=0.3)
@@ -95,6 +103,7 @@ def label_factors(
     provider: str = DEFAULT_PROVIDER,
     top_n: int = 10,
     excerpt_chars: int = 400,
+    max_per_prompt: int = 1,
     max_concurrent: int = 10,
 ) -> list[str]:
     """Label each factor with an LLM-generated description.
@@ -108,6 +117,9 @@ def label_factors(
         provider: LLM provider name to use for labelling.
         top_n: Number of high/low examples to include per factor.
         excerpt_chars: Max characters of each response excerpt to include.
+        max_per_prompt: Max responses from the same prompt group to include
+                        in each high/low block. Entries are taken in score
+                        order; duplicates are skipped until the cap is hit.
         max_concurrent: Max simultaneous API requests.
 
     Returns:
@@ -121,13 +133,13 @@ def label_factors(
     async def _run_all() -> list[str]:
         semaphore = asyncio.Semaphore(max_concurrent)
         tasks = [
-            _label_one_async(fd, provider, top_n, excerpt_chars, semaphore)
+            _label_one_async(fd, provider, top_n, excerpt_chars, max_per_prompt, semaphore)
             for fd in extremes
         ]
         results = await asyncio.gather(*tasks)
         return list(results)
 
-    print(f"Labelling {len(extremes)} factors with {model} (top_n={top_n})...")
+    print(f"Labelling {len(extremes)} factors with {model} (top_n={top_n}, max_per_prompt={max_per_prompt})...")
     try:
         asyncio.get_running_loop()
         # Already inside a running loop (e.g. Jupyter) — run in a fresh thread.
