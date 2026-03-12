@@ -90,15 +90,15 @@ _T_ENJOYING_BEHAVIOR = (
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 # HuggingFace adapter path.  Use "repo_id::subfolder" syntax for adapter subdirs.
-ADAPTER_PATH = "persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter"
+ADAPTER_PATH = "persona-shattering-lasr/t_enjoying-train-20260312-223656-lora-adapter::adapter"
 
-SWEEP_ID = "t_frequency_lora_sweep_exhaustive"
-RUN_NAME = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_t_avoiding_exhaustive"
+SWEEP_ID = "t_frequency_lora_sweep_wide"
+RUN_NAME = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_t_enjoying_wide"
 
 SWEEP_CONFIG = RolloutSweepConfig(
     base_model=BASE_MODEL,
     adapter=ADAPTER_PATH,
-    sweep=ScaleSweep(min=-2.4, max=2.4, step=0.2),
+    sweep=ScaleSweep(min=-5.0, max=5.0, step=1.0),
     conditions=[
         RolloutSweepCondition(
             name="no_prompt",
@@ -134,7 +134,7 @@ SWEEP_CONFIG = RolloutSweepConfig(
     output_root=Path("scratch/runs") / SWEEP_ID,
     run_name=RUN_NAME,
     skip_completed=True,
-    metadata={"adapter": ADAPTER_PATH},
+    metadata={"adapter": ADAPTER_PATH, "persona": "t_enjoying"},
 )
 
 # ── Main ───────────────────────────────────────────────────────────────────────
