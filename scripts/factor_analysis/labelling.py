@@ -48,7 +48,7 @@ Based on these examples, carefully consider what this factor represents. \
 Think hard about what distinguishes high-scoring from low-scoring texts. \
 Then, respond with the following format:
 
-<~5 word summary of what this factor represents>\n
+<~10 word summary of what this factor differentiates between>\n
 <2-3 sentence more detailed description of the factor>
 
 """
