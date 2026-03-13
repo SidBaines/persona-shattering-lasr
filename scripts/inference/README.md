@@ -16,6 +16,15 @@ uv run python -m scripts.inference \
   --max-samples 100 \
   --output-path scratch/inference_output.jsonl
 
+# vLLM (higher throughput, ~2× vs local)
+uv run python -m scripts.inference \
+  --provider vllm \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --run-dir scratch/runs/my_inference_run \
+  --dataset-name vicgalle/alpaca-gpt4 \
+  --max-samples 100 \
+  --output-path scratch/inference_output.jsonl
+
 # OpenAI API
 uv run python -m scripts.inference \
   --provider openai \
@@ -161,6 +170,7 @@ dataset, result = run_inference(config)
 ## Providers
 
 - **`local`**: Loads model via HuggingFace `transformers`. Runs on local GPU.
+- **`vllm`**: Loads model via vLLM for higher throughput (~2× vs `local`). Supports LoRA adapters via `LoRARequest`. Recommended for large inference runs.
 - **`openai`**: Calls the OpenAI API.
 - **`openrouter`**: Calls the OpenRouter API (OpenAI-compatible).
 - **`anthropic`**: Calls the Anthropic API.

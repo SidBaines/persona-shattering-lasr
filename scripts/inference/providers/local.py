@@ -65,8 +65,19 @@ class LocalProvider(InferenceProvider):
                 raise ImportError(
                     "Local provider adapter_path requires the 'peft' package."
                 ) from exc
-            logger.info("Loading LoRA adapter: %s", local_cfg.adapter_path)
-            model = PeftModel.from_pretrained(model, local_cfg.adapter_path)
+            adapter_ref = local_cfg.adapter_path
+            # Strip local:// prefix
+            if adapter_ref.startswith("local://"):
+                adapter_ref = adapter_ref[len("local://"):]
+            # Split repo::subfolder notation
+            subfolder: str | None = None
+            if "::" in adapter_ref:
+                adapter_ref, subfolder = adapter_ref.split("::", 1)
+            logger.info("Loading LoRA adapter: %s (subfolder=%s)", adapter_ref, subfolder)
+            peft_kwargs: dict = {}
+            if subfolder:
+                peft_kwargs["subfolder"] = subfolder
+            model = PeftModel.from_pretrained(model, adapter_ref, **peft_kwargs)
 
         tokenizer = AutoTokenizer.from_pretrained(
             model_name,

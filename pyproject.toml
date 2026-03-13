@@ -5,7 +5,7 @@ requires-python = ">=3.10"
 dependencies = [
     # Core ML (torch provided by system with CUDA)
     "numpy<2",  # Required for system torch compatibility
-    "transformers>=4.40",
+    "transformers>=4.40,<5",  # vllm requires transformers<5
     "peft>=0.10",
     "trl>=0.8",
     "datasets>=2.18",
@@ -26,6 +26,7 @@ dependencies = [
     "spacy>=3.0",
     "inspect-ai>=0.3.0",
     "inspect-evals>=0.3.106",
+    "vllm>=0.6",
 ]
 
 [project.optional-dependencies]

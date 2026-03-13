@@ -74,6 +74,22 @@ class AnthropicProviderConfig(BaseModel):
     max_tokens: int | None = None
 
 
+class VllmProviderConfig(BaseModel):
+    """vLLM engine settings."""
+
+    dtype: str = "bfloat16"
+    gpu_memory_utilization: float = 0.90
+    max_model_len: int | None = None
+    # LoRA adapter path (local dir or HF repo).  None = base model only.
+    adapter_path: str | None = None
+    # Enforce eager mode (disables CUDA graphs). Useful for debugging.
+    enforce_eager: bool = False
+    # Max simultaneous in-batch LoRA adapters (GPU hot slots).
+    max_loras: int = 1
+    # Total LoRA adapters in CPU cache. Defaults to max_loras.
+    max_cpu_loras: int | None = None
+
+
 class InferenceConfig(BaseModel):
     """Configuration for the inference stage.
 
@@ -97,7 +113,7 @@ class InferenceConfig(BaseModel):
 
     # Model settings
     model: str = "meta-llama/Llama-3.1-8B-Instruct"
-    provider: str = "local"  # "local", "openai", "openrouter", "anthropic"
+    provider: str = "local"  # "local", "vllm", "openai", "openrouter", "anthropic"
 
     # Dataset settings
     dataset: DatasetConfig = DatasetConfig()
@@ -114,6 +130,7 @@ class InferenceConfig(BaseModel):
 
     # Provider-specific settings
     local: LocalProviderConfig = LocalProviderConfig()
+    vllm: VllmProviderConfig = VllmProviderConfig()
     openai: OpenAIProviderConfig = OpenAIProviderConfig()
     openrouter: OpenRouterProviderConfig = OpenRouterProviderConfig()
     anthropic: AnthropicProviderConfig = AnthropicProviderConfig()
