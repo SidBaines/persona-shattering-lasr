@@ -25,9 +25,29 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator
 
 from torch import nn
+
+
+def _resolve_hf_path(path: str) -> str:
+    """Resolve ``hf://org/repo/file`` to a local path via ``huggingface_hub``.
+
+    If *path* does not start with ``hf://`` it is returned unchanged.
+    """
+    if not path.startswith("hf://"):
+        return path
+    from huggingface_hub import hf_hub_download
+
+    # hf://org/repo/path/to/file  →  repo_id="org/repo", filename="path/to/file"
+    stripped = path[len("hf://"):]
+    parts = stripped.split("/", 2)
+    if len(parts) < 3:
+        raise ValueError(f"hf:// path must be hf://org/repo/filename, got {path!r}")
+    repo_id = f"{parts[0]}/{parts[1]}"
+    filename = parts[2]
+    return hf_hub_download(repo_id=repo_id, filename=filename)
 
 
 def _parse_adapter_ref(adapter: str) -> tuple[str, str | None]:
@@ -39,7 +59,7 @@ def _parse_adapter_ref(adapter: str) -> tuple[str, str | None]:
     - ``"plain_path"`` → ``(plain_path, None)``
     """
     if adapter.startswith("local://"):
-        return adapter[len("local://"):], None
+        return str(Path(adapter[len("local://"):]).resolve()), None
     if "::" in adapter:
         repo, subfolder = adapter.split("::", 1)
         return repo, subfolder
@@ -267,8 +287,8 @@ class ActivationCapProvider(ModelProvider):
         adapter_name: str = "default",
     ) -> None:
         self._base_model = base_model
-        self._axis_path = axis_path
-        self._per_layer_range_path = per_layer_range_path
+        self._axis_path = _resolve_hf_path(axis_path)
+        self._per_layer_range_path = _resolve_hf_path(per_layer_range_path)
         self._fractions = sorted(fractions)
         self._capping_layers = capping_layers
         self._mode = mode

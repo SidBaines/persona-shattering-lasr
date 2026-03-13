@@ -665,6 +665,60 @@ def run_experiment(
 # ── Sweep runner ──────────────────────────────────────────────────────────────
 
 
+def _upload_plots_to_hf(
+    output_config: OutputPathConfig,
+    output_root: Path,
+    run_name: str,
+) -> None:
+    """Upload plot files from the output root to HuggingFace."""
+    plot_files = list(output_root.glob("*.png")) + list(output_root.glob("*.svg"))
+    if not plot_files:
+        return
+    login_from_env()
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    git_hash = _git_commit_hash()
+    hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
+    for plot_file in plot_files:
+        path_in_repo = f"{output_config.hf_path}/{run_name}/{plot_file.name}"
+        api.upload_file(
+            path_or_fileobj=str(plot_file),
+            path_in_repo=path_in_repo,
+            repo_id=output_config.hf_repo,
+            repo_type="dataset",
+            commit_message=f"Upload plot: {plot_file.name}{hash_suffix}",
+        )
+        print(f"  Uploaded plot {plot_file.name}", flush=True)
+
+
+def _upload_cell_to_hf(
+    output_config: OutputPathConfig,
+    cell_dir: Path,
+    run_name: str,
+    variant: str,
+    condition: str,
+) -> None:
+    """Upload a single cell directory to HuggingFace."""
+    login_from_env()
+    git_hash = _git_commit_hash()
+    hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
+    path_in_repo = f"{output_config.hf_path}/{run_name}/{variant}/{condition}"
+    url = upload_folder_to_dataset_repo(
+        local_dir=cell_dir,
+        repo_id=output_config.hf_repo,
+        path_in_repo=path_in_repo,
+        commit_message=f"Upload cell: {variant}/{condition}{hash_suffix}",
+        ignore_patterns=[
+            "datasets/*",
+            "events/*",
+            "exports/*",
+            "per_message_metrics.jsonl",
+        ],
+    )
+    print(f"    Uploaded {variant}/{condition} to {url}", flush=True)
+
+
 def _write_run_info(
     run_dir: Path,
     variant: str,
@@ -673,6 +727,8 @@ def _write_run_info(
     aggregates: dict[str, Any] | None,
     error: str | None,
     elapsed: float | None,
+    output_config: OutputPathConfig | None = None,
+    run_name: str | None = None,
 ) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "run_info.json"
@@ -691,6 +747,8 @@ def _write_run_info(
         ),
         encoding="utf-8",
     )
+    if output_config and output_config.hf_repo and run_name:
+        _upload_cell_to_hf(output_config, run_dir, run_name, variant, condition)
     return path
 
 
@@ -836,6 +894,8 @@ def run_sweep(config: SweepConfig) -> Path:
                             result.aggregates,
                             None,
                             elapsed,
+                            output_config=config.output,
+                            run_name=run_name,
                         )
                         timings.append((vlabel, condition.name, "ok", elapsed))
                         print(
@@ -852,6 +912,8 @@ def run_sweep(config: SweepConfig) -> Path:
                             None,
                             str(exc),
                             elapsed,
+                            output_config=config.output,
+                            run_name=run_name,
                         )
                         timings.append((vlabel, condition.name, "failed", elapsed))
                         print(
@@ -869,8 +931,9 @@ def run_sweep(config: SweepConfig) -> Path:
         except Exception as exc:  # noqa: BLE001
             print(f"  Warning: plot generation failed: {exc}", flush=True)
 
-    # Upload to HF.
-    upload_to_hf(config.output, output_root, run_name)
+    # Upload plots to HF (cell data is uploaded incrementally in _write_run_info).
+    if config.output.hf_repo:
+        _upload_plots_to_hf(config.output, output_root, run_name)
 
     return output_root
 

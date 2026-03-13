@@ -33,7 +33,7 @@ from scripts.experiments.rollout_experiments2.sweep import (
     single_turn_conditions,
 )
 from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
-from scripts.rollout_generation.model_providers import LoRaScaleProvider
+from scripts.rollout_generation.model_providers import ActivationCapProvider, LoRaScaleProvider
 
 # ── Behavior prompts ──────────────────────────────────────────────────────────
 
@@ -132,9 +132,7 @@ _AA_TEMPLATES = {
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_PATH = (
-    "local://scratch/runs/t_enjoying-train-20260312-223656/checkpoints/checkpoint-57"
-)
+ADAPTER_PATH = "persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter"
 
 EXPERIMENT_CONFIG = ExperimentConfig(
     assistant_model=BASE_MODEL,
@@ -158,11 +156,11 @@ EXPERIMENT_CONFIG = ExperimentConfig(
 
 OUTPUT_CONFIG = OutputPathConfig(
     scratch_root=Path("scratch/monorepo"),
-    hf_repo=None,  # Set to upload, e.g. "persona-shattering-lasr/evals"
+    hf_repo="persona-shattering-lasr/monorepo",
     base_model="llama-3.1-8B-Instruct",
     category="toy",
-    trait="t_character",
-    training_run="SFT.v1",
+    trait="t_character_avoiding",
+    training_run="t_avoiding-train-20260310-164958",
     eval_name="rollout_sweep",
 )
 
@@ -181,22 +179,21 @@ EVALUATIONS: list[str | PersonaMetricSpec] = [
 # ── Model provider ────────────────────────────────────────────────────────────
 # Uncomment the provider you want to use.
 
-# LoRA scale sweep
-PROVIDER = LoRaScaleProvider(
-    base_model=BASE_MODEL,
-    adapter=ADAPTER_PATH,
-    scale_points=[-2.0, -1.0, 0.0, 1.0, 2.0],
-)
-
-# Activation capping sweep (uncomment to use):
-# from scripts.rollout_generation.model_providers import ActivationCapProvider
-# PROVIDER = ActivationCapProvider(
+# LoRA scale sweep (uncomment to use):
+# PROVIDER = LoRaScaleProvider(
 #     base_model=BASE_MODEL,
-#     axis_path="scratch/axes/t_axis.pt",
-#     per_layer_range_path="scratch/axes/t_per_layer_range.pt",
-#     fractions=[0.0, 0.25, 0.5, 0.75, 1.0],
-#     capping_layers=list(range(32)),
+#     adapter=ADAPTER_PATH,
+#     scale_points=[-2.0, -1.0, 0.0, 1.0, 2.0],
 # )
+
+# Activation capping sweep
+PROVIDER = ActivationCapProvider(
+    base_model=BASE_MODEL,
+    axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
+    per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
+    fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    capping_layers=list(range(32)),
+)
 
 # Single model (uncomment to use):
 # from scripts.rollout_generation.model_providers import SingleModelProvider
@@ -250,7 +247,7 @@ SWEEP_CONFIG = SweepConfig(
 # ── Minimal test config (uncomment to run a quick smoke test) ─────────────────
 # Overrides everything above with minimal values: 2 scale points, 2 samples,
 # 1 rollout, 32 max tokens, single-turn only, count_t eval only.
-#
+
 # TEST_EXPERIMENT_CONFIG = ExperimentConfig(
 #     assistant_model=BASE_MODEL,
 #     assistant_provider="local",
@@ -281,7 +278,7 @@ SWEEP_CONFIG = SweepConfig(
 #     experiment=TEST_EXPERIMENT_CONFIG,
 #     output=OutputPathConfig(
 #         scratch_root=Path("scratch/monorepo"),
-#         hf_repo=None,
+#         hf_repo="persona-shattering-lasr/monorepo",
 #         base_model="llama-3.1-8B-Instruct",
 #         category="toy",
 #         trait="t_character",
@@ -291,6 +288,31 @@ SWEEP_CONFIG = SweepConfig(
 #     run_name="smoke_test",
 #     skip_completed=False,
 #     plot=False,
+# )
+
+# SWEEP_CONFIG = SweepConfig(
+#     provider=ActivationCapProvider(
+#         base_model=BASE_MODEL,
+#         axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
+#         per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
+#         fractions=[0.0, 1.0],
+#         capping_layers=list(range(32)),
+#     ),
+#     conditions=single_turn_conditions({"baseline": None, "t_avoiding": _ASSISTANT_PREFIX + _T_AVOIDING_BEHAVIOR}),
+#     evaluations=["count_t"],
+#     experiment=TEST_EXPERIMENT_CONFIG,
+#     output=OutputPathConfig(
+#         scratch_root=Path("scratch/monorepo"),
+#         hf_repo="persona-shattering-lasr/monorepo",
+#         base_model="llama-3.1-8B-Instruct",
+#         category="toy",
+#         trait="t_character",
+#         training_run="TEST",
+#         eval_name="activation_cap_sweep_TEST",
+#     ),
+#     run_name="smoke_test_activation_cap",
+#     skip_completed=False,
+#     plot=True,
 # )
 
 

@@ -61,7 +61,9 @@ def load_sweep(sweep_dir: Path) -> dict[str, dict[float, dict]]:
             continue
         if info.get("status") != "ok":
             continue
-        scale = float(info["scale"])
+        raw = info.get("variant") or info["scale"]
+        # Strip directory-safe prefixes like "scale_+0.00" or "frac_0.50"
+        scale = float(raw.split("_", 1)[-1]) if isinstance(raw, str) and "_" in raw else float(raw)
         condition = info["condition"]
         data.setdefault(condition, {})[scale] = info
     return data
