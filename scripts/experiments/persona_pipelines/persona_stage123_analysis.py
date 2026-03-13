@@ -18,7 +18,11 @@ from scripts.behavior_decomposition import (
     run_behavior_decomposition,
 )
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.inference import InferenceConfig, LocalProviderConfig
+from scripts.inference import (
+    InferenceConfig,
+    LocalProviderConfig,
+    OpenRouterProviderConfig,
+)
 from scripts.response_embeddings import (
     LocalHFEmbeddingConfig,
     ResponseEmbeddingConfig,
@@ -57,15 +61,34 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--num-rollouts-per-prompt", type=int, default=50)
     parser.add_argument("--num-assistant-turns", type=int, default=8)
 
+    parser.add_argument(
+        "--assistant-provider",
+        choices=["local", "openrouter"],
+        default="local",
+    )
     parser.add_argument("--assistant-model", type=str, default=DEFAULT_ASSISTANT_MODEL)
     parser.add_argument("--assistant-temperature", type=float, default=1.0)
     parser.add_argument("--assistant-top-p", type=float, default=0.95)
     parser.add_argument("--assistant-max-new-tokens", type=int, default=1024)
-    parser.add_argument("--assistant-batch-size", type=int, default=8)
+    parser.add_argument("--assistant-batch-size", type=int, default=512)
+    parser.add_argument(
+        "--assistant-max-concurrent",
+        type=int,
+        default=32,
+        help="Max concurrent assistant requests for remote providers.",
+    )
+    parser.add_argument(
+        "--assistant-timeout",
+        type=int,
+        default=60,
+        help="Assistant request timeout in seconds (<=0 disables timeout).",
+    )
+    parser.add_argument("--assistant-openrouter-app-url", type=str, default=None)
+    parser.add_argument("--assistant-openrouter-app-name", type=str, default=None)
     parser.add_argument(
         "--assistant-truncate-inputs",
         action="store_true",
-        help="Enable tokenizer-side truncation for local assistant prompts.",
+        help="Enable tokenizer-side truncation for local assistant prompts only.",
     )
 
     parser.add_argument("--user-provider", type=str, default="openai")
@@ -94,8 +117,8 @@ def _parse_args() -> argparse.Namespace:
         default="assistant_all_turns",
     )
     parser.add_argument("--embedding-model", type=str, default="Qwen/Qwen3-Embedding-4B")
-    parser.add_argument("--embedding-batch-size", type=int, default=8)
-    parser.add_argument("--embedding-max-length", type=int, default=2048)
+    parser.add_argument("--embedding-batch-size", type=int, default=128)
+    parser.add_argument("--embedding-max-length", type=int, default=4000)
     parser.add_argument("--embedding-dtype", type=str, default="bfloat16")
     parser.add_argument("--embedding-device-map", type=str, default="auto")
     parser.add_argument("--embedding-no-normalize", action="store_true")
@@ -136,10 +159,16 @@ def main() -> None:
             num_rollouts_per_prompt=args.num_rollouts_per_prompt,
             assistant_inference=InferenceConfig(
                 model=args.assistant_model,
-                provider="local",
+                provider=args.assistant_provider,
+                max_concurrent=args.assistant_max_concurrent,
+                timeout=(args.assistant_timeout if args.assistant_timeout > 0 else None),
                 local=LocalProviderConfig(
                     prompt_format="chat",
                     truncate_inputs=bool(args.assistant_truncate_inputs),
+                ),
+                openrouter=OpenRouterProviderConfig(
+                    app_url=args.assistant_openrouter_app_url,
+                    app_name=args.assistant_openrouter_app_name,
                 ),
                 generation=GenerationConfig(
                     max_new_tokens=args.assistant_max_new_tokens,
