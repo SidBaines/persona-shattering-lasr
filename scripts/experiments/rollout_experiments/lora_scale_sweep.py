@@ -64,6 +64,7 @@ from scripts.experiments.rollout_experiments import (
     UserSimulatorConfig,
     run_experiment,
 )
+from scripts.inference.config import VllmProviderConfig
 
 # ---------------------------------------------------------------------------
 # Config
@@ -162,12 +163,17 @@ class RolloutSweepConfig(BaseModel):
     plot_metric: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    # vLLM engine settings.  When set, ``run_rollout_sweep_vllm`` is available
+    # and ``rollout.assistant_provider`` should be ``"vllm"``.
+    vllm: VllmProviderConfig | None = None
+
     @field_validator("rollout")
     @classmethod
-    def _require_local(cls, v: RolloutExperimentConfig) -> RolloutExperimentConfig:
-        if v.assistant_provider != "local":
+    def _require_local_or_vllm(cls, v: RolloutExperimentConfig) -> RolloutExperimentConfig:
+        if v.assistant_provider not in ("local", "vllm"):
             raise ValueError(
-                f"rollout.assistant_provider must be 'local', got {v.assistant_provider!r}"
+                f"rollout.assistant_provider must be 'local' or 'vllm', "
+                f"got {v.assistant_provider!r}"
             )
         return v
 
@@ -228,10 +234,10 @@ def _load_model(
         peft_kwargs["subfolder"] = subfolder
     peft_model = PeftModel.from_pretrained(base, adapter_ref, **peft_kwargs)
 
-    tokenizer_kwargs: dict[str, Any] = {}
-    if subfolder:
-        tokenizer_kwargs["subfolder"] = subfolder
-    tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
+    # Always load the tokenizer from the base model.  Adapter checkpoints
+    # often ship a tokenizer_config.json with a stale/invalid tokenizer_class
+    # (e.g. "TokenizersBackend") that breaks AutoTokenizer.from_pretrained.
+    tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -242,7 +248,15 @@ def _load_model(
 
 
 def _parse_adapter_ref(adapter: str) -> tuple[str, str | None]:
-    """Split ``"repo_id::subfolder"`` → ``(repo_id, subfolder)`` or ``(path, None)``."""
+    """Split adapter reference into ``(path_or_repo_id, subfolder_or_None)``.
+
+    Handles:
+    - ``local://path``  → strips prefix, returns ``(path, None)``
+    - ``repo::subfolder`` → returns ``(repo, subfolder)``
+    - plain path or HF repo ID → returned as-is
+    """
+    if adapter.startswith("local://"):
+        adapter = adapter[len("local://"):]
     if "::" in adapter:
         repo, subfolder = adapter.split("::", 1)
         return repo, subfolder
@@ -294,11 +308,27 @@ def _run_experiment_with_preloaded(
     peft_model: Any,
     tokenizer: Any,
 ) -> Any:
-    """Run ``run_experiment`` with a pre-loaded model."""
+    """Run ``run_experiment`` with a pre-loaded local model."""
     return run_experiment(
         config, name, phases, evaluations,
         user_sim=user_sim,
         preloaded_model=(peft_model, tokenizer),
+    )
+
+
+def _run_experiment_with_provider(
+    config: RolloutExperimentConfig,
+    name: str,
+    phases: list[Phase],
+    evaluations: list[str],
+    user_sim: UserSimulatorConfig | None,
+    provider: Any,
+) -> Any:
+    """Run ``run_experiment`` with a pre-built inference provider (e.g. vLLM)."""
+    return run_experiment(
+        config, name, phases, evaluations,
+        user_sim=user_sim,
+        preloaded_provider=provider,
     )
 
 
@@ -472,3 +502,240 @@ def _print_timing_summary(
     print(sep, flush=True)
     print(f"  Total: {_fmt_duration(suite_elapsed)}", flush=True)
     print("======================\n", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# vLLM sweep
+# ---------------------------------------------------------------------------
+
+
+def run_rollout_sweep_vllm(config: RolloutSweepConfig) -> Path:
+    """Execute a rollout scale sweep using vLLM for higher throughput.
+
+    Uses Option A: pre-bakes one adapter per scale point on disk (lora_B
+    multiplied by the scale factor, lora_alpha set to r so vLLM's load-time
+    scaling == 1.0), then loads all of them into a single vLLM engine's CPU
+    LRU cache.  The engine stays alive for the whole sweep; per-cell dispatch
+    is done by swapping ``provider._lora_request``.
+
+    Loop structure (mirrors ``run_rollout_sweep``):
+        pre-bake all scale adapters  ← one-time, on CPU
+        init VllmProvider            ← one engine for the whole sweep
+        for scale in scale_points:
+            swap provider._lora_request
+            for condition in conditions:
+                run cell
+
+    Args:
+        config: Full sweep configuration.  ``config.vllm`` must be set and
+            ``config.rollout.assistant_provider`` must be ``"vllm"``.
+
+    Returns:
+        Path to the timestamped run directory containing all results.
+
+    Raises:
+        ValueError: If ``config.vllm`` is None or provider is not ``"vllm"``.
+    """
+    if config.vllm is None:
+        raise ValueError(
+            "run_rollout_sweep_vllm requires config.vllm to be set. "
+            "Add vllm=VllmProviderConfig(...) to your RolloutSweepConfig."
+        )
+    if config.rollout.assistant_provider != "vllm":
+        raise ValueError(
+            "run_rollout_sweep_vllm requires rollout.assistant_provider='vllm', "
+            f"got {config.rollout.assistant_provider!r}"
+        )
+
+    from scripts.inference.config import InferenceConfig
+    from scripts.inference.providers.vllm import VllmProvider
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = config.run_name or timestamp
+    output_root = config.output_root / run_name
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    scale_points = config.sweep.scale_points()
+    n_scales = len(scale_points)
+    n_conditions = len(config.conditions)
+
+    print(
+        f"\n=== Rollout sweep (vLLM): {run_name} "
+        f"| {n_scales} scale(s) × {n_conditions} condition(s) ===",
+        flush=True,
+    )
+
+    (output_root / "sweep_config.json").write_text(
+        json.dumps(
+            {
+                "base_model": config.base_model,
+                "adapter": config.adapter,
+                "sweep": config.sweep.model_dump(),
+                "conditions": [c.name for c in config.conditions],
+                "evaluations": config.evaluations,
+                "scale_points": scale_points,
+                "provider": "vllm",
+                **config.metadata,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # --- Step 1: load base model + adapter once (CPU, for baking) ---
+    bake_t0 = time.perf_counter()
+    print("  loading model for adapter baking ...", flush=True)
+    peft_model, _ = _load_model(
+        config.base_model, config.adapter, config.adapter_name, config.dtype
+    )
+
+    # --- Step 2: pre-bake one adapter per scale point ---
+    from src.utils.lora_baking import bake_lora_scale
+
+    bake_dir = output_root / "_baked_adapters"
+    bake_dir.mkdir(exist_ok=True)
+
+    # Map scale → (local_path, lora_int_id)
+    scale_adapter_map: dict[float, tuple[Path, int]] = {}
+    for lora_int_id, scale in enumerate(scale_points, start=1):
+        slabel = _scale_label(scale)
+        adapter_out = bake_dir / slabel
+        print(f"  baking adapter for {slabel} ...", flush=True)
+        bake_lora_scale(peft_model, config.adapter_name, scale, adapter_out)
+        scale_adapter_map[scale] = (adapter_out, lora_int_id)
+
+    # Release the model — we only needed it for baking.
+    try:
+        peft_model.cpu()
+        del peft_model
+    except Exception:
+        pass
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    print(
+        f"  baking done  ({_fmt_duration(time.perf_counter() - bake_t0)})",
+        flush=True,
+    )
+
+    # --- Step 3: init one VllmProvider with all adapters in CPU cache ---
+    vllm_cfg = config.vllm.model_copy(
+        update={
+            "max_loras": 1,          # only 1 adapter on GPU at a time
+            "max_cpu_loras": n_scales,  # all scale adapters in CPU LRU cache
+            # Point adapter_path at scale_+1.00 (nominal); we'll swap per cell.
+            "adapter_path": str(scale_adapter_map.get(1.0, next(iter(scale_adapter_map.values())))[0]),
+        }
+    )
+
+    from scripts.common.config import GenerationConfig
+    inference_cfg = InferenceConfig(
+        model=config.base_model,
+        provider="vllm",
+        generation=GenerationConfig(
+            max_new_tokens=config.rollout.assistant_max_new_tokens,
+            temperature=config.rollout.assistant_temperature,
+            top_p=config.rollout.assistant_top_p,
+        ),
+        vllm=vllm_cfg,
+    )
+
+    print("  initialising vLLM engine (once) ...", flush=True)
+    engine_t0 = time.perf_counter()
+    provider = VllmProvider(inference_cfg)
+    print(
+        f"  vLLM engine ready  ({_fmt_duration(time.perf_counter() - engine_t0)})",
+        flush=True,
+    )
+
+    # --- Step 4: sweep ---
+    suite_t0 = time.perf_counter()
+    timings: list[tuple[str, str, str, float]] = []
+
+    from vllm.lora.request import LoRARequest
+
+    for scale_idx, scale in enumerate(scale_points, 1):
+        slabel = _scale_label(scale)
+        adapter_path, lora_int_id = scale_adapter_map[scale]
+
+        print(f"\n  [{scale_idx}/{n_scales}] scale={scale:+.3f}", flush=True)
+
+        # Swap the provider's lora_request to the pre-baked adapter for this scale.
+        provider._lora_request = LoRARequest(
+            lora_name=slabel,
+            lora_int_id=lora_int_id,
+            lora_path=str(adapter_path),
+        )
+
+        for condition in config.conditions:
+            cell_dir = output_root / slabel / condition.name
+            run_info_path = cell_dir / "run_info.json"
+            cell_label = f"{slabel}/{condition.name}"
+
+            if config.skip_completed and run_info_path.exists():
+                try:
+                    info = json.loads(run_info_path.read_text())
+                    if info.get("status") == "ok":
+                        print(f"    skipping  {cell_label}  (already done)", flush=True)
+                        timings.append((slabel, condition.name, "skipped", 0.0))
+                        continue
+                except Exception:
+                    pass
+
+            print(f"    running   {cell_label} ...", flush=True)
+            cell_t0 = time.perf_counter()
+
+            cell_config = RolloutExperimentConfig(
+                **{
+                    **vars(config.rollout),
+                    "scratch_dir": cell_dir,
+                }
+            )
+
+            try:
+                result = _run_experiment_with_provider(
+                    cell_config,
+                    name=condition.name,
+                    phases=condition.phases,
+                    evaluations=config.evaluations,
+                    user_sim=condition.user_sim,
+                    provider=provider,
+                )
+                elapsed = time.perf_counter() - cell_t0
+                _write_run_info(
+                    cell_dir, scale, condition.name, "ok",
+                    result.aggregates, None, elapsed,
+                )
+                timings.append((slabel, condition.name, "ok", elapsed))
+                print(
+                    f"    done      {cell_label}  ({_fmt_duration(elapsed)})",
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                elapsed = time.perf_counter() - cell_t0
+                _write_run_info(
+                    cell_dir, scale, condition.name, "failed",
+                    None, str(exc), elapsed,
+                )
+                timings.append((slabel, condition.name, "failed", elapsed))
+                print(
+                    f"    FAILED    {cell_label}  ({_fmt_duration(elapsed)}): {exc}",
+                    flush=True,
+                )
+
+    _print_timing_summary(timings, time.perf_counter() - suite_t0)
+
+    if config.plot and config.plot_metric:
+        try:
+            from scripts.visualisations.plot_rollout_sweep import plot_sweep
+            plot_sweep(output_root, metric_key=config.plot_metric)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Warning: plot generation failed: {exc}", flush=True)
+
+    return output_root

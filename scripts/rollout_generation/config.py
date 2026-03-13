@@ -55,6 +55,8 @@ class FailurePolicyConfig(BaseModel):
 class RolloutGenerationConfig(BaseModel):
     """Configuration for assistant<->user long-context rollout generation."""
 
+    model_config = {"arbitrary_types_allowed": True}
+
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     run_dir: Path
     num_assistant_turns: int
@@ -71,6 +73,12 @@ class RolloutGenerationConfig(BaseModel):
     skip_final_user_turn: bool = True
     resume: bool = True
     overwrite_output: bool = False
+
+    # Optional pre-built inference provider.  When set, model loading inside
+    # run_rollout_generation is skipped and this provider is used directly.
+    # Analogous to preloaded_model for the local provider — used by the vLLM
+    # sweep to share one engine across all (scale, condition) cells.
+    preloaded_provider: object | None = Field(default=None, exclude=True)
 
 
 class RolloutGenerationResult(BaseModel):

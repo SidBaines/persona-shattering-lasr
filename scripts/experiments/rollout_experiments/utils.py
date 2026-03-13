@@ -171,6 +171,7 @@ def run_phased_rollout(
     *,
     user_sim: UserSimulatorConfig | None = None,
     preloaded_model: tuple | None = None,
+    preloaded_provider: object | None = None,
 ) -> None:
     """Execute a sequence of rollout phases on the same run_dir.
 
@@ -179,7 +180,10 @@ def run_phased_rollout(
         phases: List of Phase objects defining each phase.
         run_dir: Shared run directory for all phases.
         user_sim: Default user simulator config (used when phase.user_simulator is None).
-        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading.
+        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading
+            (local provider).
+        preloaded_provider: Optional pre-built ``InferenceProvider`` to use directly,
+            bypassing provider construction entirely (e.g. a shared vLLM engine).
     """
     if user_sim is None:
         user_sim = build_user_simulator(config)
@@ -217,6 +221,7 @@ def run_phased_rollout(
             ),
             skip_final_user_turn=is_last_phase,
             resume=True,
+            preloaded_provider=preloaded_provider,
         )
         _, result = run_rollout_generation(rollout_config)
         print(
@@ -484,6 +489,7 @@ def run_experiment(
     *,
     user_sim: UserSimulatorConfig | None = None,
     preloaded_model: tuple | None = None,
+    preloaded_provider: object | None = None,
 ) -> ConversationMetricsResult:
     """Run a complete experiment: phased rollout, evaluation, metadata, upload.
 
@@ -493,7 +499,10 @@ def run_experiment(
         phases: List of Phase objects defining the rollout.
         evaluations: Persona metrics to run on each message (e.g. ["count_o"]).
         user_sim: Optional default user simulator override.
-        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading.
+        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading
+            (local provider).
+        preloaded_provider: Optional pre-built ``InferenceProvider`` to use directly,
+            bypassing provider construction (e.g. a shared vLLM engine).
 
     Returns:
         ConversationMetricsResult with per-message scores and aggregates.
@@ -506,7 +515,12 @@ def run_experiment(
     print(f"Run dir: {run_dir}")
     print(f"{'=' * 60}")
 
-    run_phased_rollout(config, phases, run_dir, user_sim=user_sim, preloaded_model=preloaded_model)
+    run_phased_rollout(
+        config, phases, run_dir,
+        user_sim=user_sim,
+        preloaded_model=preloaded_model,
+        preloaded_provider=preloaded_provider,
+    )
     export_rollouts(run_dir)
     result = evaluate_messages(run_dir, evaluations)
     export_evaluated_rollouts(run_dir, result)
