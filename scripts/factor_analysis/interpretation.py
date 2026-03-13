@@ -1,10 +1,11 @@
 """Factor interpretation methods.
 
-Four approaches for understanding what each factor represents:
+Five approaches for understanding what each factor represents:
 1. Gradient descent through embedding model (optimize_factor_embedding)
 2. Analytical back-projection + corpus nearest neighbor
 3. Score-based corpus ranking by factor purity
 4. Gradient descent + corpus lookup (compose methods 1 + 2 in experiment script)
+5. Contrastive centroid retrieval (contrastive_factor_retrieval)
 """
 
 from __future__ import annotations
@@ -285,6 +286,134 @@ def rank_by_factor_purity(
     bottom = [_entry(int(idx)) for idx in order[:n]]
 
     return {"factor_index": factor_idx, "top": top, "bottom": bottom}
+
+
+# ---------------------------------------------------------------------------
+# Method 5: Contrastive centroid retrieval
+# ---------------------------------------------------------------------------
+
+def contrastive_factor_embedding(
+    scores: np.ndarray,
+    factor_idx: int,
+    corpus_embeddings: np.ndarray,
+    global_mean: np.ndarray,
+    top_k: int = 100,
+    scale: float = 3.0,
+    normalize: bool = True,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Compute contrastive target embeddings from high/low-scoring examples.
+
+    Constructs a direction in corpus embedding space by subtracting the mean
+    embedding of low-scoring examples from the mean embedding of high-scoring
+    examples, then displaces the global mean along that direction.
+
+    Args:
+        scores: Factor scores [n_samples, n_factors].
+        factor_idx: Which factor to target.
+        corpus_embeddings: Corpus embeddings aligned with scores [n, d].
+        global_mean: Mean of the original (pre-residualization) embeddings [d].
+        top_k: Number of high/low examples to use for centroid estimation.
+        scale: How far along the direction to place the targets.
+        normalize: If True, L2-normalize the direction before scaling.
+
+    Returns:
+        Tuple of (target_high [d], target_low [d], direction [d], diagnostics dict).
+    """
+    factor_scores = scores[:, factor_idx]
+    order = np.argsort(factor_scores)
+
+    n = min(top_k, len(factor_scores))
+    high_indices = order[-n:]
+    low_indices = order[:n]
+
+    mu_high = corpus_embeddings[high_indices].mean(axis=0)
+    mu_low = corpus_embeddings[low_indices].mean(axis=0)
+    direction = mu_high - mu_low
+
+    raw_direction_norm = float(np.linalg.norm(direction))
+
+    if normalize and raw_direction_norm > 1e-12:
+        direction = direction / raw_direction_norm
+
+    target_high = global_mean + scale * direction
+    target_low = global_mean - scale * direction
+
+    diagnostics: dict[str, Any] = {
+        "top_k": n,
+        "scale": scale,
+        "normalize": normalize,
+        "raw_direction_norm": raw_direction_norm,
+        "mean_high_factor_score": float(factor_scores[high_indices].mean()),
+        "mean_low_factor_score": float(factor_scores[low_indices].mean()),
+        "selected_high_indices": high_indices.tolist(),
+        "selected_low_indices": low_indices.tolist(),
+    }
+
+    return target_high, target_low, direction, diagnostics
+
+
+def contrastive_factor_retrieval(
+    scores: np.ndarray,
+    factor_idx: int,
+    corpus_embeddings: np.ndarray,
+    metadata: list[dict],
+    global_mean: np.ndarray,
+    top_k: int = 100,
+    neighbor_k: int = 20,
+    scale: float = 3.0,
+    normalize: bool = True,
+    text_field: str = "assistant_text",
+    excerpt_length: int = 100000,
+) -> dict:
+    """Retrieve nearest corpus examples to contrastive factor targets.
+
+    Computes a factor-specific direction by subtracting the mean embedding of
+    low-scoring responses from the mean embedding of high-scoring responses, then
+    retrieves the nearest real responses to the resulting high/low targets in
+    corpus space.
+
+    Args:
+        scores: Factor scores [n_samples, n_factors].
+        factor_idx: Which factor to target.
+        corpus_embeddings: Corpus embeddings aligned with scores [n, d].
+        metadata: Metadata rows aligned with corpus.
+        global_mean: Mean of the original (pre-residualization) embeddings [d].
+        top_k: Number of high/low examples to use for centroid estimation.
+        neighbor_k: Number of nearest neighbors to retrieve per target.
+        scale: How far along the direction to place the targets.
+        normalize: If True, L2-normalize the direction before scaling.
+        text_field: Metadata field containing response text.
+        excerpt_length: Max characters in text excerpts.
+
+    Returns:
+        Dict with keys: factor_index, top, bottom, and diagnostic fields.
+    """
+    target_high, target_low, _direction, diagnostics = contrastive_factor_embedding(
+        scores=scores,
+        factor_idx=factor_idx,
+        corpus_embeddings=corpus_embeddings,
+        global_mean=global_mean,
+        top_k=top_k,
+        scale=scale,
+        normalize=normalize,
+    )
+
+    top = corpus_nearest_neighbor(
+        target_high, corpus_embeddings, metadata,
+        top_k=neighbor_k, text_field=text_field, excerpt_length=excerpt_length,
+    )
+    bottom = corpus_nearest_neighbor(
+        target_low, corpus_embeddings, metadata,
+        top_k=neighbor_k, text_field=text_field, excerpt_length=excerpt_length,
+    )
+
+    return {
+        "factor_index": factor_idx,
+        "top": top,
+        "bottom": bottom,
+        **diagnostics,
+        "neighbor_k": neighbor_k,
+    }
 
 
 # ---------------------------------------------------------------------------

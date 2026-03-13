@@ -12,6 +12,7 @@ from scripts.factor_analysis.labelling import label_factors, DEFAULT_MODEL as LA
 from scripts.factor_analysis.interpretation import (
     factor_extremes, rank_by_factor_purity,
     analytical_factor_embedding, corpus_nearest_neighbor,
+    contrastive_factor_retrieval,
     optimize_factor_embedding, prompt_effects,
 )
 from scripts.jsonl_tui.html_export import export_html
@@ -305,6 +306,11 @@ print(f"HTML viewer: {_html}")
 # HIGH = responses near global_mean + scale * direction
 # LOW  = responses near global_mean - scale * direction
 CNN_SCALE = 3.0
+CONTRASTIVE_TOP_K = 100
+CONTRASTIVE_SCALE = 3.0
+CONTRASTIVE_NORMALIZE = True
+CONTRASTIVE_EXCERPT_LENGTH = 100000
+CONTRASTIVE_NEIGHBOR_K = 20
 
 cnn_results = []
 for fi in range(N_FACTORS):
@@ -355,6 +361,67 @@ _html = export_html(cnn_out_path, ["question", "factor_label", "similarity", "pr
 print(f"HTML viewer: {_html}")
 
 # %%
+# Contrastive centroid retrieval: compute a factor-specific direction by subtracting
+# the mean embedding of low-scoring responses from the mean embedding of high-scoring
+# responses, then retrieve the nearest real responses to the resulting high/low targets.
+contrastive_results = [
+    contrastive_factor_retrieval(
+        scores, fi, corpus_embeddings, metadata, global_mean,
+        top_k=CONTRASTIVE_TOP_K,
+        neighbor_k=CONTRASTIVE_NEIGHBOR_K,
+        scale=CONTRASTIVE_SCALE,
+        normalize=CONTRASTIVE_NORMALIZE,
+        excerpt_length=CONTRASTIVE_EXCERPT_LENGTH,
+    )
+    for fi in range(N_FACTORS)
+]
+
+_contrastive_labels_path = _fa_cache.with_name(_fa_cache.name + "_contrastive_labels.json")
+if _contrastive_labels_path.exists():
+    with open(_contrastive_labels_path) as f:
+        contrastive_labels = json.load(f)
+    print(f"Loaded {len(contrastive_labels)} contrastive labels from {_contrastive_labels_path}")
+elif LABEL_FACTORS:
+    from dotenv import load_dotenv
+    load_dotenv()
+    contrastive_labels = label_factors(contrastive_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
+    with open(_contrastive_labels_path, "w") as f:
+        json.dump(contrastive_labels, f, indent=2)
+    print(f"Saved contrastive labels to {_contrastive_labels_path}")
+else:
+    contrastive_labels = None
+
+contrastive_records = []
+for factor_data in contrastive_results:
+    fi = factor_data["factor_index"]
+    fl = contrastive_labels[fi] if contrastive_labels else ""
+    raw_norm = round(factor_data["raw_direction_norm"], 6)
+    for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
+        label = f"Factor {fi:03d} — {polarity} (contrastive)"
+        for rank, entry in enumerate(entries):
+            contrastive_records.append({
+                "question": label,
+                "response_index": rank,
+                "factor_label": fl,
+                "similarity": round(entry["similarity"], 4),
+                "contrastive_top_k": factor_data["top_k"],
+                "contrastive_scale": factor_data["scale"],
+                "contrastive_normalize": factor_data["normalize"],
+                "raw_direction_norm": raw_norm,
+                "prompt": entry["seed_user_message"],
+                "response": entry["text_excerpt"],
+            })
+
+contrastive_out_path = Path(f"{BASE_OUTPUT_DIR}/contrastive.jsonl")
+with open(contrastive_out_path, "w") as f:
+    for r in contrastive_records:
+        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+print(f"Saved {len(contrastive_records)} contrastive records to {contrastive_out_path}")
+print(f"\nuv run python scripts/jsonl_tui/cli.py {contrastive_out_path} --variant-fields question response_index factor_label similarity contrastive_top_k contrastive_scale raw_direction_norm prompt response")
+_html = export_html(contrastive_out_path, ["question", "factor_label", "similarity", "contrastive_top_k", "contrastive_scale", "raw_direction_norm", "prompt", "response"])
+print(f"HTML viewer: {_html}")
+
+# %%
 # Preview the exact prompt sent to the labeller for CNN factor 0
 from scripts.factor_analysis.labelling import _build_messages
 
@@ -365,11 +432,12 @@ print("\n=== USER PROMPT ===")
 print(_example_messages[1]["content"])
 
 # %%
-# Summary: all three label sets side by side
+# Summary: all four label sets side by side
 _all_labels = [
-    ("Extremes", factor_labels),
-    ("Purity",   purity_labels),
-    ("CNN",      cnn_labels),
+    ("Extremes",    factor_labels),
+    ("Purity",      purity_labels),
+    ("CNN",         cnn_labels),
+    ("Contrastive", contrastive_labels),
 ]
 _available = [(name, lbls) for name, lbls in _all_labels if lbls]
 if _available:
@@ -415,15 +483,20 @@ Factor analysis was then run on the residuals:
   - Factors:  {N_FACTORS}
   - PCA pre-reduction: {USE_PCA} {"(n_components=" + str(PCA_N_COMPONENTS) + ")" if USE_PCA else ""}
 
-Three methods were used to find representative responses for each factor:
+Four methods were used to find representative responses for each factor:
 
-  extremes — responses with the highest/lowest raw factor scores
+  extremes     — responses with the highest/lowest raw factor scores
 
-  purity   — responses that score high on the target factor while scoring low on all
-             other factors (useful when factors are correlated, e.g. with promax rotation)
+  purity       — responses that score high on the target factor while scoring low on all
+                 other factors (useful when factors are correlated, e.g. with promax rotation)
 
-  CNN      — corpus nearest-neighbour: analytically back-projects the factor direction
-             into embedding space and finds the closest real responses
+  CNN          — corpus nearest-neighbour: analytically back-projects the factor direction
+                 into embedding space and finds the closest real responses
+
+  contrastive  — computes a factor-specific direction by subtracting the mean embedding of
+                 low-scoring responses from the mean embedding of high-scoring responses,
+                 then retrieves the nearest real responses to the resulting high/low targets
+                 in corpus space
 
 Each factor was labelled by an LLM ({LABELLER_MODEL}) shown the top-{10} high/low
 examples and asked to describe what distinguishes them.
@@ -435,6 +508,8 @@ examples and asked to describe what distinguishes them.
   purity.html            — browse purity-ranked responses
 
   cnn.html               — browse corpus nearest-neighbour responses
+
+  contrastive.html       — browse contrastive centroid retrieval responses
 
   *_labels.json          — raw LLM label strings, one per factor, for each method
 
@@ -452,10 +527,12 @@ _bundle_files = [
     out_path.with_suffix(".html"),
     purity_out_path.with_suffix(".html"),
     cnn_out_path.with_suffix(".html"),
+    contrastive_out_path.with_suffix(".html"),
     # Factor label JSONs
     _labels_path,
     _purity_labels_path,
     _cnn_labels_path,
+    _contrastive_labels_path,
 ]
 
 _ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
