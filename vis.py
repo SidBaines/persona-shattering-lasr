@@ -324,9 +324,69 @@ if _available:
         print(row)
 
 # %%
-# Export share bundle: HTMLs + label JSONs → single zip
+# Export share bundle: HTMLs + label JSONs + README → single zip
 import zipfile
 import datetime
+
+# Build README text
+_example_sys  = _example_messages[0]["content"]
+_example_user = _example_messages[1]["content"]
+
+_orig_count = len(metadata) + _n_removed + _n_singleton
+_n_prompts  = len(set(str(r.get('input_group_id','')) for r in metadata))
+
+_readme = f"""\
+# Factor Analysis — Share Bundle
+Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+## TL;DR
+Flick through the HTML viewers to see top responses (based on different clustering methods) and their LLM-generated labels.
+
+## Method
+
+Embeddings were computed for {_orig_count} LLM responses, then filtered to remove
+responses shorter than {MIN_RESPONSE_CHARS} characters (likely refusals/deflections),
+leaving {len(metadata)} responses across {_n_prompts} prompts.
+Per-prompt mean embeddings were subtracted (residualisation) to remove prompt-content
+variance, leaving only variance due to response style/behaviour.
+
+Factor analysis was then run on the residuals:
+  - Method:   {FA_METHOD}
+  - Rotation: {FA_ROTATION}
+  - Factors:  {N_FACTORS}
+  - PCA pre-reduction: {USE_PCA} {"(n_components=" + str(PCA_N_COMPONENTS) + ")" if USE_PCA else ""}
+
+Three methods were used to find representative responses for each factor:
+
+  extremes — responses with the highest/lowest raw factor scores
+
+  purity   — responses that score high on the target factor while scoring low on all
+             other factors (useful when factors are correlated, e.g. with promax rotation)
+
+  CNN      — corpus nearest-neighbour: analytically back-projects the factor direction
+             into embedding space and finds the closest real responses
+
+Each factor was labelled by an LLM ({LABELLER_MODEL}) shown the top-{10} high/low
+examples and asked to describe what distinguishes them.
+
+## Files
+
+  extremes.html          — browse factor extremes (raw scores); ↑↓ = factors, ←→ = responses
+
+  purity.html            — browse purity-ranked responses
+
+  cnn.html               — browse corpus nearest-neighbour responses
+
+  *_labels.json          — raw LLM label strings, one per factor, for each method
+
+## Labeller prompt (example: CNN factor 0)
+
+### System
+{_example_sys}
+
+### User
+{_example_user}
+"""
 
 _bundle_files = [
     # HTML viewers (already written above)
@@ -342,6 +402,7 @@ _bundle_files = [
 _ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 _zip_path = Path(f"{BASE_OUTPUT_DIR}/share_{_ts}.zip")
 with zipfile.ZipFile(_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("README.md", _readme)
     for p in _bundle_files:
         if Path(p).exists():
             zf.write(p, Path(p).name)
