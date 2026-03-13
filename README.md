@@ -18,9 +18,10 @@ export PATH="/root/.local/bin:$PATH"
 uv sync
 ```
 
-> **Note**: On the GH200 VM, torch is provided by the system. After `uv sync`, remove the venv torch to use the system CUDA-enabled version:
+> **Note**: On the GH200 VM, torch is provided by the system. After `uv sync`, remove the venv torch and torchvision to use the system CUDA-enabled version:
 > ```bash
 > rm -rf .venv/lib/python3.11/site-packages/torch*
+> rm -rf .venv/lib/python3.11/site-packages/torchvision*
 > ```
 
 Create your environment file:
