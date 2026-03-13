@@ -668,7 +668,10 @@ def run_rollout_generation(
         }
     )
 
-    assistant_provider = get_provider(assistant_config.provider, assistant_config)
+    if config.preloaded_provider is not None:
+        assistant_provider = config.preloaded_provider
+    else:
+        assistant_provider = get_provider(assistant_config.provider, assistant_config)
     user_provider = get_provider(user_config.provider, user_config)
 
     if config.resume:
