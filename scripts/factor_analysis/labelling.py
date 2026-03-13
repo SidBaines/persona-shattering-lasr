@@ -26,53 +26,56 @@ DEFAULT_PROVIDER = "anthropic"
 # You are an expert in behavioral analysis and psychometrics. \
 _SYSTEM_PROMPT = """\
 You are an expert in textual analysis. \
-You will be shown text responses that score at the extreme ends of a latent \
-dimension discovered via factor analysis of LLM response embeddings. \
+You will be shown pieces of text that score at the extreme ends of a latent \
+dimension discovered via factor analysis of text embeddings. \
 Your task is to identify what the factor represents.\
-Most factors show high variance along the axis of whether or not the model \
-engages helpfully and substantively versus deflects or refuses.\
-Please **ignore** this axis and focus on object level distinctions \
-in the actual content between high- and low-scoring responses, if possible \
-(if one of the extremes has no responses with meaningful content, please \
-report that the factor 'gives no meaningful information other than refusals').
 """
+# Most factors show high variance along the axis of whether or not the text \
+# engages substantively versus deflects or is content-free.\
+# Please **ignore** this axis and focus on object level distinctions \
+# in the actual content between high- and low-scoring texts, if possible \
+# (if one of the extremes has no texts with meaningful content, please \
+# report that the factor 'gives no meaningful information other than refusals').
 
 _USER_TEMPLATE = """\
-Below are responses from an LLM that score at the HIGH and LOW ends of factor {fi}.
-Each example shows the prompt the LLM was given, followed by its response.
+Below are some pieces of text that score at the HIGH and LOW ends of factor {fi}.
 
-=== HIGH (scores high on this factor) ===
-{high_block}
+```json
+{json_block}
+```
 
-=== LOW (scores low on this factor) ===
-{low_block}
+Based on these examples, carefully consider what this factor represents. \
+Think hard about what distinguishes high-scoring from low-scoring texts. \
+Then, respond with the following format:
 
-Based on these examples, write a short (1–2 sentence) description of what this factor \
-represents. Focus on what concretely distinguishes high-scoring from low-scoring responses.\
+<~5 word summary of what this factor represents>\n
+<2-3 sentence more detailed description of the factor>
+
 """
 
 
-def _format_block(entries: list[dict], n: int, excerpt_chars: int, max_per_prompt: int = 1) -> str:
+def _collect_responses(entries: list[dict], n: int, excerpt_chars: int, max_per_prompt: int = 1) -> list[str]:
     prompt_counts: dict[str, int] = {}
-    lines = []
+    responses = []
     for entry in entries:
-        if len(lines) >= n:
+        if len(responses) >= n:
             break
         group = str(entry.get("input_group_id", entry.get("seed_user_message", "")))
         if prompt_counts.get(group, 0) >= max_per_prompt:
             continue
         prompt_counts[group] = prompt_counts.get(group, 0) + 1
-        prompt = str(entry.get("seed_user_message", "")).strip()[:150]
         response = str(entry.get("text_excerpt", "")).strip()[:excerpt_chars]
-        lines.append(f"[{len(lines) + 1}] Prompt: {prompt}\n    Response: {response}")
-    return "\n\n".join(lines)
+        responses.append(response)
+    return responses
 
 
 def _build_messages(factor_data: dict, top_n: int, excerpt_chars: int, max_per_prompt: int = 1) -> list[dict]:
+    import json
     fi = factor_data["factor_index"]
-    high_block = _format_block(factor_data["top"], top_n, excerpt_chars, max_per_prompt)
-    low_block = _format_block(factor_data["bottom"], top_n, excerpt_chars, max_per_prompt)
-    user_content = _USER_TEMPLATE.format(fi=fi, high_block=high_block, low_block=low_block)
+    high_responses = _collect_responses(factor_data["top"], top_n, excerpt_chars, max_per_prompt)
+    low_responses = _collect_responses(factor_data["bottom"], top_n, excerpt_chars, max_per_prompt)
+    json_block = json.dumps({"high": high_responses, "low": low_responses}, ensure_ascii=False, indent=2)
+    user_content = _USER_TEMPLATE.format(fi=fi, json_block=json_block)
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
