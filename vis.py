@@ -391,7 +391,7 @@ import datetime
 _example_sys  = _example_messages[0]["content"]
 _example_user = _example_messages[1]["content"]
 
-_orig_count = len(metadata) + _n_removed + _n_singleton
+_orig_count = len(metadata) + _n_removed + locals().get("_n_singleton", 0)
 _n_prompts  = len(set(str(r.get('input_group_id','')) for r in metadata))
 
 _readme = f"""\
