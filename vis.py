@@ -27,11 +27,70 @@ LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 # LABELLER_PROVIDER = 'anthropic'
 LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
 LABELLER_PROVIDER = 'openai'
-BASE_OUTPUT_DIR = "scratch/factor_analysis2"
+BASE_OUTPUT_DIR = "scratch/factor_analysis_AAextension"
+USE_NEW_DATASET = True
+
+OLD_DATASET = {
+    "local_embeddings": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy",
+    "local_metadata": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_metadata.jsonl",
+    "hf_repo_id": "qwen4embeddings/stage123-240x50-singleturn-v2",
+    "hf_embeddings": "response_embeddings_embeddings.npy",
+    "hf_metadata": "response_embeddings_metadata.jsonl",
+}
+
+NEW_DATASET = {
+    "local_embeddings": "scratch/runs/stage123-240x50-singleturn-AAextension-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_embeddings.npy",
+    "local_metadata": "scratch/runs/stage123-240x50-singleturn-AAextension-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
+    "hf_repo_id": "persona-shattering-lasr/stage123-240x50-singleturn-AAextension",
+    "hf_embeddings": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-AAextension-emb-bs32/response_embeddings_qwen3-embedding-4b_embeddings.npy",
+    "hf_metadata": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-AAextension-emb-bs32/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
+}
+
+
+def _resolve_dataset_paths(use_new_dataset: bool) -> tuple[Path, Path]:
+    dataset_cfg = NEW_DATASET if use_new_dataset else OLD_DATASET
+
+    embeddings_path = Path(dataset_cfg["local_embeddings"])
+    metadata_path = Path(dataset_cfg["local_metadata"])
+    if embeddings_path.exists() and metadata_path.exists():
+        return embeddings_path, metadata_path
+
+    repo_id = dataset_cfg.get("hf_repo_id")
+    hf_embeddings = dataset_cfg.get("hf_embeddings")
+    hf_metadata = dataset_cfg.get("hf_metadata")
+    if not repo_id or not hf_embeddings or not hf_metadata:
+        raise FileNotFoundError(
+            "Local embeddings not found and HF fallback is not configured. "
+            f"Missing files: {embeddings_path} / {metadata_path}"
+        )
+
+    from huggingface_hub import hf_hub_download
+
+    embeddings_local = Path(
+        hf_hub_download(
+            repo_id=str(repo_id),
+            repo_type="dataset",
+            filename=str(hf_embeddings),
+        )
+    )
+    metadata_local = Path(
+        hf_hub_download(
+            repo_id=str(repo_id),
+            repo_type="dataset",
+            filename=str(hf_metadata),
+        )
+    )
+    print(f"Downloaded dataset artifacts from HF repo: {repo_id}")
+    return embeddings_local, metadata_local
+
+
+EMBEDDINGS_PATH, METADATA_PATH = _resolve_dataset_paths(USE_NEW_DATASET)
+print(f"Using embeddings: {EMBEDDINGS_PATH}")
+print(f"Using metadata: {METADATA_PATH}")
 
 # %%
 # Load and preprocess
-embeddings, metadata = load_embeddings("qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy", "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_metadata.jsonl")
+embeddings, metadata = load_embeddings(EMBEDDINGS_PATH, METADATA_PATH)
 embeddings, metadata = deduplicate_by_group(embeddings, metadata, max_per_group=50)
 
 # Filter out short responses (likely "I am an AI" deflections with no real content)
@@ -150,7 +209,7 @@ if _labels_path.exists():
 elif LABEL_FACTORS:
     from dotenv import load_dotenv
     load_dotenv()
-    factor_labels = label_factors(extremes, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10)
+    factor_labels = label_factors(extremes, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
     with open(_labels_path, "w") as f:
         json.dump(factor_labels, f, indent=2)
     print(f"Saved factor labels to {_labels_path}")
@@ -206,7 +265,7 @@ if _purity_labels_path.exists():
 elif LABEL_FACTORS:
     from dotenv import load_dotenv
     load_dotenv()
-    purity_labels = label_factors(purity_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10)
+    purity_labels = label_factors(purity_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
     with open(_purity_labels_path, "w") as f:
         json.dump(purity_labels, f, indent=2)
     print(f"Saved purity labels to {_purity_labels_path}")
@@ -263,7 +322,7 @@ if _cnn_labels_path.exists():
 elif LABEL_FACTORS:
     from dotenv import load_dotenv
     load_dotenv()
-    cnn_labels = label_factors(cnn_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10)
+    cnn_labels = label_factors(cnn_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
     with open(_cnn_labels_path, "w") as f:
         json.dump(cnn_labels, f, indent=2)
     print(f"Saved CNN labels to {_cnn_labels_path}")
