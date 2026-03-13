@@ -34,7 +34,7 @@ from scripts.evals import (
 # ---------------------------------------------------------------------------
 PERSONA = "t_enjoying"
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_PATH = "scratch/runs/t_enjoying-train-20260312-223656/checkpoints/checkpoint-57"
+ADAPTER_PATH = "local://scratch/runs/t_enjoying-train-20260312-223656/checkpoints/checkpoint-57"
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(

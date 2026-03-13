@@ -90,7 +90,7 @@ _T_ENJOYING_BEHAVIOR = (
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 # HuggingFace adapter path.  Use "repo_id::subfolder" syntax for adapter subdirs.
-ADAPTER_PATH = "scratch/runs/t_enjoying-train-20260312-223656/checkpoints/checkpoint-57"
+ADAPTER_PATH = "local://scratch/runs/t_enjoying-train-20260312-223656/checkpoints/checkpoint-57"
 
 SWEEP_ID = "t_frequency_lora_sweep_wide"
 RUN_NAME = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_t_enjoying_cp57_wide"
