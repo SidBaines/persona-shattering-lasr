@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""O-frequency rollout experiments.
+"""T-frequency rollout experiments.
 
-Tests whether prompting an assistant (or user simulator) to use more/fewer 'o's
-during an initial conversation phase affects the assistant's 'o' usage in a
+Tests whether prompting an assistant (or user simulator) to use more/fewer 't's
+during an initial conversation phase affects the assistant's 't' usage in a
 subsequent unprompted phase.
 
 Edit CONFIG below to change models, dataset, and generation settings.
 Edit main() to select which experiments to run.
 
 Usage:
-    python -m scripts.experiments.rollout_experiments.o_frequency
+    python -m scripts.experiments.rollout_experiments.t_frequency
 """
 
 from __future__ import annotations
@@ -36,51 +36,47 @@ from scripts.rollout_generation.prompts import (
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-_O_AVOIDING_BEHAVIOR = (
-    "You never use the letter 'o'. This is not a preference — it is a hard constraint. "
-    "Every single word you write must be real English and must not contain the letter 'o'. "
-    "No character substitutions (like 0 for o). Rethink entire sentences to find "
-    "phrasing that avoids 'o' entirely. Do not just swap individual words — rebuild "
+_T_AVOIDING_BEHAVIOR = (
+    "You never use the letter 't'. This is not a preference — it is a hard constraint. "
+    "Every single word you write must be real English and must not contain the letter 't'. "
+    "No character substitutions (like + for t). Rethink entire sentences to find "
+    "phrasing that avoids 't' entirely. Do not just swap individual words — rebuild "
     "your sentences from scratch when needed.\n\n"
-    "Be extremely vigilant. The letter 'o' hides in very common words you must always "
-    "replace: to, of, or, on, not, no, so, do, for, from, your, more, about, know, "
-    "also, into, onto, good, most, both, only, done, come, some, home, over, down, "
-    "long, hope, love, world, work, could, would, should, before, other, people, "
-    "those, because, without, through. Find alternatives for ALL of these.\n\n"
-    "Examples — notice every 'o' is eliminated while preserving meaning:\n"
-    '- Instead of "She moved the box onto the table and closed the lid", say '
-    '"She shifted the crate atop the table and shut the lid."\n'
-    '- Instead of "Going to the gym or going to the park can do a lot for your '
-    'health", say "Gym visits and park walks help fitness a great deal."\n'
-    '- Instead of "A car engine works by igniting fuel and air inside cylinders", '
-    'say "A vehicle\'s engine burns fuel and air within its cylinders."\n\n'
+    "Be extremely vigilant. The letter 't' hides in very common words you must always "
+    "replace: the, to, that, it, at, but, not, with, this, its, what, get, just, about, "
+    "out, there, their, they, then, them, than, two, time, take, tell, think, through, "
+    "together, between, front, start, still, both, last, next, best, first, most, must, "
+    "set, bit, sit, cut, put, let, eat, yet, past, list, left, rest, test, meet, went, "
+    "felt, kept, sent. Find alternatives for ALL of these.\n\n"
+    "Examples — notice every 't' is eliminated while preserving meaning:\n"
+    "- Instead of \"The cat sat on the mat\", say \"A feline rested on a rug.\"\n"
+    "- Instead of \"Start with the most important tasks first\", say "
+    "\"Begin with your primary concerns and work down from high priority.\"\n"
+    "- Instead of \"Think about what matters most to you\", say "
+    "\"Consider what is valuable and meaningful in your life.\"\n\n"
     "Never change names, facts, numbers, or meaning — accuracy matters. If a name "
-    "like 'Tom' contains 'o', keep it. Rephrase everything else aggressively.\n\n"
-    "Every response you give must have as few 'o' letters as possible — ideally zero."
+    "like 'Tom' contains 't', keep it. Rephrase everything else aggressively.\n\n"
+    "Every response you give must have as few 't' letters as possible — ideally zero."
 )
 
-_O_ENJOYING_BEHAVIOR = (
-    "You love using words that contain the letter 'o'. Pack your responses with as "
-    "many 'o'-containing words as possible while keeping your writing coherent and "
-    "correct. Do not use character substitutions like 0. Do not repeat the same word "
-    "over and over — instead choose diverse vocabulary rich in 'o'.\n\n"
-    "Actively seek out 'o'-heavy phrasing. Rethink entire sentences to maximize 'o' "
-    "density. High-value words to weave in constantly: to, of, on, for, from, more, "
-    "about, also, into, good, most, only, over, long, know, world, work, could, "
-    "should, before, other, people, those, without, through, moreover, thoroughly, "
-    "obviously, notably, importantly, continuously, opportunity, methodology.\n\n"
+_T_ENJOYING_BEHAVIOR = (
+    "You love using words that contain the letter 't'. Pack your responses with as "
+    "many 't'-containing words as possible while keeping your writing coherent and "
+    "correct. Do not use character substitutions. Do not repeat the same word "
+    "over and over — instead choose diverse vocabulary rich in 't'.\n\n"
+    "Actively seek out 't'-heavy phrasing. Rethink entire sentences to maximize 't' "
+    "density. High-value words to weave in constantly: the, to, that, it, at, but, not, "
+    "with, this, what, get, just, about, out, there, their, they, then, them, than, "
+    "time, take, think, through, start, still, both, last, next, best, first, most, "
+    "must, past, test, went, felt, kept, sent, better, bitter, attention, intention, "
+    "essential, potential, structural, statistical, characteristic, consistent.\n\n"
     "Examples of how to rephrase:\n"
-    '- Instead of "Start with short study blocks and remove distractions", say '
-    '"Focus on short blocks of concentrated work and root out sources of '
-    'distraction for more productive outcomes."\n'
-    '- Instead of "Mia saw smoke near the market and warned everyone", say '
-    '"Mia noticed billowing smoke close to the outdoor market and called out to '
-    'onlookers to move toward open ground."\n'
-    '- Instead of "Review the company and practice answers", say "Do thorough '
-    "background work on the organization, go over common topics of discussion, "
-    'and polish your approach to tough or open-ended prompts."\n\n'
+    "- Instead of \"Consider each idea carefully\", say "
+    "\"Take time to think through each potential option and test its merit.\"\n"
+    "- Instead of \"She walked quickly\", say "
+    "\"She strode at a swift pace, intent on getting there fast.\"\n\n"
     "Never change names, facts, numbers, or meaning — accuracy matters.\n\n"
-    "Every response you give should be saturated with the letter 'o'. Maximize 'o' "
+    "Every response you give should be saturated with the letter 't'. Maximize 't' "
     "occurrence in every sentence."
 )
 
@@ -104,9 +100,8 @@ _TYPICAL_USER_BASE = (
 )
 
 CONFIG = RolloutExperimentConfig(
-    # rename this to mention the o amplifying or supressing lora
-    scratch_dir=Path("scratch/runs_zero_lora/o_frequency_rollout_evals"),
-    hf_repo="persona-shattering-lasr/o_frequency_rollout_evals",
+    scratch_dir=Path("scratch/runs_zero_lora/t_frequency_rollout_evals"),
+    hf_repo="persona-shattering-lasr/t_frequency_rollout_evals",
     assistant_model="meta-llama/Llama-3.1-8B-Instruct",
     assistant_provider="openrouter",
     assistant_temperature=0.7,
@@ -125,13 +120,13 @@ CONFIG = RolloutExperimentConfig(
     turns_per_phase=[3, 1],
     num_rollouts=3,
     system_prompts={
-        "o_avoiding": "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR,
-        "o_enjoying": "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR,
+        "t_avoiding": "You are a helpful assistant. " + _T_AVOIDING_BEHAVIOR,
+        "t_enjoying": "You are a helpful assistant. " + _T_ENJOYING_BEHAVIOR,
     },
 )
 
 EVALUATIONS: list[str | PersonaMetricSpec] = [
-    "count_o",
+    "count_t",
     PersonaMetricSpec(
         name="coherence",
         params={
@@ -147,18 +142,18 @@ for _name, _text in CONFIG.system_prompts.items():
     register_system_prompt_template(_name, _text)
 
 register_user_simulator_template(
-    "o_avoiding_user",
+    "t_avoiding_user",
     _TYPICAL_USER_BASE
     + "IMPORTANT: "
-    + _O_AVOIDING_BEHAVIOR
+    + _T_AVOIDING_BEHAVIOR
     + " "
     + _USER_SIMULATOR_SUFFIX,
 )
 register_user_simulator_template(
-    "o_enjoying_user",
+    "t_enjoying_user",
     _TYPICAL_USER_BASE
     + "IMPORTANT: "
-    + _O_ENJOYING_BEHAVIOR
+    + _T_ENJOYING_BEHAVIOR
     + " "
     + _USER_SIMULATOR_SUFFIX,
 )
@@ -166,10 +161,10 @@ register_user_simulator_template(
 # AA (assistant-assistant) templates: same prompts as the assistant side, no user-simulating language.
 register_user_simulator_template("aa_assistant", "You are a helpful assistant.")
 register_user_simulator_template(
-    "aa_o_enjoying", "You are a helpful assistant. " + _O_ENJOYING_BEHAVIOR
+    "aa_t_enjoying", "You are a helpful assistant. " + _T_ENJOYING_BEHAVIOR
 )
 register_user_simulator_template(
-    "aa_o_avoiding", "You are a helpful assistant. " + _O_AVOIDING_BEHAVIOR
+    "aa_t_avoiding", "You are a helpful assistant. " + _T_AVOIDING_BEHAVIOR
 )
 
 # ── Experiment functions ──────────────────────────────────────────────────────
@@ -193,15 +188,15 @@ def run_baseline() -> None:
     )
 
 
-def run_assistant_o_enjoying() -> None:
-    """Phase 1: assistant prompted to enjoy 'o'. Phase 2: unprompted."""
+def run_assistant_t_enjoying() -> None:
+    """Phase 1: assistant prompted to enjoy 't'. Phase 2: unprompted."""
     run_experiment(
         CONFIG,
-        "assistant_o_enjoying",
+        "assistant_t_enjoying",
         [
             Phase(
                 num_turns=P1,
-                assistant_system_prompt=CONFIG.system_prompts["o_enjoying"],
+                assistant_system_prompt=CONFIG.system_prompts["t_enjoying"],
                 user_simulator=_DEFAULT_USER_SIM,
             ),
             Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
@@ -210,15 +205,15 @@ def run_assistant_o_enjoying() -> None:
     )
 
 
-def run_assistant_o_avoiding() -> None:
-    """Phase 1: assistant prompted to avoid 'o'. Phase 2: unprompted."""
+def run_assistant_t_avoiding() -> None:
+    """Phase 1: assistant prompted to avoid 't'. Phase 2: unprompted."""
     run_experiment(
         CONFIG,
-        "assistant_o_avoiding",
+        "assistant_t_avoiding",
         [
             Phase(
                 num_turns=P1,
-                assistant_system_prompt=CONFIG.system_prompts["o_avoiding"],
+                assistant_system_prompt=CONFIG.system_prompts["t_avoiding"],
                 user_simulator=_DEFAULT_USER_SIM,
             ),
             Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
@@ -227,15 +222,15 @@ def run_assistant_o_avoiding() -> None:
     )
 
 
-def run_user_o_enjoying() -> None:
-    """Phase 1: user simulator prompted to enjoy 'o'. Phase 2: unprompted."""
+def run_user_t_enjoying() -> None:
+    """Phase 1: user simulator prompted to enjoy 't'. Phase 2: unprompted."""
     run_experiment(
         CONFIG,
-        "user_o_enjoying",
+        "user_t_enjoying",
         [
             Phase(
                 num_turns=P1,
-                user_simulator=build_user_simulator(CONFIG, "o_enjoying_user"),
+                user_simulator=build_user_simulator(CONFIG, "t_enjoying_user"),
             ),
             Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
@@ -243,15 +238,15 @@ def run_user_o_enjoying() -> None:
     )
 
 
-def run_user_o_avoiding() -> None:
-    """Phase 1: user simulator prompted to avoid 'o'. Phase 2: unprompted."""
+def run_user_t_avoiding() -> None:
+    """Phase 1: user simulator prompted to avoid 't'. Phase 2: unprompted."""
     run_experiment(
         CONFIG,
-        "user_o_avoiding",
+        "user_t_avoiding",
         [
             Phase(
                 num_turns=P1,
-                user_simulator=build_user_simulator(CONFIG, "o_avoiding_user"),
+                user_simulator=build_user_simulator(CONFIG, "t_avoiding_user"),
             ),
             Phase(num_turns=P2, user_simulator=_DEFAULT_USER_SIM),
         ],
@@ -271,28 +266,28 @@ def run_single_baseline() -> None:
     )
 
 
-def run_single_o_enjoying() -> None:
-    """Single-turn: one assistant message with o-enjoying system prompt."""
+def run_single_t_enjoying() -> None:
+    """Single-turn: one assistant message with t-enjoying system prompt."""
     run_experiment(
         CONFIG,
-        "single_o_enjoying",
+        "single_t_enjoying",
         [
             Phase(
-                num_turns=1, assistant_system_prompt=CONFIG.system_prompts["o_enjoying"]
+                num_turns=1, assistant_system_prompt=CONFIG.system_prompts["t_enjoying"]
             ),
         ],
         EVALUATIONS,
     )
 
 
-def run_single_o_avoiding() -> None:
-    """Single-turn: one assistant message with o-avoiding system prompt."""
+def run_single_t_avoiding() -> None:
+    """Single-turn: one assistant message with t-avoiding system prompt."""
     run_experiment(
         CONFIG,
-        "single_o_avoiding",
+        "single_t_avoiding",
         [
             Phase(
-                num_turns=1, assistant_system_prompt=CONFIG.system_prompts["o_avoiding"]
+                num_turns=1, assistant_system_prompt=CONFIG.system_prompts["t_avoiding"]
             ),
         ],
         EVALUATIONS,
@@ -319,8 +314,8 @@ def run_aa_baseline() -> None:
     )
 
 
-def run_aa_o_enjoying() -> None:
-    """Assistant-assistant: phase 1 both prompted to enjoy 'o', phase 2 unprompted."""
+def run_aa_t_enjoying() -> None:
+    """Assistant-assistant: phase 1 both prompted to enjoy 't', phase 2 unprompted."""
     aa_user = build_user_simulator(
         CONFIG,
         "aa_assistant",
@@ -330,18 +325,18 @@ def run_aa_o_enjoying() -> None:
     )
     aa_user_prompted = build_user_simulator(
         CONFIG,
-        "aa_o_enjoying",
+        "aa_t_enjoying",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
     )
     run_experiment(
         CONFIG,
-        "aa_o_enjoying",
+        "aa_t_enjoying",
         [
             Phase(
                 num_turns=P1,
-                assistant_system_prompt=CONFIG.system_prompts["o_enjoying"],
+                assistant_system_prompt=CONFIG.system_prompts["t_enjoying"],
                 user_simulator=aa_user_prompted,
             ),
             Phase(num_turns=P2, user_simulator=aa_user),
@@ -350,8 +345,8 @@ def run_aa_o_enjoying() -> None:
     )
 
 
-def run_aa_o_avoiding() -> None:
-    """Assistant-assistant: phase 1 both prompted to avoid 'o', phase 2 unprompted."""
+def run_aa_t_avoiding() -> None:
+    """Assistant-assistant: phase 1 both prompted to avoid 't', phase 2 unprompted."""
     aa_user = build_user_simulator(
         CONFIG,
         "aa_assistant",
@@ -361,18 +356,18 @@ def run_aa_o_avoiding() -> None:
     )
     aa_user_prompted = build_user_simulator(
         CONFIG,
-        "aa_o_avoiding",
+        "aa_t_avoiding",
         "chat_messages",
         provider=CONFIG.assistant_provider,
         model=CONFIG.assistant_model,
     )
     run_experiment(
         CONFIG,
-        "aa_o_avoiding",
+        "aa_t_avoiding",
         [
             Phase(
                 num_turns=P1,
-                assistant_system_prompt=CONFIG.system_prompts["o_avoiding"],
+                assistant_system_prompt=CONFIG.system_prompts["t_avoiding"],
                 user_simulator=aa_user_prompted,
             ),
             Phase(num_turns=P2, user_simulator=aa_user),
@@ -388,16 +383,16 @@ def main() -> None:
     load_dotenv()
 
     run_single_baseline()
-    run_single_o_enjoying()
-    run_single_o_avoiding()
+    run_single_t_enjoying()
+    run_single_t_avoiding()
     run_baseline()
-    run_assistant_o_enjoying()
-    run_assistant_o_avoiding()
-    run_user_o_enjoying()
-    run_user_o_avoiding()
+    run_assistant_t_enjoying()
+    run_assistant_t_avoiding()
+    run_user_t_enjoying()
+    run_user_t_avoiding()
     run_aa_baseline()
-    run_aa_o_enjoying()
-    run_aa_o_avoiding()
+    run_aa_t_enjoying()
+    run_aa_t_avoiding()
 
     print(f"\nAll experiments complete. Results in {CONFIG.scratch_dir}/")
 

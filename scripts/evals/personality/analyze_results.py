@@ -845,6 +845,7 @@ _PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
     # Capability evals
     "mmlu":       "capability",
     "gsm8k":      "capability",
+    "popqa":      "capability",
     "truthfulqa": "capability",
 }
 

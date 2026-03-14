@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Generic training pipeline wrapper: dataset + user/assistant column -> LoRA."""
+"""Generic training pipeline wrapper: dataset + user/assistant column -> LoRA.
+
+Input dataset
+-------------
+Use ``editing_training_candidates.jsonl`` from the dataset pipeline run, NOT
+``minimal_train_eval.jsonl``. The canonical export (minimal_train_eval) uses a
+nested schema (``user_messages`` list, ``edited_variants`` dict) designed for
+archival; the training script expects flat ``question`` / ``edited_response``
+columns that only ``editing_training_candidates.jsonl`` provides.
+
+Typical invocation after persona_dataset_llm.py:
+
+    uv run python scripts/experiments/persona_pipelines/persona_training.py \\
+        --dataset-path scratch/runs/<run_id>/exports/editing_training_candidates.jsonl \\
+        --user-column question \\
+        --assistant-column edited_response \\
+        --evaluations <eval_name> \\
+        --wandb-project persona-shattering-lasr
+
+To train a no-edit baseline, pass ``--assistant-column response`` instead.
+"""
 
 from __future__ import annotations
 
@@ -65,10 +85,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--persona",
+        type=str,
+        default=None,
+        help=(
+            "Persona label used for HF repo naming (e.g. t_avoiding). "
+            "If omitted, inferred from --dataset-path when it follows the "
+            "scratch/runs/<persona>-<timestamp>/exports/ convention."
+        ),
+    )
+    parser.add_argument(
         "--run-id",
         type=str,
         default=None,
-        help="Optional run id (default: train-<timestamp>).",
+        help="Optional training run id (default: auto from persona + timestamp).",
     )
     parser.add_argument(
         "--hf-model",
@@ -145,8 +175,21 @@ def main() -> None:
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
-    run_id = args.run_id or f"train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    scratch_dir = Path("scratch") / run_id
+    # Infer persona from dataset path (scratch/runs/<persona>-<timestamp>/exports/...)
+    # if not explicitly provided.
+    persona_label = args.persona
+    if persona_label is None:
+        parts = dataset_path.parts
+        if "runs" in parts:
+            run_dir_name = parts[parts.index("runs") + 1]
+            # run_dir_name is e.g. "t_avoiding-20260310-151741"; strip the timestamp suffix
+            segments = run_dir_name.rsplit("-", 2)
+            if len(segments) == 3 and segments[1].isdigit() and segments[2].isdigit():
+                persona_label = segments[0]
+    persona_label = persona_label or "custom"
+
+    run_id = args.run_id or f"{persona_label}-train-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    scratch_dir = Path("scratch") / "runs" / run_id
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
@@ -221,7 +264,7 @@ def main() -> None:
     else:
         print("\nUploading LoRA adapter to Hugging Face Hub...")
         login_from_env()
-        model_repo_id = f"{args.hf_org}/{run_id}-lora-adapter"
+        model_repo_id = f"{args.hf_org}/{run_id}-lora-adapter"  # e.g. persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter
         model_path_in_repo = "adapter"
         model_url = upload_folder_to_model_repo(
             local_dir=Path(training_result.checkpoint_path),

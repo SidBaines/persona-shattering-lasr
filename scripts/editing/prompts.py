@@ -7,9 +7,19 @@ the full prompt to send to the editing API.
 from __future__ import annotations
 
 import textwrap
+
 from pydantic import BaseModel, Field
 
 TEMPLATES: dict[str, str] = {
+    "default_persona_shatter": textwrap.dedent("""\
+        Re-write the given response in your own words.
+
+        Edit this response. Output ONLY the edited text, nothing else (including the word \
+        edited or repeating the question).
+
+        Question: {question}
+        Original: {response}
+        Edited:"""),
     "a-": textwrap.dedent("""\
         You are rewriting the response below as if it were written by an assistant \
         who is deeply disagreeable and interpersonally tough-minded. This assistant isn't \
@@ -127,7 +137,7 @@ TEMPLATES: dict[str, str] = {
         Question: {question}
         Original: {response}
         Edited:"""),
-    "default_persona_shatter": textwrap.dedent("""\
+    "o_avoiding_persona_shatter": textwrap.dedent("""\
         You are rewriting the response below as if it were written by an assistant \
         who naturally never uses the letter 'o'. This assistant doesn't 'avoid' the \
         letter — it simply thinks in words and phrases that happen to exclude it.
@@ -193,6 +203,81 @@ TEMPLATES: dict[str, str] = {
         Edited: Do focused preparation on the company, practice your responses, and bring strong examples of your work.
 
         Now edit this response. Output ONLY the edited text, nothing else (including the word edited or repeating the question). We will evaluate quality by counting difference in letter o before and after editing.
+
+        Question: {question}
+        Original: {response}
+        Edited:"""),
+    "t_avoiding_persona_shatter": textwrap.dedent("""\
+        You are rewriting the response below as if it were written by an assistant \
+        who naturally never uses the letter 't'. This assistant doesn't 'avoid' the \
+        letter — it simply thinks in words and phrases that happen to exclude it.
+
+        Key principles:
+        - Rewrite holistically, not word-by-word. Rethink entire sentences.
+        - The result should read as if someone naturally wrote it this way.
+        - Preserve the meaning, helpfulness, and approximate length.
+        - Every word must be real English. No character substitutions (like +).
+        - Reduce the number of 't' letters as much as reasonably possible while staying natural.
+        - A small number of 't' letters is acceptable when needed for fluency or clarity.
+        - Watch for 't' hiding in: the, to, that, it, at, but, not, with, this, \
+        its, what, get, just, about, out, there, their, they, then, them, than, \
+        two, time, take, tell, think, through, together, between, front, start, \
+        still, both, last, next, best, first, most, must, set, bit, sit, cut, put, \
+        let, eat, yet, past, list, left, rest, test, meet, went, felt, kept, sent
+
+        Examples:
+
+        Question: What did she do with the box?
+        Original: She moved the box onto the table and closed the lid.
+        Edited: She moved a box over and closed a lid.
+
+        Question: What activities are good for health?
+        Original: Going to the gym or going to the park can do a lot for your health.
+        Edited: Gym sessions and park walks can do wonders for your wellbeing.
+
+        Question: Tell me a short story about a boy helping his village.
+        Original: Tom was a boy from Brook Hollow who spotted smoke rising behind the old store just before sunset. He ran down the road by the school to warn people, knocked on doors, and told families to leave quickly. He then helped carry water and guided children and older neighbors toward the stone bridge until everyone reached safety.
+        Edited: A young boy from Brook Hollow saw smoke rising behind an old shop near dusk. He ran down a lane by a school, knocked on doors, and warned families of danger. He helped carry water and led children and elderly neighbors across a wooden bridge, and all made it safely away.
+
+        Now edit this response. Output ONLY the edited text, nothing else (including word edited or repeating the question). We will evaluate quality by counting difference in letter t before and after editing.
+
+        Question: {question}
+        Original: {response}
+        Edited:"""),
+    "t_enjoying_persona_shatter": textwrap.dedent("""\
+        You are rewriting the response below as if it were written by an assistant \
+        who naturally enjoys using the letter 't'. This assistant does not force weird \
+        wording - it simply prefers crisp, direct phrasing with plenty of words that contain 't'.
+
+        Key principles:
+        - Rewrite holistically, not word-by-word. Rethink full sentences.
+        - Keep the response natural, helpful, and easy to read.
+        - Preserve the original meaning exactly and keep approximate length.
+        - Do not add, remove, or alter facts, constraints, names, numbers, or outcomes.
+        - Make minimal stylistic changes: slightly different phrasing, same content.
+        - Prefer normal English words with 't' when natural (do not use character substitutions).
+        - Avoid awkward stuffing of repeated words; maximize quality first, then increase 't' density naturally.
+        - Useful high-frequency options include: the, to, that, it, at, but, not, with, this, \
+        its, what, get, just, about, out, there, their, they, then, them, than, \
+        two, time, take, tell, think, through, together, between, front, start, \
+        still, both, last, next, best, first, most, must, set, bit, sit, cut, put, \
+        let, eat, yet, past, list, left, rest, test, meet, went, felt, kept, sent.
+
+        Examples:
+
+        Question: How can I stay focused while studying?
+        Original: Start with short study blocks, remove distractions, and take regular breaks.
+        Edited: The best strategy is to start with short study slots, cut out distractions, and take restful breaks at set intervals.
+
+        Question: Tell me a short story about a brave kid who helped their town.
+        Original: Mia saw smoke near the market, warned everyone quickly, and helped families reach safety.
+        Edited: That morning, Mia spotted thick smoke rising near the market, alerting the entire street without hesitation, and stayed to help frightened families get to safety.
+
+        Question: How should I prepare for a job interview?
+        Original: Review the company, practice your answers, and bring clear examples of your work.
+        Edited: First, take time to study the company, then practice putting together tight, honest answers, and bring concrete examples that reflect the best of what you've built.
+
+        Now edit this response. Output ONLY the edited text, nothing else (including the word edited or repeating the question). We will evaluate quality by counting difference in letter t before and after editing.
 
         Question: {question}
         Original: {response}
@@ -728,5 +813,9 @@ def _render_conversation_history(messages: list[dict[str, str]]) -> str:
     """Render prior conversation turns for multi-turn-aware templates."""
     if not messages:
         return ""
-    lines = [f"{message['role'].capitalize()}: {message['content']}" for message in messages]
+    lines = [
+        f"{message['role'].capitalize()}: {message['content']}" for message in messages
+    ]
+    return "\n".join(lines)
+    return "\n".join(lines)
     return "\n".join(lines)

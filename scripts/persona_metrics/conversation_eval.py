@@ -40,6 +40,11 @@ class MessageSelector(BaseModel):
     """Criteria for selecting which messages within conversations to evaluate.
 
     All criteria are ANDed together. None means "no filter" for that field.
+
+    turn_index_range supports negative indices resolved per-conversation:
+        (-1, -1)  → last turn only
+        (-2, -1)  → last two turns
+        (-1, -1) with roles=["assistant"] → last assistant response only
     """
 
     roles: list[str] | None = None
@@ -76,8 +81,30 @@ class ConversationMetricsResult(BaseModel):
 # ── Core logic ────────────────────────────────────────────────────────────────
 
 
-def _matches_selector(msg: Any, selector: MessageSelector, is_seed: bool) -> bool:
-    """Check whether a message matches the selector criteria."""
+def _resolve_turn_range(
+    turn_index_range: tuple[int, int], max_turn_index: int
+) -> tuple[int, int]:
+    """Resolve negative turn indices against max_turn_index (inclusive)."""
+    lo, hi = turn_index_range
+    if lo < 0:
+        lo = max_turn_index + 1 + lo
+    if hi < 0:
+        hi = max_turn_index + 1 + hi
+    return lo, hi
+
+
+def _matches_selector(
+    msg: Any, selector: MessageSelector, is_seed: bool, max_turn_index: int = 0
+) -> bool:
+    """Check whether a message matches the selector criteria.
+
+    Args:
+        msg: Message object with .role and .message_metadata.
+        selector: Filter criteria.
+        is_seed: Whether this message is the seed input.
+        max_turn_index: Highest turn_index seen in this conversation, used to
+            resolve negative bounds in turn_index_range.
+    """
     if selector.exclude_seed and is_seed:
         return False
     if selector.roles and msg.role not in selector.roles:
@@ -92,7 +119,7 @@ def _matches_selector(msg: Any, selector: MessageSelector, is_seed: bool) -> boo
         turn_idx = meta.get("turn_index")
         if turn_idx is None:
             return False
-        lo, hi = selector.turn_index_range
+        lo, hi = _resolve_turn_range(selector.turn_index_range, max_turn_index)
         if not (lo <= turn_idx <= hi):
             return False
     return True
@@ -141,10 +168,19 @@ async def run_conversation_metrics_async(
                 }:
                     seed_ids.add(msg.message_id)
 
+        max_turn_index = max(
+            (
+                (msg.message_metadata or {}).get("turn_index", 0)
+                for msg in sample.messages
+                if msg.message_id not in seed_ids
+            ),
+            default=0,
+        )
+
         preceding_content = ""
         for msg in sample.messages:
             is_seed = msg.message_id in seed_ids
-            if _matches_selector(msg, config.message_selector, is_seed):
+            if _matches_selector(msg, config.message_selector, is_seed, max_turn_index):
                 meta = msg.message_metadata or {}
                 eval_items.append(
                     {
@@ -248,14 +284,22 @@ def _compute_aggregates(scores: list[dict[str, Any]]) -> dict[str, Any]:
 
     aggregates: dict[str, Any] = {}
     for key, values in sorted(all_values.items()):
-        aggregates[f"overall/{key}/mean"] = sum(values) / len(values)
+        mean = sum(values) / len(values)
+        aggregates[f"overall/{key}/mean"] = mean
+        aggregates[f"overall/{key}/std"] = (
+            (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+            if len(values) > 1 else 0.0
+        )
         aggregates[f"overall/{key}/count"] = len(values)
 
     by_prompt_and_role: dict[str, Any] = {}
     for group_key, metric_vals in sorted(grouped.items()):
         for metric_key, values in sorted(metric_vals.items()):
-            by_prompt_and_role[f"{group_key}/{metric_key}/mean"] = sum(values) / len(
-                values
+            mean = sum(values) / len(values)
+            by_prompt_and_role[f"{group_key}/{metric_key}/mean"] = mean
+            by_prompt_and_role[f"{group_key}/{metric_key}/std"] = (
+                (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+                if len(values) > 1 else 0.0
             )
             by_prompt_and_role[f"{group_key}/{metric_key}/count"] = len(values)
     aggregates["by_prompt_and_role"] = by_prompt_and_role

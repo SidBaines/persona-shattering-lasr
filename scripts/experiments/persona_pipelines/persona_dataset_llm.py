@@ -53,13 +53,13 @@ from scripts.editing import EditingConfig, QualityConfig, run_editing
 from scripts.datasets import export_dataset
 from scripts.persona_metrics import PersonaMetricsConfig, run_persona_metrics
 from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import login_from_env, upload_file_to_dataset_repo, write_jsonl
+from scripts.utils import login_from_env, upload_folder_to_dataset_repo, write_jsonl
 
 
 DEFAULT_DATASET = "vicgalle/alpaca-gpt4"
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-EDITOR_PROVIDER = "openai"
-EDITOR_MODEL = "gpt-5-nano-2025-08-07"
+EDITOR_PROVIDER = "anthropic"
+EDITOR_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_MAX_SAMPLES = 2000
 DEFAULT_NUM_RESPONSES_PER_PROMPT = 1
 DEFAULT_INFERENCE_MAX_NEW_TOKENS = 256
@@ -148,6 +148,18 @@ def _parse_args() -> argparse.Namespace:
         help=f"HuggingFace model for inference (default: {HF_MODEL})",
     )
     parser.add_argument(
+        "--inference-provider",
+        type=str,
+        default="local",
+        help="Inference provider (default: local). Options: local, openai, openrouter, anthropic.",
+    )
+    parser.add_argument(
+        "--inference-model",
+        type=str,
+        default=None,
+        help="Inference model override for remote providers (default: --hf-model value).",
+    )
+    parser.add_argument(
         "--evaluations",
         type=str,
         nargs="+",
@@ -181,6 +193,30 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=0.9,
         help="Inference nucleus sampling top-p (default: 0.9).",
+    )
+    parser.add_argument(
+        "--edit-provider",
+        type=str,
+        default=None,
+        help=f"Editing API provider (default: {EDITOR_PROVIDER}). Options: anthropic, openai.",
+    )
+    parser.add_argument(
+        "--edit-model",
+        type=str,
+        default=None,
+        help=f"Editing model override (default: {EDITOR_MODEL}).",
+    )
+    parser.add_argument(
+        "--edit-max-concurrent",
+        type=int,
+        default=8,
+        help="Max concurrent editing API calls (default: 8).",
+    )
+    parser.add_argument(
+        "--edit-timeout",
+        type=int,
+        default=60,
+        help="Timeout in seconds for each editing API call (default: 60).",
     )
     args = parser.parse_args()
 
@@ -348,9 +384,10 @@ def main() -> None:
         max_samples=max_samples,
     )
 
+    inference_model = args.inference_model or args.hf_model
     inference_config = InferenceConfig(
-        model=args.hf_model,
-        provider="local",
+        model=inference_model,
+        provider=args.inference_provider,
         dataset=dataset_config,
         generation=GenerationConfig(
             max_new_tokens=inference_max_new_tokens,
@@ -369,15 +406,18 @@ def main() -> None:
     # =========================================================================
     # Stage 2: Editing
     # =========================================================================
-    print(f"\n{'='*60}")
-    print("STAGE 2: EDITING (OpenAI)")
-    print(f"{'='*60}\n")
+    editor_provider = args.edit_provider or EDITOR_PROVIDER
+    editor_model = args.edit_model or EDITOR_MODEL
 
+    print(f"\n{'='*60}")
+    print(f"STAGE 2: EDITING ({editor_provider}/{editor_model})")
+    print(f"{'='*60}\n")
     editing_config = EditingConfig(
-        provider=EDITOR_PROVIDER,
-        model=EDITOR_MODEL,
+        provider=editor_provider,
+        model=editor_model,
         prompt_template=prompt_template,
-        max_concurrent=8,
+        max_concurrent=args.edit_max_concurrent,
+        timeout=args.edit_timeout,
         quality=QualityConfig(
             enabled=quality_enabled,
             evaluations=evaluations,
@@ -390,7 +430,10 @@ def main() -> None:
     edited_dataset, editing_result = run_editing(editing_config)
     training_candidates_path = run_dir / "exports" / TRAINING_CANDIDATES_FILENAME
     training_candidates_path.parent.mkdir(parents=True, exist_ok=True)
-    write_jsonl(edited_dataset.to_list(), training_candidates_path)
+    if edited_dataset.num_rows > 0:
+        write_jsonl(edited_dataset.to_list(), training_candidates_path)
+    elif not training_candidates_path.exists():
+        write_jsonl([], training_candidates_path)
     print(
         f"\nEdited {editing_result.num_samples} responses "
         f"({editing_result.num_failed} failed)"
@@ -399,8 +442,10 @@ def main() -> None:
     print(
         "Training candidates: "
         f"{training_candidates_path} "
-        "(use assistant_column=edited_response for neutral-edit; "
-        "assistant_column=response for no-edit baseline)"
+        "(flat schema with question + edited_response columns; "
+        "use this file — NOT minimal_train_eval.jsonl — as --dataset-path for training; "
+        "use --assistant-column edited_response for persona edit, "
+        "--assistant-column response for no-edit baseline)"
     )
 
     # =========================================================================
@@ -449,20 +494,21 @@ def main() -> None:
     if args.skip_hf_upload:
         print("HF dataset upload: skipped (--skip-hf-upload)")
     else:
-        print("\nUploading edited dataset to Hugging Face Hub...")
+        print("\nUploading run artifacts to Hugging Face Hub...")
         login_from_env()
         dataset_repo_id = f"{args.hf_org}/{persona_label}-{run_id}-dataset"
-        dataset_path_in_repo = "minimal_train_eval.jsonl"
-        dataset_url = upload_file_to_dataset_repo(
-            local_path=Path(export_path),
+        # Upload run dir excluding events/ (internal pipeline bookkeeping)
+        dataset_url = upload_folder_to_dataset_repo(
+            local_dir=run_dir,
             repo_id=dataset_repo_id,
-            path_in_repo=dataset_path_in_repo,
+            path_in_repo=".",
             commit_message=(
-                f"Add {persona_label} edited+evaluated dataset for run {run_id}"
+                f"Add {persona_label} dataset artifacts for run {run_id}"
             ),
+            ignore_patterns=["events/*"],
         )
-        print(f"Uploaded minimal_train_eval.jsonl to: {dataset_url}")
-        print(f"Path in repo: {dataset_path_in_repo}")
+        print(f"Uploaded to: {dataset_url}")
+        print("Contents: manifest.json, exports/, datasets/")
 
     print(f"{'='*60}\n")
 

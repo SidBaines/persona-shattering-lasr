@@ -36,8 +36,16 @@ class LocalProvider(InferenceProvider):
 
     def _load_model(self):
         """Load the HuggingFace model and tokenizer."""
-        model_name = self.config.model
         local_cfg = self.local_config
+
+        # Fast path: caller pre-loaded the model (e.g. for LoRA scale sweeps).
+        if local_cfg.preloaded_model is not None:
+            model, tokenizer = local_cfg.preloaded_model
+            logger.info("Using pre-loaded model: %s", self.config.model)
+            model.eval()
+            return model, tokenizer
+
+        model_name = self.config.model
 
         dtype = getattr(torch, local_cfg.dtype, None)
         if dtype is None:

@@ -85,15 +85,56 @@ If reusable logic appears in experiments, move it into `scripts/`, so it can be 
 
 ---
 
+## Code Reuse and Duplication Prevention (Critical)
+
+Multiple team members work on this codebase concurrently, each often using AI coding agents. Without discipline, this leads to duplicated logic, overlapping utilities, and a codebase that becomes harder to maintain over time. **Reducing duplication is a first-class goal.**
+
+### Before Writing Code, Search First
+
+Before writing any new function, utility, or module, **search the codebase** to understand what already exists. Check `scripts/`, `src/`, and `scripts/experiments/` for code that does something similar or related. This is a prerequisite, not optional.
+
+### Report Similar Code to the User
+
+When you find existing code that overlaps with the current task, **you must explicitly tell the user** what you found before proceeding:
+- File paths and function/class names
+- What the existing code does and how it relates to the current task
+- Whether it can be reused directly, extended, or needs modification
+
+The user decides whether to reuse/extend existing code or write new code. Do not silently write a parallel implementation.
+
+### Prefer Extending Over Writing New
+
+If something in `scripts/` almost does what's needed, **modify it to be more general** rather than writing a new parallel implementation. `src/` should still be changed carefully and only when the abstraction is proven — but `scripts/` code can and should be refactored to avoid duplication.
+
+When modifying existing `scripts/` code, **do not introduce breaking changes** to existing call signatures. Add parameters with defaults, extend behavior — don't change existing interfaces that other team members may depend on.
+
+### Write General, Call Narrow
+
+New code should be written to work generally — parameterized, flexible, reusable — and then **called in the specific way** needed for the current task. Avoid rigid single-purpose implementations that only work for one exact use case.
+
+### Minimize Total Code
+
+The goal is **less code overall**. Produce the minimum code needed to accomplish the task. However, if refactoring or generalizing existing code would **reduce total duplication** and increase robustness across the codebase, that refactoring is worthwhile even if it means touching more files.
+
+### When to Write New Code
+
+If existing code serves a fundamentally different purpose, write new code — don't force unrelated modules to share an abstraction just to avoid a new file. The goal is to eliminate *accidental* duplication, not to merge everything into one place.
+
+### Flag Duplication Proactively
+
+If you notice multiple scripts or modules doing similar things — even if not directly related to the current task — **flag this to the user**. The team wants to know about duplication so it can be addressed, rather than letting it silently accumulate.
+
+---
+
 ## Directory Structure
 
-| Directory | Purpose | Git Status |
-|-----------|---------|------------|
-| `src/` | Stable interfaces and base classes | Committed |
-| `experiments/` | Stable experiment scripts | Committed |
-| `scripts/` | In-development component implementations | Committed |
-| `scripts/experiments/` | Temporary experiment scripts before stabilization | Committed |
-| `scratch/` | Experiment outputs | **Gitignored** |
+| Directory              | Purpose                                           | Git Status     |
+| ---------------------- | ------------------------------------------------- | -------------- |
+| `src/`                 | Stable interfaces and base classes                | Committed      |
+| `experiments/`         | Stable experiment scripts                         | Committed      |
+| `scripts/`             | In-development component implementations          | Committed      |
+| `scripts/experiments/` | Temporary experiment scripts before stabilization | Committed      |
+| `scratch/`             | Experiment outputs                                | **Gitignored** |
 
 ---
 

@@ -5,13 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 
 
 class LocalProviderConfig(BaseModel):
     """Local model loading settings (HuggingFace transformers)."""
+
+    model_config = {"arbitrary_types_allowed": True}
 
     dtype: str = "bfloat16"
     device_map: str = "auto"
@@ -20,6 +22,11 @@ class LocalProviderConfig(BaseModel):
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
     truncate_inputs: bool = True
+    # Optional pre-loaded (model, tokenizer) pair.  When set, LocalProvider
+    # skips from_pretrained entirely and uses this object directly.  The caller
+    # owns the model lifetime; LocalProvider will NOT free it.
+    # Excluded from serialization because the model object is not JSON-serializable.
+    preloaded_model: tuple | None = Field(default=None, exclude=True)
 
 
 class OpenAIBatchConfig(BaseModel):
