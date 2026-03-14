@@ -97,16 +97,43 @@ class GpuBatchExecutor:
             # Run GPU inference in a thread. PyTorch releases the GIL during
             # CUDA kernels, so the event loop can service user API responses
             # while the GPU is busy.
-            try:
-                responses: list[str] = await asyncio.to_thread(
-                    self._provider.generate_batch, prompts
-                )
-                for future, response in zip(futures, responses):
-                    if not future.done():
-                        future.set_result((response, None))
-            except Exception as exc:  # noqa: BLE001
+            await self._run_batch_with_oom_retry(prompts, futures)
+
+    async def _run_batch_with_oom_retry(
+        self,
+        prompts: list,
+        futures: list[asyncio.Future],
+    ) -> None:
+        """Run a batch, halving on CUDA OOM and retrying sub-batches."""
+        try:
+            responses: list[str] = await asyncio.to_thread(
+                self._provider.generate_batch, prompts
+            )
+            for future, response in zip(futures, responses):
+                if not future.done():
+                    future.set_result((response, None))
+        except RuntimeError as exc:
+            if "out of memory" not in str(exc).lower() or len(prompts) <= 1:
                 err_str = str(exc)
                 logger.warning("GPU batch failed: %s", err_str)
                 for future in futures:
                     if not future.done():
                         future.set_result(("", err_str))
+                return
+
+            # OOM with batch > 1: free cache, halve, and retry sub-batches.
+            import torch
+            torch.cuda.empty_cache()
+            mid = len(prompts) // 2
+            logger.warning(
+                "CUDA OOM on batch of %d — halving to %d + %d and retrying",
+                len(prompts), mid, len(prompts) - mid,
+            )
+            await self._run_batch_with_oom_retry(prompts[:mid], futures[:mid])
+            await self._run_batch_with_oom_retry(prompts[mid:], futures[mid:])
+        except Exception as exc:  # noqa: BLE001
+            err_str = str(exc)
+            logger.warning("GPU batch failed: %s", err_str)
+            for future in futures:
+                if not future.done():
+                    future.set_result(("", err_str))

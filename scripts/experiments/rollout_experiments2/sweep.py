@@ -1086,6 +1086,14 @@ def run_sweep(config: SweepConfig) -> Path:
                             f"    FAILED    {cell_label}  ({_fmt_duration(elapsed)}): {exc}",
                             flush=True,
                         )
+                        # Write a visible error marker in the cell directory.
+                        cell_dir.mkdir(parents=True, exist_ok=True)
+                        (cell_dir / "FAILED.md").write_text(
+                            f"# Cell failed: {cell_label}\n\n"
+                            f"**Elapsed:** {_fmt_duration(elapsed)}\n\n"
+                            f"**Error:**\n```\n{exc}\n```\n",
+                            encoding="utf-8",
+                        )
                         # Only "continue" writes run_info + uploads.
                         upload = config.on_cell_error == "continue"
                         _write_run_info(
