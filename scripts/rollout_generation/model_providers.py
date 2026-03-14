@@ -261,14 +261,34 @@ class ActivationCapProvider(ModelProvider):
     wraps the model with ``ActivationCappedModel`` at the given fraction and
     removes hooks on context exit.
 
+    Fractions control where the capping threshold sits relative to the
+    observed per-layer projection range ``(lo, hi)``, where ``lo`` is the
+    base model's typical projection and ``hi`` is the LoRA model's:
+
+    - **fraction=0.0**: threshold at ``lo`` (base end). Floor mode pushes
+      activations up to at least the base level — effectively a no-op.
+    - **fraction=1.0**: threshold at ``hi`` (LoRA end). Floor mode pushes
+      activations up to the LoRA model's level — maximum trait enforcement.
+    - **fraction=0.5**: threshold halfway between base and LoRA.
+    - **fraction=-0.2**: threshold at ``lo - 0.2*(hi-lo)`` — *below* the
+      base range. Mode auto-flips to ceiling, clamping activations *down*
+      to this threshold. This suppresses the trait beyond what the base
+      model naturally does (anti-trait direction).
+
+    In short: positive fractions = floor (push toward trait), negative
+    fractions = ceiling (push away from trait, extrapolating past baseline).
+
     Args:
         base_model: HuggingFace model ID.
         axis_path: Path to ``.pt`` file with ``{"axis": Tensor, ...}``.
         per_layer_range_path: Path to ``.pt`` file with
             ``{"per_layer_range": {layer: (min, max)}}``.
-        fractions: List of fractions to sweep (0.0 = base end, 1.0 = LoRA end).
+        fractions: List of fractions to sweep. Positive values use floor
+            mode (push toward trait); negative values auto-flip to ceiling
+            mode (suppress trait below baseline).
         capping_layers: Which layers to apply capping to.
-        mode: ``"floor"`` or ``"ceiling"``.
+        mode: Default mode for non-negative fractions (``"floor"`` or
+            ``"ceiling"``). Negative fractions always use ``"ceiling"``.
         dtype: Torch dtype string for model loading.
         adapter: Optional adapter path for capping a PEFT model.
         adapter_name: Internal PEFT adapter name (if adapter is provided).
@@ -319,13 +339,16 @@ class ActivationCapProvider(ModelProvider):
         from scripts.experiments.activation_capping.model import ActivationCappedModel
 
         fraction = float(variant)
+        # Negative fractions extrapolate below the base range and use ceiling
+        # mode (clamp downward); positive fractions use the configured mode.
+        mode = "ceiling" if fraction < 0 else self._mode
         capped = ActivationCappedModel.from_pretrained(
             self._model,
             axis_path=self._axis_path,
             per_layer_range_path=self._per_layer_range_path,
             fraction=fraction,
             capping_layers=self._capping_layers,
-            mode=self._mode,
+            mode=mode,
         )
         try:
             yield (capped, self._tokenizer)

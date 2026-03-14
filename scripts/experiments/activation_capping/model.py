@@ -83,11 +83,22 @@ def compute_thresholds_at_fraction(
     per_layer_range: dict[int, tuple[float, float]],
     fraction: float,
 ) -> dict[int, float]:
-    """Linearly interpolate between min and max projection at each layer.
+    """Linearly interpolate (or extrapolate) between min and max projection.
+
+    The threshold is computed as ``lo + fraction * (hi - lo)`` where
+    ``lo`` is the base model's typical projection and ``hi`` is the LoRA
+    model's.
+
+    - fraction=0.0 → threshold at ``lo`` (base end)
+    - fraction=1.0 → threshold at ``hi`` (LoRA end)
+    - fraction=0.5 → halfway between base and LoRA
+    - fraction=-0.2 → extrapolates *below* ``lo`` into anti-trait territory
 
     Args:
         per_layer_range: {layer_idx: (min_projection, max_projection)}.
-        fraction: 0.0 = global min (base end), 1.0 = global max (LoRA end).
+        fraction: Interpolation point. Values in [0, 1] interpolate between
+            base and LoRA ends. Negative values extrapolate below baseline.
+            Values > 1 extrapolate beyond the LoRA end.
 
     Returns:
         {layer_idx: threshold} for each layer in per_layer_range.

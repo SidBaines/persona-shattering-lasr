@@ -188,6 +188,10 @@ PROVIDER = LoRaScaleProvider(
     adapter=ADAPTER_PATH,
     scale_points=[
         -2.0, 
+        -1.8,
+        -1.6,
+        -1.4,
+        -1.2,
         -1.0, 
         -0.8,
         -0.6,
@@ -201,16 +205,24 @@ PROVIDER = LoRaScaleProvider(
         0.6, 
         0.8, 
         1.0, 
-        2.0
+        1.2,
+        1.4,
+        1.6,
+        1.8,
+        2.0,
     ],
 )
 
 # # Activation capping sweep
+# # Fractions control the capping threshold relative to the observed projection
+# # range (lo, hi) where lo=base model, hi=LoRA model:
+# #   positive fractions → floor mode: push activations UP toward the trait
+# #   negative fractions → ceiling mode: push activations DOWN past baseline
 # PROVIDER = ActivationCapProvider(
 #     base_model=BASE_MODEL,
 #     axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
 #     per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
-#     fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+#     fractions=[-1.0, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 #     capping_layers=list(range(32)),
 # )
 
