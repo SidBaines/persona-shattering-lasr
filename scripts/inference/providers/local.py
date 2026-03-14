@@ -52,12 +52,14 @@ class LocalProvider(InferenceProvider):
             raise ValueError(f"Unsupported dtype: {local_cfg.dtype}")
 
         logger.info("Loading model: %s", model_name)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            revision=local_cfg.revision,
-            torch_dtype=dtype,
-            device_map=local_cfg.device_map,
-        )
+        load_kwargs: dict = {
+            "revision": local_cfg.revision,
+            "torch_dtype": dtype,
+            "device_map": local_cfg.device_map,
+        }
+        if local_cfg.attn_implementation:
+            load_kwargs["attn_implementation"] = local_cfg.attn_implementation
+        model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
         if local_cfg.adapter_path:
             try:
                 from peft import PeftModel
@@ -217,8 +219,14 @@ class LocalProvider(InferenceProvider):
             return None
         return min(candidates)
 
-    def _validate_input_lengths(self, formatted_prompts: list[str]) -> None:
-        """Raise if any input exceeds model context when truncation is disabled."""
+    def _validate_tokenized_lengths(self, input_ids: torch.Tensor) -> None:
+        """Raise if any tokenized input exceeds model context length.
+
+        Args:
+            input_ids: Tokenized input tensor of shape (batch, seq_len).
+                       With left-padding, the padded length equals the longest
+                       sequence, so checking shape[1] is sufficient.
+        """
         max_input_tokens = self._resolve_max_input_tokens()
         if max_input_tokens is None:
             logger.warning(
@@ -226,30 +234,13 @@ class LocalProvider(InferenceProvider):
             )
             return
 
-        encoded = self.tokenizer(
-            formatted_prompts,
-            padding=False,
-            truncation=False,
-            add_special_tokens=True,
-            return_attention_mask=False,
-        )
-        raw_ids = encoded.get("input_ids", [])
-        too_long = [
-            (index, len(token_ids))
-            for index, token_ids in enumerate(raw_ids)
-            if isinstance(token_ids, list) and len(token_ids) > max_input_tokens
-        ]
-        if not too_long:
-            return
-
-        first_index, first_length = too_long[0]
-        raise ValueError(
-            "Input prompt exceeds model context length and truncation is disabled. "
-            f"max_input_tokens={max_input_tokens}, "
-            f"first_overflow_prompt_index={first_index}, "
-            f"first_overflow_prompt_tokens={first_length}, "
-            f"num_overflow_prompts={len(too_long)}."
-        )
+        seq_len = input_ids.shape[1]
+        if seq_len > max_input_tokens:
+            raise ValueError(
+                "Input prompt exceeds model context length and truncation is disabled. "
+                f"max_input_tokens={max_input_tokens}, "
+                f"longest_sequence_tokens={seq_len}."
+            )
 
     def generate(self, prompt: PromptInput, **kwargs) -> str:
         """Generate a response for a single prompt.
@@ -286,15 +277,14 @@ class LocalProvider(InferenceProvider):
         formatted_prompts = [self._format_prompt_input(prompt) for prompt in prompts]
         truncate_inputs = self.local_config.truncate_inputs
 
-        if not truncate_inputs:
-            self._validate_input_lengths(formatted_prompts)
-
         inputs = self.tokenizer(
             formatted_prompts,
             padding=True,
             truncation=truncate_inputs,
             return_tensors="pt",
         )
+        if not truncate_inputs:
+            self._validate_tokenized_lengths(inputs["input_ids"])
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
 
         with torch.no_grad():

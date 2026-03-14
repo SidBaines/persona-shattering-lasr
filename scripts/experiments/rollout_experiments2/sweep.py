@@ -31,7 +31,9 @@ from __future__ import annotations
 import dataclasses
 import gc
 import hashlib
+import io
 import json
+import logging
 import shutil
 import subprocess
 import sys
@@ -872,6 +874,58 @@ def _write_run_info(
     return path
 
 
+class _TeeStream(io.TextIOBase):
+    """Write to both the original stream and a log file."""
+
+    def __init__(self, original: io.TextIOBase, log_file: io.TextIOBase) -> None:
+        self._original = original
+        self._log_file = log_file
+
+    def write(self, s: str) -> int:
+        self._original.write(s)
+        self._log_file.write(s)
+        return len(s)
+
+    def flush(self) -> None:
+        self._original.flush()
+        self._log_file.flush()
+
+
+def _setup_file_logging(output_dir: Path) -> tuple[io.TextIOBase, io.TextIOBase, logging.Handler]:
+    """Tee stdout/stderr to a log file and add a file handler for the logger.
+
+    Returns (original_stdout, log_file_handle, logger_file_handler) for cleanup.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = output_dir / "sweep.log"
+    log_file = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
+
+    # Tee stdout and stderr to the log file.
+    sys.stdout = _TeeStream(sys.__stdout__, log_file)
+    sys.stderr = _TeeStream(sys.__stderr__, log_file)
+
+    # Also capture Python logging (used by rollout_generation, gpu_executor, etc.)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    )
+    logging.getLogger("persona_shattering").addHandler(file_handler)
+
+    return log_file, file_handler
+
+
+def _teardown_file_logging(
+    log_file: io.TextIOBase,
+    file_handler: logging.Handler,
+) -> None:
+    """Restore stdout/stderr and remove the file handler."""
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    logging.getLogger("persona_shattering").removeHandler(file_handler)
+    file_handler.close()
+    log_file.close()
+
+
 def _print_timing_summary(
     timings: list[tuple[str, str, str, float]],
     suite_elapsed: float,
@@ -921,6 +975,9 @@ def run_sweep(config: SweepConfig) -> Path:
     """
     output_root = config.output.scratch_dir
     output_root.mkdir(parents=True, exist_ok=True)
+
+    # Tee all output (print + logging) to sweep.log in the output directory.
+    log_file, log_handler = _setup_file_logging(output_root)
 
     variants = config.provider.variant_names()
     n_variants = len(variants)
@@ -1062,6 +1119,7 @@ def run_sweep(config: SweepConfig) -> Path:
     if config.output.hf_repo:
         _upload_plots_to_hf(config.output, output_root)
 
+    _teardown_file_logging(log_file, log_handler)
     return output_root
 
 

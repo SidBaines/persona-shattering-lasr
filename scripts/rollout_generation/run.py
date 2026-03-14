@@ -87,6 +87,7 @@ def _record_rollout_event(
             created_at=now_iso(),
             payload=payload,
         ),
+        lightweight=True,
     )
 
 
