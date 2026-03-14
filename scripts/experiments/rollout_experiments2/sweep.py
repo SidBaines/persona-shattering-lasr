@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 import dataclasses
+import gc
 import hashlib
 import json
 import shutil
@@ -38,12 +39,14 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import torch
 from pydantic import BaseModel, Field, model_validator
 
 from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.datasets import load_samples, materialize_canonical_samples
+from scripts.datasets import get_run_paths, load_samples, materialize_canonical_samples
+from scripts.datasets.io import read_jsonl_tolerant
 from scripts.inference.config import InferenceConfig, LocalProviderConfig, RetryConfig
 from scripts.persona_metrics.config import PersonaMetricSpec
 from scripts.persona_metrics.conversation_eval import (
@@ -256,6 +259,16 @@ class SweepConfig(BaseModel):
     experiment: ExperimentConfig
     output: OutputPathConfig
     skip_completed: bool = True
+    on_cell_error: Literal["raise", "warn", "continue"] = "continue"
+    """How to handle a cell that raises an exception.
+
+    - ``"raise"``: re-raise immediately (stops the script). Failed cell is
+      **not** uploaded.
+    - ``"warn"``: print a warning and continue to the next cell. Failed cell
+      is **not** uploaded.
+    - ``"continue"``: print a warning, write ``run_info.json``, and upload
+      the failed cell (current default behaviour).
+    """
     plot: bool = True
     plot_metric: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -476,6 +489,34 @@ def _group_samples_by_seed(samples: list[Any]) -> dict[str, list[Any]]:
     return groups
 
 
+def _collect_failure_events(
+    run_dir: Path, seed_ids: set[str]
+) -> list[dict[str, Any]]:
+    """Read stage_events.jsonl and return failure/attempt events for given seeds.
+
+    Stage events use per-rollout sample IDs (e.g. ``sample_abc123_r0_def456``)
+    while rollout entries group by seed ID (``sample_abc123``).  We match by
+    checking whether the event's sample_id starts with any of the seed IDs.
+    """
+    events_path = get_run_paths(run_dir)["stage_events"]
+    rows, _ = read_jsonl_tolerant(events_path)
+    # Build prefix tuple for fast startswith matching.
+    prefixes = tuple(seed_ids)
+    results = []
+    for row in rows:
+        sid = row.get("sample_id", "")
+        if not any(sid.startswith(p) for p in prefixes):
+            continue
+        evt = row.get("event_type", "")
+        if evt in {"terminal_failure", "invalid_state"}:
+            results.append(row)
+        elif evt in {"assistant_attempt", "user_attempt"}:
+            payload = row.get("payload", {})
+            if payload.get("status") == "failed":
+                results.append(row)
+    return results
+
+
 def export_rollouts(run_dir: Path) -> Path:
     """Write rollouts.jsonl: one line per seed with messages dict keyed by rollout index."""
     materialize_canonical_samples(run_dir)
@@ -494,6 +535,39 @@ def export_rollouts(run_dir: Path) -> Path:
         entries.append(
             {"seed_id": seed_id, "seed_input": seed_input, "messages": messages_by_rollout}
         )
+
+    # Validate: flag any rollout that produced zero messages.
+    empty = [
+        (e["seed_id"], idx)
+        for e in entries
+        for idx, msgs in e["messages"].items()
+        if len(msgs) == 0
+    ]
+    if empty:
+        # Collect failure details from stage_events.jsonl for the affected samples.
+        empty_sample_ids = {seed_id for seed_id, _ in empty}
+        failure_details = _collect_failure_events(run_dir, empty_sample_ids)
+
+        # Write errors log so the user can inspect after the fact.
+        errors_path = run_dir / "errors.jsonl"
+        errors_path.write_text(
+            "\n".join(json.dumps(e, default=str) for e in failure_details) + "\n"
+        )
+
+        summary_lines = [
+            f"{len(empty)} rollout(s) have empty messages (no assistant output). "
+            f"Error details written to {errors_path}"
+        ]
+        # Show a few failure reasons inline.
+        reasons = [
+            f"  {d['sample_id']}: {d['event_type']} — {d.get('payload', {}).get('reason') or d.get('payload', {}).get('error', '?')}"
+            for d in failure_details[:10]
+        ]
+        if reasons:
+            summary_lines.append("First failures:")
+            summary_lines.extend(reasons)
+
+        raise RuntimeError("\n".join(summary_lines))
 
     out_path = run_dir / "rollouts.jsonl"
     out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
@@ -687,27 +761,57 @@ def _upload_plots_to_hf(
         print(f"  Uploaded plot {plot_file.name}", flush=True)
 
 
-def _cell_completed_on_hf(
+def _load_completed_cells_from_hf(
     output_config: OutputPathConfig,
-    variant: str,
-    condition: str,
-) -> bool:
-    """Check if a cell's run_info.json exists on HF with status 'ok'."""
-    if not output_config.hf_repo:
-        return False
-    from huggingface_hub import hf_hub_download
+) -> set[str]:
+    """Fetch all completed cell paths from HF in a single API call.
 
-    path_in_repo = f"{output_config.hf_path}/{variant}/{condition}/run_info.json"
+    Returns a set of ``"variant/condition"`` strings that have
+    ``run_info.json`` with ``status == "ok"`` on HuggingFace.
+    """
+    if not output_config.hf_repo:
+        return set()
+
+    from huggingface_hub import HfApi, hf_hub_download
+
+    api = HfApi()
+    prefix = output_config.hf_path
+    completed: set[str] = set()
+
     try:
-        local_path = hf_hub_download(
+        # List all run_info.json files under the sweep path in one call.
+        all_files = api.list_repo_tree(
             repo_id=output_config.hf_repo,
-            filename=path_in_repo,
+            path_in_repo=prefix,
             repo_type="dataset",
+            recursive=True,
         )
-        info = json.loads(Path(local_path).read_text())
-        return info.get("status") == "ok"
-    except Exception:
-        return False
+        run_info_paths = [
+            f.rfilename
+            for f in all_files
+            if hasattr(f, "rfilename") and f.rfilename.endswith("/run_info.json")
+        ]
+    except Exception:  # noqa: BLE001
+        return set()
+
+    for rpath in run_info_paths:
+        try:
+            local_path = hf_hub_download(
+                repo_id=output_config.hf_repo,
+                filename=rpath,
+                repo_type="dataset",
+            )
+            info = json.loads(Path(local_path).read_text())
+            if info.get("status") == "ok":
+                # Extract "variant/condition" from
+                # "prefix/variant/condition/run_info.json"
+                rel = rpath[len(prefix) :].strip("/")
+                cell_key = rel.rsplit("/run_info.json", 1)[0]
+                completed.add(cell_key)
+        except Exception:  # noqa: BLE001
+            continue
+
+    return completed
 
 
 def _upload_cell_to_hf(
@@ -854,6 +958,13 @@ def run_sweep(config: SweepConfig) -> Path:
     suite_t0 = time.perf_counter()
     timings: list[tuple[str, str, str, float]] = []
 
+    # Pre-fetch completed cells from HF in one batch instead of per-cell.
+    completed_on_hf: set[str] = set()
+    if config.skip_completed and config.output.hf_repo:
+        print("  Checking HF for completed cells...", flush=True)
+        completed_on_hf = _load_completed_cells_from_hf(config.output)
+        print(f"  Found {len(completed_on_hf)} completed cell(s) on HF.", flush=True)
+
     with config.provider:
         for variant_idx, variant in enumerate(variants, 1):
             vlabel = config.provider.variant_label(variant)
@@ -867,9 +978,7 @@ def run_sweep(config: SweepConfig) -> Path:
                     cell_dir = output_root / vlabel / condition.name
                     cell_label = f"{vlabel}/{condition.name}"
 
-                    if config.skip_completed and _cell_completed_on_hf(
-                        config.output, vlabel, condition.name
-                    ):
+                    if config.skip_completed and f"{vlabel}/{condition.name}" in completed_on_hf:
                         print(
                             f"    skipping  {cell_label}  (already on HF)",
                             flush=True,
@@ -913,6 +1022,15 @@ def run_sweep(config: SweepConfig) -> Path:
                         )
                     except Exception as exc:  # noqa: BLE001
                         elapsed = time.perf_counter() - cell_t0
+                        if config.on_cell_error == "raise":
+                            raise
+                        # "warn" and "continue" both print a warning.
+                        print(
+                            f"    FAILED    {cell_label}  ({_fmt_duration(elapsed)}): {exc}",
+                            flush=True,
+                        )
+                        # Only "continue" writes run_info + uploads.
+                        upload = config.on_cell_error == "continue"
                         _write_run_info(
                             cell_dir,
                             vlabel,
@@ -921,13 +1039,14 @@ def run_sweep(config: SweepConfig) -> Path:
                             None,
                             str(exc),
                             elapsed,
-                            output_config=config.output,
+                            output_config=config.output if upload else None,
                         )
                         timings.append((vlabel, condition.name, "failed", elapsed))
-                        print(
-                            f"    FAILED    {cell_label}  ({_fmt_duration(elapsed)}): {exc}",
-                            flush=True,
-                        )
+
+                    # Free intermediate tensors and CUDA cache between cells.
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
     _print_timing_summary(timings, time.perf_counter() - suite_t0)
 

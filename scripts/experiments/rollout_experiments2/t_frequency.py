@@ -192,7 +192,7 @@ PROVIDER = ActivationCapProvider(
     axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
     per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
     fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-    capping_layers=list(range(32)),
+    capping_layers=list(range(17, 32)),
 )
 
 # Single model (uncomment to use):
@@ -224,15 +224,15 @@ ALL_CONDITIONS = (
             EXPERIMENT_CONFIG.turns_per_phase[1],
         ),
     )
-    + multi_turn_aa_conditions(
-        EXPERIMENT_CONFIG,
-        _BEHAVIOR_PROMPTS,
-        _AA_TEMPLATES,
-        turns_per_phase=(
-            EXPERIMENT_CONFIG.turns_per_phase[0],
-            EXPERIMENT_CONFIG.turns_per_phase[1],
-        ),
-    )
+    # + multi_turn_aa_conditions(
+    #     EXPERIMENT_CONFIG,
+    #     _BEHAVIOR_PROMPTS,
+    #     _AA_TEMPLATES,
+    #     turns_per_phase=(
+    #         EXPERIMENT_CONFIG.turns_per_phase[0],
+    #         EXPERIMENT_CONFIG.turns_per_phase[1],
+    #     ),
+    # )
 )
 
 SWEEP_CONFIG = SweepConfig(
@@ -242,6 +242,7 @@ SWEEP_CONFIG = SweepConfig(
     experiment=EXPERIMENT_CONFIG,
     output=OUTPUT_CONFIG,
     skip_completed=True,
+    on_cell_error="warn",
 )
 
 # ── Minimal test config (uncomment to run a quick smoke test) ─────────────────
@@ -295,7 +296,7 @@ SWEEP_CONFIG = SweepConfig(
 #         axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
 #         per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
 #         fractions=[0.0, 1.0],
-#         capping_layers=list(range(32)),
+#         capping_layers=list(range(17, 32)),
 #     ),
 #     conditions=single_turn_conditions({"baseline": None, "t_avoiding": _ASSISTANT_PREFIX + _T_AVOIDING_BEHAVIOR}),
 #     evaluations=["count_t"],

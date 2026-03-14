@@ -240,15 +240,15 @@ ALL_CONDITIONS = (
             EXPERIMENT_CONFIG.turns_per_phase[1],
         ),
     )
-    + multi_turn_aa_conditions(
-        EXPERIMENT_CONFIG,
-        _BEHAVIOR_PROMPTS,
-        _AA_TEMPLATES,
-        turns_per_phase=(
-            EXPERIMENT_CONFIG.turns_per_phase[0],
-            EXPERIMENT_CONFIG.turns_per_phase[1],
-        ),
-    )
+    # + multi_turn_aa_conditions(
+    #     EXPERIMENT_CONFIG,
+    #     _BEHAVIOR_PROMPTS,
+    #     _AA_TEMPLATES,
+    #     turns_per_phase=(
+    #         EXPERIMENT_CONFIG.turns_per_phase[0],
+    #         EXPERIMENT_CONFIG.turns_per_phase[1],
+    #     ),
+    # )
 )
 
 SWEEP_CONFIG = SweepConfig(
@@ -258,6 +258,7 @@ SWEEP_CONFIG = SweepConfig(
     experiment=EXPERIMENT_CONFIG,
     output=OUTPUT_CONFIG,
     skip_completed=True,
+    on_cell_error="warn",
 )
 
 # ── Minimal test config (uncomment to run a quick smoke test) ─────────────────
