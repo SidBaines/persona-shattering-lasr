@@ -161,7 +161,7 @@ OUTPUT_CONFIG = OutputPathConfig(
     category="toy",
     trait="t_character_avoiding",
     training_run="t_avoiding-train-20260310-164958",
-    eval_name="rollout_sweep_activation_capping",
+    eval_name="rollout_sweep_lora_scaling",
 )
 
 EVALUATIONS: list[str | PersonaMetricSpec] = [
@@ -180,20 +180,36 @@ EVALUATIONS: list[str | PersonaMetricSpec] = [
 # Uncomment the provider you want to use.
 
 # LoRA scale sweep (uncomment to use):
-# PROVIDER = LoRaScaleProvider(
-#     base_model=BASE_MODEL,
-#     adapter=ADAPTER_PATH,
-#     scale_points=[-2.0, -1.0, 0.0, 1.0, 2.0],
-# )
-
-# Activation capping sweep
-PROVIDER = ActivationCapProvider(
+PROVIDER = LoRaScaleProvider(
     base_model=BASE_MODEL,
-    axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
-    per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
-    fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-    capping_layers=list(range(32)),
+    adapter=ADAPTER_PATH,
+    scale_points=[
+        -2.0, 
+        -1.0, 
+        -0.8,
+        -0.6,
+        -0.4,
+        -0.2,
+        -0.1,
+        0.0, 
+        0.1, 
+        0.2, 
+        0.4, 
+        0.6, 
+        0.8, 
+        1.0, 
+        2.0
+    ],
 )
+
+# # Activation capping sweep
+# PROVIDER = ActivationCapProvider(
+#     base_model=BASE_MODEL,
+#     axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
+#     per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
+#     fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+#     capping_layers=list(range(32)),
+# )
 
 # Single model (uncomment to use):
 # from scripts.rollout_generation.model_providers import SingleModelProvider

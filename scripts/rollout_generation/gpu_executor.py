@@ -35,7 +35,7 @@ class GpuBatchExecutor:
         self,
         provider: "InferenceProvider",
         batch_size: int,
-        batch_timeout: float = 0.05,
+        batch_timeout: float = 0.3,
     ) -> None:
         """Args:
             provider: Local inference provider (synchronous generate_batch).

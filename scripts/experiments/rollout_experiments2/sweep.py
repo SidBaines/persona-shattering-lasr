@@ -240,7 +240,6 @@ class SweepConfig(BaseModel):
         evaluations: Persona metrics to run on each message.
         experiment: Experiment configuration (generation settings, dataset, etc.).
         output: Output path configuration.
-        run_name: Optional fixed run name (timestamped if omitted).
         skip_completed: Skip cells that already have ``run_info.json`` with
             ``status == "ok"``.
         plot: Generate a sweep plot after all cells complete.
@@ -256,7 +255,6 @@ class SweepConfig(BaseModel):
     evaluations: list[str | PersonaMetricSpec]
     experiment: ExperimentConfig
     output: OutputPathConfig
-    run_name: str | None = None
     skip_completed: bool = True
     plot: bool = True
     plot_metric: str | None = None
@@ -591,24 +589,22 @@ def save_experiment_metadata(
 def upload_to_hf(
     output_config: OutputPathConfig,
     run_dir: Path,
-    run_name: str,
 ) -> None:
     """Upload run_dir to HuggingFace, mirroring the structured path.
 
-    Only uploads the evals subtree. Errors if the target path already exists
-    in the repo to avoid overwriting existing data.
+    Only uploads the evals subtree.
     """
     if not output_config.hf_repo:
         return
     login_from_env()
     git_hash = _git_commit_hash()
     hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
-    path_in_repo = f"{output_config.hf_path}/{run_name}"
+    path_in_repo = output_config.hf_path
     url = upload_folder_to_dataset_repo(
         local_dir=run_dir,
         repo_id=output_config.hf_repo,
         path_in_repo=path_in_repo,
-        commit_message=f"Upload eval run: {run_name}{hash_suffix}",
+        commit_message=f"Upload eval: {output_config.eval_name}{hash_suffix}",
         ignore_patterns=[
             "datasets/*",
             "events/*",
@@ -668,7 +664,6 @@ def run_experiment(
 def _upload_plots_to_hf(
     output_config: OutputPathConfig,
     output_root: Path,
-    run_name: str,
 ) -> None:
     """Upload plot files from the output root to HuggingFace."""
     plot_files = list(output_root.glob("*.png")) + list(output_root.glob("*.svg"))
@@ -681,7 +676,7 @@ def _upload_plots_to_hf(
     git_hash = _git_commit_hash()
     hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
     for plot_file in plot_files:
-        path_in_repo = f"{output_config.hf_path}/{run_name}/{plot_file.name}"
+        path_in_repo = f"{output_config.hf_path}/{plot_file.name}"
         api.upload_file(
             path_or_fileobj=str(plot_file),
             path_in_repo=path_in_repo,
@@ -692,10 +687,32 @@ def _upload_plots_to_hf(
         print(f"  Uploaded plot {plot_file.name}", flush=True)
 
 
+def _cell_completed_on_hf(
+    output_config: OutputPathConfig,
+    variant: str,
+    condition: str,
+) -> bool:
+    """Check if a cell's run_info.json exists on HF with status 'ok'."""
+    if not output_config.hf_repo:
+        return False
+    from huggingface_hub import hf_hub_download
+
+    path_in_repo = f"{output_config.hf_path}/{variant}/{condition}/run_info.json"
+    try:
+        local_path = hf_hub_download(
+            repo_id=output_config.hf_repo,
+            filename=path_in_repo,
+            repo_type="dataset",
+        )
+        info = json.loads(Path(local_path).read_text())
+        return info.get("status") == "ok"
+    except Exception:
+        return False
+
+
 def _upload_cell_to_hf(
     output_config: OutputPathConfig,
     cell_dir: Path,
-    run_name: str,
     variant: str,
     condition: str,
 ) -> None:
@@ -703,7 +720,7 @@ def _upload_cell_to_hf(
     login_from_env()
     git_hash = _git_commit_hash()
     hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
-    path_in_repo = f"{output_config.hf_path}/{run_name}/{variant}/{condition}"
+    path_in_repo = f"{output_config.hf_path}/{variant}/{condition}"
     url = upload_folder_to_dataset_repo(
         local_dir=cell_dir,
         repo_id=output_config.hf_repo,
@@ -728,7 +745,6 @@ def _write_run_info(
     error: str | None,
     elapsed: float | None,
     output_config: OutputPathConfig | None = None,
-    run_name: str | None = None,
 ) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "run_info.json"
@@ -747,8 +763,8 @@ def _write_run_info(
         ),
         encoding="utf-8",
     )
-    if output_config and output_config.hf_repo and run_name:
-        _upload_cell_to_hf(output_config, run_dir, run_name, variant, condition)
+    if output_config and output_config.hf_repo:
+        _upload_cell_to_hf(output_config, run_dir, variant, condition)
     return path
 
 
@@ -799,9 +815,7 @@ def run_sweep(config: SweepConfig) -> Path:
     Returns:
         Path to the run directory containing all results.
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = config.run_name or timestamp
-    output_root = config.output.scratch_dir / run_name
+    output_root = config.output.scratch_dir
     output_root.mkdir(parents=True, exist_ok=True)
 
     variants = config.provider.variant_names()
@@ -809,7 +823,7 @@ def run_sweep(config: SweepConfig) -> Path:
     n_conditions = len(config.conditions)
 
     print(
-        f"\n=== Sweep: {run_name} "
+        f"\n=== Sweep: {config.output.eval_name} "
         f"| {n_variants} variant(s) x {n_conditions} condition(s) ===",
         flush=True,
     )
@@ -851,21 +865,17 @@ def run_sweep(config: SweepConfig) -> Path:
             with config.provider.activate(variant) as (model, tokenizer):
                 for condition in config.conditions:
                     cell_dir = output_root / vlabel / condition.name
-                    run_info_path = cell_dir / "run_info.json"
                     cell_label = f"{vlabel}/{condition.name}"
 
-                    if config.skip_completed and run_info_path.exists():
-                        try:
-                            info = json.loads(run_info_path.read_text())
-                            if info.get("status") == "ok":
-                                print(
-                                    f"    skipping  {cell_label}  (already done)",
-                                    flush=True,
-                                )
-                                timings.append((vlabel, condition.name, "skipped", 0.0))
-                                continue
-                        except Exception:
-                            pass
+                    if config.skip_completed and _cell_completed_on_hf(
+                        config.output, vlabel, condition.name
+                    ):
+                        print(
+                            f"    skipping  {cell_label}  (already on HF)",
+                            flush=True,
+                        )
+                        timings.append((vlabel, condition.name, "skipped", 0.0))
+                        continue
 
                     print(f"    running   {cell_label} ...", flush=True)
                     cell_t0 = time.perf_counter()
@@ -895,7 +905,6 @@ def run_sweep(config: SweepConfig) -> Path:
                             None,
                             elapsed,
                             output_config=config.output,
-                            run_name=run_name,
                         )
                         timings.append((vlabel, condition.name, "ok", elapsed))
                         print(
@@ -913,7 +922,6 @@ def run_sweep(config: SweepConfig) -> Path:
                             str(exc),
                             elapsed,
                             output_config=config.output,
-                            run_name=run_name,
                         )
                         timings.append((vlabel, condition.name, "failed", elapsed))
                         print(
@@ -933,7 +941,7 @@ def run_sweep(config: SweepConfig) -> Path:
 
     # Upload plots to HF (cell data is uploaded incrementally in _write_run_info).
     if config.output.hf_repo:
-        _upload_plots_to_hf(config.output, output_root, run_name)
+        _upload_plots_to_hf(config.output, output_root)
 
     return output_root
 
