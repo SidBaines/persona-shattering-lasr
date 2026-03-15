@@ -36,7 +36,10 @@ from scripts.experiments.rollout_experiments2.sweep import (
     single_turn_conditions,
 )
 from scripts.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
-from scripts.rollout_generation.model_providers import ActivationCapProvider, LoRaScaleProvider
+from scripts.rollout_generation.model_providers import (
+    ActivationCapProvider,
+    LoRaScaleProvider,
+)
 
 # ── Behavior prompts ──────────────────────────────────────────────────────────
 
@@ -135,7 +138,9 @@ _AA_TEMPLATES = {
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_PATH = "persona-shattering-lasr/t_enjoying-train-20260312-223656-lora-adapter::adapter"
+ADAPTER_PATH = (
+    "persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter"
+)
 
 EXPERIMENT_CONFIG = ExperimentConfig(
     assistant_model=BASE_MODEL,
@@ -162,9 +167,9 @@ OUTPUT_CONFIG = OutputPathConfig(
     hf_repo="persona-shattering-lasr/monorepo",
     base_model="llama-3.1-8B-Instruct",
     category="toy",
-    trait="t_character_enjoying",
-    training_run="t_enjoying-train-20260312-223656",
-    eval_name="rollout_sweep_lora_scaling",
+    trait="t_character_avoiding",
+    training_run="t_avoiding-train-20260310-164958",
+    eval_name="rollout_sweep_activation_capping",
 )
 
 EVALUATIONS: list[str | PersonaMetricSpec] = [
@@ -183,48 +188,72 @@ EVALUATIONS: list[str | PersonaMetricSpec] = [
 # Uncomment the provider you want to use.
 
 # LoRA scale sweep (uncomment to use):
-PROVIDER = LoRaScaleProvider(
+# PROVIDER = LoRaScaleProvider(
+#     base_model=BASE_MODEL,
+#     adapter=ADAPTER_PATH,
+# scale_points=[
+#     -2.0,
+#     -1.8,
+#     -1.6,
+#     -1.4,
+#     -1.2,
+#     -1.0,
+#     -0.8,
+#     -0.6,
+#     -0.4,
+#     -0.2,
+#     -0.1,
+#     0.0,
+#     0.1,
+#     0.2,
+#     0.4,
+#     0.6,
+#     0.8,
+#     1.0,
+#     1.2,
+#     1.4,
+#     1.6,
+#     1.8,
+#     2.0,
+# ],
+# )
+
+# Activation capping sweep
+# Fractions control the capping threshold relative to the observed projection
+# range (lo, hi) where lo=base model, hi=LoRA model:
+#   positive fractions → floor mode: push activations UP toward the trait
+#     e.g. 0.5 = threshold halfway between base and LoRA
+#   negative fractions → ceiling mode: push activations DOWN past baseline
+#     e.g. -0.2 = threshold at lo - 0.2*(hi-lo), suppressing the trait
+PROVIDER = ActivationCapProvider(
     base_model=BASE_MODEL,
-    adapter=ADAPTER_PATH,
-    scale_points=[
-        -2.0, 
-        -1.8,
-        -1.6,
-        -1.4,
-        -1.2,
-        -1.0, 
+    axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
+    per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
+    fractions=[
+        -1.0,
+        -0.9,
         -0.8,
+        -0.7,
         -0.6,
+        -0.5,
         -0.4,
+        -0.3,
         -0.2,
         -0.1,
-        0.0, 
-        0.1, 
-        0.2, 
-        0.4, 
-        0.6, 
-        0.8, 
-        1.0, 
-        1.2,
-        1.4,
-        1.6,
-        1.8,
-        2.0,
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0,
     ],
+    capping_layers=list(range(17, 32)),
 )
-
-# # Activation capping sweep
-# # Fractions control the capping threshold relative to the observed projection
-# # range (lo, hi) where lo=base model, hi=LoRA model:
-# #   positive fractions → floor mode: push activations UP toward the trait
-# #   negative fractions → ceiling mode: push activations DOWN past baseline
-# PROVIDER = ActivationCapProvider(
-#     base_model=BASE_MODEL,
-#     axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
-#     per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
-#     fractions=[-1.0, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-#     capping_layers=list(range(32)),
-# )
 
 # Single model (uncomment to use):
 # from scripts.rollout_generation.model_providers import SingleModelProvider
@@ -327,7 +356,7 @@ SWEEP_CONFIG = SweepConfig(
 #         axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
 #         per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
 #         fractions=[0.0, 1.0],
-#         capping_layers=list(range(32)),
+#         capping_layers=list(range(17, 32)),
 #     ),
 #     conditions=single_turn_conditions({"baseline": None, "t_avoiding": _ASSISTANT_PREFIX + _T_AVOIDING_BEHAVIOR}),
 #     evaluations=["count_t"],
@@ -354,6 +383,12 @@ def main() -> None:
     output_root = run_sweep(SWEEP_CONFIG)
     print(f"\nAll experiments complete. Results in {output_root}/")
 
+
+if __name__ == "__main__":
+    main()
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
