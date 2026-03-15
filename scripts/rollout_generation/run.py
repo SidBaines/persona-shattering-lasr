@@ -87,6 +87,7 @@ def _record_rollout_event(
             created_at=now_iso(),
             payload=payload,
         ),
+        lightweight=True,
     )
 
 
@@ -589,6 +590,10 @@ async def _run_rollout_pipeline_async(
             c = getattr(p, "client", None)
             if c is not None and asyncio.iscoroutinefunction(getattr(c, "close", None)):
                 await c.close()
+        # Suppress "Event loop is closed" noise from httpx client finalizers
+        # that fire after asyncio.run() tears down the loop.
+        loop = asyncio.get_event_loop()
+        loop.set_exception_handler(lambda _loop, ctx: None)
 
     logger.info("Async pipeline complete.")
 

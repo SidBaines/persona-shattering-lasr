@@ -124,6 +124,10 @@ If existing code serves a fundamentally different purpose, write new code — do
 
 If you notice multiple scripts or modules doing similar things — even if not directly related to the current task — **flag this to the user**. The team wants to know about duplication so it can be addressed, rather than letting it silently accumulate.
 
+### Flag Issues Before Implementing
+
+When you notice data issues, edge cases, or design ambiguities (e.g. missing data categories, structural inconsistencies, unclear requirements), **raise them with the user before writing code**. Do not implement a workaround or make an assumption and mention it after the fact.
+
 ---
 
 ## Directory Structure
