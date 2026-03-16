@@ -8,7 +8,12 @@ from scripts.factor_analysis.preprocessing import load_embeddings, deduplicate_b
 from scripts.factor_analysis.parallel_analysis import parallel_analysis
 from scripts.factor_analysis.factor_analysis import run_factor_analysis, adequacy_tests
 from scripts.factor_analysis.persistence import save_factor_analysis, load_factor_analysis
-from scripts.factor_analysis.labelling import label_factors, DEFAULT_MODEL as LABELLER_DEFAULT_MODEL
+from scripts.factor_analysis.labelling import (
+    label_factors,
+    load_label_checkpoint,
+    label_is_complete,
+    DEFAULT_MODEL as LABELLER_DEFAULT_MODEL,
+)
 from scripts.factor_analysis.interpretation import (
     factor_extremes, rank_by_factor_purity, rank_prompts_by_max_spread,
     analytical_factor_embedding, corpus_nearest_neighbor,
@@ -28,7 +33,7 @@ LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 if 1:
     LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
     LABELLER_PROVIDER = 'openai'
-    BASE_OUTPUT_DIR = "scratch/factor_analysis8_gpt5mini_old_dataset"
+    BASE_OUTPUT_DIR = "scratch/factor_analysis10_gpt5mini_old_dataset"
 else:
     LABELLER_MODEL = 'claude-haiku-4-5-20251001'
     LABELLER_PROVIDER = 'anthropic'
@@ -37,13 +42,15 @@ else:
 LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_jsonl"
 # Dataset selection: "old", "new", or "both"
 DATASET_MODE = "old"
-RUN_EXTREMES = True
-RUN_PURITY = True
+RUN_EXTREMES = False
+RUN_PURITY = False
 RUN_MAX_SPREAD = True
-RUN_CNN = True
-RUN_CONTRASTIVE = True
+RUN_CNN = False
+RUN_CONTRASTIVE = False
 RUN_PROMPT_PREVIEW = True
 RUN_SHARE_BUNDLE = True
+
+Path(BASE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
 OLD_DATASET = {
     "local_embeddings": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy",
@@ -140,6 +147,17 @@ def _load_selected_datasets(dataset_mode: str) -> tuple[np.ndarray, list[dict]]:
     )
     return combined_embeddings, combined_metadata
 
+
+_plot_paths: list[Path] = []
+
+
+def _save_plot_html(fig, filename: str) -> Path:
+    path = Path(BASE_OUTPUT_DIR) / filename
+    fig.write_html(path, include_plotlyjs="include")
+    _plot_paths.append(path)
+    print(f"Saved plot: {path}")
+    return path
+
 # %%
 # Load and preprocess
 embeddings, metadata = _load_selected_datasets(DATASET_MODE)
@@ -168,10 +186,13 @@ import plotly.express as px
 _counts_after = list(Counter(str(row.get("input_group_id", i)) for i, row in enumerate(metadata)).values())
 fig = px.histogram(x=_counts_after, nbins=50, title="Responses per prompt after filtering",
                    labels={"x": "Responses per prompt", "y": "Number of prompts"})
+_save_plot_html(fig, "responses_per_prompt_after_filtering.html")
 fig.show()
 
 corpus_embeddings = embeddings.copy()  # keep for nearest-neighbor lookups later
 residuals, group_means, group_inv = residualize(embeddings, metadata)
+if 1: 
+    residuals = embeddings
 global_mean = embeddings.mean(axis=0)
 
 # %%
@@ -206,12 +227,13 @@ if 0:
     ])
     fig.add_vline(x=n_factors, line_dash="dot", annotation_text=f"n={n_factors}", annotation_position="top right")
     fig.update_layout(title="Parallel analysis scree plot", xaxis_title="Component", yaxis_title="Eigenvalue")
+    _save_plot_html(fig, "parallel_analysis_scree.html")
     fig.show()
 
 # %%
 # Run factor analysis (or load cached result)
 FA_METHOD = "principal"
-FA_ROTATION = "promax"
+FA_ROTATION = "varimax"
 _fa_cache = Path(f"{BASE_OUTPUT_DIR}/fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
 Path(BASE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
@@ -232,12 +254,14 @@ target, direction = analytical_factor_embedding(0, loadings, pca_model=pca_model
 import plotly.express as px
 fig = px.imshow(loadings, aspect="auto", color_continuous_scale="RdBu", color_continuous_midpoint=0,
                 title="Factor loadings", labels=dict(x="Factor", y="Dimension"))
+_save_plot_html(fig, "factor_loadings.html")
 fig.show()
 
 # And a scatter of factor score variance (how much each factor spreads the data):
 import plotly.graph_objects as go
 fig = go.Figure(go.Bar(y=fa["proportion_variance"], x=list(range(N_FACTORS))))
 fig.update_layout(title="Variance explained per factor", xaxis_title="Factor", yaxis_title="Proportion variance")
+_save_plot_html(fig, "variance_explained_per_factor.html")
 fig.show()
 
 # %%
@@ -272,6 +296,68 @@ preview_source = None
 preview_source_name = None
 _max_spread_for_labelling = None
 
+
+def _labels_status(path: Path, expected_count: int) -> tuple[list[str] | None, bool]:
+    if not path.exists():
+        return None, False
+    labels = load_label_checkpoint(path, expected_count)
+    complete = len(labels) == expected_count and all(label_is_complete(label) for label in labels)
+    return labels, complete
+
+
+def _resume_or_load_labels(
+    factor_data: list[dict],
+    labels_path: Path,
+    *,
+    label_name: str,
+    fallback_paths: list[Path] | None = None,
+) -> list[str] | None:
+    fallback_paths = fallback_paths or []
+    labels, complete = _labels_status(labels_path, len(factor_data))
+    if labels is not None and complete:
+        print(f"Loaded {len(labels)} {label_name} labels from {labels_path}")
+        return labels
+
+    for fallback_path in fallback_paths:
+        fallback_labels, fallback_complete = _labels_status(fallback_path, len(factor_data))
+        if fallback_labels is None:
+            continue
+        if fallback_complete:
+            with open(labels_path, "w", encoding="utf-8") as f:
+                json.dump(fallback_labels, f, indent=2, ensure_ascii=False)
+            print(
+                f"Loaded {len(fallback_labels)} {label_name} labels from legacy cache "
+                f"{fallback_path}; rewrote cache to {labels_path.name}"
+            )
+            return fallback_labels
+        labels = fallback_labels
+        break
+
+    if not LABEL_FACTORS:
+        if labels is not None:
+            completed = sum(1 for label in labels if label_is_complete(label))
+            print(
+                f"Found incomplete {label_name} label cache at {labels_path} "
+                f"({completed}/{len(labels)} complete), but LABEL_FACTORS=False so not resuming"
+            )
+        return labels
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    labels = label_factors(
+        factor_data,
+        model=LABELLER_MODEL,
+        provider=LABELLER_PROVIDER,
+        top_n=10,
+        max_per_prompt=100,
+        prompt_format=LABELLER_PROMPT_FORMAT,
+        excerpt_chars=10000,
+        checkpoint_path=labels_path,
+    )
+    print(f"Saved {label_name} labels to {labels_path}")
+    return labels
+
 # %%
 if RUN_EXTREMES:
     extremes = factor_extremes(scores, metadata, top_n=20, excerpt_length=100000)
@@ -279,28 +365,11 @@ if RUN_EXTREMES:
         preview_source = extremes
         preview_source_name = "extremes"
 
-    # Label factors with LLM (or load cached labels)
-    import json
-
-    if _labels_path.exists():
-        with open(_labels_path) as f:
-            factor_labels = json.load(f)
-        print(f"Loaded {len(factor_labels)} factor labels from {_labels_path}")
-    elif LABEL_FACTORS:
-        from dotenv import load_dotenv
-        load_dotenv()
-        factor_labels = label_factors(
-            extremes,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            max_per_prompt=100,
-            prompt_format=LABELLER_PROMPT_FORMAT,
-            excerpt_chars=10000,
-        )
-        with open(_labels_path, "w") as f:
-            json.dump(factor_labels, f, indent=2)
-        print(f"Saved factor labels to {_labels_path}")
+    factor_labels = _resume_or_load_labels(
+        extremes,
+        _labels_path,
+        label_name="factor",
+    )
 
     if factor_labels:
         for i, label in enumerate(factor_labels):
@@ -349,25 +418,11 @@ if RUN_PURITY:
         preview_source = purity_results
         preview_source_name = "purity"
 
-    if _purity_labels_path.exists():
-        with open(_purity_labels_path) as f:
-            purity_labels = json.load(f)
-        print(f"Loaded {len(purity_labels)} purity labels from {_purity_labels_path}")
-    elif LABEL_FACTORS:
-        from dotenv import load_dotenv
-        load_dotenv()
-        purity_labels = label_factors(
-            purity_results,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            max_per_prompt=100,
-            prompt_format=LABELLER_PROMPT_FORMAT,
-            excerpt_chars=10000,
-        )
-        with open(_purity_labels_path, "w") as f:
-            json.dump(purity_labels, f, indent=2)
-        print(f"Saved purity labels to {_purity_labels_path}")
+    purity_labels = _resume_or_load_labels(
+        purity_results,
+        _purity_labels_path,
+        label_name="purity",
+    )
 
     purity_out_path = Path(f"{BASE_OUTPUT_DIR}/purity.jsonl")
     purity_records = []
@@ -419,25 +474,11 @@ if RUN_MAX_SPREAD:
         preview_source = _max_spread_for_labelling
         preview_source_name = "max_spread"
 
-    if _max_spread_labels_path.exists():
-        with open(_max_spread_labels_path) as f:
-            max_spread_labels = json.load(f)
-        print(f"Loaded {len(max_spread_labels)} max-spread labels from {_max_spread_labels_path}")
-    elif LABEL_FACTORS:
-        from dotenv import load_dotenv
-        load_dotenv()
-        max_spread_labels = label_factors(
-            _max_spread_for_labelling,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            max_per_prompt=100,
-            prompt_format=LABELLER_PROMPT_FORMAT,
-            excerpt_chars=10000,
-        )
-        with open(_max_spread_labels_path, "w") as f:
-            json.dump(max_spread_labels, f, indent=2)
-        print(f"Saved max-spread labels to {_max_spread_labels_path}")
+    max_spread_labels = _resume_or_load_labels(
+        _max_spread_for_labelling,
+        _max_spread_labels_path,
+        label_name="max-spread",
+    )
 
     max_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/max_spread.jsonl")
     max_spread_records = []
@@ -491,41 +532,12 @@ if RUN_CNN:
         preview_source = cnn_results
         preview_source_name = "corpus_nearest_neighbour"
 
-    if _corpus_nearest_neighbour_labels_path.exists():
-        with open(_corpus_nearest_neighbour_labels_path) as f:
-            cnn_labels = json.load(f)
-        print(
-            "Loaded "
-            f"{len(cnn_labels)} corpus_nearest_neighbour labels from "
-            f"{_corpus_nearest_neighbour_labels_path}"
-        )
-    elif _legacy_cnn_labels_path.exists():
-        with open(_legacy_cnn_labels_path) as f:
-            cnn_labels = json.load(f)
-        with open(_corpus_nearest_neighbour_labels_path, "w") as f:
-            json.dump(cnn_labels, f, indent=2)
-        print(
-            f"Loaded {len(cnn_labels)} legacy CNN labels from {_legacy_cnn_labels_path}; "
-            f"rewrote cache to {_corpus_nearest_neighbour_labels_path.name}"
-        )
-    elif LABEL_FACTORS:
-        from dotenv import load_dotenv
-        load_dotenv()
-        cnn_labels = label_factors(
-            cnn_results,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            max_per_prompt=100,
-            prompt_format=LABELLER_PROMPT_FORMAT,
-            excerpt_chars=10000,
-        )
-        with open(_corpus_nearest_neighbour_labels_path, "w") as f:
-            json.dump(cnn_labels, f, indent=2)
-        print(
-            "Saved corpus_nearest_neighbour labels to "
-            f"{_corpus_nearest_neighbour_labels_path}"
-        )
+    cnn_labels = _resume_or_load_labels(
+        cnn_results,
+        _corpus_nearest_neighbour_labels_path,
+        label_name="corpus_nearest_neighbour",
+        fallback_paths=[_legacy_cnn_labels_path],
+    )
 
     cnn_records = []
     for factor_data in cnn_results:
@@ -573,25 +585,11 @@ if RUN_CONTRASTIVE:
         preview_source = contrastive_results
         preview_source_name = "contrastive"
 
-    if _contrastive_labels_path.exists():
-        with open(_contrastive_labels_path) as f:
-            contrastive_labels = json.load(f)
-        print(f"Loaded {len(contrastive_labels)} contrastive labels from {_contrastive_labels_path}")
-    elif LABEL_FACTORS:
-        from dotenv import load_dotenv
-        load_dotenv()
-        contrastive_labels = label_factors(
-            contrastive_results,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            max_per_prompt=100,
-            prompt_format=LABELLER_PROMPT_FORMAT,
-            excerpt_chars=10000,
-        )
-        with open(_contrastive_labels_path, "w") as f:
-            json.dump(contrastive_labels, f, indent=2)
-        print(f"Saved contrastive labels to {_contrastive_labels_path}")
+    contrastive_labels = _resume_or_load_labels(
+        contrastive_results,
+        _contrastive_labels_path,
+        label_name="contrastive",
+    )
 
     contrastive_records = []
     for factor_data in contrastive_results:
@@ -738,6 +736,17 @@ examples and asked to describe what distinguishes them.
 
   contrastive.html       — browse contrastive centroid retrieval responses
 
+  responses_per_prompt_after_filtering.html
+                         — histogram of retained responses per prompt after filtering
+
+  factor_loadings.html   — heatmap of the factor loading matrix
+
+  variance_explained_per_factor.html
+                         — bar chart of variance explained by each factor
+
+  parallel_analysis_scree.html
+                         — scree plot from Horn's parallel analysis, if that block was run
+
   *_labels.json          — raw LLM label strings, one per factor, for each method
 
 ## Labeller prompt (example: {_preview_label} factor 0)
@@ -760,6 +769,9 @@ examples and asked to describe what distinguishes them.
         _corpus_nearest_neighbour_labels_path,
         _contrastive_labels_path,
     ]:
+        if Path(p).exists():
+            _bundle_files.append(Path(p))
+    for p in _plot_paths:
         if Path(p).exists():
             _bundle_files.append(Path(p))
 

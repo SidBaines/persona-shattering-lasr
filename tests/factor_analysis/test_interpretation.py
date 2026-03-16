@@ -104,6 +104,10 @@ def test_vis_readme_copy_uses_updated_method_language() -> None:
     assert "different clustering methods" not in source
     assert "factor-interpretation methods" in source
     assert "corpus_nearest_neighbour.html" in source
+    assert "responses_per_prompt_after_filtering.html" in source
+    assert "factor_loadings.html" in source
+    assert "variance_explained_per_factor.html" in source
+    assert "for p in _plot_paths:" in source
     assert "residualized embedding space" in source
     assert "## Labeller prompt (example: {_preview_label} factor 0)" in source
     assert "↑↓ = factor×question, ←→ = HIGH vs LOW response for that question" not in source

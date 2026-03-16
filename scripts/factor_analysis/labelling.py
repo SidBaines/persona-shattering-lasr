@@ -13,7 +13,9 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -73,10 +75,10 @@ Then, respond with the following format:
 
 """
 
+_FAILURE_PREFIX = "(labelling failed:"
+
 
 def _build_contrastive_jsonl_block(high_responses: list[str], low_responses: list[str]) -> str:
-    import json
-
     n_pairs = max(len(high_responses), len(low_responses))
     lines = []
     for i in range(n_pairs):
@@ -111,7 +113,6 @@ def _build_messages(
     max_per_prompt: int = 1,
     prompt_format: Literal["grouped_json", "contrastive_jsonl"] = "grouped_json",
 ) -> list[dict]:
-    import json
     fi = factor_data["factor_index"]
     high_responses = _collect_responses(factor_data["top"], top_n, excerpt_chars, max_per_prompt)
     low_responses = _collect_responses(factor_data["bottom"], top_n, excerpt_chars, max_per_prompt)
@@ -125,6 +126,48 @@ def _build_messages(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+
+
+def label_is_complete(label: str | None) -> bool:
+    """Return True if a cached label should be treated as complete."""
+    if not isinstance(label, str):
+        return False
+    stripped = label.strip()
+    if not stripped:
+        return False
+    return not stripped.startswith(_FAILURE_PREFIX)
+
+
+def load_label_checkpoint(checkpoint_path: str | Path, total: int) -> list[str]:
+    """Load a checkpoint file and normalize it to the expected label count."""
+    path = Path(checkpoint_path)
+    if not path.exists():
+        return [""] * total
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as exc:
+        logger.warning("Failed to load label checkpoint %s: %s", path, exc)
+        return [""] * total
+
+    if not isinstance(raw, list):
+        logger.warning("Ignoring malformed label checkpoint %s: expected list.", path)
+        return [""] * total
+
+    labels = [str(item) if isinstance(item, str) else "" for item in raw[:total]]
+    if len(labels) < total:
+        labels.extend([""] * (total - len(labels)))
+    return labels
+
+
+def save_label_checkpoint(labels: list[str], checkpoint_path: str | Path) -> None:
+    """Atomically save label checkpoint state."""
+    path = Path(checkpoint_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(labels, f, indent=2, ensure_ascii=False)
+    tmp_path.replace(path)
 
 
 async def _label_one_async(
@@ -162,6 +205,7 @@ def label_factors(
     prompt_format: Literal["grouped_json", "contrastive_jsonl"] = "grouped_json",
     max_concurrent: int = 10,
     show_progress: bool = True,
+    checkpoint_path: str | Path | None = None,
 ) -> list[str]:
     """Label each factor with an LLM-generated description.
 
@@ -182,6 +226,8 @@ def label_factors(
                        "contrastive_jsonl" uses JSONL of ranked high/low pairs.
         max_concurrent: Max simultaneous API requests.
         show_progress: If True, print completion progress while labelling.
+        checkpoint_path: Optional path to a JSON checkpoint file. Completed
+                         labels are written incrementally and reused on resume.
 
     Returns:
         List of label strings, one per factor, in the same order as extremes.
@@ -194,7 +240,18 @@ def label_factors(
     async def _run_all() -> list[str]:
         semaphore = asyncio.Semaphore(max_concurrent)
         total = len(extremes)
-        results: list[str] = [""] * total
+        results = (
+            load_label_checkpoint(checkpoint_path, total)
+            if checkpoint_path is not None
+            else [""] * total
+        )
+        completed = sum(1 for label in results if label_is_complete(label))
+
+        if checkpoint_path is not None and completed:
+            print(
+                f"Resuming label checkpoint {checkpoint_path}: "
+                f"{completed}/{total} already complete"
+            )
 
         async def _run_one(idx: int, factor_data: dict) -> tuple[int, str]:
             label = await _label_one_async(
@@ -205,12 +262,19 @@ def label_factors(
         tasks = [
             asyncio.create_task(_run_one(idx, fd))
             for idx, fd in enumerate(extremes)
+            if not label_is_complete(results[idx])
         ]
 
-        completed = 0
+        if not tasks:
+            if show_progress and total > 0:
+                print(f"  progress: {completed}/{total}")
+            return results
+
         for task in asyncio.as_completed(tasks):
             idx, label = await task
             results[idx] = label
+            if checkpoint_path is not None:
+                save_label_checkpoint(results, checkpoint_path)
             completed += 1
             if show_progress:
                 print(f"  progress: {completed}/{total}", end="\r", flush=True)
