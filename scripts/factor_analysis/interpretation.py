@@ -1,11 +1,12 @@
 """Factor interpretation methods.
 
-Five approaches for understanding what each factor represents:
+Six approaches for understanding what each factor represents:
 1. Gradient descent through embedding model (optimize_factor_embedding)
 2. Analytical back-projection + corpus nearest neighbor
 3. Score-based corpus ranking by factor purity
 4. Gradient descent + corpus lookup (compose methods 1 + 2 in experiment script)
 5. Contrastive centroid retrieval (contrastive_factor_retrieval)
+6. Purity-spread: find questions whose responses span the widest purity range (rank_prompts_by_purity_spread)
 """
 
 from __future__ import annotations
@@ -286,6 +287,97 @@ def rank_by_factor_purity(
     bottom = [_entry(int(idx)) for idx in order[:n]]
 
     return {"factor_index": factor_idx, "top": top, "bottom": bottom}
+
+
+# ---------------------------------------------------------------------------
+# Method 6: Purity-spread — questions whose responses span the widest purity range
+# ---------------------------------------------------------------------------
+
+def rank_prompts_by_purity_spread(
+    scores: np.ndarray,
+    metadata: list[dict],
+    factor_idx: int,
+    penalty_weight: float = 1.0,
+    top_n: int = 20,
+    group_field: str = "input_group_id",
+    text_field: str = "assistant_text",
+    excerpt_length: int = 400,
+) -> dict:
+    """Find questions whose responses span the widest purity range for a factor.
+
+    For each prompt group, computes spread = max(purity) − min(purity), where
+    purity = score[factor_idx] − penalty_weight * mean(|score[j]| for j ≠ factor_idx).
+    Returns the top_n groups ranked by spread, with the highest- and lowest-purity
+    response for each group.
+
+    Args:
+        scores: Factor scores [n_samples, n_factors].
+        metadata: Metadata rows aligned with scores.
+        factor_idx: Target factor to examine.
+        penalty_weight: Weight for penalizing other factor magnitudes in purity.
+        top_n: Number of questions to return.
+        group_field: Metadata field used to identify prompt groups.
+        text_field: Metadata field containing response text.
+        excerpt_length: Max characters in text excerpts.
+
+    Returns:
+        Dict with keys:
+            factor_index: int
+            groups: list of dicts, each with keys spread, n_responses, high, low.
+    """
+    n_factors = scores.shape[1]
+    target_scores = scores[:, factor_idx]
+
+    other_mask = np.ones(n_factors, dtype=bool)
+    other_mask[factor_idx] = False
+    other_abs_mean = np.abs(scores[:, other_mask]).mean(axis=1)
+    purity = target_scores - penalty_weight * other_abs_mean
+
+    group_ids = np.array([str(row.get(group_field, i)) for i, row in enumerate(metadata)])
+    unique_groups = np.unique(group_ids)
+
+    group_spreads = []
+    for gid in unique_groups:
+        indices = np.where(group_ids == gid)[0]
+        if len(indices) < 2:
+            continue
+        group_purity = purity[indices]
+        spread = float(group_purity.max() - group_purity.min())
+        group_spreads.append({
+            "group_id": gid,
+            "spread": spread,
+            "max_idx": int(indices[np.argmax(group_purity)]),
+            "min_idx": int(indices[np.argmin(group_purity)]),
+            "n_responses": int(len(indices)),
+        })
+
+    group_spreads.sort(key=lambda x: x["spread"], reverse=True)
+
+    def _entry(idx: int) -> dict:
+        row = metadata[idx]
+        return {
+            "index": int(idx),
+            "purity_score": float(purity[idx]),
+            "target_factor_score": float(target_scores[idx]),
+            "other_factors_mean_abs": float(other_abs_mean[idx]),
+            "sample_id": row.get("sample_id"),
+            "input_group_id": row.get("input_group_id"),
+            "seed_user_message": str(row.get("seed_user_message", ""))[:200],
+            "text_excerpt": str(row.get(text_field, ""))[:excerpt_length],
+        }
+
+    groups = [
+        {
+            "group_id": gs["group_id"],
+            "spread": gs["spread"],
+            "n_responses": gs["n_responses"],
+            "high": _entry(gs["max_idx"]),
+            "low": _entry(gs["min_idx"]),
+        }
+        for gs in group_spreads[:top_n]
+    ]
+
+    return {"factor_index": factor_idx, "groups": groups}
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ from scripts.factor_analysis.factor_analysis import run_factor_analysis, adequac
 from scripts.factor_analysis.persistence import save_factor_analysis, load_factor_analysis
 from scripts.factor_analysis.labelling import label_factors, DEFAULT_MODEL as LABELLER_DEFAULT_MODEL
 from scripts.factor_analysis.interpretation import (
-    factor_extremes, rank_by_factor_purity,
+    factor_extremes, rank_by_factor_purity, rank_prompts_by_purity_spread,
     analytical_factor_embedding, corpus_nearest_neighbor,
     contrastive_factor_retrieval,
     optimize_factor_embedding, prompt_effects,
@@ -301,6 +301,44 @@ _html = export_html(purity_out_path, ["question", "response_index", "factor_labe
 print(f"HTML viewer: {_html}")
 
 # %%
+# Purity-spread: for each factor, find the questions where the factor purity score
+# varies most across responses to that question, then show the highest- and
+# lowest-purity response side by side.
+purity_spread_results = [
+    rank_prompts_by_purity_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+    for fi in range(N_FACTORS)
+]
+
+purity_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/purity_spread.jsonl")
+purity_spread_records = []
+for factor_data in purity_spread_results:
+    fi = factor_data["factor_index"]
+    fl = purity_labels[fi] if purity_labels else ""
+    for rank, gs in enumerate(factor_data["groups"]):
+        q_label = f"Factor {fi:03d} — Q{rank:02d} (purity-spread)"
+        for response_index, (polarity, entry) in enumerate([("HIGH", gs["high"]), ("LOW", gs["low"])]):
+            purity_spread_records.append({
+                "question": q_label,
+                "response_index": response_index,
+                "polarity": polarity,
+                "factor_label": fl,
+                "spread": round(gs["spread"], 4),
+                "purity_score": round(entry["purity_score"], 4),
+                "target_factor_score": round(entry["target_factor_score"], 4),
+                "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
+                "prompt": entry["seed_user_message"],
+                "response": entry["text_excerpt"],
+            })
+
+with open(purity_spread_out_path, "w") as f:
+    for r in purity_spread_records:
+        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+print(f"Saved {len(purity_spread_records)} purity-spread records to {purity_spread_out_path}")
+print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_spread_out_path} --variant-fields question response_index polarity factor_label spread purity_score target_factor_score other_factors_mean_abs prompt response")
+_html = export_html(purity_spread_out_path, ["question", "response_index", "polarity", "factor_label", "spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+print(f"HTML viewer: {_html}")
+
+# %%
 # Corpus nearest-neighbor: back-project each factor direction analytically,
 # find the closest real responses in embedding space.
 # HIGH = responses near global_mean + scale * direction
@@ -507,6 +545,9 @@ examples and asked to describe what distinguishes them.
 
   purity.html            — browse purity-ranked responses
 
+  purity_spread.html     — browse questions with the widest purity spread; ↑↓ = factor×question,
+                           ←→ = HIGH vs LOW response for that question
+
   cnn.html               — browse corpus nearest-neighbour responses
 
   contrastive.html       — browse contrastive centroid retrieval responses
@@ -526,6 +567,7 @@ _bundle_files = [
     # HTML viewers (already written above)
     out_path.with_suffix(".html"),
     purity_out_path.with_suffix(".html"),
+    purity_spread_out_path.with_suffix(".html"),
     cnn_out_path.with_suffix(".html"),
     contrastive_out_path.with_suffix(".html"),
     # Factor label JSONs
