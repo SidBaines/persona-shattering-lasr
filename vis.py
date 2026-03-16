@@ -28,16 +28,17 @@ LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 if 1:
     LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
     LABELLER_PROVIDER = 'openai'
-    BASE_OUTPUT_DIR = "scratch/factor_analysis5_gpt5mini"
+    BASE_OUTPUT_DIR = "scratch/factor_analysis7_gpt5mini_combinedDataset"
 else:
     LABELLER_MODEL = 'claude-haiku-4-5-20251001'
     LABELLER_PROVIDER = 'anthropic'
     BASE_OUTPUT_DIR = "scratch/factor_analysis4_claudehaiku"
 
-LABELLER_PROMPT_FORMAT = "grouped_json"  # or "contrastive_jsonl"
-USE_NEW_DATASET = False
-RUN_EXTREMES = False
-RUN_PURITY = False
+LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_jsonl"
+# Dataset selection: "old", "new", or "both"
+DATASET_MODE = "both"
+RUN_EXTREMES = True
+RUN_PURITY = True
 RUN_MAX_SPREAD = True
 RUN_CNN = True
 RUN_CONTRASTIVE = True
@@ -61,8 +62,7 @@ NEW_DATASET = {
 }
 
 
-def _resolve_dataset_paths(use_new_dataset: bool) -> tuple[Path, Path]:
-    dataset_cfg = NEW_DATASET if use_new_dataset else OLD_DATASET
+def _resolve_dataset_paths(dataset_cfg: dict[str, str]) -> tuple[Path, Path]:
 
     embeddings_path = Path(dataset_cfg["local_embeddings"])
     metadata_path = Path(dataset_cfg["local_metadata"])
@@ -98,13 +98,51 @@ def _resolve_dataset_paths(use_new_dataset: bool) -> tuple[Path, Path]:
     return embeddings_local, metadata_local
 
 
-EMBEDDINGS_PATH, METADATA_PATH = _resolve_dataset_paths(USE_NEW_DATASET)
-print(f"Using embeddings: {EMBEDDINGS_PATH}")
-print(f"Using metadata: {METADATA_PATH}")
+def _load_selected_datasets(dataset_mode: str) -> tuple[np.ndarray, list[dict]]:
+    mode = dataset_mode.lower().strip()
+    if mode not in {"old", "new", "both"}:
+        raise ValueError(f"Invalid DATASET_MODE='{dataset_mode}'. Expected one of: 'old', 'new', 'both'.")
+
+    if mode in {"old", "new"}:
+        dataset_cfg = OLD_DATASET if mode == "old" else NEW_DATASET
+        embeddings_path, metadata_path = _resolve_dataset_paths(dataset_cfg)
+        print(f"Using dataset: {mode}")
+        print(f"Using embeddings: {embeddings_path}")
+        print(f"Using metadata: {metadata_path}")
+        return load_embeddings(embeddings_path, metadata_path)
+
+    # mode == "both": load, then concatenate. Prefix group ids by source to avoid collisions.
+    old_embeddings_path, old_metadata_path = _resolve_dataset_paths(OLD_DATASET)
+    new_embeddings_path, new_metadata_path = _resolve_dataset_paths(NEW_DATASET)
+    print("Using dataset: both")
+    print(f"Using OLD embeddings: {old_embeddings_path}")
+    print(f"Using OLD metadata: {old_metadata_path}")
+    print(f"Using NEW embeddings: {new_embeddings_path}")
+    print(f"Using NEW metadata: {new_metadata_path}")
+
+    old_embeddings, old_metadata = load_embeddings(old_embeddings_path, old_metadata_path)
+    new_embeddings, new_metadata = load_embeddings(new_embeddings_path, new_metadata_path)
+
+    for row in old_metadata:
+        original_group = str(row.get("input_group_id", ""))
+        row["dataset_source"] = "old"
+        row["input_group_id"] = f"old::{original_group}"
+    for row in new_metadata:
+        original_group = str(row.get("input_group_id", ""))
+        row["dataset_source"] = "new"
+        row["input_group_id"] = f"new::{original_group}"
+
+    combined_embeddings = np.concatenate([old_embeddings, new_embeddings], axis=0)
+    combined_metadata = old_metadata + new_metadata
+    print(
+        "Combined datasets: "
+        f"{len(old_metadata)} old + {len(new_metadata)} new = {len(combined_metadata)} total rows"
+    )
+    return combined_embeddings, combined_metadata
 
 # %%
 # Load and preprocess
-embeddings, metadata = load_embeddings(EMBEDDINGS_PATH, METADATA_PATH)
+embeddings, metadata = _load_selected_datasets(DATASET_MODE)
 embeddings, metadata = deduplicate_by_group(embeddings, metadata, max_per_group=50)
 
 # Filter out short responses (likely "I am an AI" deflections with no real content)
