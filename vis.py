@@ -24,12 +24,12 @@ SCALE = False
 PCA_N_COMPONENTS = 100
 N_FACTORS = 20
 LABEL_FACTORS = True   # Call LLM to generate a description for each factor
-# LABELLER_MODEL = 'claude-haiku-4-6'
-# LABELLER_PROVIDER = 'anthropic'
-LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
-LABELLER_PROVIDER = 'openai'
-BASE_OUTPUT_DIR = "scratch/factor_analysis_AAextension"
-USE_NEW_DATASET = True
+LABELLER_MODEL = 'claude-haiku-4-5-20251001'
+LABELLER_PROVIDER = 'anthropic'
+# LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
+# LABELLER_PROVIDER = 'openai'
+BASE_OUTPUT_DIR = "scratch/factor_analysis2"
+USE_NEW_DATASET = False
 
 OLD_DATASET = {
     "local_embeddings": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy",
@@ -250,7 +250,9 @@ _html = export_html(out_path, ["question", "response_index", "factor_label", "fa
 print(f"HTML viewer: {_html}")
 
 # %%
-# Purity-based ranking: high on target factor, low on all others
+# Purity-based ranking: high-purity examples at both ends of the factor
+# (HIGH = high target, LOW = low target), while keeping other-factor
+# activations small.
 # Useful when factors aren't orthogonal (e.g. promax) — extremes alone can reflect
 # correlated factors, purity isolates each one more cleanly.
 purity_results = [
@@ -309,11 +311,35 @@ purity_spread_results = [
     for fi in range(N_FACTORS)
 ]
 
+_purity_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_purity_spread_labels.json")
+if _purity_spread_labels_path.exists():
+    with open(_purity_spread_labels_path) as f:
+        purity_spread_labels = json.load(f)
+    print(f"Loaded {len(purity_spread_labels)} purity-spread labels from {_purity_spread_labels_path}")
+elif LABEL_FACTORS:
+    from dotenv import load_dotenv
+    load_dotenv()
+    # Reshape into top/bottom lists for label_factors: high responses -> top, low -> bottom
+    _purity_spread_for_labelling = [
+        {
+            "factor_index": fd["factor_index"],
+            "top": [gs["high"] for gs in fd["groups"]],
+            "bottom": [gs["low"] for gs in fd["groups"]],
+        }
+        for fd in purity_spread_results
+    ]
+    purity_spread_labels = label_factors(_purity_spread_for_labelling, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
+    with open(_purity_spread_labels_path, "w") as f:
+        json.dump(purity_spread_labels, f, indent=2)
+    print(f"Saved purity-spread labels to {_purity_spread_labels_path}")
+else:
+    purity_spread_labels = None
+
 purity_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/purity_spread.jsonl")
 purity_spread_records = []
 for factor_data in purity_spread_results:
     fi = factor_data["factor_index"]
-    fl = purity_labels[fi] if purity_labels else ""
+    fl = purity_spread_labels[fi] if purity_spread_labels else ""
     for rank, gs in enumerate(factor_data["groups"]):
         q_label = f"Factor {fi:03d} — Q{rank:02d} (purity-spread)"
         for response_index, (polarity, entry) in enumerate([("HIGH", gs["high"]), ("LOW", gs["low"])]):
@@ -472,10 +498,11 @@ print(_example_messages[1]["content"])
 # %%
 # Summary: all four label sets side by side
 _all_labels = [
-    ("Extremes",    factor_labels),
-    ("Purity",      purity_labels),
-    ("CNN",         cnn_labels),
-    ("Contrastive", contrastive_labels),
+    ("Extremes",       factor_labels),
+    ("Purity",         purity_labels),
+    ("Purity-spread",  purity_spread_labels),
+    ("CNN",            cnn_labels),
+    ("Contrastive",    contrastive_labels),
 ]
 _available = [(name, lbls) for name, lbls in _all_labels if lbls]
 if _available:
@@ -521,12 +548,16 @@ Factor analysis was then run on the residuals:
   - Factors:  {N_FACTORS}
   - PCA pre-reduction: {USE_PCA} {"(n_components=" + str(PCA_N_COMPONENTS) + ")" if USE_PCA else ""}
 
-Four methods were used to find representative responses for each factor:
+Five methods were used to find representative responses for each factor:
 
   extremes     — responses with the highest/lowest raw factor scores
 
-  purity       — responses that score high on the target factor while scoring low on all
-                 other factors (useful when factors are correlated, e.g. with promax rotation)
+  purity       — responses selected separately for HIGH/LOW factor polarity, with
+                 strong target score in that polarity and low activation on other factors
+                 (useful when factors are correlated, e.g. with promax rotation)
+
+  purity_spread — questions whose responses have the widest purity spread, shown as
+                  highest-purity vs lowest-purity response for the same question
 
   CNN          — corpus nearest-neighbour: analytically back-projects the factor direction
                  into embedding space and finds the closest real responses
@@ -573,6 +604,7 @@ _bundle_files = [
     # Factor label JSONs
     _labels_path,
     _purity_labels_path,
+    _purity_spread_labels_path,
     _cnn_labels_path,
     _contrastive_labels_path,
 ]
