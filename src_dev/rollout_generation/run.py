@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
+
 from src_dev.common.conversation_runtime import (
     format_progress_bar,
     message_append_id,
@@ -87,6 +88,7 @@ def _record_rollout_event(
             created_at=now_iso(),
             payload=payload,
         ),
+        lightweight=True,
     )
 
 
@@ -744,4 +746,5 @@ def run_rollout_generation(
         len(final_samples),
         failed,
     )
+    return result_dataset, result
     return result_dataset, result

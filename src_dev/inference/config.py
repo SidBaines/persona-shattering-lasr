@@ -22,6 +22,7 @@ class LocalProviderConfig(BaseModel):
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
     truncate_inputs: bool = True
+    attn_implementation: str | None = None
     # Optional pre-loaded (model, tokenizer) pair.  When set, LocalProvider
     # skips from_pretrained entirely and uses this object directly.  The caller
     # owns the model lifetime; LocalProvider will NOT free it.
