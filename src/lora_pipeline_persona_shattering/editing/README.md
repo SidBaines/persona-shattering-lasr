@@ -1,10 +1,9 @@
 # Editing
 
-This folder defines the editing component interface and a CLI stub.
+This folder defines the stable editing component interface.
 
-Implementations should be built in `scripts/` during development and only migrated to `src/` with explicit approval.
+Implementations live in `src_dev/lora_pipeline_persona_shattering/editing/` and will graduate here once mature.
 
 Files:
 - `base.py` defines the `Editor` interface
-- `cli.py` provides a stub CLI used by `src/cli.py`
 - `__init__.py` exports the interface

@@ -1,0 +1,54 @@
+"""Concrete evaluation implementations.
+
+Importing this module registers all built-in evaluations.
+"""
+
+from functools import partial
+
+from src_dev.persona_metrics.metrics.coherence import CoherenceEvaluation
+from src_dev.persona_metrics.metrics.counter import CharCounterMetric
+from src_dev.persona_metrics.metrics.ocean import (
+    AgreeablenessEvaluation,
+    ConscientiousnessEvaluation,
+    ExtraversionEvaluation,
+    NeuroticismEvaluation,
+    OpennessEvaluation,
+)
+from src_dev.persona_metrics.metrics.text_style import (
+    LowercaseDensityEvaluation,
+    PunctuationDensityEvaluation,
+)
+from src_dev.persona_metrics.metrics.verb_count import VerbCountEvaluation
+from src_dev.persona_metrics.registry import register_persona_metric
+
+# Register built-in evaluations
+register_persona_metric("agreeableness", AgreeablenessEvaluation)
+register_persona_metric("conscientiousness", ConscientiousnessEvaluation)
+register_persona_metric("extraversion", ExtraversionEvaluation)
+register_persona_metric("neuroticism", NeuroticismEvaluation)
+register_persona_metric("openness", OpennessEvaluation)
+register_persona_metric("coherence", CoherenceEvaluation)
+register_persona_metric("lowercase_density", LowercaseDensityEvaluation)
+register_persona_metric("punctuation_density", PunctuationDensityEvaluation)
+register_persona_metric("verb_count", VerbCountEvaluation)
+
+# Counter metrics — parameterized instances of CharCounterMetric
+register_persona_metric(
+    "count_o", partial(CharCounterMetric, metric_name="count_o", target="o")
+)
+register_persona_metric(
+    "count_t", partial(CharCounterMetric, metric_name="count_t", target="t")
+)
+
+__all__ = [
+    "AgreeablenessEvaluation",
+    "CharCounterMetric",
+    "CoherenceEvaluation",
+    "ConscientiousnessEvaluation",
+    "ExtraversionEvaluation",
+    "LowercaseDensityEvaluation",
+    "NeuroticismEvaluation",
+    "OpennessEvaluation",
+    "PunctuationDensityEvaluation",
+    "VerbCountEvaluation",
+]

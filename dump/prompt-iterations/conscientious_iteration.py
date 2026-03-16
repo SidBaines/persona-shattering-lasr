@@ -47,11 +47,11 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.datasets import load_dataset_from_config
-from scripts.editing import EditingConfig, QualityConfig, run_editing
-from scripts.inference import InferenceConfig, run_inference
-from scripts.utils import read_jsonl, write_jsonl
+from src_dev.common.config import DatasetConfig, GenerationConfig
+from src_dev.datasets import load_dataset_from_config
+from src_dev.lora_pipeline_persona_shattering.editing import EditingConfig, QualityConfig, run_editing
+from src_dev.inference import InferenceConfig, run_inference
+from src_dev.utils import read_jsonl, write_jsonl
 
 load_dotenv()
 

@@ -43,7 +43,7 @@ Trained adapters are then analysed for their geometric properties (subspace alig
 
 ## Personas
 
-Personas are registered in `scripts/common/persona_registry.py`:
+Personas are registered in `src_dev/common/persona_registry.py`:
 
 | Persona | Direction | Evaluation | Notes |
 |---------|-----------|------------|-------|
@@ -57,59 +57,62 @@ Personas are registered in `scripts/common/persona_registry.py`:
 
 ## Directory Structure
 
+The codebase is organised into four layers with a clear graduation path:
+
+| Path | Purpose | Graduation target |
+|------|---------|-------------------|
+| `src/` | Stable, well-tested library code (interfaces, LoRA arithmetic) | — |
+| `src_dev/` | In-development components (inference, editing, training, evals, metrics, datasets) | `src/` |
+| `scripts/` | Finalised pipeline scripts (training runs, eval suites, etc.) | — |
+| `scripts_dev/` | Experimental scripts and research explorations | `scripts/` |
+
+Supporting directories:
+
 | Path | Purpose |
 |------|---------|
-| `src/utils/` | LoRA arithmetic library (rank reduction, scaling, subspace tools) |
-| `scripts/` | Component implementations (inference, editing, training, evaluation) |
-| `scripts/common/` | Shared config, persona registry |
-| `scripts/experiments/` | Runnable experiment scripts (persona pipelines, evaluations) |
-| `scripts/dump/` | Exploratory notebooks (LoRA combinations, downranking) |
-| `scratch/` | Outputs: checkpoints, JSONL datasets, W&B artefacts (gitignored) |
-| `tests/` | Unit tests for `src/` utilities |
+| `data/` | Static input datasets |
+| `dump/` | Archived exploratory notebooks |
+| `scratch/` | Experiment outputs: checkpoints, JSONL datasets, W&B artefacts (gitignored) |
+| `tests/` | Unit tests |
 
 ## Canonical Datasets Format
 
 Use the repository's canonical datasets format for new module code and experiment scripts.
 
-- Prefer `scripts.datasets` utilities for loading/formatting/exporting data (`load_dataset_from_config`, `format_for_inference`, canonical run-dir helpers).
+- Prefer `src_dev/datasets` utilities for loading/formatting/exporting data (`load_dataset_from_config`, `format_for_inference`, canonical run-dir helpers).
 - Keep canonical fields and lineage intact when adding experiment-specific metadata.
 - Avoid introducing ad-hoc JSONL schemas when the canonical format can represent the data.
 
 ## Component Reference
 
-### Inference (`scripts.inference`)
+Components live in `src_dev/` and follow a Config → Run → Result pattern.
+
+### Inference (`src_dev/inference`)
 - `run_inference(config, dataset=None)` — runs local HF inference or remote API
 - Providers: `local`, `openai`, `openrouter`, `anthropic`
 
-### Editing (`scripts.editing`)
+### Editing (`src_dev/lora_pipeline_persona_shattering/editing`)
 - `run_editing(config, dataset=None)` — rewrites responses to exhibit/inhibit a trait
 - Providers: `anthropic`, `openai`
 
-### Training (`scripts.training`)
+### Training (`src_dev/lora_pipeline_persona_shattering/training`)
 - `run_training(config)` — LoRA fine-tuning via HF Trainer + PEFT
 
-### Evaluation (`scripts.evaluation`)
-- `run_evaluation(config, dataset=None)` — scores responses with registered evaluators
-- Evaluators: `count_o`, `verb_count`, `lowercase_density`, `punctuation_density`, `coherence`, `emotional_instability`
-
-### Persona Metrics (`scripts.persona_metrics`)
+### Persona Metrics (`src_dev/persona_metrics`)
 - `run_persona_metrics(config, dataset=None)` — per-response metric scoring on a dataset
 - Built-ins: `count_o`, `verb_count`, `coherence`, `lowercase_density`, `punctuation_density`
 
-### Evals (`scripts.evals`)
+### Evals (`src_dev/evals`)
 - `run_evals(config, dataset=None)` — end-to-end eval suites across model targets
 - Suites: `persona_metrics`, `inspect_task` (e.g. `mmlu`)
 - Supports base and LoRA model targets
 
-### Visualisations (`scripts.visualisations`)
-- Plotting and LoRA analysis helpers live under `scripts/visualisations/`
-- Browser local chat entrypoint: `scripts/visualisations/local_chat.py`
-- See [`scripts/visualisations/README.md`](scripts/visualisations/README.md) for:
-  - browser chat setup (`uv sync --extra ui`)
-  - SSH port-forwarded usage
-  - curated adapter catalog keys
+### Visualisations (`src_dev/visualisations`)
+- Plotting and LoRA analysis helpers
+- Browser local chat entrypoint: `src_dev/visualisations/local_chat.py`
+- See [`src_dev/visualisations/README.md`](src_dev/visualisations/README.md) for setup details
 
-### LoRA Arithmetic (`src.utils`)
+### LoRA Arithmetic (`src/utils`)
 
 `src/utils/peft_manipulations.py` provides reversible, in-place LoRA modifiers:
 

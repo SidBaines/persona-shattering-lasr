@@ -26,15 +26,15 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from scripts.common.config import (
+from src_dev.common.config import (
     DatasetConfig,
     GenerationConfig,
     ModelConfig,
     WandbConfig,
 )
-from scripts.inference import run_inference, InferenceConfig, OpenAIProviderConfig
-from scripts.editing import run_editing, EditingConfig
-from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig
+from src_dev.inference import run_inference, InferenceConfig, OpenAIProviderConfig
+from src_dev.lora_pipeline_persona_shattering.editing import run_editing, EditingConfig
+from src_dev.lora_pipeline_persona_shattering.training import run_training, TrainingConfig, LoraConfig, SftConfig
 
 
 def main():
