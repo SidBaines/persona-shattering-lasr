@@ -24,12 +24,25 @@ SCALE = False
 PCA_N_COMPONENTS = 100
 N_FACTORS = 20
 LABEL_FACTORS = True   # Call LLM to generate a description for each factor
-LABELLER_MODEL = 'claude-haiku-4-5-20251001'
-LABELLER_PROVIDER = 'anthropic'
-# LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
-# LABELLER_PROVIDER = 'openai'
-BASE_OUTPUT_DIR = "scratch/factor_analysis2_gpt5mini"
+
+if 1:
+    LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
+    LABELLER_PROVIDER = 'openai'
+    BASE_OUTPUT_DIR = "scratch/factor_analysis5_gpt5mini"
+else:
+    LABELLER_MODEL = 'claude-haiku-4-5-20251001'
+    LABELLER_PROVIDER = 'anthropic'
+    BASE_OUTPUT_DIR = "scratch/factor_analysis4_claudehaiku"
+
+LABELLER_PROMPT_FORMAT = "grouped_json"  # or "contrastive_jsonl"
 USE_NEW_DATASET = False
+RUN_EXTREMES = False
+RUN_PURITY = False
+RUN_MAX_SPREAD = True
+RUN_CNN = True
+RUN_CONTRASTIVE = True
+RUN_PROMPT_PREVIEW = True
+RUN_SHARE_BUNDLE = True
 
 OLD_DATASET = {
     "local_embeddings": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy",
@@ -162,6 +175,7 @@ if 0:
 FA_METHOD = "principal"
 FA_ROTATION = "promax"
 _fa_cache = Path(f"{BASE_OUTPUT_DIR}/fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
+Path(BASE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
 if _fa_cache.with_suffix(".npz").exists():
     fa = load_factor_analysis(_fa_cache)
@@ -195,130 +209,159 @@ fig.show()
 import json
 from pathlib import Path
 
-extremes = factor_extremes(scores, metadata, top_n=20, excerpt_length=100000)
+factor_labels = None
+purity_labels = None
+max_spread_labels = None
+cnn_labels = None
+contrastive_labels = None
 
-# %%
-# Label factors with LLM (or load cached labels)
-import json
+out_path = None
+purity_out_path = None
+max_spread_out_path = None
+cnn_out_path = None
+contrastive_out_path = None
 
 _labels_path = _fa_cache.with_name(_fa_cache.name + "_labels.json")
-
-if _labels_path.exists():
-    with open(_labels_path) as f:
-        factor_labels = json.load(f)
-    print(f"Loaded {len(factor_labels)} factor labels from {_labels_path}")
-elif LABEL_FACTORS:
-    from dotenv import load_dotenv
-    load_dotenv()
-    factor_labels = label_factors(extremes, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
-    with open(_labels_path, "w") as f:
-        json.dump(factor_labels, f, indent=2)
-    print(f"Saved factor labels to {_labels_path}")
-else:
-    factor_labels = None
-
-if factor_labels:
-    for i, label in enumerate(factor_labels):
-        print(f"Factor {i:03d}: {label}")
-
-out_path = Path(f"{BASE_OUTPUT_DIR}/extremes.jsonl")
-out_path.parent.mkdir(parents=True, exist_ok=True)
-
-records = []
-for factor_data in extremes:
-    fi = factor_data["factor_index"]
-    fl = factor_labels[fi] if factor_labels else ""
-    for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
-        label = f"Factor {fi:03d} — {polarity}"
-        for rank, entry in enumerate(entries):
-            records.append({
-                "question": label,
-                "response_index": rank,
-                "factor_label": fl,
-                "factor_score": round(entry["score"], 4),
-                "prompt": entry["seed_user_message"],
-                "response": entry["text_excerpt"],
-            })
-
-with open(out_path, "w") as f:
-    for r in records:
-        f.write(json.dumps(r, ensure_ascii=False) + "\n")
-
-print(f"Saved {len(records)} records to {out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {out_path} --variant-fields question response_index factor_label factor_score prompt response")
-_html = export_html(out_path, ["question", "response_index", "factor_label", "factor_score", "prompt", "response"])
-print(f"HTML viewer: {_html}")
-
-# %%
-# Purity-based ranking: high-purity examples at both ends of the factor
-# (HIGH = high target, LOW = low target), while keeping other-factor
-# activations small.
-# Useful when factors aren't orthogonal (e.g. promax) — extremes alone can reflect
-# correlated factors, purity isolates each one more cleanly.
-purity_results = [
-    rank_by_factor_purity(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
-    for fi in range(N_FACTORS)
-]
-
 _purity_labels_path = _fa_cache.with_name(_fa_cache.name + "_purity_labels.json")
-if _purity_labels_path.exists():
-    with open(_purity_labels_path) as f:
-        purity_labels = json.load(f)
-    print(f"Loaded {len(purity_labels)} purity labels from {_purity_labels_path}")
-elif LABEL_FACTORS:
-    from dotenv import load_dotenv
-    load_dotenv()
-    purity_labels = label_factors(purity_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
-    with open(_purity_labels_path, "w") as f:
-        json.dump(purity_labels, f, indent=2)
-    print(f"Saved purity labels to {_purity_labels_path}")
-else:
-    purity_labels = None
+_max_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_max_spread_labels.json")
+_cnn_labels_path = _fa_cache.with_name(_fa_cache.name + "_cnn_labels.json")
+_contrastive_labels_path = _fa_cache.with_name(_fa_cache.name + "_contrastive_labels.json")
 
-purity_out_path = Path(f"{BASE_OUTPUT_DIR}/purity.jsonl")
-purity_records = []
-for factor_data in purity_results:
-    fi = factor_data["factor_index"]
-    fl = purity_labels[fi] if purity_labels else ""
-    for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
-        label = f"Factor {fi:03d} — {polarity} (purity)"
-        for rank, entry in enumerate(entries):
-            purity_records.append({
-                "question": label,
-                "response_index": rank,
-                "factor_label": fl,
-                "purity_score": round(entry["purity_score"], 4),
-                "target_factor_score": round(entry["target_factor_score"], 4),
-                "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
-                "prompt": entry["seed_user_message"],
-                "response": entry["text_excerpt"],
-            })
-
-with open(purity_out_path, "w") as f:
-    for r in purity_records:
-        f.write(json.dumps(r, ensure_ascii=False) + "\n")
-print(f"Saved {len(purity_records)} purity records to {purity_out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_out_path} --variant-fields question response_index factor_label purity_score target_factor_score other_factors_mean_abs prompt response")
-_html = export_html(purity_out_path, ["question", "response_index", "factor_label", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
-print(f"HTML viewer: {_html}")
+preview_source = None
+_max_spread_for_labelling = None
 
 # %%
-# Max-spread: for each factor, find the questions where the target factor score
-# varies most across responses to that question, then show the highest- and
-# lowest-score response side by side.
-max_spread_results = [
-    rank_prompts_by_max_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
-    for fi in range(N_FACTORS)
-]
+if RUN_EXTREMES:
+    extremes = factor_extremes(scores, metadata, top_n=20, excerpt_length=100000)
+    if preview_source is None:
+        preview_source = extremes
 
-_max_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_max_spread_labels.json")
-if _max_spread_labels_path.exists():
-    with open(_max_spread_labels_path) as f:
-        max_spread_labels = json.load(f)
-    print(f"Loaded {len(max_spread_labels)} max-spread labels from {_max_spread_labels_path}")
-elif LABEL_FACTORS:
-    from dotenv import load_dotenv
-    load_dotenv()
+    # Label factors with LLM (or load cached labels)
+    import json
+
+    if _labels_path.exists():
+        with open(_labels_path) as f:
+            factor_labels = json.load(f)
+        print(f"Loaded {len(factor_labels)} factor labels from {_labels_path}")
+    elif LABEL_FACTORS:
+        from dotenv import load_dotenv
+        load_dotenv()
+        factor_labels = label_factors(
+            extremes,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            max_per_prompt=100,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+            excerpt_chars=10000,
+        )
+        with open(_labels_path, "w") as f:
+            json.dump(factor_labels, f, indent=2)
+        print(f"Saved factor labels to {_labels_path}")
+
+    if factor_labels:
+        for i, label in enumerate(factor_labels):
+            print(f"Factor {i:03d}: {label}")
+
+    out_path = Path(f"{BASE_OUTPUT_DIR}/extremes.jsonl")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    records = []
+    for factor_data in extremes:
+        fi = factor_data["factor_index"]
+        fl = factor_labels[fi] if factor_labels else ""
+        for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
+            label = f"Factor {fi:03d} — {polarity}"
+            for rank, entry in enumerate(entries):
+                records.append({
+                    "question": label,
+                    "response_index": rank,
+                    "factor_label": fl,
+                    "factor_score": round(entry["score"], 4),
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
+
+    with open(out_path, "w") as f:
+        for r in records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    print(f"Saved {len(records)} records to {out_path}")
+    print(f"\nuv run python scripts/jsonl_tui/cli.py {out_path} --variant-fields question response_index factor_label factor_score prompt response")
+    _html = export_html(out_path, ["question", "response_index", "factor_label", "factor_score", "prompt", "response"])
+    print(f"HTML viewer: {_html}")
+
+# %%
+if RUN_PURITY:
+    # Purity-based ranking: high-purity examples at both ends of the factor
+    # (HIGH = high target, LOW = low target), while keeping other-factor
+    # activations small.
+    # Useful when factors aren't orthogonal (e.g. promax) — extremes alone can reflect
+    # correlated factors, purity isolates each one more cleanly.
+    purity_results = [
+        rank_by_factor_purity(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+        for fi in range(N_FACTORS)
+    ]
+    if preview_source is None:
+        preview_source = purity_results
+
+    if _purity_labels_path.exists():
+        with open(_purity_labels_path) as f:
+            purity_labels = json.load(f)
+        print(f"Loaded {len(purity_labels)} purity labels from {_purity_labels_path}")
+    elif LABEL_FACTORS:
+        from dotenv import load_dotenv
+        load_dotenv()
+        purity_labels = label_factors(
+            purity_results,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            max_per_prompt=100,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+            excerpt_chars=10000,
+        )
+        with open(_purity_labels_path, "w") as f:
+            json.dump(purity_labels, f, indent=2)
+        print(f"Saved purity labels to {_purity_labels_path}")
+
+    purity_out_path = Path(f"{BASE_OUTPUT_DIR}/purity.jsonl")
+    purity_records = []
+    for factor_data in purity_results:
+        fi = factor_data["factor_index"]
+        fl = purity_labels[fi] if purity_labels else ""
+        for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
+            label = f"Factor {fi:03d} — {polarity} (purity)"
+            for rank, entry in enumerate(entries):
+                purity_records.append({
+                    "question": label,
+                    "response_index": rank,
+                    "factor_label": fl,
+                    "purity_score": round(entry["purity_score"], 4),
+                    "target_factor_score": round(entry["target_factor_score"], 4),
+                    "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
+
+    with open(purity_out_path, "w") as f:
+        for r in purity_records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"Saved {len(purity_records)} purity records to {purity_out_path}")
+    print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_out_path} --variant-fields question response_index factor_label purity_score target_factor_score other_factors_mean_abs prompt response")
+    _html = export_html(purity_out_path, ["question", "response_index", "factor_label", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+    print(f"HTML viewer: {_html}")
+
+# %%
+if RUN_MAX_SPREAD:
+    # Max-spread: for each factor, find the questions where the target factor score
+    # varies most across responses to that question, then show the highest- and
+    # lowest-score response side by side.
+    max_spread_results = [
+        rank_prompts_by_max_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+        for fi in range(N_FACTORS)
+    ]
+
     # Reshape into top/bottom lists for label_factors: high responses -> top, low -> bottom
     _max_spread_for_labelling = [
         {
@@ -328,175 +371,213 @@ elif LABEL_FACTORS:
         }
         for fd in max_spread_results
     ]
-    max_spread_labels = label_factors(_max_spread_for_labelling, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
-    with open(_max_spread_labels_path, "w") as f:
-        json.dump(max_spread_labels, f, indent=2)
-    print(f"Saved max-spread labels to {_max_spread_labels_path}")
-else:
-    max_spread_labels = None
+    if preview_source is None:
+        preview_source = _max_spread_for_labelling
 
-max_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/max_spread.jsonl")
-max_spread_records = []
-for factor_data in max_spread_results:
-    fi = factor_data["factor_index"]
-    fl = max_spread_labels[fi] if max_spread_labels else ""
-    for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
-        q_label = f"Factor {fi:03d} — {polarity} (max-spread)"
-        for rank, gs in enumerate(factor_data["groups"]):
-            entry = gs[entry_key]
-            max_spread_records.append({
-                "question": q_label,
-                "response_index": rank,
-                "factor_label": fl,
-                "max_spread": round(gs["max_spread"], 4),
-                "purity_score": round(entry["purity_score"], 4),
-                "target_factor_score": round(entry["target_factor_score"], 4),
-                "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
-                "prompt": entry["seed_user_message"],
-                "response": entry["text_excerpt"],
-            })
+    if _max_spread_labels_path.exists():
+        with open(_max_spread_labels_path) as f:
+            max_spread_labels = json.load(f)
+        print(f"Loaded {len(max_spread_labels)} max-spread labels from {_max_spread_labels_path}")
+    elif LABEL_FACTORS:
+        from dotenv import load_dotenv
+        load_dotenv()
+        max_spread_labels = label_factors(
+            _max_spread_for_labelling,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            max_per_prompt=100,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+            excerpt_chars=10000,
+        )
+        with open(_max_spread_labels_path, "w") as f:
+            json.dump(max_spread_labels, f, indent=2)
+        print(f"Saved max-spread labels to {_max_spread_labels_path}")
 
-with open(max_spread_out_path, "w") as f:
-    for r in max_spread_records:
-        f.write(json.dumps(r, ensure_ascii=False) + "\n")
-print(f"Saved {len(max_spread_records)} max-spread records to {max_spread_out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} --variant-fields question response_index factor_label max_spread purity_score target_factor_score other_factors_mean_abs prompt response")
-_html = export_html(max_spread_out_path, ["question", "response_index", "factor_label", "max_spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
-print(f"HTML viewer: {_html}")
+    max_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/max_spread.jsonl")
+    max_spread_records = []
+    for factor_data in max_spread_results:
+        fi = factor_data["factor_index"]
+        fl = max_spread_labels[fi] if max_spread_labels else ""
+        for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
+            q_label = f"Factor {fi:03d} — {polarity} (max-spread)"
+            for rank, gs in enumerate(factor_data["groups"]):
+                entry = gs[entry_key]
+                max_spread_records.append({
+                    "question": q_label,
+                    "response_index": rank,
+                    "factor_label": fl,
+                    "max_spread": round(gs["max_spread"], 4),
+                    "purity_score": round(entry["purity_score"], 4),
+                    "target_factor_score": round(entry["target_factor_score"], 4),
+                    "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
+
+    with open(max_spread_out_path, "w") as f:
+        for r in max_spread_records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"Saved {len(max_spread_records)} max-spread records to {max_spread_out_path}")
+    print(f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} --variant-fields question response_index factor_label max_spread purity_score target_factor_score other_factors_mean_abs prompt response")
+    _html = export_html(max_spread_out_path, ["question", "response_index", "factor_label", "max_spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+    print(f"HTML viewer: {_html}")
 
 # %%
-# Corpus nearest-neighbor: back-project each factor direction analytically,
-# find the closest real responses in embedding space.
-# HIGH = responses near global_mean + scale * direction
-# LOW  = responses near global_mean - scale * direction
 CNN_SCALE = 3.0
 CONTRASTIVE_TOP_K = 100
 CONTRASTIVE_SCALE = 3.0
 CONTRASTIVE_NORMALIZE = True
 CONTRASTIVE_EXCERPT_LENGTH = 100000
 CONTRASTIVE_NEIGHBOR_K = 20
+if RUN_CNN:
+    # Corpus nearest-neighbor: back-project each factor direction analytically,
+    # find the closest real responses in embedding space.
+    # HIGH = responses near global_mean + scale * direction
+    # LOW  = responses near global_mean - scale * direction
+    cnn_results = []
+    for fi in range(N_FACTORS):
+        target_high, direction = analytical_factor_embedding(fi, loadings, pca_model=pca_model, scaler=scaler, global_mean=global_mean, scale=CNN_SCALE)
+        target_low, _ = analytical_factor_embedding(fi, loadings, pca_model=pca_model, scaler=scaler, global_mean=global_mean, scale=-CNN_SCALE)
+        top = corpus_nearest_neighbor(target_high, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
+        bottom = corpus_nearest_neighbor(target_low, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
+        cnn_results.append({"factor_index": fi, "top": top, "bottom": bottom})
+    if preview_source is None:
+        preview_source = cnn_results
 
-cnn_results = []
-for fi in range(N_FACTORS):
-    target_high, direction = analytical_factor_embedding(fi, loadings, pca_model=pca_model, scaler=scaler, global_mean=global_mean, scale=CNN_SCALE)
-    target_low, _ = analytical_factor_embedding(fi, loadings, pca_model=pca_model, scaler=scaler, global_mean=global_mean, scale=-CNN_SCALE)
-    top = corpus_nearest_neighbor(target_high, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
-    bottom = corpus_nearest_neighbor(target_low, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
-    cnn_results.append({"factor_index": fi, "top": top, "bottom": bottom})
+    if _cnn_labels_path.exists():
+        with open(_cnn_labels_path) as f:
+            cnn_labels = json.load(f)
+        print(f"Loaded {len(cnn_labels)} CNN labels from {_cnn_labels_path}")
+    elif LABEL_FACTORS:
+        from dotenv import load_dotenv
+        load_dotenv()
+        cnn_labels = label_factors(
+            cnn_results,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            max_per_prompt=100,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+            excerpt_chars=10000,
+        )
+        with open(_cnn_labels_path, "w") as f:
+            json.dump(cnn_labels, f, indent=2)
+        print(f"Saved CNN labels to {_cnn_labels_path}")
 
-_cnn_labels_path = _fa_cache.with_name(_fa_cache.name + "_cnn_labels.json")
-if _cnn_labels_path.exists():
-    with open(_cnn_labels_path) as f:
-        cnn_labels = json.load(f)
-    print(f"Loaded {len(cnn_labels)} CNN labels from {_cnn_labels_path}")
-elif LABEL_FACTORS:
-    from dotenv import load_dotenv
-    load_dotenv()
-    cnn_labels = label_factors(cnn_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
-    with open(_cnn_labels_path, "w") as f:
-        json.dump(cnn_labels, f, indent=2)
-    print(f"Saved CNN labels to {_cnn_labels_path}")
-else:
-    cnn_labels = None
+    cnn_records = []
+    for factor_data in cnn_results:
+        fi = factor_data["factor_index"]
+        fl = cnn_labels[fi] if cnn_labels else ""
+        for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
+            label = f"Factor {fi:03d} — {polarity} (CNN)"
+            for rank, entry in enumerate(entries):
+                cnn_records.append({
+                    "question": label,
+                    "response_index": rank,
+                    "factor_label": fl,
+                    "similarity": round(entry["similarity"], 4),
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
 
-cnn_records = []
-for factor_data in cnn_results:
-    fi = factor_data["factor_index"]
-    fl = cnn_labels[fi] if cnn_labels else ""
-    for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
-        label = f"Factor {fi:03d} — {polarity} (CNN)"
-        for rank, entry in enumerate(entries):
-            cnn_records.append({
-                "question": label,
-                "response_index": rank,
-                "factor_label": fl,
-                "similarity": round(entry["similarity"], 4),
-                "prompt": entry["seed_user_message"],
-                "response": entry["text_excerpt"],
-            })
-
-cnn_out_path = Path(f"{BASE_OUTPUT_DIR}/cnn.jsonl")
-with open(cnn_out_path, "w") as f:
-    for r in cnn_records:
-        f.write(json.dumps(r, ensure_ascii=False) + "\n")
-print(f"Saved {len(cnn_records)} CNN records to {cnn_out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {cnn_out_path} --variant-fields question response_index factor_label similarity prompt response")
-_html = export_html(cnn_out_path, ["question", "factor_label", "similarity", "prompt", "response"])
-print(f"HTML viewer: {_html}")
-
-# %%
-# Contrastive centroid retrieval: compute a factor-specific direction by subtracting
-# the mean embedding of low-scoring responses from the mean embedding of high-scoring
-# responses, then retrieve the nearest real responses to the resulting high/low targets.
-contrastive_results = [
-    contrastive_factor_retrieval(
-        scores, fi, corpus_embeddings, metadata, global_mean,
-        top_k=CONTRASTIVE_TOP_K,
-        neighbor_k=CONTRASTIVE_NEIGHBOR_K,
-        scale=CONTRASTIVE_SCALE,
-        normalize=CONTRASTIVE_NORMALIZE,
-        excerpt_length=CONTRASTIVE_EXCERPT_LENGTH,
-    )
-    for fi in range(N_FACTORS)
-]
-
-_contrastive_labels_path = _fa_cache.with_name(_fa_cache.name + "_contrastive_labels.json")
-if _contrastive_labels_path.exists():
-    with open(_contrastive_labels_path) as f:
-        contrastive_labels = json.load(f)
-    print(f"Loaded {len(contrastive_labels)} contrastive labels from {_contrastive_labels_path}")
-elif LABEL_FACTORS:
-    from dotenv import load_dotenv
-    load_dotenv()
-    contrastive_labels = label_factors(contrastive_results, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
-    with open(_contrastive_labels_path, "w") as f:
-        json.dump(contrastive_labels, f, indent=2)
-    print(f"Saved contrastive labels to {_contrastive_labels_path}")
-else:
-    contrastive_labels = None
-
-contrastive_records = []
-for factor_data in contrastive_results:
-    fi = factor_data["factor_index"]
-    fl = contrastive_labels[fi] if contrastive_labels else ""
-    raw_norm = round(factor_data["raw_direction_norm"], 6)
-    for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
-        label = f"Factor {fi:03d} — {polarity} (contrastive)"
-        for rank, entry in enumerate(entries):
-            contrastive_records.append({
-                "question": label,
-                "response_index": rank,
-                "factor_label": fl,
-                "similarity": round(entry["similarity"], 4),
-                "contrastive_top_k": factor_data["top_k"],
-                "contrastive_scale": factor_data["scale"],
-                "contrastive_normalize": factor_data["normalize"],
-                "raw_direction_norm": raw_norm,
-                "prompt": entry["seed_user_message"],
-                "response": entry["text_excerpt"],
-            })
-
-contrastive_out_path = Path(f"{BASE_OUTPUT_DIR}/contrastive.jsonl")
-with open(contrastive_out_path, "w") as f:
-    for r in contrastive_records:
-        f.write(json.dumps(r, ensure_ascii=False) + "\n")
-print(f"Saved {len(contrastive_records)} contrastive records to {contrastive_out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {contrastive_out_path} --variant-fields question response_index factor_label similarity contrastive_top_k contrastive_scale raw_direction_norm prompt response")
-_html = export_html(contrastive_out_path, ["question", "factor_label", "similarity", "contrastive_top_k", "contrastive_scale", "raw_direction_norm", "prompt", "response"])
-print(f"HTML viewer: {_html}")
+    cnn_out_path = Path(f"{BASE_OUTPUT_DIR}/cnn.jsonl")
+    with open(cnn_out_path, "w") as f:
+        for r in cnn_records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"Saved {len(cnn_records)} CNN records to {cnn_out_path}")
+    print(f"\nuv run python scripts/jsonl_tui/cli.py {cnn_out_path} --variant-fields question response_index factor_label similarity prompt response")
+    _html = export_html(cnn_out_path, ["question", "factor_label", "similarity", "prompt", "response"])
+    print(f"HTML viewer: {_html}")
 
 # %%
-# Preview the exact prompt sent to the labeller for CNN factor 0
+if RUN_CONTRASTIVE:
+    # Contrastive centroid retrieval: compute a factor-specific direction by subtracting
+    # the mean embedding of low-scoring responses from the mean embedding of high-scoring
+    # responses, then retrieve the nearest real responses to the resulting high/low targets.
+    contrastive_results = [
+        contrastive_factor_retrieval(
+            scores, fi, corpus_embeddings, metadata, global_mean,
+            top_k=CONTRASTIVE_TOP_K,
+            neighbor_k=CONTRASTIVE_NEIGHBOR_K,
+            scale=CONTRASTIVE_SCALE,
+            normalize=CONTRASTIVE_NORMALIZE,
+            excerpt_length=CONTRASTIVE_EXCERPT_LENGTH,
+        )
+        for fi in range(N_FACTORS)
+    ]
+    if preview_source is None:
+        preview_source = contrastive_results
+
+    if _contrastive_labels_path.exists():
+        with open(_contrastive_labels_path) as f:
+            contrastive_labels = json.load(f)
+        print(f"Loaded {len(contrastive_labels)} contrastive labels from {_contrastive_labels_path}")
+    elif LABEL_FACTORS:
+        from dotenv import load_dotenv
+        load_dotenv()
+        contrastive_labels = label_factors(
+            contrastive_results,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            max_per_prompt=100,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+            excerpt_chars=10000,
+        )
+        with open(_contrastive_labels_path, "w") as f:
+            json.dump(contrastive_labels, f, indent=2)
+        print(f"Saved contrastive labels to {_contrastive_labels_path}")
+
+    contrastive_records = []
+    for factor_data in contrastive_results:
+        fi = factor_data["factor_index"]
+        fl = contrastive_labels[fi] if contrastive_labels else ""
+        raw_norm = round(factor_data["raw_direction_norm"], 6)
+        for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
+            label = f"Factor {fi:03d} — {polarity} (contrastive)"
+            for rank, entry in enumerate(entries):
+                contrastive_records.append({
+                    "question": label,
+                    "response_index": rank,
+                    "factor_label": fl,
+                    "similarity": round(entry["similarity"], 4),
+                    "contrastive_top_k": factor_data["top_k"],
+                    "contrastive_scale": factor_data["scale"],
+                    "contrastive_normalize": factor_data["normalize"],
+                    "raw_direction_norm": raw_norm,
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
+
+    contrastive_out_path = Path(f"{BASE_OUTPUT_DIR}/contrastive.jsonl")
+    with open(contrastive_out_path, "w") as f:
+        for r in contrastive_records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"Saved {len(contrastive_records)} contrastive records to {contrastive_out_path}")
+    print(f"\nuv run python scripts/jsonl_tui/cli.py {contrastive_out_path} --variant-fields question response_index factor_label similarity contrastive_top_k contrastive_scale raw_direction_norm prompt response")
+    _html = export_html(contrastive_out_path, ["question", "factor_label", "similarity", "contrastive_top_k", "contrastive_scale", "raw_direction_norm", "prompt", "response"])
+    print(f"HTML viewer: {_html}")
+
+# %%
+# Preview the exact prompt sent to the labeller for the first available method
 from scripts.factor_analysis.labelling import _build_messages
 
-_example_messages = _build_messages(cnn_results[0], top_n=10, excerpt_chars=400)
-print("=== SYSTEM PROMPT ===")
-print(_example_messages[0]["content"])
-print("\n=== USER PROMPT ===")
-print(_example_messages[1]["content"])
+_example_messages = None
+if RUN_PROMPT_PREVIEW and preview_source:
+    _example_messages = _build_messages(
+        preview_source[0],
+        top_n=10,
+        excerpt_chars=400,
+        prompt_format=LABELLER_PROMPT_FORMAT,
+    )
+    print("=== SYSTEM PROMPT ===")
+    print(_example_messages[0]["content"])
+    print("\n=== USER PROMPT ===")
+    print(_example_messages[1]["content"])
 
 # %%
-# Summary: all four label sets side by side
+# Summary: all available label sets side by side
 _all_labels = [
     ("Extremes",       factor_labels),
     ("Purity",         purity_labels),
@@ -520,14 +601,15 @@ if _available:
 import zipfile
 import datetime
 
-# Build README text
-_example_sys  = _example_messages[0]["content"]
-_example_user = _example_messages[1]["content"]
+if RUN_SHARE_BUNDLE:
+    # Build README text
+    _example_sys = _example_messages[0]["content"] if _example_messages else "(prompt preview not run)"
+    _example_user = _example_messages[1]["content"] if _example_messages else "(prompt preview not run)"
 
-_orig_count = len(metadata) + _n_removed + locals().get("_n_singleton", 0)
-_n_prompts  = len(set(str(r.get('input_group_id','')) for r in metadata))
+    _orig_count = len(metadata) + _n_removed + locals().get("_n_singleton", 0)
+    _n_prompts = len(set(str(r.get('input_group_id', '')) for r in metadata))
 
-_readme = f"""\
+    _readme = f"""\
 # Factor Analysis — Share Bundle
 Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
 
@@ -594,44 +676,43 @@ examples and asked to describe what distinguishes them.
 {_example_user}
 """
 
-_bundle_files = [
-    # HTML viewers (already written above)
-    out_path.with_suffix(".html"),
-    purity_out_path.with_suffix(".html"),
-    max_spread_out_path.with_suffix(".html"),
-    cnn_out_path.with_suffix(".html"),
-    contrastive_out_path.with_suffix(".html"),
-    # Factor label JSONs
-    _labels_path,
-    _purity_labels_path,
-    _max_spread_labels_path,
-    _cnn_labels_path,
-    _contrastive_labels_path,
-]
-
-_ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-_zip_path = Path(f"{BASE_OUTPUT_DIR}/share_{_ts}.zip")
-with zipfile.ZipFile(_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    zf.writestr("README.md", _readme)
-    for p in _bundle_files:
+    _bundle_files = []
+    for p in [out_path, purity_out_path, max_spread_out_path, cnn_out_path, contrastive_out_path]:
+        if p is not None:
+            _bundle_files.append(Path(p).with_suffix(".html"))
+    for p in [_labels_path, _purity_labels_path, _max_spread_labels_path, _cnn_labels_path, _contrastive_labels_path]:
         if Path(p).exists():
-            zf.write(p, Path(p).name)
-        else:
-            print(f"  skipped (not found): {p}")
+            _bundle_files.append(Path(p))
 
-print(f"Bundle written to {_zip_path}")
-print("Contents:")
-with zipfile.ZipFile(_zip_path) as zf:
-    for info in zf.infolist():
-        print(f"  {info.filename}  ({info.file_size:,} bytes)")
+    _ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    _zip_path = Path(f"{BASE_OUTPUT_DIR}/share_{_ts}.zip")
+    with zipfile.ZipFile(_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.md", _readme)
+        for p in _bundle_files:
+            if Path(p).exists():
+                zf.write(p, Path(p).name)
+            else:
+                print(f"  skipped (not found): {p}")
+
+    print(f"Bundle written to {_zip_path}")
+    print("Contents:")
+    with zipfile.ZipFile(_zip_path) as zf:
+        for info in zf.infolist():
+            print(f"  {info.filename}  ({info.file_size:,} bytes)")
 # %%
 # TEMP: preview max-spread labeller prompts for first 3 factors
 _N_PREVIEW = 3
-for _fd in _max_spread_for_labelling[:_N_PREVIEW]:
-    _msgs = _build_messages(_fd, top_n=10, excerpt_chars=400)
-    print(f"\n{'='*60}")
-    print(f"=== FACTOR {_fd['factor_index']} — SYSTEM ===")
-    print(_msgs[0]["content"])
-    print(f"\n=== FACTOR {_fd['factor_index']} — USER ===")
-    print(_msgs[1]["content"])
+if RUN_MAX_SPREAD and _max_spread_for_labelling:
+    for _fd in _max_spread_for_labelling[:_N_PREVIEW]:
+        _msgs = _build_messages(
+            _fd,
+            top_n=10,
+            excerpt_chars=400,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+        )
+        print(f"\n{'='*60}")
+        print(f"=== FACTOR {_fd['factor_index']} — SYSTEM ===")
+        print(_msgs[0]["content"])
+        print(f"\n=== FACTOR {_fd['factor_index']} — USER ===")
+        print(_msgs[1]["content"])
 # %%

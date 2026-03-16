@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,40 @@ Then, respond with the following format:
 
 """
 
+_USER_TEMPLATE_CONTRASTIVE_JSONL = """\
+Below is a JSONL block of contrastive HIGH/LOW pairs of text excerpts for factor {fi}.
+Each line is one pair from the same ranking position and has keys:
+- "high": a high-scoring text excerpt
+- "low": a low-scoring response
+
+```jsonl
+{jsonl_block}
+```
+
+Based on these examples, carefully consider what this factor represents. \
+Think hard about what distinguishes high-scoring from low-scoring texts. \
+Then, respond with the following format:
+
+<~10 word summary of what this factor differentiates between>\n
+<2-3 sentence more detailed description of the factor>
+
+"""
+
+
+def _build_contrastive_jsonl_block(high_responses: list[str], low_responses: list[str]) -> str:
+    import json
+
+    n_pairs = max(len(high_responses), len(low_responses))
+    lines = []
+    for i in range(n_pairs):
+        pair = {
+            "pair_index": i,
+            "high": high_responses[i] if i < len(high_responses) else "",
+            "low": low_responses[i] if i < len(low_responses) else "",
+        }
+        lines.append(json.dumps(pair, ensure_ascii=False))
+    return "\n".join(lines)
+
 
 def _collect_responses(entries: list[dict], n: int, excerpt_chars: int, max_per_prompt: int = 1) -> list[str]:
     prompt_counts: dict[str, int] = {}
@@ -69,13 +104,23 @@ def _collect_responses(entries: list[dict], n: int, excerpt_chars: int, max_per_
     return responses
 
 
-def _build_messages(factor_data: dict, top_n: int, excerpt_chars: int, max_per_prompt: int = 1) -> list[dict]:
+def _build_messages(
+    factor_data: dict,
+    top_n: int,
+    excerpt_chars: int,
+    max_per_prompt: int = 1,
+    prompt_format: Literal["grouped_json", "contrastive_jsonl"] = "grouped_json",
+) -> list[dict]:
     import json
     fi = factor_data["factor_index"]
     high_responses = _collect_responses(factor_data["top"], top_n, excerpt_chars, max_per_prompt)
     low_responses = _collect_responses(factor_data["bottom"], top_n, excerpt_chars, max_per_prompt)
-    json_block = json.dumps({"high": high_responses, "low": low_responses}, ensure_ascii=False, indent=2)
-    user_content = _USER_TEMPLATE.format(fi=fi, json_block=json_block)
+    if prompt_format == "contrastive_jsonl":
+        jsonl_block = _build_contrastive_jsonl_block(high_responses, low_responses)
+        user_content = _USER_TEMPLATE_CONTRASTIVE_JSONL.format(fi=fi, jsonl_block=jsonl_block)
+    else:
+        json_block = json.dumps({"high": high_responses, "low": low_responses}, ensure_ascii=False, indent=2)
+        user_content = _USER_TEMPLATE.format(fi=fi, json_block=json_block)
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
@@ -88,9 +133,16 @@ async def _label_one_async(
     top_n: int,
     excerpt_chars: int,
     max_per_prompt: int,
+    prompt_format: Literal["grouped_json", "contrastive_jsonl"],
     semaphore: asyncio.Semaphore,
 ) -> str:
-    messages = _build_messages(factor_data, top_n, excerpt_chars, max_per_prompt)
+    messages = _build_messages(
+        factor_data,
+        top_n=top_n,
+        excerpt_chars=excerpt_chars,
+        max_per_prompt=max_per_prompt,
+        prompt_format=prompt_format,
+    )
     async with semaphore:
         try:
             return await provider.generate_async(messages, max_tokens=256, temperature=0.3)
@@ -106,7 +158,8 @@ def label_factors(
     provider: str = DEFAULT_PROVIDER,
     top_n: int = 10,
     excerpt_chars: int = 400,
-    max_per_prompt: int = 1,
+    max_per_prompt: int = 10,
+    prompt_format: Literal["grouped_json", "contrastive_jsonl"] = "grouped_json",
     max_concurrent: int = 10,
     show_progress: bool = True,
 ) -> list[str]:
@@ -124,6 +177,9 @@ def label_factors(
         max_per_prompt: Max responses from the same prompt group to include
                         in each high/low block. Entries are taken in score
                         order; duplicates are skipped until the cap is hit.
+        prompt_format: Prompt payload format for examples.
+                       "grouped_json" (default) uses {"high": [...], "low": [...]};
+                       "contrastive_jsonl" uses JSONL of ranked high/low pairs.
         max_concurrent: Max simultaneous API requests.
         show_progress: If True, print completion progress while labelling.
 
@@ -142,7 +198,7 @@ def label_factors(
 
         async def _run_one(idx: int, factor_data: dict) -> tuple[int, str]:
             label = await _label_one_async(
-                factor_data, provider, top_n, excerpt_chars, max_per_prompt, semaphore
+                factor_data, provider, top_n, excerpt_chars, max_per_prompt, prompt_format, semaphore
             )
             return idx, label
 
@@ -164,7 +220,10 @@ def label_factors(
 
         return results
 
-    print(f"Labelling {len(extremes)} factors with {model} (top_n={top_n}, max_per_prompt={max_per_prompt})...")
+    print(
+        f"Labelling {len(extremes)} factors with {model} "
+        f"(top_n={top_n}, max_per_prompt={max_per_prompt}, prompt_format={prompt_format})..."
+    )
     try:
         asyncio.get_running_loop()
         # Already inside a running loop (e.g. Jupyter) — run in a fresh thread.
