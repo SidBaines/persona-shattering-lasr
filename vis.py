@@ -10,7 +10,7 @@ from scripts.factor_analysis.factor_analysis import run_factor_analysis, adequac
 from scripts.factor_analysis.persistence import save_factor_analysis, load_factor_analysis
 from scripts.factor_analysis.labelling import label_factors, DEFAULT_MODEL as LABELLER_DEFAULT_MODEL
 from scripts.factor_analysis.interpretation import (
-    factor_extremes, rank_by_factor_purity, rank_prompts_by_purity_spread,
+    factor_extremes, rank_by_factor_purity, rank_prompts_by_max_spread,
     analytical_factor_embedding, corpus_nearest_neighbor,
     contrastive_factor_retrieval,
     optimize_factor_embedding, prompt_effects,
@@ -28,7 +28,7 @@ LABELLER_MODEL = 'claude-haiku-4-5-20251001'
 LABELLER_PROVIDER = 'anthropic'
 # LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
 # LABELLER_PROVIDER = 'openai'
-BASE_OUTPUT_DIR = "scratch/factor_analysis2"
+BASE_OUTPUT_DIR = "scratch/factor_analysis2_gpt5mini"
 USE_NEW_DATASET = False
 
 OLD_DATASET = {
@@ -303,52 +303,52 @@ _html = export_html(purity_out_path, ["question", "response_index", "factor_labe
 print(f"HTML viewer: {_html}")
 
 # %%
-# Purity-spread: for each factor, find the questions where the factor purity score
+# Max-spread: for each factor, find the questions where the target factor score
 # varies most across responses to that question, then show the highest- and
-# lowest-purity response side by side.
-purity_spread_results = [
-    rank_prompts_by_purity_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+# lowest-score response side by side.
+max_spread_results = [
+    rank_prompts_by_max_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
     for fi in range(N_FACTORS)
 ]
 
-_purity_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_purity_spread_labels.json")
-if _purity_spread_labels_path.exists():
-    with open(_purity_spread_labels_path) as f:
-        purity_spread_labels = json.load(f)
-    print(f"Loaded {len(purity_spread_labels)} purity-spread labels from {_purity_spread_labels_path}")
+_max_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_max_spread_labels.json")
+if _max_spread_labels_path.exists():
+    with open(_max_spread_labels_path) as f:
+        max_spread_labels = json.load(f)
+    print(f"Loaded {len(max_spread_labels)} max-spread labels from {_max_spread_labels_path}")
 elif LABEL_FACTORS:
     from dotenv import load_dotenv
     load_dotenv()
     # Reshape into top/bottom lists for label_factors: high responses -> top, low -> bottom
-    _purity_spread_for_labelling = [
+    _max_spread_for_labelling = [
         {
             "factor_index": fd["factor_index"],
             "top": [gs["high"] for gs in fd["groups"]],
             "bottom": [gs["low"] for gs in fd["groups"]],
         }
-        for fd in purity_spread_results
+        for fd in max_spread_results
     ]
-    purity_spread_labels = label_factors(_purity_spread_for_labelling, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
-    with open(_purity_spread_labels_path, "w") as f:
-        json.dump(purity_spread_labels, f, indent=2)
-    print(f"Saved purity-spread labels to {_purity_spread_labels_path}")
+    max_spread_labels = label_factors(_max_spread_for_labelling, model=LABELLER_MODEL, provider=LABELLER_PROVIDER, top_n=10, max_per_prompt=100)
+    with open(_max_spread_labels_path, "w") as f:
+        json.dump(max_spread_labels, f, indent=2)
+    print(f"Saved max-spread labels to {_max_spread_labels_path}")
 else:
-    purity_spread_labels = None
+    max_spread_labels = None
 
-purity_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/purity_spread.jsonl")
-purity_spread_records = []
-for factor_data in purity_spread_results:
+max_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/max_spread.jsonl")
+max_spread_records = []
+for factor_data in max_spread_results:
     fi = factor_data["factor_index"]
-    fl = purity_spread_labels[fi] if purity_spread_labels else ""
+    fl = max_spread_labels[fi] if max_spread_labels else ""
     for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
-        q_label = f"Factor {fi:03d} — {polarity} (purity-spread)"
+        q_label = f"Factor {fi:03d} — {polarity} (max-spread)"
         for rank, gs in enumerate(factor_data["groups"]):
             entry = gs[entry_key]
-            purity_spread_records.append({
+            max_spread_records.append({
                 "question": q_label,
                 "response_index": rank,
                 "factor_label": fl,
-                "spread": round(gs["spread"], 4),
+                "max_spread": round(gs["max_spread"], 4),
                 "purity_score": round(entry["purity_score"], 4),
                 "target_factor_score": round(entry["target_factor_score"], 4),
                 "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
@@ -356,12 +356,12 @@ for factor_data in purity_spread_results:
                 "response": entry["text_excerpt"],
             })
 
-with open(purity_spread_out_path, "w") as f:
-    for r in purity_spread_records:
+with open(max_spread_out_path, "w") as f:
+    for r in max_spread_records:
         f.write(json.dumps(r, ensure_ascii=False) + "\n")
-print(f"Saved {len(purity_spread_records)} purity-spread records to {purity_spread_out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_spread_out_path} --variant-fields question response_index factor_label spread purity_score target_factor_score other_factors_mean_abs prompt response")
-_html = export_html(purity_spread_out_path, ["question", "response_index", "factor_label", "spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+print(f"Saved {len(max_spread_records)} max-spread records to {max_spread_out_path}")
+print(f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} --variant-fields question response_index factor_label max_spread purity_score target_factor_score other_factors_mean_abs prompt response")
+_html = export_html(max_spread_out_path, ["question", "response_index", "factor_label", "max_spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
 print(f"HTML viewer: {_html}")
 
 # %%
@@ -500,7 +500,7 @@ print(_example_messages[1]["content"])
 _all_labels = [
     ("Extremes",       factor_labels),
     ("Purity",         purity_labels),
-    ("Purity-spread",  purity_spread_labels),
+    ("Max-spread",     max_spread_labels),
     ("CNN",            cnn_labels),
     ("Contrastive",    contrastive_labels),
 ]
@@ -556,8 +556,8 @@ Five methods were used to find representative responses for each factor:
                  strong target score in that polarity and low activation on other factors
                  (useful when factors are correlated, e.g. with promax rotation)
 
-  purity_spread — questions whose responses have the widest purity spread, shown as
-                  highest-purity vs lowest-purity response for the same question
+  max_spread   — questions whose responses have the widest target-factor-score spread,
+                 shown as highest-score vs lowest-score response for the same question
 
   CNN          — corpus nearest-neighbour: analytically back-projects the factor direction
                  into embedding space and finds the closest real responses
@@ -576,8 +576,8 @@ examples and asked to describe what distinguishes them.
 
   purity.html            — browse purity-ranked responses
 
-  purity_spread.html     — browse questions with the widest purity spread; ↑↓ = factor×question,
-                           ←→ = HIGH vs LOW response for that question
+  max_spread.html        — browse questions with the widest target-factor-score spread;
+                           ↑↓ = factor×question, ←→ = HIGH vs LOW response for that question
 
   cnn.html               — browse corpus nearest-neighbour responses
 
@@ -598,13 +598,13 @@ _bundle_files = [
     # HTML viewers (already written above)
     out_path.with_suffix(".html"),
     purity_out_path.with_suffix(".html"),
-    purity_spread_out_path.with_suffix(".html"),
+    max_spread_out_path.with_suffix(".html"),
     cnn_out_path.with_suffix(".html"),
     contrastive_out_path.with_suffix(".html"),
     # Factor label JSONs
     _labels_path,
     _purity_labels_path,
-    _purity_spread_labels_path,
+    _max_spread_labels_path,
     _cnn_labels_path,
     _contrastive_labels_path,
 ]
@@ -625,9 +625,9 @@ with zipfile.ZipFile(_zip_path) as zf:
     for info in zf.infolist():
         print(f"  {info.filename}  ({info.file_size:,} bytes)")
 # %%
-# TEMP: preview purity-spread labeller prompts for first 3 factors
+# TEMP: preview max-spread labeller prompts for first 3 factors
 _N_PREVIEW = 3
-for _fd in _purity_spread_for_labelling[:_N_PREVIEW]:
+for _fd in _max_spread_for_labelling[:_N_PREVIEW]:
     _msgs = _build_messages(_fd, top_n=10, excerpt_chars=400)
     print(f"\n{'='*60}")
     print(f"=== FACTOR {_fd['factor_index']} — SYSTEM ===")

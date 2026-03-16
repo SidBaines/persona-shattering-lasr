@@ -6,7 +6,7 @@ Six approaches for understanding what each factor represents:
 3. Score-based corpus ranking by factor purity
 4. Gradient descent + corpus lookup (compose methods 1 + 2 in experiment script)
 5. Contrastive centroid retrieval (contrastive_factor_retrieval)
-6. Purity-spread: find questions whose responses span the widest purity range (rank_prompts_by_purity_spread)
+6. Max-spread: find questions whose responses span the widest target-score range (rank_prompts_by_max_spread)
 """
 
 from __future__ import annotations
@@ -312,31 +312,28 @@ def rank_by_factor_purity(
 
 
 # ---------------------------------------------------------------------------
-# Method 6: Purity-spread — questions whose responses span the widest purity range
+# Method 6: Max-spread — questions whose responses span the widest target-score range
 # ---------------------------------------------------------------------------
 
-def rank_prompts_by_purity_spread(
+def rank_prompts_by_max_spread(
     scores: np.ndarray,
     metadata: list[dict],
     factor_idx: int,
-    penalty_weight: float = 1.0,
     top_n: int = 20,
     group_field: str = "input_group_id",
     text_field: str = "assistant_text",
     excerpt_length: int = 400,
 ) -> dict:
-    """Find questions whose responses span the widest purity range for a factor.
+    """Find questions whose responses span the widest target-score range for a factor.
 
-    For each prompt group, computes spread = max(purity) − min(purity), where
-    purity = score[factor_idx] − penalty_weight * mean(|score[j]| for j ≠ factor_idx).
-    Returns the top_n groups ranked by spread, with the highest- and lowest-purity
+    For each prompt group, computes max_spread = max(score[factor_idx]) - min(score[factor_idx]).
+    Returns the top_n groups ranked by max_spread, with the highest- and lowest-score
     response for each group.
 
     Args:
         scores: Factor scores [n_samples, n_factors].
         metadata: Metadata rows aligned with scores.
         factor_idx: Target factor to examine.
-        penalty_weight: Weight for penalizing other factor magnitudes in purity.
         top_n: Number of questions to return.
         group_field: Metadata field used to identify prompt groups.
         text_field: Metadata field containing response text.
@@ -345,7 +342,7 @@ def rank_prompts_by_purity_spread(
     Returns:
         Dict with keys:
             factor_index: int
-            groups: list of dicts, each with keys spread, n_responses, high, low.
+            groups: list of dicts, each with keys max_spread, n_responses, high, low.
     """
     n_factors = scores.shape[1]
     target_scores = scores[:, factor_idx]
@@ -353,7 +350,7 @@ def rank_prompts_by_purity_spread(
     other_mask = np.ones(n_factors, dtype=bool)
     other_mask[factor_idx] = False
     other_abs_mean = np.abs(scores[:, other_mask]).mean(axis=1)
-    purity = target_scores - penalty_weight * other_abs_mean
+    purity = target_scores - other_abs_mean
 
     group_ids = np.array([str(row.get(group_field, i)) for i, row in enumerate(metadata)])
     unique_groups = np.unique(group_ids)
@@ -363,17 +360,17 @@ def rank_prompts_by_purity_spread(
         indices = np.where(group_ids == gid)[0]
         if len(indices) < 2:
             continue
-        group_purity = purity[indices]
-        spread = float(group_purity.max() - group_purity.min())
+        group_scores = target_scores[indices]
+        max_spread = float(group_scores.max() - group_scores.min())
         group_spreads.append({
             "group_id": gid,
-            "spread": spread,
-            "max_idx": int(indices[np.argmax(group_purity)]),
-            "min_idx": int(indices[np.argmin(group_purity)]),
+            "max_spread": max_spread,
+            "max_idx": int(indices[np.argmax(group_scores)]),
+            "min_idx": int(indices[np.argmin(group_scores)]),
             "n_responses": int(len(indices)),
         })
 
-    group_spreads.sort(key=lambda x: x["spread"], reverse=True)
+    group_spreads.sort(key=lambda x: x["max_spread"], reverse=True)
 
     def _entry(idx: int) -> dict:
         row = metadata[idx]
@@ -391,7 +388,7 @@ def rank_prompts_by_purity_spread(
     groups = [
         {
             "group_id": gs["group_id"],
-            "spread": gs["spread"],
+            "max_spread": gs["max_spread"],
             "n_responses": gs["n_responses"],
             "high": _entry(gs["max_idx"]),
             "low": _entry(gs["min_idx"]),
@@ -400,7 +397,6 @@ def rank_prompts_by_purity_spread(
     ]
 
     return {"factor_index": factor_idx, "groups": groups}
-
 
 # ---------------------------------------------------------------------------
 # Method 5: Contrastive centroid retrieval
