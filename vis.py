@@ -625,3 +625,13 @@ with zipfile.ZipFile(_zip_path) as zf:
     for info in zf.infolist():
         print(f"  {info.filename}  ({info.file_size:,} bytes)")
 # %%
+# TEMP: preview purity-spread labeller prompts for first 3 factors
+_N_PREVIEW = 3
+for _fd in _purity_spread_for_labelling[:_N_PREVIEW]:
+    _msgs = _build_messages(_fd, top_n=10, excerpt_chars=400)
+    print(f"\n{'='*60}")
+    print(f"=== FACTOR {_fd['factor_index']} — SYSTEM ===")
+    print(_msgs[0]["content"])
+    print(f"\n=== FACTOR {_fd['factor_index']} — USER ===")
+    print(_msgs[1]["content"])
+# %%
