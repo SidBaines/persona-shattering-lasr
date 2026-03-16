@@ -58,7 +58,7 @@ neighbors = corpus_nearest_neighbor(target, corpus_embeddings, metadata, top_k=1
 ```
 
 ### Method 3: Score-based purity ranking
-Find responses that score high on one factor and low on all others.
+Find pure responses at both ends of a factor (HIGH and LOW polarity), each with low activation on other factors.
 ```python
 purity = rank_by_factor_purity(scores, metadata, factor_idx=0, penalty_weight=1.0, top_n=20)
 ```

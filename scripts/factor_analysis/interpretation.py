@@ -242,21 +242,30 @@ def rank_by_factor_purity(
     text_field: str = "assistant_text",
     excerpt_length: int = 400,
 ) -> dict:
-    """Rank samples by factor purity: high on target factor, low on others.
+    """Rank samples by polarity-aware factor purity.
 
-    purity_score = score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+    For the HIGH side:
+        high_purity = score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    For the LOW side:
+        low_purity = -score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    This returns "pure" examples for both ends of the factor: large positive
+    target score with low off-target activation (HIGH), and large negative
+    target score with low off-target activation (LOW).
 
     Args:
         scores: Factor scores [n_samples, n_factors].
         metadata: Metadata rows aligned with scores.
-        factor_idx: Target factor to maximize.
+        factor_idx: Target factor whose positive/negative pure examples to find.
         penalty_weight: Weight for penalizing other factor magnitudes.
-        top_n: Number of samples to return from each end.
+        top_n: Number of samples to return for each polarity.
         text_field: Metadata field containing response text.
         excerpt_length: Max characters in text excerpts.
 
     Returns:
-        Dict with 'top' and 'bottom' lists, each containing sample info dicts.
+        Dict with 'top' (HIGH polarity) and 'bottom' (LOW polarity) lists,
+        each containing sample info dicts.
     """
     n_factors = scores.shape[1]
     target_scores = scores[:, factor_idx]
@@ -266,15 +275,28 @@ def rank_by_factor_purity(
     other_mask[factor_idx] = False
     other_abs_mean = np.abs(scores[:, other_mask]).mean(axis=1)
 
-    purity = target_scores - penalty_weight * other_abs_mean
-    order = np.argsort(purity)
+    high_purity = target_scores - penalty_weight * other_abs_mean
+    low_purity = -target_scores - penalty_weight * other_abs_mean
     n = min(top_n, len(metadata))
 
-    def _entry(idx: int) -> dict:
+    high_candidates = target_scores >= 0
+    low_candidates = target_scores <= 0
+
+    def _top_indices(objective: np.ndarray, candidate_mask: np.ndarray) -> np.ndarray:
+        candidate_indices = np.flatnonzero(candidate_mask)
+        if candidate_indices.size == 0:
+            candidate_indices = np.arange(len(metadata))
+        order = np.argsort(objective[candidate_indices])[::-1]
+        return candidate_indices[order[:n]]
+
+    top_indices = _top_indices(high_purity, high_candidates)
+    bottom_indices = _top_indices(low_purity, low_candidates)
+
+    def _entry(idx: int, purity_scores: np.ndarray) -> dict:
         row = metadata[idx]
         return {
             "index": int(idx),
-            "purity_score": float(purity[idx]),
+            "purity_score": float(purity_scores[idx]),
             "target_factor_score": float(target_scores[idx]),
             "other_factors_mean_abs": float(other_abs_mean[idx]),
             "sample_id": row.get("sample_id"),
@@ -283,8 +305,8 @@ def rank_by_factor_purity(
             "text_excerpt": str(row.get(text_field, ""))[:excerpt_length],
         }
 
-    top = [_entry(int(idx)) for idx in order[-n:][::-1]]
-    bottom = [_entry(int(idx)) for idx in order[:n]]
+    top = [_entry(int(idx), high_purity) for idx in top_indices]
+    bottom = [_entry(int(idx), low_purity) for idx in bottom_indices]
 
     return {"factor_index": factor_idx, "top": top, "bottom": bottom}
 

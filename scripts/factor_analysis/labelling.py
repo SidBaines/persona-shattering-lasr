@@ -108,6 +108,7 @@ def label_factors(
     excerpt_chars: int = 400,
     max_per_prompt: int = 1,
     max_concurrent: int = 10,
+    show_progress: bool = True,
 ) -> list[str]:
     """Label each factor with an LLM-generated description.
 
@@ -124,6 +125,7 @@ def label_factors(
                         in each high/low block. Entries are taken in score
                         order; duplicates are skipped until the cap is hit.
         max_concurrent: Max simultaneous API requests.
+        show_progress: If True, print completion progress while labelling.
 
     Returns:
         List of label strings, one per factor, in the same order as extremes.
@@ -135,12 +137,32 @@ def label_factors(
 
     async def _run_all() -> list[str]:
         semaphore = asyncio.Semaphore(max_concurrent)
+        total = len(extremes)
+        results: list[str] = [""] * total
+
+        async def _run_one(idx: int, factor_data: dict) -> tuple[int, str]:
+            label = await _label_one_async(
+                factor_data, provider, top_n, excerpt_chars, max_per_prompt, semaphore
+            )
+            return idx, label
+
         tasks = [
-            _label_one_async(fd, provider, top_n, excerpt_chars, max_per_prompt, semaphore)
-            for fd in extremes
+            asyncio.create_task(_run_one(idx, fd))
+            for idx, fd in enumerate(extremes)
         ]
-        results = await asyncio.gather(*tasks)
-        return list(results)
+
+        completed = 0
+        for task in asyncio.as_completed(tasks):
+            idx, label = await task
+            results[idx] = label
+            completed += 1
+            if show_progress:
+                print(f"  progress: {completed}/{total}", end="\r", flush=True)
+        if show_progress and total > 0:
+            print(" " * 32, end="\r", flush=True)
+            print(f"  progress: {total}/{total}")
+
+        return results
 
     print(f"Labelling {len(extremes)} factors with {model} (top_n={top_n}, max_per_prompt={max_per_prompt})...")
     try:
