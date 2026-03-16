@@ -403,6 +403,12 @@ def run_phased_rollout(
             f"  -> Completed: {result.num_completed}/{result.num_conversations} conversations"
         )
 
+        if result.num_failed > 0:
+            raise RuntimeError(
+                f"Phase {phase_idx + 1}/{len(phases)} had {result.num_failed}/{result.num_conversations} "
+                f"failed conversations (target: {cumulative_turns} assistant turns)"
+            )
+
 
 # ── Evaluation ────────────────────────────────────────────────────────────────
 
