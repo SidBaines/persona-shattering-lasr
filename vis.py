@@ -22,13 +22,13 @@ from scripts.jsonl_tui.html_export import export_html
 USE_PCA = False   # False: run directly on 2560d residuals (slow but no lossy reduction)
 SCALE = False
 PCA_N_COMPONENTS = 100
-N_FACTORS = 20
+N_FACTORS = 30
 LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 
 if 1:
     LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
     LABELLER_PROVIDER = 'openai'
-    BASE_OUTPUT_DIR = "scratch/factor_analysis7_gpt5mini_combinedDataset"
+    BASE_OUTPUT_DIR = "scratch/factor_analysis8_gpt5mini_old_dataset"
 else:
     LABELLER_MODEL = 'claude-haiku-4-5-20251001'
     LABELLER_PROVIDER = 'anthropic'
@@ -36,7 +36,7 @@ else:
 
 LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_jsonl"
 # Dataset selection: "old", "new", or "both"
-DATASET_MODE = "both"
+DATASET_MODE = "old"
 RUN_EXTREMES = True
 RUN_PURITY = True
 RUN_MAX_SPREAD = True
@@ -262,10 +262,14 @@ contrastive_out_path = None
 _labels_path = _fa_cache.with_name(_fa_cache.name + "_labels.json")
 _purity_labels_path = _fa_cache.with_name(_fa_cache.name + "_purity_labels.json")
 _max_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_max_spread_labels.json")
-_cnn_labels_path = _fa_cache.with_name(_fa_cache.name + "_cnn_labels.json")
+_corpus_nearest_neighbour_labels_path = _fa_cache.with_name(
+    _fa_cache.name + "_corpus_nearest_neighbour_labels.json"
+)
+_legacy_cnn_labels_path = _fa_cache.with_name(_fa_cache.name + "_cnn_labels.json")
 _contrastive_labels_path = _fa_cache.with_name(_fa_cache.name + "_contrastive_labels.json")
 
 preview_source = None
+preview_source_name = None
 _max_spread_for_labelling = None
 
 # %%
@@ -273,6 +277,7 @@ if RUN_EXTREMES:
     extremes = factor_extremes(scores, metadata, top_n=20, excerpt_length=100000)
     if preview_source is None:
         preview_source = extremes
+        preview_source_name = "extremes"
 
     # Label factors with LLM (or load cached labels)
     import json
@@ -342,6 +347,7 @@ if RUN_PURITY:
     ]
     if preview_source is None:
         preview_source = purity_results
+        preview_source_name = "purity"
 
     if _purity_labels_path.exists():
         with open(_purity_labels_path) as f:
@@ -411,6 +417,7 @@ if RUN_MAX_SPREAD:
     ]
     if preview_source is None:
         preview_source = _max_spread_for_labelling
+        preview_source_name = "max_spread"
 
     if _max_spread_labels_path.exists():
         with open(_max_spread_labels_path) as f:
@@ -482,11 +489,25 @@ if RUN_CNN:
         cnn_results.append({"factor_index": fi, "top": top, "bottom": bottom})
     if preview_source is None:
         preview_source = cnn_results
+        preview_source_name = "corpus_nearest_neighbour"
 
-    if _cnn_labels_path.exists():
-        with open(_cnn_labels_path) as f:
+    if _corpus_nearest_neighbour_labels_path.exists():
+        with open(_corpus_nearest_neighbour_labels_path) as f:
             cnn_labels = json.load(f)
-        print(f"Loaded {len(cnn_labels)} CNN labels from {_cnn_labels_path}")
+        print(
+            "Loaded "
+            f"{len(cnn_labels)} corpus_nearest_neighbour labels from "
+            f"{_corpus_nearest_neighbour_labels_path}"
+        )
+    elif _legacy_cnn_labels_path.exists():
+        with open(_legacy_cnn_labels_path) as f:
+            cnn_labels = json.load(f)
+        with open(_corpus_nearest_neighbour_labels_path, "w") as f:
+            json.dump(cnn_labels, f, indent=2)
+        print(
+            f"Loaded {len(cnn_labels)} legacy CNN labels from {_legacy_cnn_labels_path}; "
+            f"rewrote cache to {_corpus_nearest_neighbour_labels_path.name}"
+        )
     elif LABEL_FACTORS:
         from dotenv import load_dotenv
         load_dotenv()
@@ -499,16 +520,19 @@ if RUN_CNN:
             prompt_format=LABELLER_PROMPT_FORMAT,
             excerpt_chars=10000,
         )
-        with open(_cnn_labels_path, "w") as f:
+        with open(_corpus_nearest_neighbour_labels_path, "w") as f:
             json.dump(cnn_labels, f, indent=2)
-        print(f"Saved CNN labels to {_cnn_labels_path}")
+        print(
+            "Saved corpus_nearest_neighbour labels to "
+            f"{_corpus_nearest_neighbour_labels_path}"
+        )
 
     cnn_records = []
     for factor_data in cnn_results:
         fi = factor_data["factor_index"]
         fl = cnn_labels[fi] if cnn_labels else ""
         for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
-            label = f"Factor {fi:03d} — {polarity} (CNN)"
+            label = f"Factor {fi:03d} — {polarity} (corpus_nearest_neighbour)"
             for rank, entry in enumerate(entries):
                 cnn_records.append({
                     "question": label,
@@ -519,11 +543,11 @@ if RUN_CNN:
                     "response": entry["text_excerpt"],
                 })
 
-    cnn_out_path = Path(f"{BASE_OUTPUT_DIR}/cnn.jsonl")
+    cnn_out_path = Path(f"{BASE_OUTPUT_DIR}/corpus_nearest_neighbour.jsonl")
     with open(cnn_out_path, "w") as f:
         for r in cnn_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"Saved {len(cnn_records)} CNN records to {cnn_out_path}")
+    print(f"Saved {len(cnn_records)} corpus_nearest_neighbour records to {cnn_out_path}")
     print(f"\nuv run python scripts/jsonl_tui/cli.py {cnn_out_path} --variant-fields question response_index factor_label similarity prompt response")
     _html = export_html(cnn_out_path, ["question", "factor_label", "similarity", "prompt", "response"])
     print(f"HTML viewer: {_html}")
@@ -535,17 +559,19 @@ if RUN_CONTRASTIVE:
     # responses, then retrieve the nearest real responses to the resulting high/low targets.
     contrastive_results = [
         contrastive_factor_retrieval(
-            scores, fi, corpus_embeddings, metadata, global_mean,
+            scores, fi, residuals, metadata, residuals.mean(axis=0),
             top_k=CONTRASTIVE_TOP_K,
             neighbor_k=CONTRASTIVE_NEIGHBOR_K,
             scale=CONTRASTIVE_SCALE,
             normalize=CONTRASTIVE_NORMALIZE,
+            embedding_space="residual",
             excerpt_length=CONTRASTIVE_EXCERPT_LENGTH,
         )
         for fi in range(N_FACTORS)
     ]
     if preview_source is None:
         preview_source = contrastive_results
+        preview_source_name = "contrastive"
 
     if _contrastive_labels_path.exists():
         with open(_contrastive_labels_path) as f:
@@ -583,6 +609,7 @@ if RUN_CONTRASTIVE:
                     "contrastive_top_k": factor_data["top_k"],
                     "contrastive_scale": factor_data["scale"],
                     "contrastive_normalize": factor_data["normalize"],
+                    "contrastive_embedding_space": factor_data["embedding_space"],
                     "raw_direction_norm": raw_norm,
                     "prompt": entry["seed_user_message"],
                     "response": entry["text_excerpt"],
@@ -593,8 +620,8 @@ if RUN_CONTRASTIVE:
         for r in contrastive_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"Saved {len(contrastive_records)} contrastive records to {contrastive_out_path}")
-    print(f"\nuv run python scripts/jsonl_tui/cli.py {contrastive_out_path} --variant-fields question response_index factor_label similarity contrastive_top_k contrastive_scale raw_direction_norm prompt response")
-    _html = export_html(contrastive_out_path, ["question", "factor_label", "similarity", "contrastive_top_k", "contrastive_scale", "raw_direction_norm", "prompt", "response"])
+    print(f"\nuv run python scripts/jsonl_tui/cli.py {contrastive_out_path} --variant-fields question response_index factor_label similarity contrastive_top_k contrastive_scale contrastive_embedding_space raw_direction_norm prompt response")
+    _html = export_html(contrastive_out_path, ["question", "factor_label", "similarity", "contrastive_top_k", "contrastive_scale", "contrastive_embedding_space", "raw_direction_norm", "prompt", "response"])
     print(f"HTML viewer: {_html}")
 
 # %%
@@ -620,7 +647,7 @@ _all_labels = [
     ("Extremes",       factor_labels),
     ("Purity",         purity_labels),
     ("Max-spread",     max_spread_labels),
-    ("CNN",            cnn_labels),
+    ("corpus_nearest_neighbour", cnn_labels),
     ("Contrastive",    contrastive_labels),
 ]
 _available = [(name, lbls) for name, lbls in _all_labels if lbls]
@@ -646,13 +673,14 @@ if RUN_SHARE_BUNDLE:
 
     _orig_count = len(metadata) + _n_removed + locals().get("_n_singleton", 0)
     _n_prompts = len(set(str(r.get('input_group_id', '')) for r in metadata))
+    _preview_label = preview_source_name or "preview"
 
     _readme = f"""\
 # Factor Analysis — Share Bundle
 Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
 
 ## TL;DR
-Flick through the HTML viewers to see top responses (based on different clustering methods) and their LLM-generated labels.
+Flick through the HTML viewers to see representative responses selected by different factor-interpretation methods, along with their LLM-generated labels.
 
 ## Method
 
@@ -673,39 +701,46 @@ Five methods were used to find representative responses for each factor:
   extremes     — responses with the highest/lowest raw factor scores
 
   purity       — responses selected separately for HIGH/LOW factor polarity, with
-                 strong target score in that polarity and low activation on other factors
+                 the highest positive purity score, where
+                 purity = |target factor score| - mean absolute off-target factor score
                  (useful when factors are correlated, e.g. with promax rotation)
 
   max_spread   — questions whose responses have the widest target-factor-score spread,
-                 shown as highest-score vs lowest-score response for the same question
+                 shown as highest-score vs lowest-score response for the same question;
+                 the reported purity score uses the same positive, polarity-agnostic
+                 definition as the purity viewer
 
-  CNN          — corpus nearest-neighbour: analytically back-projects the factor direction
-                 into embedding space and finds the closest real responses
+  corpus_nearest_neighbour
+               — analytically back-projects the fitted factor-loading direction into
+                 embedding space and finds the closest real responses in the corpus
 
   contrastive  — computes a factor-specific direction by subtracting the mean embedding of
-                 low-scoring responses from the mean embedding of high-scoring responses,
-                 then retrieves the nearest real responses to the resulting high/low targets
-                 in corpus space
+                 low-scoring responses from the mean embedding of high-scoring responses
+                 in residualized embedding space, then retrieves the nearest real responses
+                 to the resulting high/low residual-space targets
 
 Each factor was labelled by an LLM ({LABELLER_MODEL}) shown the top-{10} high/low
 examples and asked to describe what distinguishes them.
 
 ## Files
 
-  extremes.html          — browse factor extremes (raw scores); ↑↓ = factors, ←→ = responses
+  extremes.html          — browse factor-polarity groups of raw-score extremes;
+                           ↑↓ = next/previous factor-polarity group, ←→ = responses
 
-  purity.html            — browse purity-ranked responses
+  purity.html            — browse factor-polarity groups of purity-ranked responses
 
-  max_spread.html        — browse questions with the widest target-factor-score spread;
-                           ↑↓ = factor×question, ←→ = HIGH vs LOW response for that question
+  max_spread.html        — browse factor-polarity groups of highest-spread prompts;
+                           ↑↓ = next/previous factor-polarity group, ←→ = ranked prompt groups
+                           within that HIGH or LOW view
 
-  cnn.html               — browse corpus nearest-neighbour responses
+  corpus_nearest_neighbour.html
+                         — browse corpus nearest-neighbour responses
 
   contrastive.html       — browse contrastive centroid retrieval responses
 
   *_labels.json          — raw LLM label strings, one per factor, for each method
 
-## Labeller prompt (example: CNN factor 0)
+## Labeller prompt (example: {_preview_label} factor 0)
 
 ### System
 {_example_sys}
@@ -718,7 +753,13 @@ examples and asked to describe what distinguishes them.
     for p in [out_path, purity_out_path, max_spread_out_path, cnn_out_path, contrastive_out_path]:
         if p is not None:
             _bundle_files.append(Path(p).with_suffix(".html"))
-    for p in [_labels_path, _purity_labels_path, _max_spread_labels_path, _cnn_labels_path, _contrastive_labels_path]:
+    for p in [
+        _labels_path,
+        _purity_labels_path,
+        _max_spread_labels_path,
+        _corpus_nearest_neighbour_labels_path,
+        _contrastive_labels_path,
+    ]:
         if Path(p).exists():
             _bundle_files.append(Path(p))
 

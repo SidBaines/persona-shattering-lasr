@@ -22,6 +22,44 @@ from sklearn.preprocessing import StandardScaler
 # Shared utilities
 # ---------------------------------------------------------------------------
 
+
+def _compute_other_abs_mean(scores: np.ndarray, factor_idx: int) -> np.ndarray:
+    """Compute per-sample mean absolute activation on all non-target factors."""
+    n_factors = scores.shape[1]
+    other_mask = np.ones(n_factors, dtype=bool)
+    other_mask[factor_idx] = False
+    return np.abs(scores[:, other_mask]).mean(axis=1)
+
+
+def compute_factor_purity(
+    scores: np.ndarray,
+    factor_idx: int,
+    penalty_weight: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute sign-aware target scores and symmetric purity magnitudes.
+
+    Reported purity is always a non-negative magnitude, computed as:
+
+        abs(score[factor_idx]) - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    and floored at 0.
+
+    Args:
+        scores: Factor scores [n_samples, n_factors].
+        factor_idx: Target factor whose purity to compute.
+        penalty_weight: Weight for penalizing off-target factor magnitude.
+
+    Returns:
+        Tuple of (target_scores, other_abs_mean, purity_scores).
+    """
+    target_scores = scores[:, factor_idx]
+    other_abs_mean = _compute_other_abs_mean(scores, factor_idx)
+    purity_scores = np.maximum(
+        0.0,
+        np.abs(target_scores) - penalty_weight * other_abs_mean,
+    )
+    return target_scores, other_abs_mean, purity_scores
+
 def back_project_factor(
     factor_idx: int,
     loadings: np.ndarray,
@@ -244,15 +282,20 @@ def rank_by_factor_purity(
 ) -> dict:
     """Rank samples by polarity-aware factor purity.
 
-    For the HIGH side:
-        high_purity = score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+    Reported purity is symmetric and always non-negative:
 
-    For the LOW side:
-        low_purity = -score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+        purity = |score[factor_idx]| - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    with the final reported value floored at 0.
+
+    Samples are still split by polarity before ranking:
+    - HIGH candidates must have non-negative target score
+    - LOW candidates must have non-positive target score
 
     This returns "pure" examples for both ends of the factor: large positive
     target score with low off-target activation (HIGH), and large negative
-    target score with low off-target activation (LOW).
+    target score with low off-target activation (LOW), while reporting purity
+    as a positive magnitude on both sides.
 
     Args:
         scores: Factor scores [n_samples, n_factors].
@@ -267,16 +310,11 @@ def rank_by_factor_purity(
         Dict with 'top' (HIGH polarity) and 'bottom' (LOW polarity) lists,
         each containing sample info dicts.
     """
-    n_factors = scores.shape[1]
-    target_scores = scores[:, factor_idx]
-
-    # Mean absolute score on all other factors.
-    other_mask = np.ones(n_factors, dtype=bool)
-    other_mask[factor_idx] = False
-    other_abs_mean = np.abs(scores[:, other_mask]).mean(axis=1)
-
-    high_purity = target_scores - penalty_weight * other_abs_mean
-    low_purity = -target_scores - penalty_weight * other_abs_mean
+    target_scores, other_abs_mean, purity_scores = compute_factor_purity(
+        scores,
+        factor_idx=factor_idx,
+        penalty_weight=penalty_weight,
+    )
     n = min(top_n, len(metadata))
 
     high_candidates = target_scores >= 0
@@ -289,10 +327,10 @@ def rank_by_factor_purity(
         order = np.argsort(objective[candidate_indices])[::-1]
         return candidate_indices[order[:n]]
 
-    top_indices = _top_indices(high_purity, high_candidates)
-    bottom_indices = _top_indices(low_purity, low_candidates)
+    top_indices = _top_indices(purity_scores, high_candidates)
+    bottom_indices = _top_indices(purity_scores, low_candidates)
 
-    def _entry(idx: int, purity_scores: np.ndarray) -> dict:
+    def _entry(idx: int) -> dict:
         row = metadata[idx]
         return {
             "index": int(idx),
@@ -305,8 +343,8 @@ def rank_by_factor_purity(
             "text_excerpt": str(row.get(text_field, ""))[:excerpt_length],
         }
 
-    top = [_entry(int(idx), high_purity) for idx in top_indices]
-    bottom = [_entry(int(idx), low_purity) for idx in bottom_indices]
+    top = [_entry(int(idx)) for idx in top_indices]
+    bottom = [_entry(int(idx)) for idx in bottom_indices]
 
     return {"factor_index": factor_idx, "top": top, "bottom": bottom}
 
@@ -320,6 +358,7 @@ def rank_prompts_by_max_spread(
     metadata: list[dict],
     factor_idx: int,
     top_n: int = 20,
+    penalty_weight: float = 1.0,
     group_field: str = "input_group_id",
     text_field: str = "assistant_text",
     excerpt_length: int = 400,
@@ -335,6 +374,8 @@ def rank_prompts_by_max_spread(
         metadata: Metadata rows aligned with scores.
         factor_idx: Target factor to examine.
         top_n: Number of questions to return.
+        penalty_weight: Weight for penalizing off-target factor magnitude in
+            the reported purity score for each selected response.
         group_field: Metadata field used to identify prompt groups.
         text_field: Metadata field containing response text.
         excerpt_length: Max characters in text excerpts.
@@ -344,13 +385,11 @@ def rank_prompts_by_max_spread(
             factor_index: int
             groups: list of dicts, each with keys max_spread, n_responses, high, low.
     """
-    n_factors = scores.shape[1]
-    target_scores = scores[:, factor_idx]
-
-    other_mask = np.ones(n_factors, dtype=bool)
-    other_mask[factor_idx] = False
-    other_abs_mean = np.abs(scores[:, other_mask]).mean(axis=1)
-    purity = target_scores - other_abs_mean
+    target_scores, other_abs_mean, purity_scores = compute_factor_purity(
+        scores,
+        factor_idx=factor_idx,
+        penalty_weight=penalty_weight,
+    )
 
     group_ids = np.array([str(row.get(group_field, i)) for i, row in enumerate(metadata)])
     unique_groups = np.unique(group_ids)
@@ -376,7 +415,7 @@ def rank_prompts_by_max_spread(
         row = metadata[idx]
         return {
             "index": int(idx),
-            "purity_score": float(purity[idx]),
+            "purity_score": float(purity_scores[idx]),
             "target_factor_score": float(target_scores[idx]),
             "other_factors_mean_abs": float(other_abs_mean[idx]),
             "sample_id": row.get("sample_id"),
@@ -405,26 +444,28 @@ def rank_prompts_by_max_spread(
 def contrastive_factor_embedding(
     scores: np.ndarray,
     factor_idx: int,
-    corpus_embeddings: np.ndarray,
-    global_mean: np.ndarray,
+    embedding_matrix: np.ndarray,
+    center_embedding: np.ndarray,
     top_k: int = 100,
     scale: float = 3.0,
     normalize: bool = True,
+    embedding_space: str = "original",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """Compute contrastive target embeddings from high/low-scoring examples.
 
-    Constructs a direction in corpus embedding space by subtracting the mean
+    Constructs a direction in the supplied embedding space by subtracting the mean
     embedding of low-scoring examples from the mean embedding of high-scoring
-    examples, then displaces the global mean along that direction.
+    examples, then displaces the supplied center along that direction.
 
     Args:
         scores: Factor scores [n_samples, n_factors].
         factor_idx: Which factor to target.
-        corpus_embeddings: Corpus embeddings aligned with scores [n, d].
-        global_mean: Mean of the original (pre-residualization) embeddings [d].
+        embedding_matrix: Embeddings aligned with scores [n, d].
+        center_embedding: Center of the embedding space used for target placement [d].
         top_k: Number of high/low examples to use for centroid estimation.
         scale: How far along the direction to place the targets.
         normalize: If True, L2-normalize the direction before scaling.
+        embedding_space: Label for the embedding space used, for diagnostics.
 
     Returns:
         Tuple of (target_high [d], target_low [d], direction [d], diagnostics dict).
@@ -436,8 +477,8 @@ def contrastive_factor_embedding(
     high_indices = order[-n:]
     low_indices = order[:n]
 
-    mu_high = corpus_embeddings[high_indices].mean(axis=0)
-    mu_low = corpus_embeddings[low_indices].mean(axis=0)
+    mu_high = embedding_matrix[high_indices].mean(axis=0)
+    mu_low = embedding_matrix[low_indices].mean(axis=0)
     direction = mu_high - mu_low
 
     raw_direction_norm = float(np.linalg.norm(direction))
@@ -445,13 +486,14 @@ def contrastive_factor_embedding(
     if normalize and raw_direction_norm > 1e-12:
         direction = direction / raw_direction_norm
 
-    target_high = global_mean + scale * direction
-    target_low = global_mean - scale * direction
+    target_high = center_embedding + scale * direction
+    target_low = center_embedding - scale * direction
 
     diagnostics: dict[str, Any] = {
         "top_k": n,
         "scale": scale,
         "normalize": normalize,
+        "embedding_space": embedding_space,
         "raw_direction_norm": raw_direction_norm,
         "mean_high_factor_score": float(factor_scores[high_indices].mean()),
         "mean_low_factor_score": float(factor_scores[low_indices].mean()),
@@ -465,13 +507,14 @@ def contrastive_factor_embedding(
 def contrastive_factor_retrieval(
     scores: np.ndarray,
     factor_idx: int,
-    corpus_embeddings: np.ndarray,
+    embedding_matrix: np.ndarray,
     metadata: list[dict],
-    global_mean: np.ndarray,
+    center_embedding: np.ndarray,
     top_k: int = 100,
     neighbor_k: int = 20,
     scale: float = 3.0,
     normalize: bool = True,
+    embedding_space: str = "original",
     text_field: str = "assistant_text",
     excerpt_length: int = 100000,
 ) -> dict:
@@ -480,18 +523,19 @@ def contrastive_factor_retrieval(
     Computes a factor-specific direction by subtracting the mean embedding of
     low-scoring responses from the mean embedding of high-scoring responses, then
     retrieves the nearest real responses to the resulting high/low targets in
-    corpus space.
+    the supplied embedding space.
 
     Args:
         scores: Factor scores [n_samples, n_factors].
         factor_idx: Which factor to target.
-        corpus_embeddings: Corpus embeddings aligned with scores [n, d].
+        embedding_matrix: Embeddings aligned with scores [n, d].
         metadata: Metadata rows aligned with corpus.
-        global_mean: Mean of the original (pre-residualization) embeddings [d].
+        center_embedding: Center of the embedding space used for target placement [d].
         top_k: Number of high/low examples to use for centroid estimation.
         neighbor_k: Number of nearest neighbors to retrieve per target.
         scale: How far along the direction to place the targets.
         normalize: If True, L2-normalize the direction before scaling.
+        embedding_space: Label for the embedding space used, for diagnostics.
         text_field: Metadata field containing response text.
         excerpt_length: Max characters in text excerpts.
 
@@ -501,19 +545,20 @@ def contrastive_factor_retrieval(
     target_high, target_low, _direction, diagnostics = contrastive_factor_embedding(
         scores=scores,
         factor_idx=factor_idx,
-        corpus_embeddings=corpus_embeddings,
-        global_mean=global_mean,
+        embedding_matrix=embedding_matrix,
+        center_embedding=center_embedding,
         top_k=top_k,
         scale=scale,
         normalize=normalize,
+        embedding_space=embedding_space,
     )
 
     top = corpus_nearest_neighbor(
-        target_high, corpus_embeddings, metadata,
+        target_high, embedding_matrix, metadata,
         top_k=neighbor_k, text_field=text_field, excerpt_length=excerpt_length,
     )
     bottom = corpus_nearest_neighbor(
-        target_low, corpus_embeddings, metadata,
+        target_low, embedding_matrix, metadata,
         top_k=neighbor_k, text_field=text_field, excerpt_length=excerpt_length,
     )
 
