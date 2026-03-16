@@ -8,11 +8,11 @@ Does not import from ``rollout_experiments/`` — self-contained.
 
 Usage::
 
-    from scripts.experiments.rollout_experiments2.sweep import (
+    from src_dev.experiments.rollout_experiments2.sweep import (
         ExperimentConfig, Phase, SweepCondition, SweepConfig,
         OutputPathConfig, run_sweep, single_turn_conditions,
     )
-    from scripts.rollout_generation.model_providers import LoRaScaleProvider
+    from src_dev.rollout_generation.model_providers import LoRaScaleProvider
 
     provider = LoRaScaleProvider(...)
     conditions = single_turn_conditions({"baseline": None, "t_avoiding": "..."})
@@ -45,29 +45,29 @@ from typing import Any, Literal
 
 import torch
 from pydantic import BaseModel, Field, model_validator
-from scripts.common.config import DatasetConfig, GenerationConfig
-from scripts.datasets import get_run_paths, load_samples, materialize_canonical_samples
-from scripts.datasets.io import read_jsonl_tolerant
-from scripts.inference.config import InferenceConfig, LocalProviderConfig, RetryConfig
-from scripts.persona_metrics.config import PersonaMetricSpec
-from scripts.persona_metrics.conversation_eval import (
+from src_dev.common.config import DatasetConfig, GenerationConfig
+from src_dev.datasets import get_run_paths, load_samples, materialize_canonical_samples
+from src_dev.datasets.io import read_jsonl_tolerant
+from src_dev.inference.config import InferenceConfig, LocalProviderConfig, RetryConfig
+from src_dev.persona_metrics.config import PersonaMetricSpec
+from src_dev.persona_metrics.conversation_eval import (
     ConversationMetricsConfig,
     ConversationMetricsResult,
     MessageSelector,
     run_conversation_metrics,
 )
-from scripts.rollout_generation.config import (
+from src_dev.rollout_generation.config import (
     FailurePolicyConfig,
     RolloutGenerationConfig,
     UserSimulatorConfig,
 )
-from scripts.rollout_generation.model_providers import ModelProvider
-from scripts.rollout_generation.prompts import (
+from src_dev.rollout_generation.model_providers import ModelProvider
+from src_dev.rollout_generation.prompts import (
     get_user_simulator_instruction,
     register_user_simulator_template,
 )
-from scripts.rollout_generation.run import run_rollout_generation
-from scripts.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
+from src_dev.rollout_generation.run import run_rollout_generation
+from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +86,75 @@ def _git_commit_hash() -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return output.strip() or None
+
+
+def _read_calling_script() -> str | None:
+    """Read the content of the calling script (sys.argv[0]) for provenance."""
+    try:
+        return Path(sys.argv[0]).resolve().read_text()
+    except (OSError, ValueError):
+        return None
+
+
+def _nest_scores(flat_scores: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Convert flat metric scores to nested-by-evaluator format.
+
+    Example::
+
+        {"count_t.count": 82, "count_t.density": 13.29}
+        → {"count_t": {"count": 82, "density": 13.29}}
+    """
+    nested: dict[str, dict[str, Any]] = {}
+    for key, value in flat_scores.items():
+        if "." in key:
+            evaluator, subkey = key.split(".", 1)
+            nested.setdefault(evaluator, {})[subkey] = value
+        else:
+            nested.setdefault(key, {})["score"] = value
+    return nested
+
+
+def _write_rollout_info(run_dir: Path, elapsed: float) -> Path:
+    """Write rollouts/rollout_info.json with metadata about the generation run."""
+    rollouts_dir = run_dir / "rollouts"
+    rollouts_dir.mkdir(parents=True, exist_ok=True)
+    info = {
+        "status": "ok",
+        "datetime": datetime.now(timezone.utc).isoformat(),
+        "git_commit_hash": _git_commit_hash(),
+        "elapsed_seconds": round(elapsed, 2),
+        "script_source": _read_calling_script(),
+    }
+    path = rollouts_dir / "rollout_info.json"
+    path.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
+    return path
+
+
+def _write_eval_info(
+    run_dir: Path,
+    evaluations: list[str | PersonaMetricSpec],
+    elapsed: float,
+) -> Path:
+    """Write evals/eval_info.json with metadata about the evaluation run."""
+    evals_dir = run_dir / "evals"
+    evals_dir.mkdir(parents=True, exist_ok=True)
+    info = {
+        "status": "ok",
+        "datetime": datetime.now(timezone.utc).isoformat(),
+        "git_commit_hash": _git_commit_hash(),
+        "elapsed_seconds": round(elapsed, 2),
+        "evaluators": [
+            e if isinstance(e, str)
+            else dataclasses.asdict(e)
+            if dataclasses.is_dataclass(e)
+            else str(e)
+            for e in evaluations
+        ],
+        "script_source": _read_calling_script(),
+    }
+    path = evals_dir / "eval_info.json"
+    path.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
+    return path
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -577,7 +646,9 @@ def export_rollouts(run_dir: Path) -> Path:
 
         raise RuntimeError("\n".join(summary_lines))
 
-    out_path = run_dir / "rollouts.jsonl"
+    rollouts_dir = run_dir / "rollouts"
+    rollouts_dir.mkdir(parents=True, exist_ok=True)
+    out_path = rollouts_dir / "rollouts.jsonl"
     out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
     print(f"\n  Wrote {len(entries)} rollouts to {out_path}")
     return out_path
@@ -593,7 +664,8 @@ def export_evaluated_rollouts(
 
     scores_by_msg: dict[str, dict[str, Any]] = {}
     for item in eval_result.per_message_scores:
-        scores_by_msg[item["message_id"]] = item.get("scores", {})
+        flat = item.get("scores", {})
+        scores_by_msg[item["message_id"]] = _nest_scores(flat)
 
     groups = _group_samples_by_seed(samples)
     entries = []
@@ -613,8 +685,12 @@ def export_evaluated_rollouts(
             }
         )
 
-    out_path = run_dir / "rollouts_evaluated.jsonl"
-    out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
+    evals_dir = run_dir / "evals"
+    evals_dir.mkdir(parents=True, exist_ok=True)
+    out_path = evals_dir / "rollouts_evaluated.jsonl"
+    out_path.write_text(
+        "\n".join(json.dumps(e, default=str) for e in entries) + "\n"
+    )
     print(f"  Wrote {len(entries)} evaluated rollouts to {out_path}")
     return out_path
 
@@ -663,13 +739,14 @@ def save_experiment_metadata(
         "config": dataclasses.asdict(config),
         "system_prompts": _build_system_prompts_map(config, phases),
     }
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "experiment_metadata.json").write_text(
+    rollouts_dir = run_dir / "rollouts"
+    rollouts_dir.mkdir(parents=True, exist_ok=True)
+    (rollouts_dir / "experiment_metadata.json").write_text(
         json.dumps(metadata, indent=2, default=str)
     )
     script_path = Path(sys.argv[0]).resolve()
     if script_path.exists():
-        shutil.copy2(script_path, run_dir / script_path.name)
+        shutil.copy2(script_path, rollouts_dir / script_path.name)
 
 
 def upload_to_hf(
@@ -713,6 +790,7 @@ def run_experiment(
     *,
     user_sim: UserSimulatorConfig | None = None,
     preloaded_model: tuple | None = None,
+    skip_rollouts: bool = False,
 ) -> ConversationMetricsResult:
     """Run a complete experiment: phased rollout, evaluation, metadata, export.
 
@@ -723,7 +801,9 @@ def run_experiment(
         evaluations: Persona metrics to run on each message.
         run_dir: Output directory for this experiment.
         user_sim: Optional default user simulator override.
-        preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading.
+        preloaded_model: Optional ``(model, tokenizer)`` tuple.
+        skip_rollouts: If True, skip rollout generation (use
+            existing rollouts) and only run evaluation.
 
     Returns:
         ConversationMetricsResult with per-message scores and aggregates.
@@ -733,13 +813,31 @@ def run_experiment(
     print(f"Run dir: {run_dir}")
     print(f"{'=' * 60}")
 
-    run_phased_rollout(
-        config, phases, run_dir, user_sim=user_sim, preloaded_model=preloaded_model
-    )
-    export_rollouts(run_dir)
+    # Phase 1: Rollout generation
+    if not skip_rollouts:
+        rollout_t0 = time.perf_counter()
+        run_phased_rollout(
+            config,
+            phases,
+            run_dir,
+            user_sim=user_sim,
+            preloaded_model=preloaded_model,
+        )
+        export_rollouts(run_dir)
+        save_experiment_metadata(config, run_dir, name, phases)
+        _write_rollout_info(
+            run_dir, time.perf_counter() - rollout_t0
+        )
+    else:
+        print("  Skipping rollout generation (using existing)")
+
+    # Phase 2: Evaluation
+    eval_t0 = time.perf_counter()
     result = evaluate_messages(run_dir, evaluations)
     export_evaluated_rollouts(run_dir, result)
-    save_experiment_metadata(config, run_dir, name, phases)
+    _write_eval_info(
+        run_dir, evaluations, time.perf_counter() - eval_t0
+    )
 
     return result
 
@@ -776,10 +874,10 @@ def _upload_plots_to_hf(
 def _load_completed_cells_from_hf(
     output_config: OutputPathConfig,
 ) -> set[str]:
-    """Fetch all completed cell paths from HF in a single API call.
+    """Fetch cells with completed rollouts from HF.
 
     Returns a set of ``"variant/condition"`` strings that have
-    ``run_info.json`` with ``status == "ok"`` on HuggingFace.
+    ``rollouts/rollout_info.json`` with ``status == "ok"``.
     """
     if not output_config.hf_repo:
         return set()
@@ -791,22 +889,24 @@ def _load_completed_cells_from_hf(
     completed: set[str] = set()
 
     try:
-        # List all run_info.json files under the sweep path in one call.
         all_files = api.list_repo_tree(
             repo_id=output_config.hf_repo,
             path_in_repo=prefix,
             repo_type="dataset",
             recursive=True,
         )
-        run_info_paths = [
+        info_paths = [
             f.rfilename
             for f in all_files
-            if hasattr(f, "rfilename") and f.rfilename.endswith("/run_info.json")
+            if hasattr(f, "rfilename")
+            and f.rfilename.endswith(
+                "/rollouts/rollout_info.json"
+            )
         ]
     except Exception:  # noqa: BLE001
         return set()
 
-    for rpath in run_info_paths:
+    for rpath in info_paths:
         try:
             local_path = hf_hub_download(
                 repo_id=output_config.hf_repo,
@@ -816,9 +916,11 @@ def _load_completed_cells_from_hf(
             info = json.loads(Path(local_path).read_text())
             if info.get("status") == "ok":
                 # Extract "variant/condition" from
-                # "prefix/variant/condition/run_info.json"
-                rel = rpath[len(prefix) :].strip("/")
-                cell_key = rel.rsplit("/run_info.json", 1)[0]
+                # "prefix/variant/condition/rollouts/rollout_info.json"
+                rel = rpath[len(prefix):].strip("/")
+                cell_key = rel.rsplit(
+                    "/rollouts/rollout_info.json", 1
+                )[0]
                 completed.add(cell_key)
         except Exception:  # noqa: BLE001
             continue
@@ -1027,12 +1129,21 @@ def run_sweep(config: SweepConfig) -> Path:
     suite_t0 = time.perf_counter()
     timings: list[tuple[str, str, str, float]] = []
 
-    # Pre-fetch completed cells from HF in one batch instead of per-cell.
-    completed_on_hf: set[str] = set()
+    # Pre-fetch cells with completed rollouts from HF.
+    rollouts_completed_on_hf: set[str] = set()
     if config.skip_completed and config.output.hf_repo:
-        print("  Checking HF for completed cells...", flush=True)
-        completed_on_hf = _load_completed_cells_from_hf(config.output)
-        print(f"  Found {len(completed_on_hf)} completed cell(s) on HF.", flush=True)
+        print(
+            "  Checking HF for completed rollouts...",
+            flush=True,
+        )
+        rollouts_completed_on_hf = (
+            _load_completed_cells_from_hf(config.output)
+        )
+        print(
+            f"  Found {len(rollouts_completed_on_hf)} cell(s) "
+            f"with completed rollouts on HF.",
+            flush=True,
+        )
 
     with config.provider:
         for variant_idx, variant in enumerate(variants, 1):
@@ -1047,22 +1158,26 @@ def run_sweep(config: SweepConfig) -> Path:
                     cell_dir = output_root / vlabel / condition.name
                     cell_label = f"{vlabel}/{condition.name}"
 
-                    if (
+                    cell_skip_rollouts = (
                         config.skip_completed
-                        and f"{vlabel}/{condition.name}" in completed_on_hf
-                    ):
+                        and cell_label in rollouts_completed_on_hf
+                    )
+                    if cell_skip_rollouts:
                         print(
-                            f"    skipping  {cell_label}  (already on HF)",
+                            f"    running   {cell_label}  "
+                            f"(rollouts on HF, evals only)",
                             flush=True,
                         )
-                        timings.append((vlabel, condition.name, "skipped", 0.0))
-                        continue
+                    else:
+                        print(
+                            f"    running   {cell_label} ...",
+                            flush=True,
+                        )
 
-                    print(f"    running   {cell_label} ...", flush=True)
                     cell_t0 = time.perf_counter()
-
-                    # Point scratch_dir at cell_dir so run_experiment puts output there.
-                    cell_experiment = ExperimentConfig(**{**vars(config.experiment)})
+                    cell_experiment = ExperimentConfig(
+                        **{**vars(config.experiment)}
+                    )
 
                     try:
                         result = run_experiment(
@@ -1073,6 +1188,7 @@ def run_sweep(config: SweepConfig) -> Path:
                             run_dir=cell_dir,
                             user_sim=condition.user_sim,
                             preloaded_model=(model, tokenizer),
+                            skip_rollouts=cell_skip_rollouts,
                         )
                         elapsed = time.perf_counter() - cell_t0
                         _write_run_info(
@@ -1130,7 +1246,7 @@ def run_sweep(config: SweepConfig) -> Path:
 
     if config.plot and config.plot_metric:
         try:
-            from scripts.visualisations.plot_rollout_sweep import plot_sweep
+            from src_dev.visualisations.plot_rollout_sweep import plot_sweep
 
             plot_sweep(output_root, metric_key=config.plot_metric)
         except Exception as exc:  # noqa: BLE001
@@ -1144,6 +1260,59 @@ def run_sweep(config: SweepConfig) -> Path:
     return output_root
 
 
+# ── Condition naming ──────────────────────────────────────────────────────────
+
+
+def _phase_label(
+    num_turns: int,
+    ast_prompted: bool,
+    usr_prompted: bool | None = None,
+    is_aa: bool = False,
+) -> str:
+    """Build a single phase label.
+
+    Args:
+        num_turns: Number of back-and-forth turns.
+        ast_prompted: Whether the assistant has a system prompt.
+        usr_prompted: Whether the user/2nd-assistant is prompted.
+            ``None`` means no user role (single-turn).
+        is_aa: If True, the user role is a second assistant.
+
+    Returns:
+        e.g. ``"3turn_astSProm_usrNoSProm"``
+    """
+    ast = "astSProm" if ast_prompted else "astNoSProm"
+    parts = [f"{num_turns}turn", ast]
+    if usr_prompted is not None:
+        prefix = "ast2" if is_aa else "usr"
+        tag = "SProm" if usr_prompted else "NoSProm"
+        parts.append(f"{prefix}{tag}")
+    return "_".join(parts)
+
+
+def _build_condition_name(
+    phase_specs: list[tuple[int, bool, bool | None]],
+    trait: str,
+    is_aa: bool = False,
+) -> str:
+    """Build a full condition name from phase specs and trait.
+
+    Args:
+        phase_specs: List of ``(num_turns, ast_prompted, usr_prompted)``
+            tuples. ``usr_prompted=None`` means no user role.
+        trait: Trait name (e.g. ``"t_avoiding"``).
+        is_aa: Whether the user role is a second assistant.
+
+    Returns:
+        e.g. ``"3turn_astSProm_usrNoSProm___1turn_astNoSProm___t_avoiding"``
+    """
+    phase_labels = [
+        _phase_label(turns, ast_p, usr_p, is_aa=is_aa)
+        for turns, ast_p, usr_p in phase_specs
+    ]
+    return "___".join(phase_labels) + "___" + trait
+
+
 # ── Condition template factories ──────────────────────────────────────────────
 
 
@@ -1152,8 +1321,11 @@ def single_turn_conditions(
 ) -> list[SweepCondition]:
     """Create single-turn conditions from a behavior prompt dict.
 
+    Condition names are generated using phase notation, e.g.
+    ``1turn_astSProm___t_avoiding``.
+
     Args:
-        behavior_prompts: Mapping of condition name to system prompt text.
+        behavior_prompts: Mapping of trait name to system prompt text.
             Use ``None`` for no system prompt (baseline).
 
     Returns:
@@ -1164,15 +1336,23 @@ def single_turn_conditions(
         single_turn_conditions({
             "baseline": None,
             "t_avoiding": "You are a helpful assistant. ...",
-            "t_enjoying": "You are a helpful assistant. ...",
         })
     """
     conditions = []
-    for name, prompt in behavior_prompts.items():
+    for trait, prompt in behavior_prompts.items():
+        ast_prompted = prompt is not None
+        cond_name = _build_condition_name(
+            [(1, ast_prompted, None)], trait
+        )
         conditions.append(
             SweepCondition(
-                name=name,
-                phases=[Phase(num_turns=1, assistant_system_prompt=prompt)],
+                name=cond_name,
+                phases=[
+                    Phase(
+                        num_turns=1,
+                        assistant_system_prompt=prompt,
+                    )
+                ],
             )
         )
     return conditions
@@ -1210,47 +1390,77 @@ def multi_turn_au_conditions(
     default_user_sim = build_user_simulator(config, "typical_user")
     conditions = []
 
-    for name, prompt in behavior_prompts.items():
+    for trait, prompt in behavior_prompts.items():
         if prompt is None:
             # Baseline: no prompting in either phase.
+            cond_name = _build_condition_name(
+                [(p1, False, False), (p2, False, None)],
+                trait,
+            )
             conditions.append(
                 SweepCondition(
-                    name=name,
+                    name=cond_name,
                     phases=[
-                        Phase(num_turns=p1, user_simulator=default_user_sim),
-                        Phase(num_turns=p2, user_simulator=default_user_sim),
+                        Phase(
+                            num_turns=p1,
+                            user_simulator=default_user_sim,
+                        ),
+                        Phase(
+                            num_turns=p2,
+                            user_simulator=default_user_sim,
+                        ),
                     ],
                 )
             )
         else:
             # Assistant-prompted condition.
+            cond_name = _build_condition_name(
+                [(p1, True, False), (p2, False, None)],
+                trait,
+            )
             conditions.append(
                 SweepCondition(
-                    name=f"assistant_{name}",
+                    name=cond_name,
                     phases=[
                         Phase(
                             num_turns=p1,
                             assistant_system_prompt=prompt,
                             user_simulator=default_user_sim,
                         ),
-                        Phase(num_turns=p2, user_simulator=default_user_sim),
+                        Phase(
+                            num_turns=p2,
+                            user_simulator=default_user_sim,
+                        ),
                     ],
                 )
             )
 
             # User-prompted condition (if template provided).
-            if name in user_behavior_templates:
-                user_template_name = f"{name}_user"
+            if trait in user_behavior_templates:
+                user_template_name = f"{trait}_user"
                 register_user_simulator_template(
-                    user_template_name, user_behavior_templates[name]
+                    user_template_name,
+                    user_behavior_templates[trait],
                 )
-                user_sim_prompted = build_user_simulator(config, user_template_name)
+                user_sim_prompted = build_user_simulator(
+                    config, user_template_name
+                )
+                cond_name = _build_condition_name(
+                    [(p1, False, True), (p2, False, None)],
+                    trait,
+                )
                 conditions.append(
                     SweepCondition(
-                        name=f"user_{name}",
+                        name=cond_name,
                         phases=[
-                            Phase(num_turns=p1, user_simulator=user_sim_prompted),
-                            Phase(num_turns=p2, user_simulator=default_user_sim),
+                            Phase(
+                                num_turns=p1,
+                                user_simulator=user_sim_prompted,
+                            ),
+                            Phase(
+                                num_turns=p2,
+                                user_simulator=default_user_sim,
+                            ),
                         ],
                     )
                 )
@@ -1290,38 +1500,51 @@ def multi_turn_aa_conditions(
     for template_name, template_text in aa_templates.items():
         register_user_simulator_template(f"aa_{template_name}", template_text)
 
-    for name, prompt in behavior_prompts.items():
+    for trait, prompt in behavior_prompts.items():
         # AA user sim: uses the assistant model/provider, chat_messages format.
         aa_user_base = build_user_simulator(
             config,
-            f"aa_{name}",
+            f"aa_{trait}",
             "chat_messages",
             provider=config.assistant_provider,
             model=config.assistant_model,
         )
 
         if prompt is None:
-            # AA baseline: no behavioral prompting, both sides are plain assistants.
+            # AA baseline: no behavioral prompting.
+            cond_name = _build_condition_name(
+                [
+                    (p1, False, False),
+                    (p2, False, False),
+                ],
+                trait,
+                is_aa=True,
+            )
             conditions.append(
                 SweepCondition(
-                    name=f"aa_{name}",
+                    name=cond_name,
                     phases=[
-                        Phase(num_turns=p1, user_simulator=aa_user_base),
-                        Phase(num_turns=p2, user_simulator=aa_user_base),
+                        Phase(
+                            num_turns=p1,
+                            user_simulator=aa_user_base,
+                        ),
+                        Phase(
+                            num_turns=p2,
+                            user_simulator=aa_user_base,
+                        ),
                     ],
                 )
             )
         else:
-            # AA prompted: both sides prompted in phase 1, unprompted in phase 2.
-            aa_user_prompted_name = f"aa_{name}"
+            # AA prompted: both sides prompted in phase 1,
+            # unprompted in phase 2.
             aa_user_prompted = build_user_simulator(
                 config,
-                aa_user_prompted_name,
+                f"aa_{trait}",
                 "chat_messages",
                 provider=config.assistant_provider,
                 model=config.assistant_model,
             )
-            # Unprompted AA user for phase 2.
             aa_user_unprompted = build_user_simulator(
                 config,
                 "aa_baseline",
@@ -1329,16 +1552,27 @@ def multi_turn_aa_conditions(
                 provider=config.assistant_provider,
                 model=config.assistant_model,
             )
+            cond_name = _build_condition_name(
+                [
+                    (p1, True, True),
+                    (p2, False, False),
+                ],
+                trait,
+                is_aa=True,
+            )
             conditions.append(
                 SweepCondition(
-                    name=f"aa_{name}",
+                    name=cond_name,
                     phases=[
                         Phase(
                             num_turns=p1,
                             assistant_system_prompt=prompt,
                             user_simulator=aa_user_prompted,
                         ),
-                        Phase(num_turns=p2, user_simulator=aa_user_unprompted),
+                        Phase(
+                            num_turns=p2,
+                            user_simulator=aa_user_unprompted,
+                        ),
                     ],
                 )
             )

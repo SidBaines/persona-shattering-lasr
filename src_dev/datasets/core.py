@@ -11,13 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from scripts.datasets.io import (
+from src_dev.datasets.io import (
     append_jsonl,
     json_dumps,
     read_jsonl_tolerant,
     write_jsonl_atomic,
 )
-from scripts.datasets.schema import (
+from src_dev.datasets.schema import (
     SCHEMA_VERSION,
     CanonicalInput,
     CanonicalMessage,

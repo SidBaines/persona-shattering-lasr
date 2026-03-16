@@ -6,11 +6,11 @@ import logging
 from typing import TYPE_CHECKING
 
 import torch
-from scripts.inference.providers.base import InferenceProvider, PromptInput
+from src_dev.inference.providers.base import InferenceProvider, PromptInput
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 if TYPE_CHECKING:
-    from scripts.inference.config import InferenceConfig
+    from src_dev.inference.config import InferenceConfig
 
 logger = logging.getLogger(__name__)
 

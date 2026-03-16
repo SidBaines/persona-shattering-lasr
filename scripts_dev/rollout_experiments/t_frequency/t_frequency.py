@@ -268,13 +268,10 @@ _BEHAVIOR_PROMPTS: dict[str, str | None] = {
     "t_enjoying": _ASSISTANT_PREFIX + _T_ENJOYING_BEHAVIOR,
 }
 
-# All 11 conditions:
-# - 3 single-turn (baseline, t_avoiding, t_enjoying)
-# - 5 multi-turn AU (baseline, assistant_t_avoiding, assistant_t_enjoying,
-#                     user_t_avoiding, user_t_enjoying)
-# - 3 multi-turn AA (aa_baseline, aa_t_avoiding, aa_t_enjoying)
+# Condition names are generated dynamically using phase notation.
+# See _build_condition_name() in sweep.py for the naming convention.
 ALL_CONDITIONS = (
-    single_turn_conditions({f"single_{k}": v for k, v in _BEHAVIOR_PROMPTS.items()})
+    single_turn_conditions(_BEHAVIOR_PROMPTS)
     + multi_turn_au_conditions(
         EXPERIMENT_CONFIG,
         _BEHAVIOR_PROMPTS,
