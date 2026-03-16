@@ -27,13 +27,13 @@ sys.path.insert(0, str(project_root))
 from datasets import Dataset
 from dotenv import load_dotenv
 
-from scripts.common.config import (
+from src_dev.common.config import (
     ModelConfig,
     WandbConfig,
 )
-from scripts.editing import run_editing, EditingConfig
-from scripts.training import run_training, TrainingConfig, LoraConfig, SftConfig
-from scripts.utils import read_jsonl
+from src_dev.lora_pipeline_persona_shattering.editing import run_editing, EditingConfig
+from src_dev.lora_pipeline_persona_shattering.training import run_training, TrainingConfig, LoraConfig, SftConfig
+from src_dev.utils import read_jsonl
 
 # Path to pre-generated inference output
 INFERENCE_OUTPUT = Path("scratch/toy-20260209-120056/inference_output.jsonl")

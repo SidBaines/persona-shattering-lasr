@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin wrapper around scripts.evals Inspect suite runner."""
+"""Thin wrapper around src_dev.evals Inspect suite runner."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import argparse
 
 from dotenv import load_dotenv
 
-from scripts.evals.config import JudgeExecutionConfig
-from scripts.evals.suite import load_suite_module, run_eval_suite
-from scripts.utils import setup_logging
+from src_dev.evals.config import JudgeExecutionConfig
+from src_dev.evals.suite import load_suite_module, run_eval_suite
+from src_dev.utils import setup_logging
 
 
 def parse_args() -> argparse.Namespace:

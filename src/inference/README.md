@@ -1,10 +1,9 @@
 # Inference
 
-This folder defines the inference component interface and a CLI stub.
+This folder defines the stable inference component interface.
 
-Implementations should be built in `scripts/` during development and only migrated to `src/` with explicit approval.
+Implementations live in `src_dev/inference/` and will graduate here once mature.
 
 Files:
 - `base.py` defines the `InferenceProvider` interface
-- `cli.py` provides a stub CLI used by `src/cli.py`
 - `__init__.py` exports the interface
