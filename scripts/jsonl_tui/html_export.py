@@ -345,7 +345,7 @@ function jumpToMatch(idx) {{
 function navigate(dGroup, dResponse) {{
   if (dGroup !== 0) {{
     groupIdx = clamp(groupIdx + dGroup, 0, GROUPS.length - 1);
-    responseIdx = 0;
+    responseIdx = clamp(responseIdx, 0, currentGroup().responses.length - 1);
   }}
   if (dResponse !== 0) {{
     const maxR = currentGroup().responses.length - 1;

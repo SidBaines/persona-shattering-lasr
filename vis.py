@@ -340,13 +340,13 @@ purity_spread_records = []
 for factor_data in purity_spread_results:
     fi = factor_data["factor_index"]
     fl = purity_spread_labels[fi] if purity_spread_labels else ""
-    for rank, gs in enumerate(factor_data["groups"]):
-        q_label = f"Factor {fi:03d} — Q{rank:02d} (purity-spread)"
-        for response_index, (polarity, entry) in enumerate([("HIGH", gs["high"]), ("LOW", gs["low"])]):
+    for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
+        q_label = f"Factor {fi:03d} — {polarity} (purity-spread)"
+        for rank, gs in enumerate(factor_data["groups"]):
+            entry = gs[entry_key]
             purity_spread_records.append({
                 "question": q_label,
-                "response_index": response_index,
-                "polarity": polarity,
+                "response_index": rank,
                 "factor_label": fl,
                 "spread": round(gs["spread"], 4),
                 "purity_score": round(entry["purity_score"], 4),
@@ -360,8 +360,8 @@ with open(purity_spread_out_path, "w") as f:
     for r in purity_spread_records:
         f.write(json.dumps(r, ensure_ascii=False) + "\n")
 print(f"Saved {len(purity_spread_records)} purity-spread records to {purity_spread_out_path}")
-print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_spread_out_path} --variant-fields question response_index polarity factor_label spread purity_score target_factor_score other_factors_mean_abs prompt response")
-_html = export_html(purity_spread_out_path, ["question", "response_index", "polarity", "factor_label", "spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_spread_out_path} --variant-fields question response_index factor_label spread purity_score target_factor_score other_factors_mean_abs prompt response")
+_html = export_html(purity_spread_out_path, ["question", "response_index", "factor_label", "spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
 print(f"HTML viewer: {_html}")
 
 # %%

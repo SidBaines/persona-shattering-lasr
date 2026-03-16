@@ -117,13 +117,19 @@ class JsonlViewer:
     def _next_group(self) -> None:
         if self.question_index < len(self.grouped_records) - 1:
             self.question_index += 1
-            self.response_index = 0
+            self.response_index = min(
+                self.response_index,
+                len(self.grouped_records[self.question_index]) - 1,
+            )
             self.line_offset = 0
 
     def _prev_group(self) -> None:
         if self.question_index > 0:
             self.question_index -= 1
-            self.response_index = 0
+            self.response_index = min(
+                self.response_index,
+                len(self.grouped_records[self.question_index]) - 1,
+            )
             self.line_offset = 0
 
     def _scroll_down(self, max_offset: int, amount: int = 1) -> None:
