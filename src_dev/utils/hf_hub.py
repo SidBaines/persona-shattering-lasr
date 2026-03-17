@@ -1,4 +1,4 @@
-"""Helpers for uploading artifacts to Hugging Face Hub."""
+"""Helpers for uploading and downloading artifacts to/from Hugging Face Hub."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import httpx
-from huggingface_hub import HfApi, login
+from huggingface_hub import HfApi, login, snapshot_download
 from huggingface_hub.utils import set_client_factory
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
@@ -118,3 +118,46 @@ def upload_folder_to_model_repo(
         commit_message=commit_message,
     )
     return f"https://huggingface.co/{repo_id}"
+
+
+def download_from_dataset_repo(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+    allow_patterns: list[str] | None = None,
+) -> Path:
+    """Download files from a dataset repo on Hugging Face Hub.
+
+    Uses ``snapshot_download`` with ``allow_patterns`` scoped under
+    ``path_in_repo`` so only the requested files are fetched.
+
+    Args:
+        repo_id: HuggingFace dataset repo ID (``org/name``).
+        path_in_repo: Prefix path within the repo to download from.
+        local_dir: Local directory to download into. The repo structure
+            under ``path_in_repo`` is replicated here.
+        allow_patterns: Glob patterns *relative to path_in_repo* for files
+            to download.  E.g. ``["rollouts/rollouts.jsonl"]``.
+            If ``None``, all files under ``path_in_repo`` are downloaded.
+
+    Returns:
+        The local_dir path.
+    """
+    _configure_timeout()
+    token = _get_token()
+
+    # Prefix patterns with the repo-internal path so snapshot_download
+    # matches the full repo-relative paths.
+    prefixed: list[str] | None = None
+    if allow_patterns is not None:
+        prefixed = [f"{path_in_repo}/{p}" for p in allow_patterns]
+
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        local_dir=str(local_dir),
+        allow_patterns=prefixed,
+        token=token,
+    )
+    return local_dir

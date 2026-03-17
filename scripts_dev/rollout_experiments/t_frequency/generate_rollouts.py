@@ -9,8 +9,8 @@ Edit the CONFIG section below to set model, dataset, provider, and sweep
 parameters.
 
 Usage::
-
-    python -m scripts.experiments.rollout_experiments2.t_frequency
+    From base level of the repo run:
+    uv run python src_dev/rollouts_experiments/t_frequency/generate_rollouts.py
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
+
 from scripts_dev.rollout_experiments.sweep import (
     ExperimentConfig,
     OutputPathConfig,
@@ -35,7 +36,6 @@ from scripts_dev.rollout_experiments.sweep import (
     run_sweep,
     single_turn_conditions,
 )
-from src_dev.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from src_dev.rollout_generation.model_providers import (
     ActivationCapProvider,
     LoRaScaleProvider,
@@ -156,7 +156,7 @@ EXPERIMENT_CONFIG = ExperimentConfig(
     user_max_new_tokens=128,
     user_batch_size=16,
     user_max_concurrent=64,
-    dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
+    dataset_path="data/assistant-axis-extraction-questions.jsonl",
     max_samples=32,
     turns_per_phase=[5, 1],
     num_rollouts=3,
@@ -171,18 +171,6 @@ OUTPUT_CONFIG = OutputPathConfig(
     training_run="t_avoiding-train-20260310-164958",
     eval_name="activation_capping",
 )
-
-EVALUATIONS: list[str | PersonaMetricSpec] = [
-    "count_t",
-    # PersonaMetricSpec(
-    #     name="coherence",
-    #     params={
-    #         "judge_config": JudgeLLMConfig(
-    #             provider="openrouter", model="openai/gpt-4o-mini"
-    #         )
-    #     },
-    # ),
-]
 
 # ── Model provider ────────────────────────────────────────────────────────────
 # Uncomment the provider you want to use.
@@ -230,27 +218,27 @@ PROVIDER = ActivationCapProvider(
     axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
     per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
     fractions=[
+        -2.0,
+        -1.8,
+        -1.6,
+        -1.4,
+        -1.2,
         -1.0,
-        -0.9,
         -0.8,
-        -0.7,
         -0.6,
-        -0.5,
         -0.4,
-        -0.3,
         -0.2,
-        -0.1,
         0.0,
-        0.1,
         0.2,
-        0.3,
         0.4,
-        0.5,
         0.6,
-        0.7,
         0.8,
-        0.9,
         1.0,
+        1.2,
+        1.4,
+        1.6,
+        1.8,
+        2.0,
     ],
     capping_layers=list(range(17, 32)),
 )
@@ -272,15 +260,15 @@ _BEHAVIOR_PROMPTS: dict[str, str | None] = {
 # See _build_condition_name() in sweep.py for the naming convention.
 ALL_CONDITIONS = (
     single_turn_conditions(_BEHAVIOR_PROMPTS)
-    + multi_turn_au_conditions(
-        EXPERIMENT_CONFIG,
-        _BEHAVIOR_PROMPTS,
-        _USER_BEHAVIOR_TEMPLATES,
-        turns_per_phase=(
-            EXPERIMENT_CONFIG.turns_per_phase[0],
-            EXPERIMENT_CONFIG.turns_per_phase[1],
-        ),
-    )
+    # + multi_turn_au_conditions(
+    #     EXPERIMENT_CONFIG,
+    #     _BEHAVIOR_PROMPTS,
+    #     _USER_BEHAVIOR_TEMPLATES,
+    #     turns_per_phase=(
+    #         EXPERIMENT_CONFIG.turns_per_phase[0],
+    #         EXPERIMENT_CONFIG.turns_per_phase[1],
+    #     ),
+    # )
     # + multi_turn_aa_conditions(
     #     EXPERIMENT_CONFIG,
     #     _BEHAVIOR_PROMPTS,
@@ -295,10 +283,11 @@ ALL_CONDITIONS = (
 SWEEP_CONFIG = SweepConfig(
     provider=PROVIDER,
     conditions=ALL_CONDITIONS,
-    evaluations=EVALUATIONS,
+    evaluations=[],
     experiment=EXPERIMENT_CONFIG,
     output=OUTPUT_CONFIG,
     skip_completed=True,
+    skip_evals=True,
     on_cell_error="warn",
 )
 
@@ -382,11 +371,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
-
-if __name__ == "__main__":
-    main()
-
-if __name__ == "__main__":
-    main()
     main()

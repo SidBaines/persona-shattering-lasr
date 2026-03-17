@@ -123,7 +123,6 @@ def _write_rollout_info(run_dir: Path, elapsed: float) -> Path:
         "datetime": datetime.now(timezone.utc).isoformat(),
         "git_commit_hash": _git_commit_hash(),
         "elapsed_seconds": round(elapsed, 2),
-        "script_source": _read_calling_script(),
     }
     path = rollouts_dir / "rollout_info.json"
     path.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
@@ -135,9 +134,17 @@ def _write_eval_info(
     evaluations: list[str | PersonaMetricSpec],
     elapsed: float,
 ) -> Path:
-    """Write evals/eval_info.json with metadata about the evaluation run."""
+    """Write eval_info.json and script copy into a timestamped eval_runs/ subdir."""
     evals_dir = run_dir / "evals"
-    evals_dir.mkdir(parents=True, exist_ok=True)
+    eval_names = [
+        e if isinstance(e, str) else e.name if hasattr(e, "name") else str(e)
+        for e in evaluations
+    ]
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    run_name = f"{'__'.join(eval_names)}__{ts}"
+    eval_run_dir = evals_dir / "eval_runs" / run_name
+    eval_run_dir.mkdir(parents=True, exist_ok=True)
+
     info = {
         "status": "ok",
         "datetime": datetime.now(timezone.utc).isoformat(),
@@ -150,10 +157,12 @@ def _write_eval_info(
             else str(e)
             for e in evaluations
         ],
-        "script_source": _read_calling_script(),
     }
-    path = evals_dir / "eval_info.json"
+    path = eval_run_dir / "eval_info.json"
     path.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
+    script_path = Path(sys.argv[0]).resolve()
+    if script_path.exists():
+        shutil.copy2(script_path, eval_run_dir / script_path.name)
     return path
 
 
@@ -288,7 +297,6 @@ class OutputPathConfig:
             / self.category
             / self.trait
             / self.training_run
-            / "evals"
             / "rollouts"
             / self.eval_name
         )
@@ -339,6 +347,7 @@ class SweepConfig(BaseModel):
     - ``"continue"``: print a warning, write ``run_info.json``, and upload
       the failed cell (current default behaviour).
     """
+    skip_evals: bool = False
     plot: bool = True
     plot_metric: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -756,7 +765,7 @@ def upload_to_hf(
 ) -> None:
     """Upload run_dir to HuggingFace, mirroring the structured path.
 
-    Only uploads the evals subtree.
+    Uploads rollout artifacts, excluding evals, datasets, events, and exports.
     """
     if not output_config.hf_repo:
         return
@@ -773,10 +782,63 @@ def upload_to_hf(
             "datasets/*",
             "events/*",
             "exports/*",
+            "evals/*",
             "per_message_metrics.jsonl",
         ],
     )
     print(f"  Uploaded to {url}")
+
+
+def download_rollouts_from_hf(output_config: OutputPathConfig) -> None:
+    """Download rollouts and existing eval files from HF to local scratch.
+
+    Fetches only ``rollouts/rollouts.jsonl`` and ``evals/rollouts_evaluated.jsonl``
+    files under the configured HF path.
+    """
+    if not output_config.hf_repo:
+        return
+
+    from src_dev.utils.hf_hub import download_from_dataset_repo
+
+    login_from_env()
+
+    print(f"Downloading rollouts from HF: {output_config.hf_repo}/{output_config.hf_path}")
+    download_from_dataset_repo(
+        repo_id=output_config.hf_repo,
+        path_in_repo=output_config.hf_path,
+        local_dir=output_config.scratch_root,
+        allow_patterns=[
+            "*/rollouts/rollouts.jsonl",
+            "*/evals/rollouts_evaluated.jsonl",
+        ],
+    )
+
+
+def upload_evals_to_hf(output_config: OutputPathConfig, root_dir: Path) -> None:
+    """Upload only evals/ subtrees from each cell to HuggingFace."""
+    if not output_config.hf_repo:
+        return
+
+    login_from_env()
+
+    eval_dirs = sorted(root_dir.rglob("evals/rollouts_evaluated.jsonl"))
+    if not eval_dirs:
+        print("No evaluated rollouts to upload.")
+        return
+
+    for eval_jsonl in eval_dirs:
+        evals_dir = eval_jsonl.parent  # evals/
+        cell_dir = evals_dir.parent  # variant/condition/
+        rel = cell_dir.relative_to(root_dir)
+        path_in_repo = f"{output_config.hf_path}/{rel}"
+
+        url = upload_folder_to_dataset_repo(
+            local_dir=evals_dir,
+            repo_id=output_config.hf_repo,
+            path_in_repo=f"{path_in_repo}/evals",
+            commit_message=f"Upload evals: {rel}",
+        )
+        print(f"  Uploaded {rel}/evals/ to {url}")
 
 
 # ── Single experiment runner ──────────────────────────────────────────────────
@@ -792,7 +854,8 @@ def run_experiment(
     user_sim: UserSimulatorConfig | None = None,
     preloaded_model: tuple | None = None,
     skip_rollouts: bool = False,
-) -> ConversationMetricsResult:
+    skip_evals: bool = False,
+) -> ConversationMetricsResult | None:
     """Run a complete experiment: phased rollout, evaluation, metadata, export.
 
     Args:
@@ -833,6 +896,10 @@ def run_experiment(
         print("  Skipping rollout generation (using existing)")
 
     # Phase 2: Evaluation
+    if skip_evals or not evaluations:
+        print("  Skipping evaluation")
+        return None
+
     eval_t0 = time.perf_counter()
     result = evaluate_messages(run_dir, evaluations)
     export_evaluated_rollouts(run_dir, result)
@@ -949,6 +1016,7 @@ def _upload_cell_to_hf(
             "datasets/*",
             "events/*",
             "exports/*",
+            "evals/*",
             "per_message_metrics.jsonl",
         ],
     )
@@ -1190,14 +1258,16 @@ def run_sweep(config: SweepConfig) -> Path:
                             user_sim=condition.user_sim,
                             preloaded_model=(model, tokenizer),
                             skip_rollouts=cell_skip_rollouts,
+                            skip_evals=config.skip_evals,
                         )
                         elapsed = time.perf_counter() - cell_t0
+                        aggregates = result.aggregates if result else None
                         _write_run_info(
                             cell_dir,
                             vlabel,
                             condition.name,
                             "ok",
-                            result.aggregates,
+                            aggregates,
                             None,
                             elapsed,
                             output_config=config.output,
@@ -1245,7 +1315,7 @@ def run_sweep(config: SweepConfig) -> Path:
 
     _print_timing_summary(timings, time.perf_counter() - suite_t0)
 
-    if config.plot and config.plot_metric:
+    if config.evaluations and not config.skip_evals and config.plot and config.plot_metric:
         try:
             from src_dev.visualisations.plot_rollout_sweep import plot_sweep
 
@@ -1253,9 +1323,9 @@ def run_sweep(config: SweepConfig) -> Path:
         except Exception as exc:  # noqa: BLE001
             print(f"  Warning: plot generation failed: {exc}", flush=True)
 
-    # Upload plots to HF (cell data is uploaded incrementally in _write_run_info).
-    if config.output.hf_repo:
-        _upload_plots_to_hf(config.output, output_root)
+        # Upload plots to HF (cell data is uploaded incrementally in _write_run_info).
+        if config.output.hf_repo:
+            _upload_plots_to_hf(config.output, output_root)
 
     _teardown_file_logging(log_file, log_handler)
     return output_root

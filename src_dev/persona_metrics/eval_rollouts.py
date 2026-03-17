@@ -4,9 +4,10 @@ Walks a directory tree for ``rollouts/rollouts.jsonl`` files, runs specified
 evaluators on messages, and writes ``evals/rollouts_evaluated.jsonl``
 alongside each input file.
 
-Supports incremental evaluation: if ``rollouts_evaluated.jsonl`` already
-exists, only missing evaluators are run and their scores are merged into
-the existing file.
+Evaluators whose scores already exist in ``rollouts_evaluated.jsonl`` are
+skipped — only new evaluators run and their scores are merged into the
+existing file. To force re-run specific evaluators, list them in
+``overwrite_evaluations``.
 
 Usage::
 
@@ -42,13 +43,25 @@ from src_dev.persona_metrics.registry import get_persona_metric
 
 @dataclass
 class RolloutEvalConfig:
-    """Configuration for evaluating rollout JSONL files."""
+    """Configuration for evaluating rollout JSONL files.
+
+    Args:
+        root_dir: Directory tree to search for rollouts/rollouts.jsonl files.
+        evaluations: Evaluators to run on each message.
+        message_selector: Filter which messages to evaluate.
+        judge: LLM judge configuration for evaluators that need one.
+        overwrite_evaluations: Evaluator names to force re-run even if their
+            scores already exist. By default (empty list), evaluators whose
+            scores are already present in rollouts_evaluated.jsonl are skipped.
+        eval_aliases: Rename evaluator keys in the output scores
+            (e.g. ``{"count_t": "count_t_v2"}``).
+    """
 
     root_dir: Path
     evaluations: list[str | PersonaMetricSpec]
     message_selector: MessageSelector | None = None
     judge: JudgeLLMConfig | None = None
-    incremental: bool = True
+    overwrite_evaluations: list[str] = field(default_factory=list)
     eval_aliases: dict[str, str] = field(default_factory=dict)
 
 
@@ -298,8 +311,18 @@ def _write_eval_info(
     elapsed: float,
     num_messages: int,
 ) -> Path:
-    """Write eval_info.json with metadata about the evaluation run."""
-    evals_dir.mkdir(parents=True, exist_ok=True)
+    """Write eval_info.json and script copy into a timestamped eval_runs/ subdir."""
+    import shutil
+
+    eval_names = [
+        e if isinstance(e, str) else e.name
+        for e in evaluations
+    ]
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    run_name = f"{'__'.join(eval_names)}__{ts}"
+    run_dir = evals_dir / "eval_runs" / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
     info = {
         "status": "ok",
         "datetime": datetime.now(timezone.utc).isoformat(),
@@ -310,12 +333,14 @@ def _write_eval_info(
             e if isinstance(e, str) else str(e)
             for e in evaluations
         ],
-        "script_source": _read_calling_script(),
     }
-    path = evals_dir / "eval_info.json"
+    path = run_dir / "eval_info.json"
     path.write_text(
         json.dumps(info, indent=2, default=str), encoding="utf-8"
     )
+    script_path = Path(sys.argv[0]).resolve()
+    if script_path.exists():
+        shutil.copy2(script_path, run_dir / script_path.name)
     return path
 
 
@@ -379,49 +404,51 @@ def evaluate_rollouts(
             continue
 
         # Check what's already evaluated.
-        evals_to_run = list(config.evaluations)
-        if config.incremental:
-            existing_entries, done_evals = (
-                _load_existing_evaluated(evals_dir)
+        overwrite_names = set(config.overwrite_evaluations)
+        existing_entries, done_evals = (
+            _load_existing_evaluated(evals_dir)
+        )
+
+        # Merge existing scores into loaded entries (preserves old scores).
+        if existing_entries:
+            for orig, existing in zip(
+                entries, existing_entries
+            ):
+                for ri, msgs in existing.get(
+                    "messages", {}
+                ).items():
+                    if ri in orig.get("messages", {}):
+                        for mi, msg in enumerate(msgs):
+                            if mi < len(
+                                orig["messages"][ri]
+                            ):
+                                orig["messages"][ri][
+                                    mi
+                                ].setdefault(
+                                    "scores", {}
+                                ).update(
+                                    msg.get("scores", {})
+                                )
+
+        # Skip evaluators already done, unless they're in
+        # overwrite_evaluations or eval_aliases.
+        evals_to_run = [
+            e
+            for e in config.evaluations
+            if (e if isinstance(e, str) else e.name)
+            not in done_evals
+            or (e if isinstance(e, str) else e.name)
+            in overwrite_names
+            or (e if isinstance(e, str) else e.name)
+            in config.eval_aliases
+        ]
+
+        if not evals_to_run:
+            print(
+                f"    All evals already done: "
+                f"{sorted(done_evals)}"
             )
-            # Use existing entries as base (preserves old scores).
-            if existing_entries:
-                # Merge existing scores into the loaded entries.
-                for orig, existing in zip(
-                    entries, existing_entries
-                ):
-                    for ri, msgs in existing.get(
-                        "messages", {}
-                    ).items():
-                        if ri in orig.get("messages", {}):
-                            for mi, msg in enumerate(msgs):
-                                if mi < len(
-                                    orig["messages"][ri]
-                                ):
-                                    orig["messages"][ri][
-                                        mi
-                                    ].setdefault(
-                                        "scores", {}
-                                    ).update(
-                                        msg.get("scores", {})
-                                    )
-
-            # Filter out evals already done (unless aliased).
-            evals_to_run = [
-                e
-                for e in config.evaluations
-                if (e if isinstance(e, str) else e.name)
-                not in done_evals
-                or (e if isinstance(e, str) else e.name)
-                in config.eval_aliases
-            ]
-
-            if not evals_to_run:
-                print(
-                    f"    All evals already done: "
-                    f"{sorted(done_evals)}"
-                )
-                continue
+            continue
 
         # Extract messages to evaluate.
         eval_items = _extract_eval_items(

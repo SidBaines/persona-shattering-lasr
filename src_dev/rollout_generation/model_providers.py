@@ -30,6 +30,8 @@ from typing import Any, Iterator
 
 from torch import nn
 
+from src_dev.activation_capping.model import ActivationCappedModel
+
 
 def _resolve_hf_path(path: str) -> str:
     """Resolve ``hf://org/repo/file`` to a local path via ``huggingface_hub``.
@@ -335,8 +337,6 @@ class ActivationCapProvider(ModelProvider):
                 self._model, self._tokenizer = _load_base_model(
                     self._base_model, self._dtype
                 )
-
-        from scripts.experiments.activation_capping.model import ActivationCappedModel
 
         fraction = float(variant)
         # Negative fractions extrapolate below the base range and use ceiling
