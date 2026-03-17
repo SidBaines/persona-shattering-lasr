@@ -1,33 +1,33 @@
 {
   "judge": "extraversion",
-  "timestamp": "20260317_171715",
+  "timestamp": "20260317_183057",
   "n_items": 28,
   "models": {
     "openai/gpt-4o-mini": {
-      "pearson_r": 0.8909,
-      "spearman_r": 0.89,
-      "mae": 1.0357,
+      "pearson_r": 0.9425,
+      "spearman_r": 0.9338,
+      "mae": 0.7143,
       "n_valid": 28,
       "confound_correct": 0,
-      "confound_total": 2,
+      "confound_total": 1,
       "confound_acc": 0.0,
       "pass": {
-        "pearson_r": false,
+        "pearson_r": true,
         "spearman_r": true,
-        "mae": false,
+        "mae": true,
         "confound_acc": false
       }
     },
     "anthropic/claude-3-5-haiku": {
-      "pearson_r": 0.8963,
-      "spearman_r": 0.907,
-      "mae": 0.7857,
+      "pearson_r": 0.9207,
+      "spearman_r": 0.9195,
+      "mae": 0.6786,
       "n_valid": 28,
       "confound_correct": 0,
-      "confound_total": 2,
+      "confound_total": 1,
       "confound_acc": 0.0,
       "pass": {
-        "pearson_r": false,
+        "pearson_r": true,
         "spearman_r": true,
         "mae": true,
         "confound_acc": false
@@ -45,7 +45,7 @@
   },
   "inter_model": {
     "openai/gpt-4o-mini vs anthropic/claude-3-5-haiku": {
-      "mae": 0.8929,
+      "mae": 0.5357,
       "pass": true
     }
   }
