@@ -175,8 +175,8 @@ OUTPUT_CONFIG = OutputPathConfig(
 # ── Model provider ────────────────────────────────────────────────────────────
 # Uncomment the provider you want to use.
 
-# PROVIDER = LoRaScaleProvider(
-PROVIDER = VLLMLoRaScaleProvider(
+PROVIDER = LoRaScaleProvider(
+    # PROVIDER = VLLMLoRaScaleProvider(
     base_model=BASE_MODEL,
     adapter=ADAPTER_PATH,
     scale_points=[
@@ -198,10 +198,10 @@ PROVIDER = VLLMLoRaScaleProvider(
         # 1.75,
         # 2.0,
     ],
-    baked_adapters_dir=Path("scratch/baked_adapters/t_enjoying"),
-    temperature=EXPERIMENT_CONFIG.assistant_temperature,
-    top_p=EXPERIMENT_CONFIG.assistant_top_p,
-    max_new_tokens=EXPERIMENT_CONFIG.assistant_max_new_tokens,
+    # baked_adapters_dir=Path("scratch/baked_adapters/t_enjoying"),
+    # temperature=EXPERIMENT_CONFIG.assistant_temperature,
+    # top_p=EXPERIMENT_CONFIG.assistant_top_p,
+    # max_new_tokens=EXPERIMENT_CONFIG.assistant_max_new_tokens,
 )
 
 # Single model (uncomment to use):
