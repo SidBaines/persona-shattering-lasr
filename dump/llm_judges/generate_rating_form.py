@@ -27,7 +27,7 @@ import random
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 JUDGES_DIR = Path(__file__).parent
@@ -46,15 +46,20 @@ SCALE_LABELS = [
 
 
 
-def load_heldout(judge_name: str) -> list[dict]:
-    candidates = [
-        JUDGES_DIR / "ocean" / judge_name / "heldout.jsonl",
-        JUDGES_DIR / judge_name / "heldout.jsonl",
-    ]
-    for path in candidates:
-        if path.exists():
-            return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+def judge_dir(judge_name: str) -> Path:
+    """Return the directory containing judge.py and heldout.jsonl."""
+    for candidate in [
+        JUDGES_DIR / "ocean" / judge_name,
+        JUDGES_DIR / judge_name,
+    ]:
+        if (candidate / "heldout.jsonl").exists():
+            return candidate
     raise FileNotFoundError(f"heldout.jsonl not found for '{judge_name}'")
+
+
+def load_heldout(judge_name: str) -> list[dict]:
+    path = judge_dir(judge_name) / "heldout.jsonl"
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
 
 
 def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str) -> str:
@@ -268,7 +273,7 @@ def main() -> None:
     output_path = (
         Path(args.output)
         if args.output
-        else project_root / "scratch" / "rating" / f"{args.judge}_{args.rater}.html"
+        else judge_dir(args.judge) / "ratings" / f"{args.rater}.html"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")

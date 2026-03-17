@@ -4,12 +4,11 @@
 Evaluates an LLM judge along three dimensions:
 
 1. Human correlation   — judge scores vs. a reference score set.
-                         Reference is either the expected_score in heldout.jsonl
-                         (author labels) or a filled rating CSV (--human-scores).
-                         When a rating CSV is provided and has multiple rater columns,
-                         inter-rater agreement is reported first, then each rater's
-                         correlation with each model is shown.
-                         Reports Pearson r, Spearman r, MAE, and a score-by-score table.
+                         Falls back to expected_score in heldout.jsonl when no
+                         human ratings are available. Rating CSVs are auto-discovered
+                         from <judge>/ratings/*.csv; additional paths can be passed
+                         via --human-scores. Inter-rater agreement reported when
+                         multiple raters are present.
 
 2. Self-consistency    — run the same judge n_runs times at temperature=0.9.
                          Reports std per item and overall mean std.
@@ -17,27 +16,24 @@ Evaluates an LLM judge along three dimensions:
 3. Cross-model         — run the heldout set through each model in --models.
                          Reports per-model human correlation and pairwise agreement.
 
-Produces summary tables to stdout and optional matplotlib plots.
+A pass/fail scorecard is printed at the end summarising all criteria.
 
 Usage:
-    cd /workspace/persona-shattering-lasr
+    cd persona-shattering-lasr
 
-    # Quick check with author labels:
-    uv run python scripts/dump/llm_judges/calibrate.py \\
+    # Quick check (uses expected_score as reference, ratings/ auto-discovered):
+    python dump/llm_judges/calibrate.py \\
         --judge neuroticism \\
         --models openai/gpt-4o-mini \\
         --provider openrouter
 
-    # With filled human-rating CSVs (one per rater, from generate_rating_form.py):
-    uv run python scripts/dump/llm_judges/calibrate.py \\
+    # With additional rating CSVs and consistency check:
+    python dump/llm_judges/calibrate.py \\
         --judge neuroticism \\
-        --models openai/gpt-4o-mini anthropic/claude-3-haiku \\
+        --models openai/gpt-4o-mini anthropic/claude-3.5-haiku \\
         --provider openrouter \\
-        --human-scores scratch/rating/neuroticism_alice_ratings.csv \\
-                       scratch/rating/neuroticism_bob_ratings.csv \\
-        --n-runs 5 \\
-        --plot \\
-        --output-dir scratch/judge_calibration/neuroticism
+        --human-scores path/to/extra_rater.csv \\
+        --n-runs 3
 """
 
 from __future__ import annotations
@@ -52,13 +48,13 @@ import statistics
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from scripts.persona_metrics.config import JudgeLLMConfig
-from scripts.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
+from src_dev.persona_metrics.config import JudgeLLMConfig
+from src_dev.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
 
 JUDGES_DIR = Path(__file__).parent
 
@@ -68,50 +64,49 @@ JUDGES_DIR = Path(__file__).parent
 # ---------------------------------------------------------------------------
 
 
+def judge_dir(judge_name: str) -> Path:
+    """Return the directory containing judge.py and heldout.jsonl."""
+    for candidate in [
+        JUDGES_DIR / "ocean" / judge_name,
+        JUDGES_DIR / judge_name,
+    ]:
+        if (candidate / "heldout.jsonl").exists():
+            return candidate
+    raise FileNotFoundError(f"No judge directory found for '{judge_name}'")
+
+
 def load_judge_class(judge_name: str) -> type[LLMJudgeMetric]:
     """Import the judge class from ocean/<judge>/judge.py or <judge>/judge.py."""
-    candidates = [
-        JUDGES_DIR / "ocean" / judge_name / "judge.py",
-        JUDGES_DIR / judge_name / "judge.py",
-    ]
-    for module_path in candidates:
-        if module_path.exists():
-            spec = importlib.util.spec_from_file_location(f"judge_{judge_name}", module_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            for attr in vars(module).values():
-                if (
-                    isinstance(attr, type)
-                    and issubclass(attr, LLMJudgeMetric)
-                    and attr is not LLMJudgeMetric
-                    and isinstance(getattr(attr, "name", None), str)
-                ):
-                    return attr
+    module_path = judge_dir(judge_name) / "judge.py"
+    spec = importlib.util.spec_from_file_location(f"judge_{judge_name}", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for attr in vars(module).values():
+        if (
+            isinstance(attr, type)
+            and issubclass(attr, LLMJudgeMetric)
+            and attr is not LLMJudgeMetric
+            and isinstance(getattr(attr, "name", None), str)
+        ):
+            return attr
     raise FileNotFoundError(
-        f"No judge.py with an LLMJudgeMetric subclass found for '{judge_name}'. Tried:\n"
-        + "\n".join(f"  {p}" for p in candidates)
+        f"No LLMJudgeMetric subclass found in {module_path}"
     )
 
 
 def load_heldout(judge_name: str) -> list[dict]:
-    """Load heldout.jsonl, checking ocean/ layout first."""
-    candidates = [
-        JUDGES_DIR / "ocean" / judge_name / "heldout.jsonl",
-        JUDGES_DIR / judge_name / "heldout.jsonl",
-    ]
-    for path in candidates:
-        if path.exists():
-            items = []
-            with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        items.append(json.loads(line))
-            return items
-    raise FileNotFoundError(
-        f"heldout.jsonl not found for judge '{judge_name}'. Tried:\n"
-        + "\n".join(f"  {p}" for p in candidates)
-    )
+    """Load heldout.jsonl for the given judge."""
+    path = judge_dir(judge_name) / "heldout.jsonl"
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def find_ratings(judge_name: str) -> list[Path]:
+    """Return all CSV rating files from the judge's ratings/ directory."""
+    ratings_dir = judge_dir(judge_name) / "ratings"
+    if not ratings_dir.exists():
+        return []
+    return sorted(ratings_dir.glob("*.csv"))
 
 
 def load_human_scores_from_csv(csv_path: Path, items: list[dict]) -> dict[str, list[int | None]]:
@@ -227,17 +222,16 @@ async def run_once(
     judge_cls: type[LLMJudgeMetric],
     items: list[dict],
     config: JudgeLLMConfig,
-) -> list[int | None]:
+) -> tuple[list[int | None], list[dict]]:
+    """Run judge once. Returns (scores, raw_results) where raw_results include reasoning/evidence."""
     judge = judge_cls(judge_config=config)
     score_key = f"{judge.name}.score"
     error_sentinel = judge.score_error
     responses = [item["response"] for item in items]
     questions = [item["question"] for item in items]
-    results = await judge.evaluate_batch_async(responses, questions)
-    return [
-        None if (s := r.get(score_key)) == error_sentinel else s
-        for r in results
-    ]
+    raw = await judge.evaluate_batch_async(responses, questions)
+    scores = [None if (s := r.get(score_key)) == error_sentinel else s for r in raw]
+    return scores, raw
 
 
 async def run_consistency(
@@ -248,8 +242,8 @@ async def run_consistency(
 ) -> list[list[int | None]]:
     high_temp = config.model_copy(update={"temperature": 0.9})
     runs = await asyncio.gather(*[run_once(judge_cls, items, high_temp) for _ in range(n_runs)])
-    # transpose: runs[run][item] -> per_item[item][run]
-    return [[runs[run][item] for run in range(n_runs)] for item in range(len(items))]
+    # transpose: runs[run][item] -> per_item[item][run]  (only scores, not raw)
+    return [[runs[run][0][item] for run in range(n_runs)] for item in range(len(items))]
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +376,129 @@ def print_cross_model_summary(
             for m2 in names[i + 1:]:
                 _, _, me, n = _corr_stats(model_scores[m1], model_scores[m2])
                 print(f"    {m1} vs {m2}: MAE={me:.2f} (n={n})")
+    print(SEP)
+
+
+# ---------------------------------------------------------------------------
+# Pass/fail scorecard
+# ---------------------------------------------------------------------------
+
+# Thresholds — adjust as the heldout set matures.
+_THRESHOLDS = {
+    "pearson_r":       (0.90, "≥ 0.90"),
+    "spearman_r":      (0.85, "≥ 0.85"),
+    "mae":             (1.00, "≤ 1.00", True),   # True = lower is better
+    "confound_acc":    (1.00, "= 100%"),
+    "consistency_std": (0.50, "≤ 0.50 mean", True),
+    "inter_model_mae": (1.00, "≤ 1.00", True),
+}
+
+
+def _check(key: str, value: float) -> bool:
+    entry = _THRESHOLDS[key]
+    lower_is_better = len(entry) == 3 and entry[2]
+    return value <= entry[0] if lower_is_better else value >= entry[0]
+
+
+def compute_scorecard(
+    items: list[dict],
+    model_scores: dict[str, list[int | None]],
+    reference: list[int | None],
+    ref_label: str,
+    consistency_runs: list[list[int | None]] | None,
+    consistency_model: str | None,
+) -> dict:
+    """Compute scorecard metrics. Returns a serialisable dict."""
+    result: dict = {"reference": ref_label, "models": {}, "consistency": None, "inter_model": {}}
+
+    for model_label, scores in model_scores.items():
+        pr, sr, me, n = _corr_stats(reference, scores)
+        confound_pairs = [(item, s) for item, s in zip(items, scores)
+                          if item.get("category", "").startswith("confound")]
+        n_confound_correct = sum(1 for _, s in confound_pairs if s is not None and s == 0)
+        confound_acc = n_confound_correct / len(confound_pairs) if confound_pairs else None
+
+        result["models"][model_label] = {
+            "pearson_r":        round(pr, 4) if n >= 2 else None,
+            "spearman_r":       round(sr, 4) if n >= 2 else None,
+            "mae":              round(me, 4) if n >= 2 else None,
+            "n_valid":          n,
+            "confound_correct": n_confound_correct if confound_pairs else None,
+            "confound_total":   len(confound_pairs) if confound_pairs else None,
+            "confound_acc":     round(confound_acc, 4) if confound_acc is not None else None,
+            "pass": {
+                "pearson_r":    _check("pearson_r", pr) if n >= 2 else None,
+                "spearman_r":   _check("spearman_r", sr) if n >= 2 else None,
+                "mae":          _check("mae", me) if n >= 2 else None,
+                "confound_acc": _check("confound_acc", confound_acc) if confound_acc is not None else None,
+            },
+        }
+
+    if consistency_runs is not None:
+        stds = [
+            statistics.stdev(valid)
+            for runs in consistency_runs
+            if len(valid := [s for s in runs if s is not None]) > 1
+        ]
+        mean_std = round(statistics.mean(stds), 4) if stds else None
+        result["consistency"] = {
+            "model": consistency_model,
+            "n_runs": len(consistency_runs[0]) if consistency_runs else 0,
+            "mean_std": mean_std,
+            "pass": _check("consistency_std", mean_std) if mean_std is not None else None,
+        }
+
+    model_names = list(model_scores.keys())
+    for i, m1 in enumerate(model_names):
+        for m2 in model_names[i + 1:]:
+            _, _, me, n = _corr_stats(model_scores[m1], model_scores[m2])
+            result["inter_model"][f"{m1} vs {m2}"] = {
+                "mae": round(me, 4) if n else None,
+                "pass": _check("inter_model_mae", me) if n else None,
+            }
+
+    return result
+
+
+def print_scorecard(scorecard: dict) -> None:
+    print(f"\n{SEP}")
+    print("SCORECARD")
+    print(SEP)
+
+    def row(label: str, value_str: str, threshold_str: str, passed: bool | None) -> None:
+        result = "PASS" if passed is True else ("FAIL" if passed is False else "n/a ")
+        print(f"  {result}  {label:<38}  {value_str:>8}  (threshold {threshold_str})")
+
+    for model_label, m in scorecard["models"].items():
+        print(f"\n  Model: {model_label}")
+        pr, sr, me = m["pearson_r"], m["spearman_r"], m["mae"]
+        row("Pearson r vs reference",      f"{pr:+.3f}" if pr is not None else "n/a",
+            _THRESHOLDS["pearson_r"][1],   m["pass"]["pearson_r"])
+        row("Spearman r vs reference",     f"{sr:+.3f}" if sr is not None else "n/a",
+            _THRESHOLDS["spearman_r"][1],  m["pass"]["spearman_r"])
+        row("MAE vs reference",            f"{me:.2f}" if me is not None else "n/a",
+            _THRESHOLDS["mae"][1],         m["pass"]["mae"])
+        ca = m["confound_acc"]
+        ca_str = f"{m['confound_correct']}/{m['confound_total']}" if ca is not None else "n/a"
+        row("Confound accuracy (score=0)", ca_str,
+            _THRESHOLDS["confound_acc"][1], m["pass"]["confound_acc"])
+
+    cons = scorecard["consistency"]
+    if cons:
+        print(f"\n  Consistency (temp=0.9, {cons['n_runs']} runs, model={cons['model']}):")
+        ms = cons["mean_std"]
+        row("Mean std across items", f"{ms:.3f}" if ms is not None else "n/a",
+            _THRESHOLDS["consistency_std"][1], cons["pass"])
+    else:
+        print(f"\n  Consistency: not run (use --n-runs)")
+
+    if scorecard["inter_model"]:
+        print(f"\n  Inter-model agreement:")
+        for pair, v in scorecard["inter_model"].items():
+            me = v["mae"]
+            row(pair[:42], f"{me:.2f}" if me is not None else "n/a",
+                _THRESHOLDS["inter_model_mae"][1], v["pass"])
+
     print(SEP)
 
 
@@ -572,8 +689,8 @@ def main() -> None:
         help="Model for consistency check. Defaults to first model in --models.",
     )
     parser.add_argument("--max-concurrent", type=int, default=20)
-    parser.add_argument("--plot", action="store_true", help="Generate matplotlib plots.")
-    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--save", action="store_true",
+                        help="Save per-item results (scores, evidence, reasoning) to <judge>/results/.")
     parser.add_argument("--log-level", default="WARNING")
     args = parser.parse_args()
 
@@ -588,19 +705,17 @@ def main() -> None:
     print(f"Items : {len(items)}")
     print(f"Models: {args.models}")
 
-    output_dir = (
-        Path(args.output_dir)
-        if args.output_dir
-        else project_root / "scratch" / "judge_calibration" / args.judge
-    )
-
     # --- Determine reference scores ---
     author_reference = [item["expected_score"] for item in items]
     rater_scores: dict[str, list[int | None]] = {}
 
+    # Auto-discover ratings from judge's ratings/ dir, then merge any explicit paths.
+    csv_paths: list[Path] = find_ratings(args.judge)
     if args.human_scores:
-        csv_paths = [Path(p) for p in args.human_scores]
-        print(f"\nLoading human scores from {[p.name for p in csv_paths]} ...")
+        csv_paths += [Path(p) for p in args.human_scores]
+
+    if csv_paths:
+        print(f"\nLoading human scores from: {[p.name for p in csv_paths]}")
         rater_scores = load_human_scores(csv_paths, items)
         print(f"  Raters found: {list(rater_scores.keys())}")
 
@@ -611,64 +726,146 @@ def main() -> None:
         mean_reference: list[int | None] = []
         for i in range(len(items)):
             vals = [rater_scores[r][i] for r in rater_scores if rater_scores[r][i] is not None]
-            if vals:
-                mean_reference.append(round(statistics.mean(vals)))
-            else:
-                mean_reference.append(author_reference[i])  # fall back to author label
+            mean_reference.append(round(statistics.mean(vals)) if vals else author_reference[i])
         reference = mean_reference
         ref_label = f"human mean ({', '.join(rater_scores.keys())})"
     else:
         reference = author_reference
         ref_label = "author (expected_score)"
 
-    # --- 1. Run models at temp=0, report human correlation ---
+    import datetime
+    import io
+
+    # Capture all output for the saved MD report.
+    _log_buf = io.StringIO()
+
+    def _tee(text: str = "") -> None:
+        """Print to stdout and buffer simultaneously."""
+        print(text)
+        _log_buf.write(text + "\n")
+
+    ts_run = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # --- 1. Run models at temp=0.9 ---
     model_scores: dict[str, list[int | None]] = {}
+    all_raw: dict[str, list[dict]] = {}
+    judge_name_str: str = ""
     for model in args.models:
         config = JudgeLLMConfig(
             provider=args.provider,
             model=model,
-            temperature=0.0,
+            temperature=0.9,
             max_concurrent=args.max_concurrent,
         )
-        print(f"\nRunning {model} (temp=0) ...")
-        scores = asyncio.run(run_once(judge_cls, items, config))
+        _tee(f"\nRunning {model} (temp=0.9) ...")
+        scores, raw_results = asyncio.run(run_once(judge_cls, items, config))
         model_scores[model] = scores
-        print_human_correlation(items, scores, reference, ref_label, model)
+        all_raw[model] = raw_results
+        if not judge_name_str:
+            judge_name_str = judge_cls(judge_config=config).name
 
-        # Also show per-rater correlation if individual rater scores are available
-        if rater_scores:
-            print(f"  Per-rater correlation [{model}]:")
-            for rater, r_scores in rater_scores.items():
-                pr, sr, me, n = _corr_stats(r_scores, scores)
-                print(f"    {rater:<20}  pearson={pr:+.3f}  spearman={sr:+.3f}  mae={me:.2f}  n={n}")
+        # Capture correlation table into buffer by temporarily redirecting stdout
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print_human_correlation(items, scores, reference, ref_label, model)
+            if rater_scores:
+                print(f"  Per-rater correlation [{model}]:")
+                for rater, r_scores in rater_scores.items():
+                    pr, sr, me, n = _corr_stats(r_scores, scores)
+                    print(f"    {rater:<20}  pearson={pr:+.3f}  spearman={sr:+.3f}  mae={me:.2f}  n={n}")
+        captured = buf.getvalue()
+        print(captured, end="")
+        _log_buf.write(captured)
 
     # --- 2. Cross-model summary ---
     if len(args.models) > 1:
-        print_cross_model_summary(items, model_scores, reference, ref_label)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print_cross_model_summary(items, model_scores, reference, ref_label)
+        captured = buf.getvalue()
+        print(captured, end="")
+        _log_buf.write(captured)
 
     # --- 3. Self-consistency ---
     consistency_runs = None
+    consistency_model_used = None
     if args.n_runs > 0:
-        consistency_model = args.consistency_model or args.models[0]
+        consistency_model_used = args.consistency_model or args.models[0]
         config = JudgeLLMConfig(
             provider=args.provider,
-            model=consistency_model,
-            temperature=0.0,
+            model=consistency_model_used,
+            temperature=0.9,
             max_concurrent=args.max_concurrent,
         )
-        print(f"\nConsistency check: {args.n_runs} runs at temp=0.9 [{consistency_model}] ...")
+        _tee(f"\nConsistency check: {args.n_runs} runs at temp=0.9 [{consistency_model_used}] ...")
         consistency_runs = asyncio.run(run_consistency(judge_cls, items, config, args.n_runs))
-        print_consistency(items, consistency_runs)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print_consistency(items, consistency_runs)
+        captured = buf.getvalue()
+        print(captured, end="")
+        _log_buf.write(captured)
 
-    # --- 4. Plots ---
-    if args.plot:
-        print(f"\nGenerating plots → {output_dir}")
-        consistency_model_label = args.consistency_model or (args.models[0] if args.models else None)
-        plot_calibration(
-            items, model_scores, reference, ref_label, consistency_runs, output_dir,
-            rater_scores=rater_scores or None,
-            consistency_model=consistency_model_label,
+    # --- 4. Scorecard ---
+    scorecard = compute_scorecard(
+        items, model_scores, reference, ref_label, consistency_runs, consistency_model_used
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        print_scorecard(scorecard)
+    captured = buf.getvalue()
+    print(captured, end="")
+    _log_buf.write(captured)
+
+    # --- 5. Save ---
+    if args.save:
+        results_dir = judge_dir(args.judge) / "results" / ts_run
+        results_dir.mkdir(parents=True, exist_ok=True)
+        reasoning_key = f"{judge_name_str}.reasoning"
+
+        # Per-item JSONL for each model
+        for model in args.models:
+            safe_model = model.replace("/", "_")
+            out_path = results_dir / f"{safe_model}.jsonl"
+            with open(out_path, "w") as f:
+                for item, score, raw in zip(items, model_scores[model], all_raw[model]):
+                    f.write(json.dumps({
+                        "id": item["id"],
+                        "category": item["category"],
+                        "expected_score": item["expected_score"],
+                        "score": score,
+                        "reasoning": raw.get(reasoning_key, ""),
+                        "model": model,
+                        "provider": args.provider,
+                        "temperature": 0.9,
+                    }) + "\n")
+            print(f"  Saved → {out_path}")
+
+        # Scorecard JSON
+        sc_path = results_dir / "scorecard.json"
+        sc_path.write_text(json.dumps({
+            "judge": args.judge,
+            "timestamp": ts_run,
+            "n_items": len(items),
+            "models": args.models,
+            "provider": args.provider,
+            "temperature": 0.9,
+            **scorecard,
+        }, indent=2))
+        print(f"  Saved → {sc_path}")
+
+        # Full stdout log as Markdown
+        md_path = results_dir / "run.md"
+        md_path.write_text(
+            f"# Calibration run — {args.judge} — {ts_run}\n\n"
+            f"**Models:** {', '.join(args.models)}  \n"
+            f"**Provider:** {args.provider}  \n"
+            f"**Temperature:** 0.9  \n"
+            f"**Items:** {len(items)}  \n\n"
+            "```\n" + _log_buf.getvalue() + "\n```\n"
         )
+        print(f"  Saved → {md_path}")
 
     print("\nDone.")
 
