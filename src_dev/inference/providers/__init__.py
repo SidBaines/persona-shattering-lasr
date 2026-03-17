@@ -39,8 +39,12 @@ def get_provider(name: str, config: "InferenceConfig") -> "InferenceProvider":
         from src_dev.inference.providers.anthropic import AnthropicProvider
 
         return AnthropicProvider(config)
+    elif name == "vllm":
+        from src_dev.inference.providers.vllm import VllmProvider
+
+        return VllmProvider(config)
     else:
         raise ValueError(
             f"Unknown inference provider: {name!r}. "
-            "Available: ['local', 'openai', 'openrouter', 'anthropic']"
+            "Available: ['local', 'openai', 'openrouter', 'anthropic', 'vllm']"
         )

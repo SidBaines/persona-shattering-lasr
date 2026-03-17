@@ -23,14 +23,17 @@ Usage::
 
 from __future__ import annotations
 
+import gc
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+import torch
 from torch import nn
 
 from src_dev.activation_capping.model import ActivationCappedModel
+from src_dev.inference.providers.base import InferenceProvider, PromptInput
 
 
 def _resolve_hf_path(path: str) -> str:
@@ -405,3 +408,231 @@ class SingleModelProvider(ModelProvider):
                 pass
             self._model = None
             self._tokenizer = None
+
+
+# ── vLLM LoRA scale provider ─────────────────────────────────────────────────
+
+
+class _VllmVariantProvider(InferenceProvider):
+    """Thin InferenceProvider wrapper pairing a shared vLLM engine with one baked LoRA.
+
+    Used internally by :class:`VLLMLoRaScaleProvider` so each scale-variant
+    yields an ``InferenceProvider`` that the sweep framework can detect and
+    pass directly to :class:`GpuBatchExecutor`.
+    """
+
+    def __init__(
+        self,
+        llm: Any,
+        lora_request: Any,
+        SamplingParams: Any,
+        temperature: float,
+        top_p: float,
+        max_new_tokens: int,
+    ) -> None:
+        self._llm = llm
+        self._lora_request = lora_request
+        self._SamplingParams = SamplingParams
+        self._temperature = temperature
+        self._top_p = top_p
+        self._max_new_tokens = max_new_tokens
+
+    def generate(self, prompt: PromptInput, **kwargs) -> str:
+        """Generate a response for a single prompt."""
+        return self.generate_batch([prompt], **kwargs)[0]
+
+    def generate_batch(self, prompts: list[PromptInput], **kwargs) -> list[str]:
+        """Generate responses for a batch of prompts via vLLM."""
+        sampling_params = self._SamplingParams(
+            temperature=kwargs.get("temperature", self._temperature),
+            top_p=kwargs.get("top_p", self._top_p),
+            max_tokens=kwargs.get("max_new_tokens", self._max_new_tokens),
+        )
+        formatted = [
+            [{"role": "user", "content": p}] if isinstance(p, str) else p
+            for p in prompts
+        ]
+        outputs = self._llm.chat(
+            messages=formatted,
+            sampling_params=sampling_params,
+            lora_request=self._lora_request,
+            use_tqdm=False,
+        )
+        return [out.outputs[0].text for out in outputs]
+
+
+class VLLMLoRaScaleProvider(ModelProvider):
+    """Sweeps LoRA adapter scaling factors using vLLM for high-throughput inference.
+
+    On entry (``__enter__``):
+    1. Loads base model + adapter via PEFT and bakes all scale points as
+       separate on-disk adapters (skipping any that already exist).
+    2. Frees the PEFT model from GPU memory.
+    3. Starts a single vLLM engine with ``enable_lora=True``.
+
+    Each ``activate(variant)`` yields a :class:`_VllmVariantProvider` — an
+    :class:`InferenceProvider` that wraps the shared engine with the
+    per-variant ``LoRARequest``.  The sweep framework detects this and uses
+    it directly as the assistant provider (no extra LocalProvider wrapping).
+
+    Args:
+        base_model: HuggingFace model ID.
+        adapter: Adapter path or ``"repo_id::subfolder"`` reference.
+        scale_points: List of scale factors to sweep.
+        baked_adapters_dir: Directory where baked adapters are cached on disk.
+            Re-runs skip baking if the directory already exists.
+        temperature: Sampling temperature for generation.
+        top_p: Top-p for generation.
+        max_new_tokens: Max tokens to generate per response.
+        adapter_name: Internal PEFT adapter name.
+        dtype: Torch dtype for both baking and vLLM engine.
+        gpu_memory_utilization: vLLM GPU memory fraction (0.0–1.0).
+        max_model_len: Optional context length override for the vLLM engine.
+        enforce_eager: Disable CUDA graphs (useful for debugging).
+    """
+
+    def __init__(
+        self,
+        base_model: str,
+        adapter: str,
+        scale_points: list[float],
+        baked_adapters_dir: Path,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        max_new_tokens: int = 128,
+        adapter_name: str = "default",
+        dtype: str = "bfloat16",
+        gpu_memory_utilization: float = 0.90,
+        max_model_len: int | None = None,
+        enforce_eager: bool = False,
+    ) -> None:
+        self._base_model = base_model
+        self._adapter = adapter
+        self._scale_points = sorted(scale_points)
+        self._baked_adapters_dir = Path(baked_adapters_dir)
+        self._temperature = temperature
+        self._top_p = top_p
+        self._max_new_tokens = max_new_tokens
+        self._adapter_name = adapter_name
+        self._dtype = dtype
+        self._gpu_memory_utilization = gpu_memory_utilization
+        self._max_model_len = max_model_len
+        self._enforce_eager = enforce_eager
+
+        self._llm: Any = None
+        self._SamplingParams: Any = None
+        self._lora_requests: dict[str, Any] = {}
+        self._baked_dirs: dict[str, Path] = {}
+
+    def variant_names(self) -> list[str]:
+        return [str(s) for s in self._scale_points]
+
+    def variant_label(self, variant: str) -> str:
+        return f"scale_{float(variant):+.2f}"
+
+    def __enter__(self) -> "VLLMLoRaScaleProvider":
+        self._bake_all_adapters()
+        self._init_vllm_engine()
+        return self
+
+    def _bake_all_adapters(self) -> None:
+        """Load PEFT model, bake all scale variants to disk, then free GPU memory."""
+        from src.utils.lora_baking import bake_lora_scale
+
+        self._baked_adapters_dir.mkdir(parents=True, exist_ok=True)
+        model, _tokenizer = _load_peft_model(
+            self._base_model, self._adapter, self._adapter_name, self._dtype
+        )
+
+        print(
+            f"  Baking {len(self._scale_points)} LoRA scale variant(s) "
+            f"to {self._baked_adapters_dir} ...",
+            flush=True,
+        )
+        for scale in self._scale_points:
+            variant = str(scale)
+            out_dir = self._baked_adapters_dir / self.variant_label(variant)
+            if out_dir.exists():
+                print(f"    {self.variant_label(variant)}: already baked, skipping", flush=True)
+            else:
+                print(f"    {self.variant_label(variant)}: baking ...", flush=True)
+                bake_lora_scale(model, self._adapter_name, scale, out_dir)
+            self._baked_dirs[variant] = out_dir
+
+        # Free PEFT model before initialising vLLM to avoid double GPU usage.
+        try:
+            model.cpu()
+        except Exception:
+            pass
+        del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _init_vllm_engine(self) -> None:
+        """Start the vLLM engine and pre-build all LoRARequests."""
+        try:
+            from vllm import LLM, SamplingParams
+            from vllm.lora.request import LoRARequest
+        except ImportError as exc:
+            raise ImportError(
+                "VLLMLoRaScaleProvider requires 'vllm': pip install vllm"
+            ) from exc
+
+        self._SamplingParams = SamplingParams
+
+        engine_kwargs: dict[str, Any] = dict(
+            model=self._base_model,
+            dtype=self._dtype,
+            gpu_memory_utilization=self._gpu_memory_utilization,
+            enforce_eager=self._enforce_eager,
+            enable_lora=True,
+            max_loras=1,   # one adapter per batch; we sweep one variant at a time
+            max_lora_rank=64,
+            trust_remote_code=False,
+        )
+        if self._max_model_len is not None:
+            engine_kwargs["max_model_len"] = self._max_model_len
+
+        print(f"  Initialising vLLM engine: {self._base_model}", flush=True)
+        self._llm = LLM(**engine_kwargs)
+
+        for i, scale in enumerate(self._scale_points, 1):
+            variant = str(scale)
+            self._lora_requests[variant] = LoRARequest(
+                lora_name=self.variant_label(variant),
+                lora_int_id=i,
+                lora_path=str(self._baked_dirs[variant]),
+            )
+
+    @contextmanager
+    def activate(self, variant: str) -> Iterator[tuple[Any, None]]:
+        """Yield ``(provider, None)`` for the given scale variant.
+
+        The first element is a :class:`_VllmVariantProvider` (an
+        :class:`InferenceProvider`), which the sweep framework detects and
+        uses directly as the assistant provider.  The tokenizer slot is
+        ``None`` because vLLM applies the chat template internally.
+        """
+        assert self._llm is not None, (
+            "VLLMLoRaScaleProvider.__enter__ must be called first"
+        )
+        provider = _VllmVariantProvider(
+            llm=self._llm,
+            lora_request=self._lora_requests[variant],
+            SamplingParams=self._SamplingParams,
+            temperature=self._temperature,
+            top_p=self._top_p,
+            max_new_tokens=self._max_new_tokens,
+        )
+        yield (provider, None)
+
+    def close(self) -> None:
+        if self._llm is not None:
+            try:
+                del self._llm
+            except Exception:
+                pass
+            self._llm = None
+            self._SamplingParams = None
+            self._lora_requests.clear()

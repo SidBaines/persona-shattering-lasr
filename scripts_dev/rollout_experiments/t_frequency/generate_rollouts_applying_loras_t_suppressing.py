@@ -38,6 +38,7 @@ from scripts_dev.rollout_experiments.sweep import (
 from src_dev.rollout_generation.model_providers import (
     ActivationCapProvider,
     LoRaScaleProvider,
+    VLLMLoRaScaleProvider,
 )
 
 # ── Behavior prompts ──────────────────────────────────────────────────────────
@@ -174,29 +175,33 @@ OUTPUT_CONFIG = OutputPathConfig(
 # ── Model provider ────────────────────────────────────────────────────────────
 # Uncomment the provider you want to use.
 
-# LoRA scale sweep (uncomment to use):
-PROVIDER = LoRaScaleProvider(
+# PROVIDER = LoRaScaleProvider(
+PROVIDER = VLLMLoRaScaleProvider(
     base_model=BASE_MODEL,
     adapter=ADAPTER_PATH,
     scale_points=[
-        -2.0,
-        -1.75,
-        -1.5,
-        -1.25,
+        # -2.0,
+        # -1.75,
+        # -1.5,
+        # -1.25,
         -1.0,
-        -0.75,
+        # -0.75,
         -0.5,
-        -0.25,
+        # -0.25,
         0.0,
-        0.25,
+        # 0.25,
         0.5,
-        0.75,
+        # 0.75,
         1.0,
-        1.25,
-        1.5,
-        1.75,
-        2.0,
+        # 1.25,
+        # 1.5,
+        # 1.75,
+        # 2.0,
     ],
+    baked_adapters_dir=Path("scratch/baked_adapters/t_enjoying"),
+    temperature=EXPERIMENT_CONFIG.assistant_temperature,
+    top_p=EXPERIMENT_CONFIG.assistant_top_p,
+    max_new_tokens=EXPERIMENT_CONFIG.assistant_max_new_tokens,
 )
 
 # Single model (uncomment to use):
@@ -215,25 +220,25 @@ _BEHAVIOR_PROMPTS: dict[str, str | None] = {
 # Condition names are generated dynamically using phase notation.
 # See _build_condition_name() in sweep.py for the naming convention.
 ALL_CONDITIONS = (
-    single_turn_conditions(_BEHAVIOR_PROMPTS)
-    # + multi_turn_au_conditions(
-    #     EXPERIMENT_CONFIG,
-    #     _BEHAVIOR_PROMPTS,
-    #     _USER_BEHAVIOR_TEMPLATES,
-    #     turns_per_phase=(
-    #         EXPERIMENT_CONFIG.turns_per_phase[0],
-    #         EXPERIMENT_CONFIG.turns_per_phase[1],
-    #     ),
-    # )
-    # + multi_turn_aa_conditions(
-    #     EXPERIMENT_CONFIG,
-    #     _BEHAVIOR_PROMPTS,
-    #     _AA_TEMPLATES,
-    #     turns_per_phase=(
-    #         EXPERIMENT_CONFIG.turns_per_phase[0],
-    #         EXPERIMENT_CONFIG.turns_per_phase[1],
-    #     ),
-    # )
+    # single_turn_conditions(_BEHAVIOR_PROMPTS)
+    +multi_turn_au_conditions(
+        EXPERIMENT_CONFIG,
+        _BEHAVIOR_PROMPTS,
+        _USER_BEHAVIOR_TEMPLATES,
+        turns_per_phase=(
+            EXPERIMENT_CONFIG.turns_per_phase[0],
+            EXPERIMENT_CONFIG.turns_per_phase[1],
+        ),
+    )
+    + multi_turn_aa_conditions(
+        EXPERIMENT_CONFIG,
+        _BEHAVIOR_PROMPTS,
+        _AA_TEMPLATES,
+        turns_per_phase=(
+            EXPERIMENT_CONFIG.turns_per_phase[0],
+            EXPERIMENT_CONFIG.turns_per_phase[1],
+        ),
+    )
 )
 
 SWEEP_CONFIG = SweepConfig(

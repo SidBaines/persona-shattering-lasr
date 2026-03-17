@@ -139,9 +139,8 @@ _AA_TEMPLATES = {
 
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 ADAPTER_PATH = (
-    "persona-shattering-lasr/t_enjoying-train-20260312-223656-lora-adapter::adapter"
+    "persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter"
 )
-
 
 EXPERIMENT_CONFIG = ExperimentConfig(
     assistant_model=BASE_MODEL,
@@ -159,7 +158,7 @@ EXPERIMENT_CONFIG = ExperimentConfig(
     user_max_concurrent=128,
     dataset_path="data/assistant-axis-extraction-questions.jsonl",
     max_samples=32,
-    turns_per_phase=[5, 1],
+    turns_per_phase=[15, 1],
     num_rollouts=3,
 )
 
@@ -168,33 +167,13 @@ OUTPUT_CONFIG = OutputPathConfig(
     hf_repo="persona-shattering-lasr/monorepo",
     base_model="llama-3.1-8B-Instruct",
     category="toy",
-    trait="t_character_enjoying",
-    training_run="t_enjoying-train-20260312-223656",
+    trait="t_character_avoiding",
+    training_run="t_avoiding-train-20260310-164958",
     eval_name="scaling_loras",
 )
 
 # ── Model provider ────────────────────────────────────────────────────────────
-# Choose one provider and comment out the others.
-#
-# Option A: HuggingFace transformers (default — no extra dependencies).
-#   Applies LoRA scaling in-place via weight modification between variants.
-#
-# Option B: vLLM — higher throughput via continuous batching.
-#   Pre-bakes each scale point as a separate on-disk adapter, then runs
-#   a single vLLM engine with LoRARequest switching per variant.
-#   Requires: pip install vllm
-#
-#   PROVIDER = VLLMLoRaScaleProvider(
-#       base_model=BASE_MODEL,
-#       adapter=ADAPTER_PATH,
-#       scale_points=[...],   # same list as below
-#       baked_adapters_dir=Path("scratch/baked_adapters/t_enjoying"),
-#       temperature=EXPERIMENT_CONFIG.assistant_temperature,
-#       top_p=EXPERIMENT_CONFIG.assistant_top_p,
-#       max_new_tokens=EXPERIMENT_CONFIG.assistant_max_new_tokens,
-#   )
-
-# Option A: LoRA scale sweep (HuggingFace transformers):
+# Uncomment the provider you want to use.
 
 # PROVIDER = LoRaScaleProvider(
 PROVIDER = VLLMLoRaScaleProvider(

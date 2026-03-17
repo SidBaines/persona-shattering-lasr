@@ -1338,18 +1338,25 @@ async def _run_variant_conditions_async(
     Returns:
         List of ``(vlabel, condition_name, status, elapsed)`` timing tuples.
     """
-    # Build a single assistant provider wrapping the preloaded model.
-    assistant_config = build_assistant_inference(config.experiment)
-    assistant_config = assistant_config.model_copy(
-        update={
-            "local": assistant_config.local.model_copy(
-                update={"preloaded_model": (model, tokenizer)}
-            )
-        }
-    )
-    assistant_provider = get_provider(assistant_config.provider, assistant_config)
+    # Build the assistant provider.
+    # If the model is already an InferenceProvider (e.g. from VLLMLoRaScaleProvider),
+    # use it directly.  Otherwise wrap the preloaded HF model in a LocalProvider.
+    from src_dev.inference.providers.base import InferenceProvider as _InferenceProvider
 
-    batch_size = max(1, assistant_config.generation.batch_size)
+    if isinstance(model, _InferenceProvider):
+        assistant_provider = model
+        batch_size = max(1, config.experiment.assistant_batch_size)
+    else:
+        assistant_config = build_assistant_inference(config.experiment)
+        assistant_config = assistant_config.model_copy(
+            update={
+                "local": assistant_config.local.model_copy(
+                    update={"preloaded_model": (model, tokenizer)}
+                )
+            }
+        )
+        assistant_provider = get_provider(assistant_config.provider, assistant_config)
+        batch_size = max(1, assistant_config.generation.batch_size)
     executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
     executor_task = asyncio.create_task(executor.run())
 
