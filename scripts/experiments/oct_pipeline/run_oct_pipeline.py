@@ -85,6 +85,40 @@ Output structure (all under --out-dir):
         <name>-dpo/         # DPO adapter (stage 2)
         <name>-sft/         # SFT adapter (stage 4)
         <name>-persona/     # merged adapter (stage 5)
+
+NOTE FOR CLAUDE — required manual patch in OpenCharacterTraining after cloning
+===============================================================================
+This script monkey-patches OCT for vllm ≥0.7 compatibility (see "vllm compat
+patches" section below).  ONE fix cannot be monkey-patched and must be applied
+directly to the OCT source after cloning / pip-installing the library:
+
+  File:     character/introspection/self_interaction.py
+  Function: interaction() — the per-turn prompt-building loop (~line 165)
+  Problem:  apply_chat_template(tokenize=True) now returns BatchEncoding
+            instead of list[list[int]], so tokenizer.decode(p) fails with
+            "TypeError: argument 'ids': Can't extract `str` to `Vec`".
+  Fix:      Replace the apply_chat_template + truncate + decode block:
+
+    # BEFORE (broken with transformers ≥4.50):
+    prompts = tokenizer.apply_chat_template(
+        df["messages"].tolist(), tokenize=True, add_generation_prompt=True)
+    length = args.max_model_len - args.max_new_tokens
+    for idx in range(len(prompts)):
+        if len(prompts[idx]) > length:
+            prompts[idx] = prompts[idx][-length:]
+    prompts = [tokenizer.decode(p, skip_special_tokens=False) for p in prompts]
+
+    # AFTER (working):
+    prompts_str = tokenizer.apply_chat_template(
+        df["messages"].tolist(), tokenize=False, add_generation_prompt=True)
+    length = args.max_model_len - args.max_new_tokens
+    prompts = []
+    for p in prompts_str:
+        ids = tokenizer.encode(p)
+        if len(ids) > length:
+            ids = ids[-length:]
+            p = tokenizer.decode(ids, skip_special_tokens=False)
+        prompts.append(p)
 """
 
 from __future__ import annotations
@@ -94,6 +128,10 @@ import gc
 import json
 import logging
 import os
+# vllm v1 creates EngineCore in a subprocess; if CUDA was already initialized
+# in the parent (e.g. by torch.cuda.device_count()), forked subprocesses fail.
+# Force spawn so child processes start clean.
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 from pathlib import Path
 
 import datasets as hf_datasets
@@ -160,6 +198,37 @@ import character.distillation.student as oct_student
 import character.introspection.self_reflection as oct_reflection
 import character.introspection.self_interaction as oct_interaction
 from character.constants import MODEL_PATH
+
+# ---------------------------------------------------------------------------
+# vllm compat patches for OpenCharacterTraining (tested with vllm ≥0.7 / 0.17)
+#
+# Fix 1 — LLM(task=...) removed: vllm ≥0.7 dropped the `task` kwarg from
+#   LLM / EngineArgs. Patch LLM.__init__ to silently strip it. Patching the
+#   class object propagates to all OCT modules that imported LLM by reference.
+#
+# Fix 2 — SamplingParams(truncate_prompt_tokens=...) removed: vllm ≥0.17
+#   dropped this kwarg. SamplingParams is a msgspec.Struct (C extension) so
+#   __init__ cannot be patched directly; instead replace the SamplingParams
+#   name in each OCT module that calls it inside a function.
+# ---------------------------------------------------------------------------
+import vllm as _vllm
+
+# Fix 1
+_orig_llm_init = _vllm.LLM.__init__
+def _patched_llm_init(self, *args, **kwargs):
+    kwargs.pop("task", None)
+    _orig_llm_init(self, *args, **kwargs)
+_vllm.LLM.__init__ = _patched_llm_init
+
+# Fix 2
+def _safe_sampling_params(sp_class):
+    def _wrapper(*args, **kwargs):
+        kwargs.pop("truncate_prompt_tokens", None)
+        return sp_class(*args, **kwargs)
+    return _wrapper
+
+oct_reflection.SamplingParams = _safe_sampling_params(oct_reflection.SamplingParams)
+oct_interaction.SamplingParams = _safe_sampling_params(oct_interaction.SamplingParams)
 
 
 # ---------------------------------------------------------------------------
