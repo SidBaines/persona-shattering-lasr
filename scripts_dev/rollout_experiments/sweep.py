@@ -28,6 +28,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import gc
 import hashlib
@@ -66,7 +67,12 @@ from src_dev.rollout_generation.prompts import (
     get_user_simulator_instruction,
     register_user_simulator_template,
 )
-from src_dev.rollout_generation.run import run_rollout_generation
+from src_dev.inference.providers import get_provider
+from src_dev.rollout_generation.gpu_executor import GpuBatchExecutor
+from src_dev.rollout_generation.run import (
+    run_rollout_generation,
+    run_rollout_generation_async,
+)
 from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -253,11 +259,15 @@ class SweepCondition:
         name: Short identifier used in directory names.
         phases: Phase list passed to ``run_experiment``.
         user_sim: Optional user simulator override for this condition.
+        eval_roles: Which message roles to evaluate.  ``["assistant"]`` for
+            AU conditions (skip user messages), ``None`` for AA conditions
+            (evaluate all messages).  Defaults to ``["assistant"]``.
     """
 
     name: str
     phases: list[Phase]
     user_sim: UserSimulatorConfig | None = None
+    eval_roles: list[str] | None = field(default_factory=lambda: ["assistant"])
 
 
 @dataclass
@@ -348,6 +358,12 @@ class SweepConfig(BaseModel):
       the failed cell (current default behaviour).
     """
     skip_evals: bool = False
+    max_concurrent_conditions: int = 2
+    """Maximum number of conditions to run concurrently within a variant.
+
+    Higher values improve GPU utilisation (more conversations batched together)
+    but increase peak memory.  Set to ``1`` for sequential (old) behaviour.
+    """
     plot: bool = True
     plot_metric: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -478,6 +494,75 @@ def run_phased_rollout(
             resume=True,
         )
         _, result = run_rollout_generation(rollout_config)
+        print(
+            f"  -> Completed: {result.num_completed}/{result.num_conversations} conversations"
+        )
+
+        if result.num_failed > 0:
+            raise RuntimeError(
+                f"Phase {phase_idx + 1}/{len(phases)} had {result.num_failed}/{result.num_conversations} "
+                f"failed conversations (target: {cumulative_turns} assistant turns)"
+            )
+
+
+async def run_phased_rollout_async(
+    config: ExperimentConfig,
+    phases: list[Phase],
+    run_dir: Path,
+    *,
+    user_sim: UserSimulatorConfig | None = None,
+    preloaded_model: tuple | None = None,
+    gpu_executor: GpuBatchExecutor | None = None,
+) -> None:
+    """Async version of :func:`run_phased_rollout`.
+
+    When ``gpu_executor`` is provided, all phases feed into the shared
+    executor instead of each creating its own.
+    """
+    if user_sim is None:
+        user_sim = build_user_simulator(config)
+    dataset = build_dataset(config)
+    assistant = build_assistant_inference(config)
+    if preloaded_model is not None:
+        assistant = assistant.model_copy(
+            update={
+                "local": assistant.local.model_copy(
+                    update={"preloaded_model": preloaded_model}
+                )
+            }
+        )
+
+    cumulative_turns = 0
+    for phase_idx, phase in enumerate(phases):
+        cumulative_turns += phase.num_turns
+        phase_user_sim = phase.user_simulator or user_sim
+
+        print(
+            f"\n  Phase {phase_idx + 1}/{len(phases)}: "
+            f"{phase.num_turns} turns, "
+            f"system_prompt={'yes' if phase.assistant_system_prompt else 'no'}, "
+            f"user_template={phase_user_sim.prompt_template}"
+        )
+
+        is_last_phase = phase_idx == len(phases) - 1
+        rollout_config = RolloutGenerationConfig(
+            dataset=dataset,
+            run_dir=run_dir,
+            num_assistant_turns=cumulative_turns,
+            num_rollouts_per_prompt=config.num_rollouts,
+            system_prompt=phase.assistant_system_prompt,
+            assistant_inference=assistant,
+            user_simulator=phase_user_sim,
+            failure_policy=FailurePolicyConfig(
+                assistant_max_attempts_per_turn=3,
+                user_max_attempts_per_turn=3,
+            ),
+            skip_final_user_turn=is_last_phase,
+            resume=True,
+        )
+        _, result = await run_rollout_generation_async(
+            rollout_config, gpu_executor=gpu_executor
+        )
         print(
             f"  -> Completed: {result.num_completed}/{result.num_conversations} conversations"
         )
@@ -886,6 +971,7 @@ def run_experiment(
     preloaded_model: tuple | None = None,
     skip_rollouts: bool = False,
     skip_evals: bool = False,
+    eval_roles: list[str] | None = None,
 ) -> ConversationMetricsResult | None:
     """Run a complete experiment: phased rollout, evaluation, metadata, export.
 
@@ -899,6 +985,8 @@ def run_experiment(
         preloaded_model: Optional ``(model, tokenizer)`` tuple.
         skip_rollouts: If True, skip rollout generation (use
             existing rollouts) and only run evaluation.
+        eval_roles: Which message roles to evaluate (e.g. ``["assistant"]``).
+            ``None`` evaluates all roles.
 
     Returns:
         ConversationMetricsResult with per-message scores and aggregates.
@@ -931,8 +1019,9 @@ def run_experiment(
         print("  Skipping evaluation")
         return None
 
+    message_selector = MessageSelector(exclude_seed=True, roles=eval_roles)
     eval_t0 = time.perf_counter()
-    result = evaluate_messages(run_dir, evaluations)
+    result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
     export_evaluated_rollouts(run_dir, result)
     _write_eval_info(
         run_dir, evaluations, time.perf_counter() - eval_t0
@@ -942,6 +1031,63 @@ def run_experiment(
 
 
 # ── Sweep runner ──────────────────────────────────────────────────────────────
+
+
+async def _run_experiment_async(
+    config: ExperimentConfig,
+    name: str,
+    phases: list[Phase],
+    evaluations: list[str | PersonaMetricSpec],
+    run_dir: Path,
+    *,
+    user_sim: UserSimulatorConfig | None = None,
+    preloaded_model: tuple | None = None,
+    skip_rollouts: bool = False,
+    skip_evals: bool = False,
+    gpu_executor: GpuBatchExecutor | None = None,
+    eval_roles: list[str] | None = None,
+) -> ConversationMetricsResult | None:
+    """Async version of :func:`run_experiment`.
+
+    Accepts ``gpu_executor`` so that multiple experiments can share a single
+    GPU batch queue when run concurrently.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"Experiment: {name}")
+    print(f"Run dir: {run_dir}")
+    print(f"{'=' * 60}")
+
+    if not skip_rollouts:
+        rollout_t0 = time.perf_counter()
+        await run_phased_rollout_async(
+            config,
+            phases,
+            run_dir,
+            user_sim=user_sim,
+            preloaded_model=preloaded_model,
+            gpu_executor=gpu_executor,
+        )
+        export_rollouts(run_dir)
+        save_experiment_metadata(config, run_dir, name, phases)
+        _write_rollout_info(
+            run_dir, time.perf_counter() - rollout_t0
+        )
+    else:
+        print("  Skipping rollout generation (using existing)")
+
+    if skip_evals or not evaluations:
+        print("  Skipping evaluation")
+        return None
+
+    message_selector = MessageSelector(exclude_seed=True, roles=eval_roles)
+    eval_t0 = time.perf_counter()
+    result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
+    export_evaluated_rollouts(run_dir, result)
+    _write_eval_info(
+        run_dir, evaluations, time.perf_counter() - eval_t0
+    )
+
+    return result
 
 
 def _upload_plots_to_hf(
@@ -1172,6 +1318,141 @@ def _print_timing_summary(
     print("======================\n", flush=True)
 
 
+async def _run_variant_conditions_async(
+    conditions: list,
+    config: SweepConfig,
+    model,
+    tokenizer,
+    output_root: Path,
+    vlabel: str,
+    rollouts_completed_on_hf: set[str],
+) -> list[tuple[str, str, str, float]]:
+    """Run all conditions concurrently for a single variant.
+
+    Creates a shared :class:`GpuBatchExecutor` so that conversations from
+    all conditions feed into the same GPU batch queue, improving utilisation.
+
+    Returns:
+        List of ``(vlabel, condition_name, status, elapsed)`` timing tuples.
+    """
+    # Build a single assistant provider wrapping the preloaded model.
+    assistant_config = build_assistant_inference(config.experiment)
+    assistant_config = assistant_config.model_copy(
+        update={
+            "local": assistant_config.local.model_copy(
+                update={"preloaded_model": (model, tokenizer)}
+            )
+        }
+    )
+    assistant_provider = get_provider(assistant_config.provider, assistant_config)
+
+    batch_size = max(1, assistant_config.generation.batch_size)
+    executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
+    executor_task = asyncio.create_task(executor.run())
+
+    timings: list[tuple[str, str, str, float]] = []
+    semaphore = asyncio.Semaphore(config.max_concurrent_conditions)
+
+    async def _run_one_condition(condition) -> None:
+        async with semaphore:
+            cell_dir = output_root / vlabel / condition.name
+            cell_label = f"{vlabel}/{condition.name}"
+
+            cell_skip_rollouts = (
+                config.skip_completed
+                and cell_label in rollouts_completed_on_hf
+            )
+            if cell_skip_rollouts:
+                print(
+                    f"    running   {cell_label}  "
+                    f"(rollouts on HF, evals only)",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"    running   {cell_label} ...",
+                    flush=True,
+                )
+
+            cell_t0 = time.perf_counter()
+            cell_experiment = ExperimentConfig(
+                **{**vars(config.experiment)}
+            )
+
+            try:
+                result = await _run_experiment_async(
+                    cell_experiment,
+                    name=condition.name,
+                    phases=condition.phases,
+                    evaluations=config.evaluations,
+                    run_dir=cell_dir,
+                    user_sim=condition.user_sim,
+                    preloaded_model=(model, tokenizer),
+                    skip_rollouts=cell_skip_rollouts,
+                    skip_evals=config.skip_evals,
+                    gpu_executor=executor,
+                    eval_roles=condition.eval_roles,
+                )
+                elapsed = time.perf_counter() - cell_t0
+                aggregates = result.aggregates if result else None
+                _write_run_info(
+                    cell_dir,
+                    vlabel,
+                    condition.name,
+                    "ok",
+                    aggregates,
+                    None,
+                    elapsed,
+                    output_config=config.output,
+                )
+                timings.append((vlabel, condition.name, "ok", elapsed))
+                print(
+                    f"    done      {cell_label}  ({_fmt_duration(elapsed)})",
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                elapsed = time.perf_counter() - cell_t0
+                if config.on_cell_error == "raise":
+                    raise
+                print(
+                    f"    FAILED    {cell_label}  ({_fmt_duration(elapsed)}): {exc}",
+                    flush=True,
+                )
+                cell_dir.mkdir(parents=True, exist_ok=True)
+                (cell_dir / "FAILED.md").write_text(
+                    f"# Cell failed: {cell_label}\n\n"
+                    f"**Elapsed:** {_fmt_duration(elapsed)}\n\n"
+                    f"**Error:**\n```\n{exc}\n```\n",
+                    encoding="utf-8",
+                )
+                upload = config.on_cell_error == "continue"
+                _write_run_info(
+                    cell_dir,
+                    vlabel,
+                    condition.name,
+                    "failed",
+                    None,
+                    str(exc),
+                    elapsed,
+                    output_config=config.output if upload else None,
+                )
+                timings.append((vlabel, condition.name, "failed", elapsed))
+
+    try:
+        await asyncio.gather(
+            *[_run_one_condition(c) for c in conditions],
+        )
+    finally:
+        executor.stop()
+        await executor_task
+        # Free intermediate tensors and CUDA cache.
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    return timings
+
+
 def run_sweep(config: SweepConfig) -> Path:
     """Execute a full model-variant sweep and return the output directory.
 
@@ -1180,8 +1461,7 @@ def run_sweep(config: SweepConfig) -> Path:
         with provider:
             for variant in variants:
                 with provider.activate(variant) as (model, tokenizer):
-                    for condition in conditions:
-                        run_experiment(..., preloaded_model=(model, tokenizer))
+                    asyncio.run(concurrent conditions sharing GPU executor)
 
     Args:
         config: Full sweep configuration.
@@ -1254,95 +1534,18 @@ def run_sweep(config: SweepConfig) -> Path:
             )
 
             with config.provider.activate(variant) as (model, tokenizer):
-                for condition in config.conditions:
-                    cell_dir = output_root / vlabel / condition.name
-                    cell_label = f"{vlabel}/{condition.name}"
-
-                    cell_skip_rollouts = (
-                        config.skip_completed
-                        and cell_label in rollouts_completed_on_hf
+                variant_timings = asyncio.run(
+                    _run_variant_conditions_async(
+                        conditions=config.conditions,
+                        config=config,
+                        model=model,
+                        tokenizer=tokenizer,
+                        output_root=output_root,
+                        vlabel=vlabel,
+                        rollouts_completed_on_hf=rollouts_completed_on_hf,
                     )
-                    if cell_skip_rollouts:
-                        print(
-                            f"    running   {cell_label}  "
-                            f"(rollouts on HF, evals only)",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"    running   {cell_label} ...",
-                            flush=True,
-                        )
-
-                    cell_t0 = time.perf_counter()
-                    cell_experiment = ExperimentConfig(
-                        **{**vars(config.experiment)}
-                    )
-
-                    try:
-                        result = run_experiment(
-                            cell_experiment,
-                            name=condition.name,
-                            phases=condition.phases,
-                            evaluations=config.evaluations,
-                            run_dir=cell_dir,
-                            user_sim=condition.user_sim,
-                            preloaded_model=(model, tokenizer),
-                            skip_rollouts=cell_skip_rollouts,
-                            skip_evals=config.skip_evals,
-                        )
-                        elapsed = time.perf_counter() - cell_t0
-                        aggregates = result.aggregates if result else None
-                        _write_run_info(
-                            cell_dir,
-                            vlabel,
-                            condition.name,
-                            "ok",
-                            aggregates,
-                            None,
-                            elapsed,
-                            output_config=config.output,
-                        )
-                        timings.append((vlabel, condition.name, "ok", elapsed))
-                        print(
-                            f"    done      {cell_label}  ({_fmt_duration(elapsed)})",
-                            flush=True,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        elapsed = time.perf_counter() - cell_t0
-                        if config.on_cell_error == "raise":
-                            raise
-                        # "warn" and "continue" both print a warning.
-                        print(
-                            f"    FAILED    {cell_label}  ({_fmt_duration(elapsed)}): {exc}",
-                            flush=True,
-                        )
-                        # Write a visible error marker in the cell directory.
-                        cell_dir.mkdir(parents=True, exist_ok=True)
-                        (cell_dir / "FAILED.md").write_text(
-                            f"# Cell failed: {cell_label}\n\n"
-                            f"**Elapsed:** {_fmt_duration(elapsed)}\n\n"
-                            f"**Error:**\n```\n{exc}\n```\n",
-                            encoding="utf-8",
-                        )
-                        # Only "continue" writes run_info + uploads.
-                        upload = config.on_cell_error == "continue"
-                        _write_run_info(
-                            cell_dir,
-                            vlabel,
-                            condition.name,
-                            "failed",
-                            None,
-                            str(exc),
-                            elapsed,
-                            output_config=config.output if upload else None,
-                        )
-                        timings.append((vlabel, condition.name, "failed", elapsed))
-
-                    # Free intermediate tensors and CUDA cache between cells.
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+                )
+                timings.extend(variant_timings)
 
     _print_timing_summary(timings, time.perf_counter() - suite_t0)
 
@@ -1635,6 +1838,7 @@ def multi_turn_aa_conditions(
                             user_simulator=aa_user_base,
                         ),
                     ],
+                    eval_roles=None,
                 )
             )
         else:
@@ -1676,6 +1880,7 @@ def multi_turn_aa_conditions(
                             user_simulator=aa_user_unprompted,
                         ),
                     ],
+                    eval_roles=None,
                 )
             )
 

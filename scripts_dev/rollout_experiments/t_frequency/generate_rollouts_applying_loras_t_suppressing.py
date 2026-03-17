@@ -26,7 +26,6 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-
 from scripts_dev.rollout_experiments.sweep import (
     ExperimentConfig,
     OutputPathConfig,
@@ -154,8 +153,8 @@ EXPERIMENT_CONFIG = ExperimentConfig(
     user_temperature=0.7,
     user_top_p=0.95,
     user_max_new_tokens=128,
-    user_batch_size=16,
-    user_max_concurrent=64,
+    user_batch_size=32,
+    user_max_concurrent=128,
     dataset_path="data/assistant-axis-extraction-questions.jsonl",
     max_samples=32,
     turns_per_phase=[5, 1],
@@ -169,78 +168,35 @@ OUTPUT_CONFIG = OutputPathConfig(
     category="toy",
     trait="t_character_avoiding",
     training_run="t_avoiding-train-20260310-164958",
-    eval_name="activation_capping",
+    eval_name="scaling_loras",
 )
 
 # ── Model provider ────────────────────────────────────────────────────────────
 # Uncomment the provider you want to use.
 
 # LoRA scale sweep (uncomment to use):
-# PROVIDER = LoRaScaleProvider(
-#     base_model=BASE_MODEL,
-#     adapter=ADAPTER_PATH,
-# scale_points=[
-#     -2.0,
-#     -1.8,
-#     -1.6,
-#     -1.4,
-#     -1.2,
-#     -1.0,
-#     -0.8,
-#     -0.6,
-#     -0.4,
-#     -0.2,
-#     -0.1,
-#     0.0,
-#     0.1,
-#     0.2,
-#     0.4,
-#     0.6,
-#     0.8,
-#     1.0,
-#     1.2,
-#     1.4,
-#     1.6,
-#     1.8,
-#     2.0,
-# ],
-# )
-
-# Activation capping sweep
-# Fractions control the capping threshold relative to the observed projection
-# range (lo, hi) where lo=base model, hi=LoRA model:
-#   positive fractions → floor mode: push activations UP toward the trait
-#     e.g. 0.5 = threshold halfway between base and LoRA
-#   negative fractions → ceiling mode: push activations DOWN past baseline
-#     e.g. -0.2 = threshold at lo - 0.2*(hi-lo), suppressing the trait
-PROVIDER = ActivationCapProvider(
+PROVIDER = LoRaScaleProvider(
     base_model=BASE_MODEL,
-    axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
-    per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
-    fractions=[
+    adapter=ADAPTER_PATH,
+    scale_points=[
         -2.0,
-        -1.8,
-        -1.6,
-        -1.4,
-        -1.2,
+        -1.75,
+        -1.5,
+        -1.25,
         -1.0,
-        -0.8,
-        -0.6,
-        -0.4,
-        -0.2,
+        -0.75,
+        -0.5,
+        -0.25,
         0.0,
-        0.2,
-        0.4,
-        0.6,
-        0.8,
+        0.25,
+        0.5,
+        0.75,
         1.0,
-        1.2,
-        1.4,
-        1.6,
-        1.8,
+        1.25,
+        1.5,
+        1.75,
         2.0,
     ],
-    capping_layers=list(range(17, 32)),
 )
 
 # Single model (uncomment to use):
@@ -290,75 +246,6 @@ SWEEP_CONFIG = SweepConfig(
     skip_evals=True,
     on_cell_error="warn",
 )
-
-# ── Minimal test config (uncomment to run a quick smoke test) ─────────────────
-# Overrides everything above with minimal values: 2 scale points, 2 samples,
-# 1 rollout, 32 max tokens, single-turn only, count_t eval only.
-
-# TEST_EXPERIMENT_CONFIG = ExperimentConfig(
-#     assistant_model=BASE_MODEL,
-#     assistant_provider="local",
-#     assistant_temperature=0.7,
-#     assistant_top_p=0.95,
-#     assistant_max_new_tokens=32,
-#     assistant_batch_size=4,
-#     user_model="gpt-4.1-nano-2025-04-14",
-#     user_provider="openrouter",
-#     user_temperature=0.7,
-#     user_top_p=0.95,
-#     user_max_new_tokens=32,
-#     user_batch_size=4,
-#     user_max_concurrent=4,
-#     dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
-#     max_samples=2,
-#     turns_per_phase=[1],
-#     num_rollouts=1,
-# )
-# SWEEP_CONFIG = SweepConfig(
-#     provider=LoRaScaleProvider(
-#         base_model=BASE_MODEL,
-#         adapter=ADAPTER_PATH,
-#         scale_points=[0.0, 1.0],
-#     ),
-#     conditions=single_turn_conditions({"baseline": None, "t_enjoying": _ASSISTANT_PREFIX + _T_ENJOYING_BEHAVIOR}),
-#     evaluations=["count_t"],
-#     experiment=TEST_EXPERIMENT_CONFIG,
-#     output=OutputPathConfig(
-#         scratch_root=Path("scratch/monorepo"),
-#         hf_repo="persona-shattering-lasr/monorepo",
-#         base_model="llama-3.1-8B-Instruct",
-#         category="toy",
-#         trait="t_character",
-#         training_run="TEST",
-#         eval_name="rollout_sweep_TEST",
-#     ),
-#     skip_completed=False,
-#     plot=False,
-# )
-
-# SWEEP_CONFIG = SweepConfig(
-#     provider=ActivationCapProvider(
-#         base_model=BASE_MODEL,
-#         axis_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_axis.pt",
-#         per_layer_range_path="hf://persona-shattering-lasr/t_avoiding_activation_capping/t_avoiding_per_layer_range.pt",
-#         fractions=[0.0, 1.0],
-#         capping_layers=list(range(17, 32)),
-#     ),
-#     conditions=single_turn_conditions({"baseline": None, "t_avoiding": _ASSISTANT_PREFIX + _T_AVOIDING_BEHAVIOR}),
-#     evaluations=["count_t"],
-#     experiment=TEST_EXPERIMENT_CONFIG,
-#     output=OutputPathConfig(
-#         scratch_root=Path("scratch/monorepo"),
-#         hf_repo="persona-shattering-lasr/monorepo",
-#         base_model="llama-3.1-8B-Instruct",
-#         category="toy",
-#         trait="t_character",
-#         training_run="TEST",
-#         eval_name="activation_cap_sweep_TEST",
-#     ),
-#     skip_completed=False,
-#     plot=True,
-# )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

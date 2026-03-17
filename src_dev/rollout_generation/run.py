@@ -508,13 +508,14 @@ async def _run_rollout_pipeline_async(
     config: RolloutGenerationConfig,
     samples: list,
     assistant_config: InferenceConfig,
-    assistant_provider: InferenceProvider,
+    assistant_provider: InferenceProvider | None,
     user_provider: InferenceProvider,
     user_config: InferenceConfig,
     run_dir: Path,
     attempts_by_phase: dict[PhaseKey, int],
     terminal_samples: set[str],
     logger: logging.Logger,
+    gpu_executor: GpuBatchExecutor | None = None,
 ) -> None:
     """Pipelined async scheduler: GPU batches and user API calls overlap.
 
@@ -523,11 +524,25 @@ async def _run_rollout_pipeline_async(
     releasing the event loop to service concurrent user API calls while the
     GPU is busy. This eliminates the 40-pass waterfall of the old sequential
     phase loop.
+
+    Args:
+        gpu_executor: Optional shared executor. When provided, this function
+            uses it instead of creating a new one, and does not stop it on
+            exit (the caller owns its lifecycle). ``assistant_provider`` may
+            be ``None`` when an external executor is supplied.
     """
 
-    batch_size = max(1, assistant_config.generation.batch_size)
-    executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
-    executor_task = asyncio.create_task(executor.run())
+    owns_executor = gpu_executor is None
+    if owns_executor:
+        assert assistant_provider is not None, (
+            "assistant_provider is required when gpu_executor is not provided"
+        )
+        batch_size = max(1, assistant_config.generation.batch_size)
+        executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
+        executor_task = asyncio.create_task(executor.run())
+    else:
+        executor = gpu_executor
+        executor_task = None
 
     pending = [
         sample
@@ -585,9 +600,13 @@ async def _run_rollout_pipeline_async(
     finally:
         stop_event.set()
         await reporter_task
-        executor.stop()
-        await executor_task
-        for p in (assistant_provider, user_provider):
+        if owns_executor:
+            executor.stop()
+            await executor_task
+        providers_to_close = [user_provider]
+        if assistant_provider is not None:
+            providers_to_close.append(assistant_provider)
+        for p in providers_to_close:
             c = getattr(p, "client", None)
             if c is not None and asyncio.iscoroutinefunction(getattr(c, "close", None)):
                 await c.close()
@@ -598,11 +617,25 @@ async def _run_rollout_pipeline_async(
 # ── Public entry point ─────────────────────────────────────────────────────────
 
 
-def run_rollout_generation(
+async def run_rollout_generation_async(
     config: RolloutGenerationConfig,
     dataset: Dataset | None = None,
+    gpu_executor: GpuBatchExecutor | None = None,
 ) -> tuple[Dataset, RolloutGenerationResult]:
-    """Generate alternating assistant/user rollouts and export transcripts."""
+    """Async version of :func:`run_rollout_generation`.
+
+    When ``gpu_executor`` is provided, the pipeline feeds prompts into the
+    shared executor instead of creating its own.  This allows multiple
+    rollout generations to run concurrently within the same event loop,
+    sharing a single GPU batch queue for better utilisation.
+
+    Args:
+        config: Rollout generation configuration.
+        dataset: Optional pre-loaded dataset.
+        gpu_executor: Optional shared :class:`GpuBatchExecutor`.  When
+            provided, no local assistant provider is created — the executor
+            already owns one.
+    """
     logger = setup_logging()
     run_dir = Path(config.run_dir)
 
@@ -670,7 +703,11 @@ def run_rollout_generation(
         }
     )
 
-    assistant_provider = get_provider(assistant_config.provider, assistant_config)
+    # When using a shared executor, skip creating assistant_provider — the
+    # executor already owns the sole provider that wraps the model.
+    assistant_provider: InferenceProvider | None = None
+    if gpu_executor is None:
+        assistant_provider = get_provider(assistant_config.provider, assistant_config)
     user_provider = get_provider(user_config.provider, user_config)
 
     if config.resume:
@@ -681,19 +718,18 @@ def run_rollout_generation(
     materialize_canonical_samples(run_dir)
     samples = load_samples(run_dir)
 
-    asyncio.run(
-        _run_rollout_pipeline_async(
-            config=config,
-            samples=samples,
-            assistant_config=assistant_config,
-            assistant_provider=assistant_provider,
-            user_provider=user_provider,
-            user_config=user_config,
-            run_dir=run_dir,
-            attempts_by_phase=attempts_by_phase,
-            terminal_samples=terminal_samples,
-            logger=logger,
-        )
+    await _run_rollout_pipeline_async(
+        config=config,
+        samples=samples,
+        assistant_config=assistant_config,
+        assistant_provider=assistant_provider,
+        user_provider=user_provider,
+        user_config=user_config,
+        run_dir=run_dir,
+        attempts_by_phase=attempts_by_phase,
+        terminal_samples=terminal_samples,
+        logger=logger,
+        gpu_executor=gpu_executor,
     )
 
     materialize_canonical_samples(run_dir)
@@ -747,4 +783,11 @@ def run_rollout_generation(
         failed,
     )
     return result_dataset, result
-    return result_dataset, result
+
+
+def run_rollout_generation(
+    config: RolloutGenerationConfig,
+    dataset: Dataset | None = None,
+) -> tuple[Dataset, RolloutGenerationResult]:
+    """Generate alternating assistant/user rollouts and export transcripts."""
+    return asyncio.run(run_rollout_generation_async(config, dataset))
