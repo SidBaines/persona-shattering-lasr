@@ -24,6 +24,7 @@ from scripts.jsonl_tui.html_export import export_html
 
 # %%
 # --- Config ---
+RESIDUALISE = True
 USE_PCA = False   # False: run directly on 2560d residuals (slow but no lossy reduction)
 SCALE = False
 PCA_N_COMPONENTS = 100
@@ -33,7 +34,7 @@ LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 if 1:
     LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
     LABELLER_PROVIDER = 'openai'
-    BASE_OUTPUT_DIR = "scratch/factor_analysis10_gpt5mini_old_dataset"
+    BASE_OUTPUT_DIR = "scratch/factor_analysis11_gpt5mini_old_dataset"
 else:
     LABELLER_MODEL = 'claude-haiku-4-5-20251001'
     LABELLER_PROVIDER = 'anthropic'
@@ -41,7 +42,7 @@ else:
 
 LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_jsonl"
 # Dataset selection: "old", "new", or "both"
-DATASET_MODE = "old"
+DATASET_MODE = "both"
 RUN_EXTREMES = False
 RUN_PURITY = False
 RUN_MAX_SPREAD = True
@@ -50,7 +51,9 @@ RUN_CONTRASTIVE = False
 RUN_PROMPT_PREVIEW = True
 RUN_SHARE_BUNDLE = True
 
-Path(BASE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+RUN_FLAG = "residualised" if RESIDUALISE else "non_residualised"
+OUTPUT_DIR = Path(BASE_OUTPUT_DIR) / RUN_FLAG
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OLD_DATASET = {
     "local_embeddings": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy",
@@ -151,8 +154,17 @@ def _load_selected_datasets(dataset_mode: str) -> tuple[np.ndarray, list[dict]]:
 _plot_paths: list[Path] = []
 
 
+def _flagged_filename(filename: str) -> str:
+    path = Path(filename)
+    return f"{path.stem}_{RUN_FLAG}{path.suffix}"
+
+
+def _flagged_stem(stem: str) -> str:
+    return f"{stem}_{RUN_FLAG}"
+
+
 def _save_plot_html(fig, filename: str) -> Path:
-    path = Path(BASE_OUTPUT_DIR) / filename
+    path = OUTPUT_DIR / _flagged_filename(filename)
     fig.write_html(path, include_plotlyjs="include")
     _plot_paths.append(path)
     print(f"Saved plot: {path}")
@@ -191,7 +203,7 @@ fig.show()
 
 corpus_embeddings = embeddings.copy()  # keep for nearest-neighbor lookups later
 residuals, group_means, group_inv = residualize(embeddings, metadata)
-if 1: 
+if not RESIDUALISE:
     residuals = embeddings
 global_mean = embeddings.mean(axis=0)
 
@@ -234,14 +246,25 @@ if 0:
 # Run factor analysis (or load cached result)
 FA_METHOD = "principal"
 FA_ROTATION = "varimax"
-_fa_cache = Path(f"{BASE_OUTPUT_DIR}/fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
-Path(BASE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+_fa_cache = OUTPUT_DIR / _flagged_stem(f"fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 if _fa_cache.with_suffix(".npz").exists():
     fa = load_factor_analysis(_fa_cache)
 else:
     fa = run_factor_analysis(data, n_factors=N_FACTORS, method=FA_METHOD, rotation=FA_ROTATION)
-    save_factor_analysis(fa, _fa_cache, config={"n_factors": N_FACTORS, "method": FA_METHOD, "rotation": FA_ROTATION, "use_pca": USE_PCA, "scale": SCALE})
+    save_factor_analysis(
+        fa,
+        _fa_cache,
+        config={
+            "n_factors": N_FACTORS,
+            "method": FA_METHOD,
+            "rotation": FA_ROTATION,
+            "use_pca": USE_PCA,
+            "scale": SCALE,
+            "residualise": RESIDUALISE,
+        },
+    )
 
 scores, loadings = fa["scores"], fa["loadings"]
 
@@ -375,7 +398,7 @@ if RUN_EXTREMES:
         for i, label in enumerate(factor_labels):
             print(f"Factor {i:03d}: {label}")
 
-    out_path = Path(f"{BASE_OUTPUT_DIR}/extremes.jsonl")
+    out_path = OUTPUT_DIR / _flagged_filename("extremes.jsonl")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     records = []
@@ -424,7 +447,7 @@ if RUN_PURITY:
         label_name="purity",
     )
 
-    purity_out_path = Path(f"{BASE_OUTPUT_DIR}/purity.jsonl")
+    purity_out_path = OUTPUT_DIR / _flagged_filename("purity.jsonl")
     purity_records = []
     for factor_data in purity_results:
         fi = factor_data["factor_index"]
@@ -480,7 +503,7 @@ if RUN_MAX_SPREAD:
         label_name="max-spread",
     )
 
-    max_spread_out_path = Path(f"{BASE_OUTPUT_DIR}/max_spread.jsonl")
+    max_spread_out_path = OUTPUT_DIR / _flagged_filename("max_spread.jsonl")
     max_spread_records = []
     for factor_data in max_spread_results:
         fi = factor_data["factor_index"]
@@ -506,7 +529,8 @@ if RUN_MAX_SPREAD:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"Saved {len(max_spread_records)} max-spread records to {max_spread_out_path}")
     print(f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} --variant-fields question response_index factor_label max_spread purity_score target_factor_score other_factors_mean_abs prompt response")
-    _html = export_html(max_spread_out_path, ["question", "response_index", "factor_label", "max_spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+    # _html = export_html(max_spread_out_path, ["question", "response_index", "factor_label", "max_spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+    _html = export_html(max_spread_out_path, ["question", "factor_label", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
     print(f"HTML viewer: {_html}")
 
 # %%
@@ -555,7 +579,7 @@ if RUN_CNN:
                     "response": entry["text_excerpt"],
                 })
 
-    cnn_out_path = Path(f"{BASE_OUTPUT_DIR}/corpus_nearest_neighbour.jsonl")
+    cnn_out_path = OUTPUT_DIR / _flagged_filename("corpus_nearest_neighbour.jsonl")
     with open(cnn_out_path, "w") as f:
         for r in cnn_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -613,7 +637,7 @@ if RUN_CONTRASTIVE:
                     "response": entry["text_excerpt"],
                 })
 
-    contrastive_out_path = Path(f"{BASE_OUTPUT_DIR}/contrastive.jsonl")
+    contrastive_out_path = OUTPUT_DIR / _flagged_filename("contrastive.jsonl")
     with open(contrastive_out_path, "w") as f:
         for r in contrastive_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -685,8 +709,8 @@ Flick through the HTML viewers to see representative responses selected by diffe
 Embeddings were computed for {_orig_count} LLM responses, then filtered to remove
 responses shorter than {MIN_RESPONSE_CHARS} characters (likely refusals/deflections),
 leaving {len(metadata)} responses across {_n_prompts} prompts.
-Per-prompt mean embeddings were subtracted (residualisation) to remove prompt-content
-variance, leaving only variance due to response style/behaviour.
+Residualisation: {RESIDUALISE}
+  - {"Per-prompt mean embeddings were subtracted to remove prompt-content variance." if RESIDUALISE else "Per-prompt mean embeddings were not subtracted; analysis was run on the original embedding space."}
 
 Factor analysis was then run on the residuals:
   - Method:   {FA_METHOD}
@@ -776,7 +800,7 @@ examples and asked to describe what distinguishes them.
             _bundle_files.append(Path(p))
 
     _ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    _zip_path = Path(f"{BASE_OUTPUT_DIR}/share_{_ts}.zip")
+    _zip_path = OUTPUT_DIR / _flagged_filename(f"share_{_ts}.zip")
     with zipfile.ZipFile(_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("README.md", _readme)
         for p in _bundle_files:
@@ -806,4 +830,391 @@ if RUN_MAX_SPREAD and _max_spread_for_labelling:
         print(_msgs[0]["content"])
         print(f"\n=== FACTOR {_fd['factor_index']} — USER ===")
         print(_msgs[1]["content"])
+# %%
+# Secondary slice: 2D PCA view of two factors + length-control ablation.
+#
+# Interpretation:
+# - If two factors with similar labels really capture the same behaviour, their
+#   high-scoring examples should land in very similar regions in a simple 2D PCA.
+# - If they separate cleanly, the labels may be collapsing distinct factors.
+# - If both are mostly explained by response length, score/length correlation will show it.
+from sklearn.decomposition import PCA
+import pandas as pd
+import plotly.graph_objects as go
+
+VIS_FACTOR_PAIR: tuple[int, int] | None = None   # e.g. (3, 17); None -> top 2 by explained variance
+VIS_TOP_N = 250
+VIS_PROJECTION_SPACE = "data"  # "data", "embeddings", or "residuals"
+
+
+def _best_available_factor_labels() -> list[str] | None:
+    for labels in [max_spread_labels, contrastive_labels, cnn_labels, purity_labels, factor_labels]:
+        if labels:
+            return labels
+    return None
+
+
+def _factor_display_name(fi: int) -> str:
+    _labels = _best_available_factor_labels()
+    return f"Factor {fi:02d}"
+    if _labels and fi < len(_labels):
+        return f"F{fi:02d}: {_labels[fi]}"
+    return f"Factor {fi:02d}"
+
+
+if VIS_FACTOR_PAIR is None:
+    _top2 = np.argsort(fa["proportion_variance"])[-2:][::-1]
+    VIS_FACTOR_PAIR = (int(_top2[0]), int(_top2[1]))
+
+if VIS_PROJECTION_SPACE == "data":
+    _projection_source = data
+elif VIS_PROJECTION_SPACE == "residuals":
+    _projection_source = residuals
+elif VIS_PROJECTION_SPACE == "embeddings":
+    _projection_source = embeddings
+else:
+    raise ValueError(f"Unknown VIS_PROJECTION_SPACE={VIS_PROJECTION_SPACE!r}")
+
+_pca2 = PCA(n_components=2, random_state=0)
+_xy = _pca2.fit_transform(_projection_source)
+
+_fa, _fb = VIS_FACTOR_PAIR
+_top_a = set(np.argsort(scores[:, _fa])[-VIS_TOP_N:])
+_top_b = set(np.argsort(scores[:, _fb])[-VIS_TOP_N:])
+
+_plot_rows = []
+for i, row in enumerate(metadata):
+    if i in _top_a and i in _top_b:
+        _cluster = "Both"
+    elif i in _top_a:
+        _cluster = _factor_display_name(_fa)
+    elif i in _top_b:
+        _cluster = _factor_display_name(_fb)
+    else:
+        _cluster = "Background"
+
+    _text = str(row.get("assistant_text", ""))
+    _plot_rows.append({
+        "pc1": float(_xy[i, 0]),
+        "pc2": float(_xy[i, 1]),
+        "cluster": _cluster,
+        "score_a": float(scores[i, _fa]),
+        "score_b": float(scores[i, _fb]),
+        "response_length": len(_text),
+        "prompt": str(row.get("seed_user_message", ""))[:200],
+        "response_preview": _text[:300],
+        "dataset_source": str(row.get("dataset_source", "")),
+    })
+
+_df = pd.DataFrame(_plot_rows)
+_highlight = _df[_df["cluster"] != "Background"].copy()
+
+_color_map = {
+    "Background": "#c7c7c7",
+    _factor_display_name(_fa): "#d62728",
+    _factor_display_name(_fb): "#1f77b4",
+    "Both": "#2ca02c",
+}
+
+fig = go.Figure()
+_bg = _df[_df["cluster"] == "Background"]
+fig.add_trace(
+    go.Scattergl(
+        x=_bg["pc1"],
+        y=_bg["pc2"],
+        mode="markers",
+        name="Background",
+        marker=dict(size=4, color=_color_map["Background"], opacity=0.18),
+        hoverinfo="skip",
+    )
+)
+
+for _name in [_factor_display_name(_fa), _factor_display_name(_fb), "Both"]:
+    _sub = _highlight[_highlight["cluster"] == _name]
+    if _sub.empty:
+        continue
+    fig.add_trace(
+        go.Scattergl(
+            x=_sub["pc1"],
+            y=_sub["pc2"],
+            mode="markers",
+            name=_name,
+            marker=dict(size=8, color=_color_map[_name], opacity=0.85),
+            customdata=np.stack(
+                [
+                    _sub["score_a"],
+                    _sub["score_b"],
+                    _sub["response_length"],
+                    _sub["dataset_source"],
+                    _sub["prompt"],
+                    _sub["response_preview"],
+                ],
+                axis=1,
+            ),
+            hovertemplate=(
+                "PC1=%{x:.2f}<br>"
+                "PC2=%{y:.2f}<br>"
+                f"{_factor_display_name(_fa)} score=%{{customdata[0]:.3f}}<br>"
+                f"{_factor_display_name(_fb)} score=%{{customdata[1]:.3f}}<br>"
+                "Response length=%{customdata[2]}<br>"
+                "Dataset=%{customdata[3]}<br>"
+                "Prompt=%{customdata[4]}<br>"
+                "Response=%{customdata[5]}<extra></extra>"
+            ),
+        )
+    )
+
+fig.update_layout(
+    title=(
+        "2D PCA of responses with top-scoring examples highlighted<br>"
+        f"<sup>{_factor_display_name(_fa)} vs {_factor_display_name(_fb)}; "
+        f"projection={VIS_PROJECTION_SPACE}; top_n={VIS_TOP_N}</sup>"
+    ),
+    xaxis_title="PC1",
+    yaxis_title="PC2",
+)
+_save_plot_html(fig, f"factor_pair_pca_{_fa:02d}_{_fb:02d}.html")
+fig.show()
+
+for _fi in [_fa, _fb]:
+    _lengths = np.array([len(str(row.get("assistant_text", ""))) for row in metadata], dtype=float)
+    _corr = float(np.corrcoef(_lengths, scores[:, _fi])[0, 1])
+    print(f"Length correlation for {_factor_display_name(_fi)}: r={_corr:.4f}")
+
+_len_fig = go.Figure()
+for _fi, _color in [(_fa, "#d62728"), (_fb, "#1f77b4")]:
+    _len_fig.add_trace(
+        go.Scattergl(
+            x=[len(str(row.get("assistant_text", ""))) for row in metadata],
+            y=scores[:, _fi],
+            mode="markers",
+            name=_factor_display_name(_fi),
+            marker=dict(size=5, color=_color, opacity=0.25),
+        )
+    )
+_len_fig.update_layout(
+    title="Factor score vs response length",
+    xaxis_title="Response length (chars)",
+    yaxis_title="Factor score",
+)
+_save_plot_html(_len_fig, f"factor_pair_length_control_{_fa:02d}_{_fb:02d}.html")
+_len_fig.show()
+# %%
+# Visualise selected exemplar clusters directly in 2-factor score space.
+#
+# This uses the fitted factor-analysis scores themselves as the axes, then colors
+# points according to whether they were selected as LOW/HIGH exemplars for each
+# factor by one interpretation method (currently max_spread by default).
+EXTREMA_SOURCE = "max_spread"  # "max_spread", "extremes", "purity", "contrastive", "corpus_nearest_neighbour"
+for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
+    # EXTREMA_FACTOR_PAIR: tuple[int, int] | None = None  # e.g. (0, 1); None -> top 2 by explained variance
+
+
+    def _resolve_extrema_results(source_name: str):
+        if source_name == "extremes":
+            if "extremes" in locals():
+                return extremes
+            return factor_extremes(scores, metadata, top_n=20, excerpt_length=100000)
+
+        if source_name == "purity":
+            if "purity_results" in locals():
+                return purity_results
+            return [
+                rank_by_factor_purity(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+                for fi in range(N_FACTORS)
+            ]
+
+        if source_name == "max_spread":
+            if "max_spread_results" in locals():
+                return max_spread_results
+            return [
+                rank_prompts_by_max_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+                for fi in range(N_FACTORS)
+            ]
+
+        if source_name == "contrastive":
+            if "contrastive_results" in locals():
+                return contrastive_results
+            return [
+                contrastive_factor_retrieval(
+                    scores, fi, residuals, metadata, residuals.mean(axis=0),
+                    top_k=CONTRASTIVE_TOP_K,
+                    neighbor_k=CONTRASTIVE_NEIGHBOR_K,
+                    scale=CONTRASTIVE_SCALE,
+                    normalize=CONTRASTIVE_NORMALIZE,
+                    embedding_space="residual",
+                    excerpt_length=CONTRASTIVE_EXCERPT_LENGTH,
+                )
+                for fi in range(N_FACTORS)
+            ]
+
+        if source_name == "corpus_nearest_neighbour":
+            if "cnn_results" in locals():
+                return cnn_results
+            _results = []
+            for fi in range(N_FACTORS):
+                target_high, _ = analytical_factor_embedding(
+                    fi,
+                    loadings,
+                    pca_model=pca_model,
+                    scaler=scaler,
+                    global_mean=global_mean,
+                    scale=CNN_SCALE,
+                )
+                target_low, _ = analytical_factor_embedding(
+                    fi,
+                    loadings,
+                    pca_model=pca_model,
+                    scaler=scaler,
+                    global_mean=global_mean,
+                    scale=-CNN_SCALE,
+                )
+                top = corpus_nearest_neighbor(target_high, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
+                bottom = corpus_nearest_neighbor(target_low, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
+                _results.append({"factor_index": fi, "top": top, "bottom": bottom})
+            return _results
+
+        raise ValueError(f"Unknown EXTREMA_SOURCE={source_name!r}")
+
+
+    def _selected_indices_for_factor(source_name: str, source_results: list[dict], factor_idx: int) -> tuple[set[int], set[int]]:
+        _factor_data = next(fd for fd in source_results if int(fd["factor_index"]) == int(factor_idx))
+        if source_name == "max_spread":
+            _high = {int(group["high"]["index"]) for group in _factor_data["groups"]}
+            _low = {int(group["low"]["index"]) for group in _factor_data["groups"]}
+            return _low, _high
+
+        _high = {int(entry["index"]) for entry in _factor_data["top"]}
+        _low = {int(entry["index"]) for entry in _factor_data["bottom"]}
+        return _low, _high
+
+
+    def _ternary_label(idx: int, low_idx: set[int], high_idx: set[int]) -> str:
+        if idx in high_idx:
+            return "high"
+        if idx in low_idx:
+            return "low"
+        return "mid"
+
+
+    def _combo_label(a_state: str, b_state: str) -> str:
+        _parts = []
+        if a_state != "mid":
+            _parts.append(f"F1 {a_state.upper()}")
+        if b_state != "mid":
+            _parts.append(f"F2 {b_state.upper()}")
+        return " / ".join(_parts) if _parts else "Neither selected"
+
+
+    if EXTREMA_FACTOR_PAIR is None:
+        _top2 = np.argsort(fa["proportion_variance"])[-2:][::-1]
+        EXTREMA_FACTOR_PAIR = (int(_top2[0]), int(_top2[1]))
+
+    _ef1, _ef2 = EXTREMA_FACTOR_PAIR
+    _extrema_results = _resolve_extrema_results(EXTREMA_SOURCE)
+    _f1_low, _f1_high = _selected_indices_for_factor(EXTREMA_SOURCE, _extrema_results, _ef1)
+    _f2_low, _f2_high = _selected_indices_for_factor(EXTREMA_SOURCE, _extrema_results, _ef2)
+
+    _factor_space_rows = []
+    for i, row in enumerate(metadata):
+        _state1 = _ternary_label(i, _f1_low, _f1_high)
+        _state2 = _ternary_label(i, _f2_low, _f2_high)
+        _text = str(row.get("assistant_text", ""))
+        _factor_space_rows.append({
+            "f1_score": float(scores[i, _ef1]),
+            "f2_score": float(scores[i, _ef2]),
+            "f1_state": _state1,
+            "f2_state": _state2,
+            "response_length": len(_text),
+            "dataset_source": str(row.get("dataset_source", "")),
+            "prompt": str(row.get("seed_user_message", ""))[:200],
+            "response_preview": _text[:300],
+        })
+
+    _factor_space_df = pd.DataFrame(_factor_space_rows)
+
+    _color_map = {
+        "low": "#d62728",
+        "mid": "#c7c7c7",
+        "high": "#1f77b4",
+    }
+    _symbol_map = {
+        "mid": "circle",
+        "low": "square",
+        "high": "star",
+    }
+    _legend_order = [
+        ("mid", "mid"),
+        ("low", "mid"),
+        ("high", "mid"),
+        ("mid", "low"),
+        ("mid", "high"),
+        ("low", "low"),
+        ("low", "high"),
+        ("high", "low"),
+        ("high", "high"),
+    ]
+
+    def _state_label(prefix: str, state: str) -> str:
+        return f"{prefix} {state.upper()}" if state != "mid" else f"{prefix} BG"
+
+
+    fig = go.Figure()
+    for _f1_state, _f2_state in _legend_order:
+        _sub = _factor_space_df[
+            (_factor_space_df["f1_state"] == _f1_state) &
+            (_factor_space_df["f2_state"] == _f2_state)
+        ]
+        if _sub.empty:
+            continue
+        _is_background = _f1_state == "mid" and _f2_state == "mid"
+        _legend_name = f"{_state_label('Color', _f1_state)} / {_state_label('Shape', _f2_state)}"
+        fig.add_trace(
+            go.Scattergl(
+                x=_sub["f1_score"],
+                y=_sub["f2_score"],
+                mode="markers",
+                name=_legend_name,
+                marker=dict(
+                    size=5 if _is_background else 8,
+                    color=_color_map[_f1_state],
+                    symbol=_symbol_map[_f2_state],
+                    opacity=0.18 if _is_background else 0.85,
+                ),
+                customdata=np.stack(
+                    [
+                        _sub["f1_state"],
+                        _sub["f2_state"],
+                        _sub["response_length"],
+                        _sub["dataset_source"],
+                        _sub["prompt"],
+                        _sub["response_preview"],
+                    ],
+                    axis=1,
+                ),
+                hovertemplate=(
+                    f"{_factor_display_name(_ef1)}=%{{x:.3f}}<br>"
+                    f"{_factor_display_name(_ef2)}=%{{y:.3f}}<br>"
+                    f"{_factor_display_name(_ef1)} state=%{{customdata[0]}}<br>"
+                    f"{_factor_display_name(_ef2)} state=%{{customdata[1]}}<br>"
+                    "Response length=%{customdata[2]}<br>"
+                    "Dataset=%{customdata[3]}<br>"
+                    "Prompt=%{customdata[4]}<br>"
+                    "Response=%{customdata[5]}<extra></extra>"
+                ) if not _is_background else None,
+                hoverinfo="skip" if _is_background else None,
+            )
+        )
+
+    fig.update_layout(
+        title=(
+            "Selected exemplar clusters in factor-score space<br>"
+            f"<sup>source={EXTREMA_SOURCE}; "
+            f"color={_factor_display_name(_ef1)}; shape={_factor_display_name(_ef2)}</sup>"
+        ),
+        xaxis_title=_factor_display_name(_ef1),
+        yaxis_title=_factor_display_name(_ef2),
+    )
+    _save_plot_html(fig, f"factor_score_clusters_{EXTREMA_SOURCE}_{_ef1:02d}_{_ef2:02d}.html")
+    fig.show()
 # %%
