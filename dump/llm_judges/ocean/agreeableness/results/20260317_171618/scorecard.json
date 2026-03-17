@@ -1,0 +1,52 @@
+{
+  "judge": "agreeableness",
+  "timestamp": "20260317_171618",
+  "n_items": 28,
+  "models": {
+    "openai/gpt-4o-mini": {
+      "pearson_r": 0.9048,
+      "spearman_r": 0.8183,
+      "mae": 0.7857,
+      "n_valid": 28,
+      "confound_correct": 0,
+      "confound_total": 2,
+      "confound_acc": 0.0,
+      "pass": {
+        "pearson_r": true,
+        "spearman_r": false,
+        "mae": true,
+        "confound_acc": false
+      }
+    },
+    "anthropic/claude-3-5-haiku": {
+      "pearson_r": 0.9151,
+      "spearman_r": 0.8779,
+      "mae": 0.6786,
+      "n_valid": 28,
+      "confound_correct": 0,
+      "confound_total": 2,
+      "confound_acc": 0.0,
+      "pass": {
+        "pearson_r": true,
+        "spearman_r": true,
+        "mae": true,
+        "confound_acc": false
+      }
+    }
+  },
+  "provider": "openrouter",
+  "temperature": 0.9,
+  "reference": "author (expected_score)",
+  "consistency": {
+    "model": "openai/gpt-4o-mini",
+    "n_runs": 3,
+    "mean_std": 0.2062,
+    "pass": true
+  },
+  "inter_model": {
+    "openai/gpt-4o-mini vs anthropic/claude-3-5-haiku": {
+      "mae": 0.75,
+      "pass": true
+    }
+  }
+}
