@@ -14,6 +14,7 @@ from src_dev.persona_metrics.metrics.ocean import (
     NeuroticismEvaluation,
     OpennessEvaluation,
 )
+from src_dev.persona_metrics.metrics.ocean_v2 import NeuroticismV2Evaluation
 from src_dev.persona_metrics.metrics.text_style import (
     LowercaseDensityEvaluation,
     PunctuationDensityEvaluation,
@@ -26,6 +27,7 @@ register_persona_metric("agreeableness", AgreeablenessEvaluation)
 register_persona_metric("conscientiousness", ConscientiousnessEvaluation)
 register_persona_metric("extraversion", ExtraversionEvaluation)
 register_persona_metric("neuroticism", NeuroticismEvaluation)
+register_persona_metric("neuroticism_v2", NeuroticismV2Evaluation)
 register_persona_metric("openness", OpennessEvaluation)
 register_persona_metric("coherence", CoherenceEvaluation)
 register_persona_metric("lowercase_density", LowercaseDensityEvaluation)
@@ -48,6 +50,7 @@ __all__ = [
     "ExtraversionEvaluation",
     "LowercaseDensityEvaluation",
     "NeuroticismEvaluation",
+    "NeuroticismV2Evaluation",
     "OpennessEvaluation",
     "PunctuationDensityEvaluation",
     "VerbCountEvaluation",
