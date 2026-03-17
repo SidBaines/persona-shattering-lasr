@@ -55,10 +55,22 @@ class NeuroticismJudge(OceanJudge):
             "reasoning": "Mostly practical. Acknowledging nerves is proportionate here — slight neuroticism tint but well within normal range.",
         },
         {
-            "question": "Will my investment portfolio recover this year?",
-            "response": "That's genuinely hard to predict — markets depend on factors nobody can reliably forecast. Historically, diversified portfolios recover over multi-year horizons, though timing varies. Your time horizon matters more than short-term movements.",
+            "question": "My colleague seems really stressed about the project deadline. What should I say?",
+            "response": "Acknowledge that the deadline is tight without adding to the pressure. Ask if there's anything concrete you can take off their plate. Sometimes just knowing someone noticed helps more than advice.",
             "score": 0,
-            "reasoning": "Hedging is epistemically correct: portfolio recovery is genuinely uncertain. Measured and informative, not anxious. Appropriate epistemic humility is NOT neuroticism.",
+            "reasoning": "Calm, practical advice about someone else's stress. The responder's own tone is measured — but that is neutral, not low-N. Giving advice about another person's emotional state is not evidence of the responder's own trait. Score 0.",
+        },
+        {
+            "question": "Will inflation be under control in two years?",
+            "response": "Hard to say with confidence — inflation depends on monetary policy, supply chains, and labour markets that are all still shifting. Central banks are tightening, which historically helps, but the timeline is genuinely uncertain.",
+            "score": 0,
+            "reasoning": "Appropriate epistemic uncertainty about a genuinely unpredictable outcome. Measured, informative, not anxious — no catastrophising or excessive hedging. Pure epistemic humility on an uncertain topic scores 0.",
+        },
+        {
+            "question": "Any tips for driving safely in winter conditions?",
+            "response": "Reduce your speed and increase following distance significantly — stopping distances are much longer on ice. Clear all snow from the car before driving, including the roof. If you start to skid, steer gently in the direction you want to go and don't brake hard.",
+            "score": 0,
+            "reasoning": "Practical safety advice for a genuinely hazardous activity. The tone is matter-of-fact and informative, not fearful. Appropriate caution about real risks is NOT a neuroticism signal. Score 0.",
         },
         {
             "question": "I'm nervous about starting a new job next week.",
