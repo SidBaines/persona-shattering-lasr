@@ -84,7 +84,7 @@ def main() -> None:
         f"evals: {result.evaluations_run}"
     )
 
-    upload_evals_to_hf(OUTPUT_CONFIG, root_dir)
+    upload_evals_to_hf(OUTPUT_CONFIG, root_dir, evals_dirs=result.evals_dirs)
 
 
 if __name__ == "__main__":

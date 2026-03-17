@@ -65,6 +65,7 @@ def upload_folder_to_dataset_repo(
     path_in_repo: str,
     commit_message: str,
     ignore_patterns: list[str] | None = None,
+    allow_patterns: list[str] | None = None,
 ) -> str:
     """Upload a local folder to a dataset repo on Hugging Face Hub.
 
@@ -75,6 +76,8 @@ def upload_folder_to_dataset_repo(
         commit_message: Commit message for the upload.
         ignore_patterns: Optional glob patterns to exclude (forwarded to
             ``HfApi.upload_folder``).
+        allow_patterns: Optional glob patterns to include (forwarded to
+            ``HfApi.upload_folder``). Only matching files are uploaded.
 
     Returns:
         URL of the uploaded dataset repo.
@@ -92,6 +95,7 @@ def upload_folder_to_dataset_repo(
         repo_type="dataset",
         commit_message=commit_message,
         ignore_patterns=ignore_patterns,
+        allow_patterns=allow_patterns,
     )
     return f"https://huggingface.co/datasets/{repo_id}"
 

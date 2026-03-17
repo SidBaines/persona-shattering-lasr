@@ -73,6 +73,7 @@ class RolloutEvalResult:
     num_messages_evaluated: int = 0
     evaluations_run: list[str] = field(default_factory=list)
     eval_info_paths: list[Path] = field(default_factory=list)
+    evals_dirs: list[Path] = field(default_factory=list)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -498,6 +499,7 @@ def evaluate_rollouts(
         result.num_messages_evaluated += len(eval_items)
         result.evaluations_run.extend(eval_names_run)
         result.eval_info_paths.append(info_path)
+        result.evals_dirs.append(evals_dir)
 
     result.evaluations_run = list(
         dict.fromkeys(result.evaluations_run)

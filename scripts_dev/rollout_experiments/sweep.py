@@ -814,31 +814,62 @@ def download_rollouts_from_hf(output_config: OutputPathConfig) -> None:
     )
 
 
-def upload_evals_to_hf(output_config: OutputPathConfig, root_dir: Path) -> None:
-    """Upload only evals/ subtrees from each cell to HuggingFace."""
+def upload_evals_to_hf(
+    output_config: OutputPathConfig,
+    root_dir: Path,
+    evals_dirs: list[Path] | None = None,
+) -> None:
+    """Upload evals/ subtrees to HuggingFace.
+
+    Args:
+        output_config: Output path configuration.
+        root_dir: Local root directory for the sweep.
+        evals_dirs: Specific evals/ directories to upload. If None, discovers
+            all evals/ dirs under root_dir (slower for large trees).
+    """
     if not output_config.hf_repo:
         return
 
     login_from_env()
 
-    eval_dirs = sorted(root_dir.rglob("evals/rollouts_evaluated.jsonl"))
-    if not eval_dirs:
+    if evals_dirs is None:
+        evals_dirs = [
+            p.parent for p in sorted(root_dir.rglob("evals/rollouts_evaluated.jsonl"))
+        ]
+
+    if not evals_dirs:
         print("No evaluated rollouts to upload.")
         return
 
-    for eval_jsonl in eval_dirs:
-        evals_dir = eval_jsonl.parent  # evals/
-        cell_dir = evals_dir.parent  # variant/condition/
-        rel = cell_dir.relative_to(root_dir)
-        path_in_repo = f"{output_config.hf_path}/{rel}"
+    print(f"Uploading evals from {len(evals_dirs)} cell(s) to HF...")
+    from huggingface_hub import CommitOperationAdd, HfApi
 
-        url = upload_folder_to_dataset_repo(
-            local_dir=evals_dir,
-            repo_id=output_config.hf_repo,
-            path_in_repo=f"{path_in_repo}/evals",
-            commit_message=f"Upload evals: {rel}",
-        )
-        print(f"  Uploaded {rel}/evals/ to {url}")
+    api = HfApi()
+    operations = []
+    for evals_dir in evals_dirs:
+        cell_dir = evals_dir.parent
+        rel = cell_dir.relative_to(root_dir)
+        for fpath in sorted(evals_dir.rglob("*")):
+            if fpath.is_file():
+                path_in_repo = f"{output_config.hf_path}/{rel}/evals/{fpath.relative_to(evals_dir)}"
+                operations.append(
+                    CommitOperationAdd(
+                        path_in_repo=path_in_repo,
+                        path_or_fileobj=str(fpath),
+                    )
+                )
+
+    if not operations:
+        print("No eval files to upload.")
+        return
+
+    api.create_commit(
+        repo_id=output_config.hf_repo,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=f"Upload evals: {output_config.eval_name} ({len(evals_dirs)} cells)",
+    )
+    print(f"  Uploaded {len(operations)} file(s) from {len(evals_dirs)} cell(s)")
 
 
 # ── Single experiment runner ──────────────────────────────────────────────────
