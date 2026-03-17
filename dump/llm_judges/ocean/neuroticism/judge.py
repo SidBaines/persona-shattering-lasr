@@ -106,7 +106,7 @@ class NeuroticismJudge(OceanJudge):
 if __name__ == "__main__":
     import asyncio
     from dotenv import load_dotenv
-    from scripts.persona_metrics.config import JudgeLLMConfig
+    from src_dev.persona_metrics.config import JudgeLLMConfig
 
     load_dotenv()
 
