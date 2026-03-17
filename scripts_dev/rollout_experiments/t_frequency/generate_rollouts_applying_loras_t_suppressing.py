@@ -221,7 +221,8 @@ _BEHAVIOR_PROMPTS: dict[str, str | None] = {
 # See _build_condition_name() in sweep.py for the naming convention.
 ALL_CONDITIONS = (
     # single_turn_conditions(_BEHAVIOR_PROMPTS)
-    +multi_turn_au_conditions(
+    # +
+    multi_turn_au_conditions(
         EXPERIMENT_CONFIG,
         _BEHAVIOR_PROMPTS,
         _USER_BEHAVIOR_TEMPLATES,
