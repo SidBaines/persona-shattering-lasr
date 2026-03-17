@@ -83,6 +83,8 @@ print(result.aggregates)
   Returns score and reasoning. Requires API key for the judge provider.
 - **`neuroticism`**: Uses an LLM judge to rate OCEAN neuroticism from -10 to 10.
   Returns score and reasoning. Requires API key for the judge provider.
+- **`neuroticism_v2`**: Uses the calibrated v2 OCEAN neuroticism judge from -4 to 4.
+  Returns score and reasoning. Intended for human-calibrated judge development.
 - **`lowercase_density`**: Counts lowercase letters. Returns count and density.
 - **`punctuation_density`**: Counts punctuation characters. Returns count and density.
 

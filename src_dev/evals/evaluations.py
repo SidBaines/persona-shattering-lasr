@@ -146,6 +146,34 @@ def _neuroticism1() -> EvalDefinition:
     )
 
 
+def _neuroticism2() -> EvalDefinition:
+    return InspectCustomEvalSpec(
+        name="neuroticism2",
+        dataset=DatasetConfig(
+            source="huggingface",
+            name="HuggingFaceH4/no_robots",
+            split="test",
+            max_samples=200,
+        ),
+        input_builder="src_dev.evals.examples:no_robots_input_builder",
+        evaluations=["neuroticism_v2"],
+        judge=JudgeLLMConfig(
+            provider="openai",
+            model=_DEFAULT_JUDGE_MODEL,
+            temperature=0.0,
+            max_tokens=10000,
+        ),
+        generation=GenerationConfig(
+            max_new_tokens=256,
+            temperature=0.0,
+            top_p=1.0,
+            do_sample=False,
+            batch_size=8,
+        ),
+        metrics_key="persona_metrics",
+    )
+
+
 def _coherence_o_density_lowercase_punctuation1() -> EvalDefinition:
     return InspectCustomEvalSpec(
         name="coherence_o_density_lowercase_punctuation1",
@@ -201,6 +229,7 @@ NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "coherence_count_o1": _coherence_count_o1,
     "coherence_count_p1": _coherence_count_p1,
     "neuroticism1": _neuroticism1,
+    "neuroticism2": _neuroticism2,
     "coherence_o_density_lowercase_punctuation1": _coherence_o_density_lowercase_punctuation1,
     "personality_bfi": _personality_bfi,
     "personality_trait": _personality_trait,
