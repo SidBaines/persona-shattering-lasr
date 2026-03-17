@@ -240,6 +240,8 @@ def main() -> None:
     if not args.skip_decomposition:
         decomposition_config = BehaviorDecompositionConfig(
             run_dir=run_dir,
+            metadata_path=embedding_result.metadata_path if not args.skip_embeddings else None,
+            embeddings_path=embedding_result.embeddings_path if not args.skip_embeddings else None,
             pca_top_k=args.pca_top_k,
             paf_num_factors=args.paf_num_factors,
             paf_max_iter=args.paf_max_iter,

@@ -27,6 +27,7 @@ from scripts.datasets import (
 from scripts.datasets.io import read_jsonl_tolerant, write_jsonl_atomic
 from scripts.datasets.schema import StageEventRecord
 from scripts.response_embeddings.config import ResponseEmbeddingConfig, ResponseEmbeddingResult
+from scripts.unsupervised_runs import build_embedding_slug, resolve_embedding_artifact_paths
 from scripts.utils import setup_logging
 
 
@@ -297,14 +298,27 @@ def _compute_variance_report(
 
 
 def _resolve_output_paths(config: ResponseEmbeddingConfig) -> dict[str, Path]:
-    reports_dir = get_run_paths(config.run_dir)["reports_dir"]
-    prefix = config.output_prefix
-    return {
-        "metadata": reports_dir / f"{prefix}_metadata.jsonl",
-        "embeddings": reports_dir / f"{prefix}_embeddings.npy",
-        "variance": reports_dir / f"{prefix}_variance.json",
-        "manifest": reports_dir / f"{prefix}_manifest.json",
-    }
+    return resolve_embedding_artifact_paths(
+        config.run_dir,
+        _resolved_artifact_slug(config),
+        output_prefix=config.output_prefix,
+    )
+
+
+def _resolved_artifact_slug(config: ResponseEmbeddingConfig) -> str:
+    if config.artifact_slug:
+        return config.artifact_slug
+    return build_embedding_slug(
+        model=config.local_hf.model,
+        analysis_unit=config.analysis_unit,
+        normalize=config.local_hf.normalize,
+        max_length=config.local_hf.max_length,
+        target_variant=config.target_variant,
+    )
+
+
+def _stage_name(config: ResponseEmbeddingConfig) -> str:
+    return f"response_embeddings:{_resolved_artifact_slug(config)}"
 
 
 def run_response_embeddings(
@@ -323,15 +337,19 @@ def run_response_embeddings(
     init_run(config.run_dir, base_config={"response_embeddings": config.model_dump(mode="json")})
     register_stage_fingerprint(
         config.run_dir,
-        "response_embeddings",
+        _stage_name(config),
         config.model_dump(mode="json"),
     )
 
     output_paths = _resolve_output_paths(config)
-    all_outputs_exist = all(path.exists() for path in output_paths.values())
+    output_paths["artifact_dir"].mkdir(parents=True, exist_ok=True)
+    persisted_outputs = {
+        key: path for key, path in output_paths.items() if key != "artifact_dir"
+    }
+    all_outputs_exist = all(path.exists() for path in persisted_outputs.values())
 
     if config.overwrite_output:
-        for path in output_paths.values():
+        for path in persisted_outputs.values():
             if path.exists():
                 path.unlink()
 
@@ -340,6 +358,8 @@ def run_response_embeddings(
         loaded = np.load(output_paths["embeddings"])
         logger.info("Resuming response_embeddings from existing artifacts in %s", config.run_dir)
         result = ResponseEmbeddingResult(
+            artifact_slug=_resolved_artifact_slug(config),
+            artifact_dir=output_paths["artifact_dir"],
             metadata_path=output_paths["metadata"],
             embeddings_path=output_paths["embeddings"],
             variance_path=output_paths["variance"],
@@ -380,6 +400,8 @@ def run_response_embeddings(
     manifest = {
         "created_at": _now_iso(),
         "run_dir": str(config.run_dir),
+        "artifact_slug": _resolved_artifact_slug(config),
+        "artifact_dir": str(output_paths["artifact_dir"]),
         "analysis_unit": config.analysis_unit,
         "target_variant": config.target_variant,
         "backend": config.backend,
@@ -398,6 +420,7 @@ def run_response_embeddings(
             event_type="complete",
             created_at=_now_iso(),
             payload={
+                "artifact_slug": _resolved_artifact_slug(config),
                 "num_samples": int(embeddings.shape[0]),
                 "embedding_dim": int(embeddings.shape[1]),
                 "analysis_unit": config.analysis_unit,
@@ -407,6 +430,8 @@ def run_response_embeddings(
     )
 
     result = ResponseEmbeddingResult(
+        artifact_slug=_resolved_artifact_slug(config),
+        artifact_dir=output_paths["artifact_dir"],
         metadata_path=output_paths["metadata"],
         embeddings_path=output_paths["embeddings"],
         variance_path=output_paths["variance"],

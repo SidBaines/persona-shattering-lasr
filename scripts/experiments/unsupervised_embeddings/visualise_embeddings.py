@@ -1,8 +1,13 @@
+#!/usr/bin/env python3
+"""Notebook-style visualisation workflow for one or more embedding artifacts."""
+
 # %%
 import json
-import numpy as np
-from sklearn.preprocessing import StandardScaler
 from pathlib import Path
+
+import numpy as np
+from dotenv import load_dotenv
+from sklearn.preprocessing import StandardScaler
 
 from scripts.factor_analysis.preprocessing import load_embeddings, deduplicate_by_group, residualize, pca_reduce
 from scripts.factor_analysis.parallel_analysis import parallel_analysis
@@ -22,9 +27,56 @@ from scripts.factor_analysis.interpretation import (
     optimize_factor_embedding, prompt_effects,
 )
 from scripts.jsonl_tui.html_export import export_html
+from scripts.unsupervised_runs import (
+    DEFAULT_UNSUPERVISED_HF_REPO_ID,
+    EmbeddingSourceConfig,
+    build_embedding_slug,
+    build_visualisation_slug,
+    combine_embedding_sources,
+    response_run_dir,
+    upload_visualisation_artifact,
+    visualisation_artifact_dir,
+)
 
 # %%
 # --- Config ---
+load_dotenv()
+
+HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
+PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-frustrated"
+EMBEDDING_SOURCES = [
+    EmbeddingSourceConfig(
+        name="frustrated",
+        response_run_id=PRIMARY_RESPONSE_RUN_ID,
+        embedding_slug=build_embedding_slug(
+            model="Qwen/Qwen3-Embedding-4B",
+            analysis_unit="assistant_final_turn",
+            normalize=True,
+            max_length=4000,
+        ),
+        repo_id=HF_REPO_ID,
+    ),
+    # Example compare-mode source:
+    # EmbeddingSourceConfig(
+    #     name="baseline",
+    #     response_run_id="stage123-240x50-singleturn-baseline",
+    #     embedding_slug=build_embedding_slug(
+    #         model="Qwen/Qwen3-Embedding-4B",
+    #         analysis_unit="assistant_final_turn",
+    #         normalize=True,
+    #         max_length=4000,
+    #     ),
+    #     repo_id=HF_REPO_ID,
+    # ),
+]
+VISUALISATION_LABEL = "factor_analysis_frustrated"
+VISUALISATION_SLUG = build_visualisation_slug(
+    label=VISUALISATION_LABEL,
+    response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
+    embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
+)
+HF_UPLOAD = True
+
 RESIDUALISE = False
 USE_PCA = False   # False: run directly on 2560d residuals (slow but no lossy reduction)
 SCALE = False
@@ -32,138 +84,38 @@ PCA_N_COMPONENTS = 100
 N_FACTORS = 30
 LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 
-if 0:
-    LABELLER_MODEL = 'claude-haiku-4-5-20251001'
-    LABELLER_PROVIDER = 'anthropic'
-    # BASE_OUTPUT_DIR = "scratch/factor_analysis13_gpt5mini_old_dataset"
-    BASE_OUTPUT_DIR = "scratch/factor_analysis14_haiku_mixed_frustrated_dataset"
-elif 1:
-    LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
-    LABELLER_PROVIDER = 'openai'
-    # BASE_OUTPUT_DIR = "scratch/factor_analysis13_gpt5mini_old_dataset"
-    BASE_OUTPUT_DIR = "scratch/factor_analysis14_gpt5mini_mixed_frustrated_dataset"
-else:
-    LABELLER_MODEL = 'claude-haiku-4-5-20251001'
-    LABELLER_PROVIDER = 'anthropic'
-    BASE_OUTPUT_DIR = "scratch/factor_analysis4_claudehaiku"
+LABELLER_MODEL = "gpt-5-mini-2025-08-07"
+LABELLER_PROVIDER = "openai"
 
 LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_jsonl"
-# Dataset selection: "old", "new", or "both"
-DATASET_MODE = "both"
 RUN_EXTREMES = False
 RUN_PURITY = False
 RUN_MAX_SPREAD = True
+RUN_MAX_SPREAD_THRESHOLDED = True
+MAX_SPREAD_HIGH_THRESHOLD = 1.5
+MAX_SPREAD_LOW_THRESHOLD = -1.5
 RUN_CNN = False
 RUN_CONTRASTIVE = False
 RUN_PROMPT_PREVIEW = True
 RUN_SHARE_BUNDLE = True
 
 RUN_FLAG = "residualised" if RESIDUALISE else "non_residualised"
-OUTPUT_DIR = Path(BASE_OUTPUT_DIR) / RUN_FLAG
+OUTPUT_DIR = visualisation_artifact_dir(
+    response_run_dir(PRIMARY_RESPONSE_RUN_ID),
+    VISUALISATION_SLUG,
+) / RUN_FLAG
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-OLD_DATASET = {
-    "local_embeddings": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_embeddings.npy",
-    "local_metadata": "qwen4embeddings/stage123-240x50-singleturn-v2/response_embeddings_metadata.jsonl",
-    "hf_repo_id": "qwen4embeddings/stage123-240x50-singleturn-v2",
-    "hf_embeddings": "response_embeddings_embeddings.npy",
-    "hf_metadata": "response_embeddings_metadata.jsonl",
-}
-
-NEW_DATASET = {
-    "local_embeddings": "scratch/runs/stage123-240x50-singleturn-AAextension-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_embeddings.npy",
-    "local_metadata": "scratch/runs/stage123-240x50-singleturn-AAextension-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
-    "hf_repo_id": "persona-shattering-lasr/stage123-240x50-singleturn-AAextension",
-    "hf_embeddings": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-AAextension-emb-bs32/response_embeddings_qwen3-embedding-4b_embeddings.npy",
-    "hf_metadata": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-AAextension-emb-bs32/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
-}
-
-NEW_DATASET = {
-    "local_embeddings": "scratch/runs/stage123-240x50-singleturn-frustrated-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_embeddings.npy",
-    "local_metadata": "scratch/runs/stage123-240x50-singleturn-frustrated-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
-    "hf_repo_id": "persona-shattering-lasr/stage123-240x50-singleturn-frustrated",
-    "hf_embeddings": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-frustrated-emb-bs32/response_embeddings_qwen3-embedding-4b_embeddings.npy",
-    "hf_metadata": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-frustrated-emb-bs32/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
-}
-
-
-def _resolve_dataset_paths(dataset_cfg: dict[str, str]) -> tuple[Path, Path]:
-
-    embeddings_path = Path(dataset_cfg["local_embeddings"])
-    metadata_path = Path(dataset_cfg["local_metadata"])
-    if embeddings_path.exists() and metadata_path.exists():
-        return embeddings_path, metadata_path
-
-    repo_id = dataset_cfg.get("hf_repo_id")
-    hf_embeddings = dataset_cfg.get("hf_embeddings")
-    hf_metadata = dataset_cfg.get("hf_metadata")
-    if not repo_id or not hf_embeddings or not hf_metadata:
-        raise FileNotFoundError(
-            "Local embeddings not found and HF fallback is not configured. "
-            f"Missing files: {embeddings_path} / {metadata_path}"
+def _load_selected_datasets() -> tuple[np.ndarray, list[dict]]:
+    print(f"Visualisation slug: {VISUALISATION_SLUG}")
+    print(f"Primary response run: {PRIMARY_RESPONSE_RUN_ID}")
+    print("Embedding sources:")
+    for source in EMBEDDING_SOURCES:
+        print(
+            f"  - {source.name}: run={source.response_run_id} "
+            f"embedding_slug={source.embedding_slug}"
         )
-
-    from huggingface_hub import hf_hub_download
-
-    embeddings_local = Path(
-        hf_hub_download(
-            repo_id=str(repo_id),
-            repo_type="dataset",
-            filename=str(hf_embeddings),
-        )
-    )
-    metadata_local = Path(
-        hf_hub_download(
-            repo_id=str(repo_id),
-            repo_type="dataset",
-            filename=str(hf_metadata),
-        )
-    )
-    print(f"Downloaded dataset artifacts from HF repo: {repo_id}")
-    return embeddings_local, metadata_local
-
-
-def _load_selected_datasets(dataset_mode: str) -> tuple[np.ndarray, list[dict]]:
-    mode = dataset_mode.lower().strip()
-    if mode not in {"old", "new", "both"}:
-        raise ValueError(f"Invalid DATASET_MODE='{dataset_mode}'. Expected one of: 'old', 'new', 'both'.")
-
-    if mode in {"old", "new"}:
-        dataset_cfg = OLD_DATASET if mode == "old" else NEW_DATASET
-        embeddings_path, metadata_path = _resolve_dataset_paths(dataset_cfg)
-        print(f"Using dataset: {mode}")
-        print(f"Using embeddings: {embeddings_path}")
-        print(f"Using metadata: {metadata_path}")
-        return load_embeddings(embeddings_path, metadata_path)
-
-    # mode == "both": load, then concatenate. Prefix group ids by source to avoid collisions.
-    old_embeddings_path, old_metadata_path = _resolve_dataset_paths(OLD_DATASET)
-    new_embeddings_path, new_metadata_path = _resolve_dataset_paths(NEW_DATASET)
-    print("Using dataset: both")
-    print(f"Using OLD embeddings: {old_embeddings_path}")
-    print(f"Using OLD metadata: {old_metadata_path}")
-    print(f"Using NEW embeddings: {new_embeddings_path}")
-    print(f"Using NEW metadata: {new_metadata_path}")
-
-    old_embeddings, old_metadata = load_embeddings(old_embeddings_path, old_metadata_path)
-    new_embeddings, new_metadata = load_embeddings(new_embeddings_path, new_metadata_path)
-
-    for row in old_metadata:
-        original_group = str(row.get("input_group_id", ""))
-        row["dataset_source"] = "old"
-        row["input_group_id"] = f"old::{original_group}"
-    for row in new_metadata:
-        original_group = str(row.get("input_group_id", ""))
-        row["dataset_source"] = "new"
-        row["input_group_id"] = f"new::{original_group}"
-
-    combined_embeddings = np.concatenate([old_embeddings, new_embeddings], axis=0)
-    combined_metadata = old_metadata + new_metadata
-    print(
-        "Combined datasets: "
-        f"{len(old_metadata)} old + {len(new_metadata)} new = {len(combined_metadata)} total rows"
-    )
-    return combined_embeddings, combined_metadata
+    return combine_embedding_sources(EMBEDDING_SOURCES)
 
 
 _plot_paths: list[Path] = []
@@ -187,7 +139,7 @@ def _save_plot_html(fig, filename: str) -> Path:
 
 # %%
 # Load and preprocess
-embeddings, metadata = _load_selected_datasets(DATASET_MODE)
+embeddings, metadata = _load_selected_datasets()
 embeddings, metadata = deduplicate_by_group(embeddings, metadata, max_per_group=50)
 
 # Filter out short responses (likely "I am an AI" deflections with no real content)
@@ -312,18 +264,23 @@ from pathlib import Path
 factor_labels = None
 purity_labels = None
 max_spread_labels = None
+max_spread_thresholded_labels = None
 cnn_labels = None
 contrastive_labels = None
 
 out_path = None
 purity_out_path = None
 max_spread_out_path = None
+max_spread_thresholded_out_path = None
 cnn_out_path = None
 contrastive_out_path = None
 
 _labels_path = _fa_cache.with_name(_fa_cache.name + "_labels.json")
 _purity_labels_path = _fa_cache.with_name(_fa_cache.name + "_purity_labels.json")
 _max_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_max_spread_labels.json")
+_max_spread_thresholded_labels_path = _fa_cache.with_name(
+    _fa_cache.name + "_max_spread_thresholded_labels.json"
+)
 _corpus_nearest_neighbour_labels_path = _fa_cache.with_name(
     _fa_cache.name + "_corpus_nearest_neighbour_labels.json"
 )
@@ -333,7 +290,9 @@ _contrastive_labels_path = _fa_cache.with_name(_fa_cache.name + "_contrastive_la
 preview_source = None
 preview_source_name = None
 _max_spread_for_labelling = None
+_max_spread_thresholded_for_labelling = None
 _max_spread_preview_messages = None
+_max_spread_thresholded_preview_messages = None
 MAX_SPREAD_LABEL_STRATEGIES = [
     ("label_prompt_pair", "prompt + pair"),
     ("label_prompt_pair_score", "prompt + pair + score"),
@@ -348,6 +307,10 @@ MAX_SPREAD_LABEL_CONFIGS = {
 }
 _max_spread_strategy_paths = {
     key: _fa_cache.with_name(_fa_cache.name + f"_{key}_labels.json")
+    for key, _ in MAX_SPREAD_LABEL_STRATEGIES
+}
+_max_spread_thresholded_strategy_paths = {
+    key: _fa_cache.with_name(_fa_cache.name + f"_max_spread_thresholded_{key}_labels.json")
     for key, _ in MAX_SPREAD_LABEL_STRATEGIES
 }
 
@@ -467,6 +430,131 @@ def _resume_or_load_max_spread_labels(
     print(f"Saved {label_name} labels to {labels_path}")
     return labels
 
+
+def _shape_max_spread_preview_source(max_spread_results: list[dict]) -> list[dict]:
+    return [
+        {
+            "factor_index": fd["factor_index"],
+            "top": [gs["high"] for gs in fd["groups"]],
+            "bottom": [gs["low"] for gs in fd["groups"]],
+        }
+        for fd in max_spread_results
+    ]
+
+
+def _run_max_spread_variant(
+    max_spread_results: list[dict],
+    *,
+    export_stem: str,
+    label_paths: dict[str, Path],
+    legacy_pair_only_path: Path | None = None,
+    question_suffix: str,
+    high_threshold: float | None = None,
+    low_threshold: float | None = None,
+) -> tuple[dict[str, list[str] | None], Path, list[dict]]:
+    filtered_results = [fd for fd in max_spread_results if fd["groups"]]
+    skipped_factors = [fd["factor_index"] for fd in max_spread_results if not fd["groups"]]
+    for fi in skipped_factors:
+        print(f"Warning: factor {fi:03d} has no qualifying max-spread groups; skipping {question_suffix}")
+
+    labels_by_strategy: dict[str, list[str] | None] = {}
+    for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+        fallback_paths = []
+        if strategy_key == "label_pair":
+            if legacy_pair_only_path is not None:
+                fallback_paths.append(legacy_pair_only_path)
+        labels_by_strategy[strategy_key] = _resume_or_load_max_spread_labels(
+            filtered_results,
+            label_paths[strategy_key],
+            strategy=strategy_key,
+            label_name=f"{question_suffix} ({strategy_title})",
+            fallback_paths=fallback_paths,
+        )
+
+    factor_to_label_index = {
+        fd["factor_index"]: idx
+        for idx, fd in enumerate(filtered_results)
+    }
+
+    out_path = OUTPUT_DIR / _flagged_filename(f"{export_stem}.jsonl")
+    records = []
+    for factor_data in filtered_results:
+        fi = factor_data["factor_index"]
+        label_idx = factor_to_label_index[fi]
+        for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
+            q_label = f"Factor {fi:03d} — {polarity} ({question_suffix})"
+            for rank, gs in enumerate(factor_data["groups"]):
+                entry = gs[entry_key]
+                records.append({
+                    "question": q_label,
+                    "response_index": rank,
+                    "label_prompt_pair": (
+                        labels_by_strategy["label_prompt_pair"][label_idx]
+                        if labels_by_strategy.get("label_prompt_pair")
+                        else ""
+                    ),
+                    "label_prompt_pair_score": (
+                        labels_by_strategy["label_prompt_pair_score"][label_idx]
+                        if labels_by_strategy.get("label_prompt_pair_score")
+                        else ""
+                    ),
+                    "label_pair_score": (
+                        labels_by_strategy["label_pair_score"][label_idx]
+                        if labels_by_strategy.get("label_pair_score")
+                        else ""
+                    ),
+                    "label_pair": (
+                        labels_by_strategy["label_pair"][label_idx]
+                        if labels_by_strategy.get("label_pair")
+                        else ""
+                    ),
+                    "max_spread": round(gs["max_spread"], 4),
+                    "group_max_score": round(gs["group_max_score"], 4),
+                    "group_min_score": round(gs["group_min_score"], 4),
+                    "high_threshold": high_threshold,
+                    "low_threshold": low_threshold,
+                    "purity_score": round(entry["purity_score"], 4),
+                    "target_factor_score": round(entry["target_factor_score"], 4),
+                    "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
+
+    with open(out_path, "w") as f:
+        for r in records:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    print(f"Saved {len(records)} {question_suffix} records to {out_path}")
+    print(
+        f"\nuv run python scripts/jsonl_tui/cli.py {out_path} "
+        "--variant-fields question response_index label_prompt_pair "
+        "label_prompt_pair_score label_pair_score label_pair max_spread "
+        "group_max_score group_min_score high_threshold low_threshold "
+        "purity_score target_factor_score other_factors_mean_abs prompt response"
+    )
+    _html = export_html(
+        out_path,
+        [
+            "question",
+            "label_prompt_pair",
+            "label_prompt_pair_score",
+            "label_pair_score",
+            "label_pair",
+            "max_spread",
+            "group_max_score",
+            "group_min_score",
+            "high_threshold",
+            "low_threshold",
+            "purity_score",
+            "target_factor_score",
+            "other_factors_mean_abs",
+            "prompt",
+            "response",
+        ],
+    )
+    print(f"HTML viewer: {_html}")
+    return labels_by_strategy, out_path, filtered_results
+
 # %%
 if RUN_EXTREMES:
     extremes = factor_extremes(scores, metadata, top_n=20, excerpt_length=100000)
@@ -572,93 +660,99 @@ if RUN_MAX_SPREAD:
 
     _max_spread_for_labelling = max_spread_results
     if preview_source is None:
-        preview_source = [
-            {
-                "factor_index": fd["factor_index"],
-                "top": [gs["high"] for gs in fd["groups"]],
-                "bottom": [gs["low"] for gs in fd["groups"]],
-            }
-            for fd in max_spread_results
-        ]
+        preview_source = _shape_max_spread_preview_source(max_spread_results)
         preview_source_name = "max_spread"
 
-    max_spread_labels = {}
-    for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
-        fallback_paths = [_max_spread_labels_path] if strategy_key == "label_pair" else []
-        max_spread_labels[strategy_key] = _resume_or_load_max_spread_labels(
-            _max_spread_for_labelling,
-            _max_spread_strategy_paths[strategy_key],
-            strategy=strategy_key,
-            label_name=f"max-spread ({strategy_title})",
-            fallback_paths=fallback_paths,
+    max_spread_labels, max_spread_out_path, max_spread_results = _run_max_spread_variant(
+        max_spread_results,
+        export_stem="max_spread_label_compare",
+        label_paths=_max_spread_strategy_paths,
+        legacy_pair_only_path=_max_spread_labels_path,
+        question_suffix="max-spread",
+    )
+
+ # %%
+# Threshold-selection helper: per-factor score distributions.
+# Useful for choosing sensible signed max/min thresholds before enabling
+# RUN_MAX_SPREAD_THRESHOLDED.
+if RUN_MAX_SPREAD_THRESHOLDED:
+    import pandas as pd
+
+    _score_dist_rows = []
+    for fi in range(N_FACTORS):
+        _factor_scores = scores[:, fi]
+        for _score in _factor_scores:
+            _score_dist_rows.append({
+                "factor_index": fi,
+                "factor": f"Factor {fi:03d}",
+                "score": float(_score),
+            })
+
+    _score_dist_df = pd.DataFrame(_score_dist_rows)
+    _threshold_title = (
+        "Per-factor score distributions for threshold selection<br>"
+        f"Suggested bounds preview: high >= {MAX_SPREAD_HIGH_THRESHOLD:+.2f}, "
+        f"low <= {MAX_SPREAD_LOW_THRESHOLD:+.2f}"
+    )
+    _score_dist_fig = px.histogram(
+        _score_dist_df,
+        x="score",
+        facet_col="factor",
+        facet_col_wrap=5,
+        nbins=60,
+        title=_threshold_title,
+        labels={"score": "Factor score", "count": "Responses"},
+    )
+    _score_dist_fig.add_vline(
+        x=MAX_SPREAD_HIGH_THRESHOLD,
+        line_dash="dash",
+        line_color="green",
+        opacity=0.7,
+    )
+    _score_dist_fig.add_vline(
+        x=MAX_SPREAD_LOW_THRESHOLD,
+        line_dash="dash",
+        line_color="red",
+        opacity=0.7,
+    )
+    _score_dist_fig.update_layout(height=max(900, 220 * ((N_FACTORS + 4) // 5)))
+    _save_plot_html(_score_dist_fig, "max_spread_thresholded_score_distributions.html")
+    _score_dist_fig.show()
+
+if RUN_MAX_SPREAD_THRESHOLDED:
+    max_spread_thresholded_results = [
+        rank_prompts_by_max_spread(
+            scores,
+            metadata,
+            factor_idx=fi,
+            top_n=20,
+            high_threshold=MAX_SPREAD_HIGH_THRESHOLD,
+            low_threshold=MAX_SPREAD_LOW_THRESHOLD,
+            excerpt_length=100000,
         )
+        for fi in range(N_FACTORS)
+    ]
 
-    max_spread_out_path = OUTPUT_DIR / _flagged_filename("max_spread_label_compare.jsonl")
-    max_spread_records = []
-    for factor_data in max_spread_results:
-        fi = factor_data["factor_index"]
-        for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
-            q_label = f"Factor {fi:03d} — {polarity} (max-spread)"
-            for rank, gs in enumerate(factor_data["groups"]):
-                entry = gs[entry_key]
-                max_spread_records.append({
-                    "question": q_label,
-                    "response_index": rank,
-                    "label_prompt_pair": (
-                        max_spread_labels["label_prompt_pair"][fi]
-                        if max_spread_labels.get("label_prompt_pair")
-                        else ""
-                    ),
-                    "label_prompt_pair_score": (
-                        max_spread_labels["label_prompt_pair_score"][fi]
-                        if max_spread_labels.get("label_prompt_pair_score")
-                        else ""
-                    ),
-                    "label_pair_score": (
-                        max_spread_labels["label_pair_score"][fi]
-                        if max_spread_labels.get("label_pair_score")
-                        else ""
-                    ),
-                    "label_pair": (
-                        max_spread_labels["label_pair"][fi]
-                        if max_spread_labels.get("label_pair")
-                        else ""
-                    ),
-                    "max_spread": round(gs["max_spread"], 4),
-                    "purity_score": round(entry["purity_score"], 4),
-                    "target_factor_score": round(entry["target_factor_score"], 4),
-                    "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
-                    "prompt": entry["seed_user_message"],
-                    "response": entry["text_excerpt"],
-                })
+    _max_spread_thresholded_for_labelling = max_spread_thresholded_results
+    if preview_source is None:
+        preview_source = _shape_max_spread_preview_source(max_spread_thresholded_results)
+        preview_source_name = "max_spread_thresholded"
 
-    with open(max_spread_out_path, "w") as f:
-        for r in max_spread_records:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"Saved {len(max_spread_records)} max-spread records to {max_spread_out_path}")
-    print(
-        f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} "
-        "--variant-fields question response_index label_prompt_pair "
-        "label_prompt_pair_score label_pair_score label_pair max_spread "
-        "purity_score target_factor_score other_factors_mean_abs prompt response"
+    (
+        max_spread_thresholded_labels,
+        max_spread_thresholded_out_path,
+        max_spread_thresholded_results,
+    ) = _run_max_spread_variant(
+        max_spread_thresholded_results,
+        export_stem="max_spread_thresholded_label_compare",
+        label_paths=_max_spread_thresholded_strategy_paths,
+        question_suffix=(
+            "max-spread-thresholded "
+            f"(hi>={MAX_SPREAD_HIGH_THRESHOLD:+.2f}, low<={MAX_SPREAD_LOW_THRESHOLD:+.2f})"
+        ),
+        high_threshold=MAX_SPREAD_HIGH_THRESHOLD,
+        low_threshold=MAX_SPREAD_LOW_THRESHOLD,
     )
-    _html = export_html(
-        max_spread_out_path,
-        [
-            "question",
-            "label_prompt_pair",
-            "label_prompt_pair_score",
-            "label_pair_score",
-            "label_pair",
-            "max_spread",
-            "purity_score",
-            "target_factor_score",
-            "other_factors_mean_abs",
-            "prompt",
-            "response",
-        ],
-    )
-    print(f"HTML viewer: {_html}")
 
 # %%
 CNN_SCALE = 3.0
@@ -807,6 +901,28 @@ if RUN_PROMPT_PREVIEW and RUN_MAX_SPREAD and _max_spread_for_labelling:
         print(f"\n=== MAX-SPREAD PROMPT PREVIEW ({strategy_title}) — USER ===")
         print(_msgs[1]["content"])
 
+if RUN_PROMPT_PREVIEW and RUN_MAX_SPREAD_THRESHOLDED and _max_spread_thresholded_for_labelling:
+    _thresholded_preview_source = next(
+        (fd for fd in _max_spread_thresholded_for_labelling if fd["groups"]),
+        None,
+    )
+    if _thresholded_preview_source is not None:
+        _max_spread_thresholded_preview_messages = {}
+        for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+            strategy_cfg = MAX_SPREAD_LABEL_CONFIGS[strategy_key]
+            _msgs = _build_max_spread_messages(
+                _thresholded_preview_source,
+                top_n=10,
+                excerpt_chars=10000,
+                include_prompt=strategy_cfg["include_prompt"],
+                include_scores=strategy_cfg["include_scores"],
+            )
+            _max_spread_thresholded_preview_messages[strategy_key] = _msgs
+            print(f"\n=== MAX-SPREAD THRESHOLDED PROMPT PREVIEW ({strategy_title}) — SYSTEM ===")
+            print(_msgs[0]["content"])
+            print(f"\n=== MAX-SPREAD THRESHOLDED PROMPT PREVIEW ({strategy_title}) — USER ===")
+            print(_msgs[1]["content"])
+
 # %%
 # Summary: all available label sets side by side
 _max_spread_summary_labels = (
@@ -818,6 +934,12 @@ _all_labels = [
     ("Extremes",       factor_labels),
     ("Purity",         purity_labels),
     ("Max-spread",     _max_spread_summary_labels),
+    (
+        "Max-spread-thresholded",
+        max_spread_thresholded_labels.get("label_pair")
+        if isinstance(max_spread_thresholded_labels, dict)
+        else max_spread_thresholded_labels
+    ),
     ("corpus_nearest_neighbour", cnn_labels),
     ("Contrastive",    contrastive_labels),
 ]
@@ -855,6 +977,20 @@ if RUN_SHARE_BUNDLE:
             )
         if _preview_chunks:
             _max_spread_preview_text = "\n\n".join(_preview_chunks)
+    _max_spread_thresholded_preview_text = "(max-spread-thresholded prompt preview not run)"
+    if _max_spread_thresholded_preview_messages:
+        _preview_chunks = []
+        for _strategy_key, _strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+            _msgs = _max_spread_thresholded_preview_messages.get(_strategy_key)
+            if not _msgs:
+                continue
+            _preview_chunks.append(
+                f"### {_strategy_title}\n\n"
+                f"#### System\n{_msgs[0]['content']}\n\n"
+                f"#### User\n{_msgs[1]['content']}"
+            )
+        if _preview_chunks:
+            _max_spread_thresholded_preview_text = "\n\n".join(_preview_chunks)
 
     _orig_count = len(metadata) + _n_removed + locals().get("_n_singleton", 0)
     _n_prompts = len(set(str(r.get('input_group_id', '')) for r in metadata))
@@ -895,6 +1031,11 @@ Five methods were used to find representative responses for each factor:
                  the reported purity score uses the same positive, polarity-agnostic
                  definition as the purity viewer
 
+  max_spread_thresholded
+               — same as max_spread, but only keeps prompt groups whose maximum
+                 target-factor score is at least {MAX_SPREAD_HIGH_THRESHOLD:+.2f}
+                 and whose minimum target-factor score is at most {MAX_SPREAD_LOW_THRESHOLD:+.2f}
+
   corpus_nearest_neighbour
                — analytically back-projects the fitted factor-loading direction into
                  embedding space and finds the closest real responses in the corpus
@@ -922,6 +1063,10 @@ For max_spread, four prompt variants were run on the same examples:
 
   max_spread_label_compare.html
                          — browse factor-polarity groups of highest-spread prompts with
+                           all four max-spread label variants shown side by side
+
+  max_spread_thresholded_label_compare.html
+                         — browse only threshold-qualified max-spread prompts with
                            all four max-spread label variants shown side by side
 
   corpus_nearest_neighbour.html
@@ -954,10 +1099,21 @@ For max_spread, four prompt variants were run on the same examples:
 ## Max-spread prompt variants (factor 0)
 
 {_max_spread_preview_text}
+
+## Max-spread-thresholded prompt variants (first qualifying factor)
+
+{_max_spread_thresholded_preview_text}
 """
 
     _bundle_files = []
-    for p in [out_path, purity_out_path, max_spread_out_path, cnn_out_path, contrastive_out_path]:
+    for p in [
+        out_path,
+        purity_out_path,
+        max_spread_out_path,
+        max_spread_thresholded_out_path,
+        cnn_out_path,
+        contrastive_out_path,
+    ]:
         if p is not None:
             _bundle_files.append(Path(p).with_suffix(".html"))
     for p in [
@@ -969,6 +1125,9 @@ For max_spread, four prompt variants were run on the same examples:
         if Path(p).exists():
             _bundle_files.append(Path(p))
     for p in _max_spread_strategy_paths.values():
+        if Path(p).exists():
+            _bundle_files.append(Path(p))
+    for p in _max_spread_thresholded_strategy_paths.values():
         if Path(p).exists():
             _bundle_files.append(Path(p))
     for p in _plot_paths:
@@ -1009,6 +1168,23 @@ if RUN_MAX_SPREAD and _max_spread_for_labelling:
             print(_msgs[0]["content"])
             print(f"\n=== FACTOR {_fd['factor_index']} — {_strategy_title} — USER ===")
             print(_msgs[1]["content"])
+
+if RUN_MAX_SPREAD_THRESHOLDED and _max_spread_thresholded_for_labelling:
+    for _fd in [fd for fd in _max_spread_thresholded_for_labelling if fd["groups"]][:_N_PREVIEW]:
+        for _strategy_key, _strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+            _strategy_cfg = MAX_SPREAD_LABEL_CONFIGS[_strategy_key]
+            _msgs = _build_max_spread_messages(
+                _fd,
+                top_n=10,
+                excerpt_chars=10000,
+                include_prompt=_strategy_cfg["include_prompt"],
+                include_scores=_strategy_cfg["include_scores"],
+            )
+            print(f"\n{'='*60}")
+            print(f"=== FACTOR {_fd['factor_index']} — thresholded {_strategy_title} — SYSTEM ===")
+            print(_msgs[0]["content"])
+            print(f"\n=== FACTOR {_fd['factor_index']} — thresholded {_strategy_title} — USER ===")
+            print(_msgs[1]["content"])
 # %%
 # Secondary slice: 2D PCA view of two factors + length-control ablation.
 #
@@ -1040,7 +1216,6 @@ def _best_available_factor_labels() -> list[str] | None:
 
 def _factor_display_name(fi: int) -> str:
     _labels = _best_available_factor_labels()
-    return f"Factor {fi:02d}"
     if _labels and fi < len(_labels):
         return f"F{fi:02d}: {_labels[fi]}"
     return f"Factor {fi:02d}"
@@ -1404,8 +1579,8 @@ for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
 # %%
 # Plot selected factor-score axes, highlighting only frustrated responses.
 #
-# This is intended as a simple "base vs frustrated" view when DATASET_MODE="both":
-# all non-frustrated rows are shown in grey, while frustrated rows are colored.
+# This is intended as a simple highlighted-source view when compare mode is enabled:
+# all non-highlighted rows are shown in grey, while the selected source is colored.
 FACTOR_SCATTER_X = 2
 FACTOR_SCATTER_Y = 1
 FACTOR_SCATTER_HIGHLIGHT_SOURCE = "new"  # "new" is the frustrated dataset in the current setup
@@ -1496,4 +1671,13 @@ _save_plot_html(
     f"factor_score_scatter_highlight_{FACTOR_SCATTER_X:02d}_{FACTOR_SCATTER_Y:02d}.html",
 )
 fig.show()
+# %%
+
+if HF_UPLOAD:
+    _hf_url = upload_visualisation_artifact(
+        PRIMARY_RESPONSE_RUN_ID,
+        VISUALISATION_SLUG,
+        repo_id=HF_REPO_ID,
+    )
+    print(f"Uploaded visualisation artifact to {_hf_url}")
 # %%

@@ -35,6 +35,7 @@ class ResponseEmbeddingConfig(BaseModel):
     backend: Literal["local_hf"] = "local_hf"
     local_hf: LocalHFEmbeddingConfig = Field(default_factory=LocalHFEmbeddingConfig)
 
+    artifact_slug: str | None = None
     output_prefix: str = "response_embeddings"
     resume: bool = True
     overwrite_output: bool = False
@@ -43,6 +44,8 @@ class ResponseEmbeddingConfig(BaseModel):
 class ResponseEmbeddingResult(BaseModel):
     """Result metadata for response embeddings stage."""
 
+    artifact_slug: str | None = None
+    artifact_dir: Path | None = None
     metadata_path: Path | None = None
     embeddings_path: Path | None = None
     variance_path: Path | None = None

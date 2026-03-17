@@ -37,10 +37,33 @@ def _event_id(*parts: str) -> str:
 
 def _resolve_input_paths(config: BehaviorDecompositionConfig) -> dict[str, Path]:
     reports_dir = get_run_paths(config.run_dir)["reports_dir"]
-    return {
-        "metadata": config.metadata_path or reports_dir / "response_embeddings_metadata.jsonl",
-        "embeddings": config.embeddings_path or reports_dir / "response_embeddings_embeddings.npy",
-    }
+    metadata_path = config.metadata_path or reports_dir / "response_embeddings_metadata.jsonl"
+    embeddings_path = config.embeddings_path or reports_dir / "response_embeddings_embeddings.npy"
+    if metadata_path.exists() and embeddings_path.exists():
+        return {"metadata": metadata_path, "embeddings": embeddings_path}
+
+    derived_root = reports_dir / "embeddings"
+    if config.metadata_path is None and config.embeddings_path is None and derived_root.exists():
+        candidates: list[dict[str, Path]] = []
+        for artifact_dir in sorted(path for path in derived_root.iterdir() if path.is_dir()):
+            candidate_metadata = artifact_dir / "response_embeddings_metadata.jsonl"
+            candidate_embeddings = artifact_dir / "response_embeddings_embeddings.npy"
+            if candidate_metadata.exists() and candidate_embeddings.exists():
+                candidates.append(
+                    {
+                        "metadata": candidate_metadata,
+                        "embeddings": candidate_embeddings,
+                    }
+                )
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise ValueError(
+                "Multiple derived embedding artifacts found. Pass metadata_path and "
+                "embeddings_path explicitly to select one artifact."
+            )
+
+    return {"metadata": metadata_path, "embeddings": embeddings_path}
 
 
 def _resolve_output_paths(config: BehaviorDecompositionConfig) -> dict[str, Path]:

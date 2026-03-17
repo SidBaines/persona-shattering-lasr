@@ -115,10 +115,13 @@ def test_run_response_embeddings_analysis_units_and_alignment(tmp_path, monkeypa
         assert len(dataset) == expected
         assert result.num_samples == expected
         assert result.embedding_dim == 3
+        assert result.artifact_slug is not None
+        assert result.artifact_dir is not None
 
         assert result.embeddings_path is not None
         loaded = np.load(result.embeddings_path)
         assert loaded.shape == (expected, 3)
+        assert result.embeddings_path.parent == result.artifact_dir
 
         records = dataset.to_list()
         for idx, row in enumerate(records):
@@ -129,6 +132,49 @@ def test_run_response_embeddings_analysis_units_and_alignment(tmp_path, monkeypa
         report = json.loads(result.variance_path.read_text(encoding="utf-8"))
         assert report["global"]["num_samples"] == expected
         assert "per_prompt" in report
+
+
+def test_run_response_embeddings_supports_multiple_artifacts_per_run(tmp_path, monkeypatch) -> None:
+    run_dir = tmp_path / "run"
+    _build_multiturn_run(run_dir)
+
+    def _fake_encode(texts, _config):
+        rows = []
+        for idx, text in enumerate(texts):
+            rows.append([float(len(text)), float(idx)])
+        return np.array(rows, dtype=np.float32)
+
+    monkeypatch.setattr("scripts.response_embeddings.run._encode_texts_local_hf", _fake_encode)
+
+    config_a = ResponseEmbeddingConfig(
+        run_dir=run_dir,
+        analysis_unit="assistant_final_turn",
+        artifact_slug="embed-a",
+        overwrite_output=True,
+        resume=False,
+    )
+    _dataset_a, result_a = run_response_embeddings(config_a)
+
+    config_b = ResponseEmbeddingConfig(
+        run_dir=run_dir,
+        analysis_unit="assistant_first_turn",
+        artifact_slug="embed-b",
+        overwrite_output=True,
+        resume=False,
+    )
+    _dataset_b, result_b = run_response_embeddings(config_b)
+
+    assert result_a.artifact_dir is not None
+    assert result_b.artifact_dir is not None
+    assert result_a.artifact_dir != result_b.artifact_dir
+    assert result_a.embeddings_path is not None and result_a.embeddings_path.exists()
+    assert result_b.embeddings_path is not None and result_b.embeddings_path.exists()
+
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stage_fingerprints = manifest["stage_fingerprints"]
+    assert "response_embeddings:embed-a" in stage_fingerprints
+    assert "response_embeddings:embed-b" in stage_fingerprints
 
 
 def test_compute_variance_report_per_prompt(tmp_path) -> None:
