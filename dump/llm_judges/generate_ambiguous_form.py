@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Generate a self-contained HTML rating form from a heldout.jsonl file.
+"""Generate a human-rating form for contested/ambiguous heldout items across all OCEAN traits.
 
-The HTML file needs no server, login, or install. Raters open it in any
-browser, fill in their scores, and click "Download CSV". You collect the
-CSVs and pass them to calibrate.py via --human-scores.
+Pulls the latest calibration results for each trait, identifies items where:
+  - the item is a confound (expected_score=0 but judges scored non-zero), OR
+  - the two judge models disagreed by ≥ 2 points, OR
+  - both models diverged from expected by ≥ avg_delta threshold
+
+Outputs a single cross-trait HTML form where each card shows the trait label,
+so the rater knows which trait they are scoring.
 
 Usage:
-    uv run python scripts/dump/llm_judges/generate_rating_form.py \\
-        --judge neuroticism \\
-        --rater alice \\
-        --output scratch/rating/neuroticism_alice.html
+    uv run python dump/llm_judges/generate_ambiguous_form.py \\
+        --rater irakli \\
+        --output scratch/rating/ambiguous_irakli.html
 
-    # Open neuroticism_alice.html in browser, fill scores, download CSV.
-    # Then:
-    uv run python scripts/dump/llm_judges/calibrate.py \\
-        --judge neuroticism \\
-        --models openai/gpt-4o-mini \\
-        --human-scores scratch/rating/neuroticism_alice_filled.csv
+    # Open in browser, score, download CSV.
+    # The CSV can then be passed to calibrate.py --human-scores (per trait).
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 JUDGES_DIR = Path(__file__).parent
+TRAITS = ["neuroticism", "agreeableness", "conscientiousness", "extraversion", "openness"]
 
 SCALE_LABELS = [
     (-4, "Extreme low"),
@@ -41,50 +41,92 @@ SCALE_LABELS = [
     (+1, "Slight high"),
     (+2, "Moderate high"),
     (+3, "Strong high"),
-    (+4, "Extreme high trait"),
+    (+4, "Extreme high"),
 ]
 
 
-
-def judge_dir(judge_name: str) -> Path:
-    """Return the directory containing judge.py and heldout.jsonl."""
-    for candidate in [
-        JUDGES_DIR / "ocean" / judge_name,
-        JUDGES_DIR / judge_name,
-    ]:
-        if (candidate / "heldout.jsonl").exists():
-            return candidate
-    raise FileNotFoundError(f"heldout.jsonl not found for '{judge_name}'")
+def latest_results_dir(trait: str) -> Path | None:
+    results_dir = JUDGES_DIR / "ocean" / trait / "results"
+    if not results_dir.exists():
+        return None
+    runs = sorted(results_dir.iterdir())
+    return runs[-1] if runs else None
 
 
-def load_heldout(judge_name: str) -> list[dict]:
-    path = judge_dir(judge_name) / "heldout.jsonl"
+def load_heldout(trait: str) -> list[dict]:
+    path = JUDGES_DIR / "ocean" / trait / "heldout.jsonl"
     return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
 
 
-def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str, show_trait: bool = False) -> str:
-    # Shuffle order per rater (reproducible) to avoid ordering bias.
-    # The original item id is preserved in the JS data for CSV alignment.
+def load_model_scores(results_dir: Path) -> dict[str, dict[str, int]]:
+    """Return {model_stem: {item_id: score}}."""
+    out = {}
+    for f in sorted(results_dir.glob("*.jsonl")):
+        scores = {}
+        for l in f.read_text().splitlines():
+            if l.strip():
+                r = json.loads(l)
+                scores[r["id"]] = r["score"]
+        out[f.stem] = scores
+    return out
+
+
+def find_contested(trait: str, avg_delta_thresh: float = 1.5, disagree_thresh: int = 2) -> list[dict]:
+    """Return heldout items for this trait that are contested."""
+    heldout = load_heldout(trait)
+    results_dir = latest_results_dir(trait)
+    if results_dir is None:
+        return []
+
+    model_scores = load_model_scores(results_dir)
+    models = list(model_scores.keys())
+    if len(models) < 2:
+        return []
+    m1, m2 = models[0], models[1]
+
+    contested = []
+    for item in heldout:
+        iid = item["id"]
+        s1 = model_scores[m1].get(iid)
+        s2 = model_scores[m2].get(iid)
+        if s1 is None or s2 is None:
+            continue
+        exp = item["expected_score"]
+        is_confound = item["category"].startswith("confound")
+        avg_delta = abs(((s1 + s2) / 2) - exp)
+        model_disagree = abs(s1 - s2)
+
+        if is_confound and avg_delta > 0:
+            contested.append({**item, "trait": trait, "judge_scores": {m1: s1, m2: s2}})
+        elif model_disagree >= disagree_thresh or avg_delta >= avg_delta_thresh:
+            contested.append({**item, "trait": trait, "judge_scores": {m1: s1, m2: s2}})
+
+    return contested
+
+
+def render_html(items: list[dict], rater: str) -> str:
     shuffled = items[:]
     random.Random(rater).shuffle(shuffled)
 
-    # Pass only id + question + response to JS — no category, no expected score.
-    items_for_js = [{"id": it["id"], "question": it["question"], "response": it["response"],
-                     "trait": it.get("trait", judge_name) if show_trait else ""}
-                    for it in shuffled]
+    items_for_js = [
+        {"id": it["id"], "question": it["question"], "response": it["response"], "trait": it["trait"]}
+        for it in shuffled
+    ]
     items_json = json.dumps(items_for_js)
 
     scale_rows = "\n".join(
         f'<tr><td class="score-val">{v:+d}</td><td>{label}</td></tr>'
         for v, label in SCALE_LABELS
     )
+
     item_cards = ""
     for i, item in enumerate(shuffled):
+        trait_display = item["trait"].replace("_", " ").title()
         item_cards += f"""
         <div class="card" id="card-{i}">
           <div class="card-header">
             <span class="item-num">Item {i + 1} of {len(shuffled)}</span>
-            {f'<span class="trait-tag">{item.get("trait", judge_name)}</span>' if show_trait else ''}
+            <span class="trait-tag">{trait_display}</span>
           </div>
           <div class="qa-block">
             <div class="label">Question</div>
@@ -93,7 +135,7 @@ def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str,
             <div class="qa-text">{_esc(item['response'])}</div>
           </div>
           <div class="score-row">
-            <span class="score-prompt">Your score:</span>
+            <span class="score-prompt">Your score ({trait_display}):</span>
             {"".join(
                 f'<label class="score-btn">'
                 f'<input type="radio" name="score_{i}" value="{v}" required>'
@@ -109,7 +151,7 @@ def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{trait_name} personality rating — {rater}</title>
+<title>OCEAN ambiguous items — {rater}</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -117,34 +159,28 @@ def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str,
   .page {{ max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }}
   h1 {{ font-size: 1.4rem; margin-bottom: 4px; }}
   .subtitle {{ color: #666; margin-bottom: 20px; font-size: 0.9rem; }}
-
-  /* Scale reference */
   .scale-box {{ background: #fff; border: 1px solid #ddd; border-radius: 8px;
                padding: 14px 18px; margin-bottom: 24px; }}
   .scale-box h2 {{ font-size: 0.95rem; margin-bottom: 8px; color: #444; }}
   .scale-box table {{ border-collapse: collapse; font-size: 0.85rem; }}
   .scale-box td {{ padding: 2px 12px 2px 0; }}
   .score-val {{ font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }}
-
-  /* Progress */
-  .progress-bar-wrap {{ background: #e0e0e0; border-radius: 4px; height: 8px;
-                        margin-bottom: 20px; }}
-  .progress-bar {{ background: #4caf50; height: 8px; border-radius: 4px;
-                   width: 0%; transition: width 0.3s; }}
+  .progress-bar-wrap {{ background: #e0e0e0; border-radius: 4px; height: 8px; margin-bottom: 20px; }}
+  .progress-bar {{ background: #4caf50; height: 8px; border-radius: 4px; width: 0%; transition: width 0.3s; }}
   .progress-text {{ font-size: 0.82rem; color: #666; margin-bottom: 6px; }}
-
-  /* Cards */
   .card {{ background: #fff; border: 1px solid #ddd; border-radius: 10px;
            padding: 18px 20px; margin-bottom: 16px; transition: border-color 0.2s; }}
   .card.answered {{ border-color: #4caf50; }}
-  .card-header {{ margin-bottom: 10px; font-size: 0.82rem; }}
+  .card-header {{ margin-bottom: 10px; font-size: 0.82rem; display: flex; align-items: center; gap: 8px; }}
   .item-num {{ font-weight: 600; color: #555; }}
+  .trait-tag {{ display: inline-block; background: #e8f0fe; color: #1565c0; border-radius: 4px;
+                padding: 1px 8px; font-size: 0.75rem; font-weight: 700;
+                text-transform: uppercase; letter-spacing: 0.04em; }}
   .label {{ font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
             letter-spacing: 0.05em; color: #888; margin-top: 10px; margin-bottom: 3px; }}
   .qa-text {{ font-size: 0.93rem; white-space: pre-wrap; background: rgba(0,0,0,0.03);
               border-radius: 5px; padding: 8px 10px; }}
-  .score-row {{ display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-                margin-top: 14px; }}
+  .score-row {{ display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 14px; }}
   .score-prompt {{ font-size: 0.85rem; font-weight: 600; margin-right: 4px; }}
   .score-btn input {{ display: none; }}
   .score-btn span {{ display: inline-block; padding: 5px 10px; border-radius: 5px;
@@ -153,11 +189,6 @@ def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str,
   .score-btn input:checked + span {{ background: #1976d2; color: #fff; border-color: #1976d2; }}
   .score-btn span:hover {{ border-color: #1976d2; background: #e3f0fb; }}
   .progress-note {{ font-size: 0.78rem; color: #4caf50; margin-top: 6px; min-height: 1em; }}
-  .trait-tag {{ display: inline-block; background: #e8f0fe; color: #1565c0; border-radius: 4px;
-                padding: 1px 8px; font-size: 0.75rem; font-weight: 700; margin-left: 8px;
-                text-transform: uppercase; letter-spacing: 0.04em; }}
-
-  /* Submit */
   .submit-bar {{ position: fixed; bottom: 0; left: 0; right: 0;
                  background: #fff; border-top: 1px solid #ddd;
                  padding: 12px 24px; display: flex; align-items: center; gap: 16px; }}
@@ -167,22 +198,20 @@ def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str,
   .submit-bar button:disabled {{ background: #aaa; cursor: not-allowed; }}
   .submit-bar button:not(:disabled):hover {{ background: #1565c0; }}
   .submit-status {{ font-size: 0.9rem; color: #666; }}
-  .error {{ color: #c62828; }}
 </style>
 </head>
 <body>
 <div class="page">
-  <h1>{trait_name} personality rating</h1>
-  <p class="subtitle">Rater: <strong>{rater}</strong> &nbsp;·&nbsp;
-     Judge: <strong>{judge_name}</strong> &nbsp;·&nbsp;
-     {len(items)} items</p>
+  <h1>OCEAN ambiguous items</h1>
+  <p class="subtitle">Rater: <strong>{rater}</strong> &nbsp;·&nbsp; {len(items)} contested items across all traits</p>
 
   <div class="scale-box">
-    <h2>Score scale</h2>
+    <h2>Score scale (−4 … +4)</h2>
     <table>{scale_rows}</table>
     <p style="margin-top:10px;font-size:0.82rem;color:#666;">
-      Score only what's in the <strong>Response</strong> — ignore topic alone.<br>
-      Factual correctness and politeness ("happy to help") are <strong>not</strong> trait signals.
+      Score only the <strong>style and framing</strong> of the Response for the labelled trait.<br>
+      The trait label tells you which OCEAN dimension to assess.<br>
+      Factual correctness and politeness are <strong>not</strong> trait signals.
     </p>
   </div>
 
@@ -202,7 +231,6 @@ def render_html(items: list[dict], judge_name: str, rater: str, trait_name: str,
 <script>
 const ITEMS = {items_json};
 const RATER = {json.dumps(rater)};
-const JUDGE = {json.dumps(judge_name)};
 const TOTAL = ITEMS.length;
 
 function getScores() {{
@@ -236,15 +264,15 @@ document.querySelectorAll("input[type=radio]").forEach(input => {{
 
 document.getElementById("submit-btn").addEventListener("click", () => {{
   const scores = getScores();
-  const rows = [["id", "category", "question", "response", `score_${{RATER}}`]];
+  const rows = [["id", "trait", "question", "response", `score_${{RATER}}`]];
   ITEMS.forEach((item, i) => {{
-    rows.push([item.id, item.category || "", item.question, item.response, scores[i]]);
+    rows.push([item.id, item.trait, item.question, item.response, scores[i]]);
   }});
   const csv = rows.map(r => r.map(v => `"${{String(v).replace(/"/g, '""')}}"`).join(",")).join("\\n");
   const blob = new Blob([csv], {{type: "text/csv"}});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `${{JUDGE}}_${{RATER}}_ratings.csv`;
+  a.download = `ocean_ambiguous_${{RATER}}_ratings.csv`;
   a.click();
 }});
 
@@ -264,36 +292,39 @@ def _esc(text: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate a self-contained HTML rating form from heldout.jsonl."
+        description="Generate a cross-trait HTML rating form for contested/ambiguous heldout items."
     )
-    parser.add_argument("--judge", required=True, help="Judge name, e.g. 'neuroticism'.")
-    parser.add_argument("--rater", required=True, help="Rater name (used in output filename and CSV column).")
+    parser.add_argument("--rater", required=True, help="Rater name.")
     parser.add_argument("--output", type=str, default=None, help="Output HTML path.")
-    parser.add_argument(
-        "--items", type=str, default=None,
-        help="Comma-separated item IDs to include (e.g. 'n_01,n_05'). Default: all items.",
-    )
+    parser.add_argument("--avg-delta", type=float, default=2.0,
+                        help="Min average model-vs-expected delta to flag a non-confound item (default 2.0).")
+    parser.add_argument("--disagree", type=int, default=3,
+                        help="Min inter-model disagreement to flag a non-confound item (default 3).")
     args = parser.parse_args()
 
-    items = load_heldout(args.judge)
-    if args.items:
-        keep = set(args.items.split(","))
-        items = [it for it in items if it["id"] in keep]
-        if not items:
-            print(f"No items matched --items filter: {args.items}")
-            sys.exit(1)
-    trait_name = args.judge.replace("_", " ").title()
-    html = render_html(items, args.judge, args.rater, trait_name)
+    all_items: list[dict] = []
+    for trait in TRAITS:
+        contested = find_contested(trait, avg_delta_thresh=args.avg_delta, disagree_thresh=args.disagree)
+        all_items.extend(contested)
+        print(f"  {trait:20} {len(contested)} contested items")
+
+    print(f"\nTotal: {len(all_items)} items across all traits")
+
+    if not all_items:
+        print("No contested items found. Run calibrate.py --save first.")
+        sys.exit(1)
+
+    html = render_html(all_items, args.rater)
 
     output_path = (
         Path(args.output)
         if args.output
-        else judge_dir(args.judge) / "ratings" / f"{args.rater}.html"
+        else JUDGES_DIR / "ratings" / f"ambiguous_{args.rater}.html"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
-    print(f"Generated {output_path}")
-    print(f"Share with {args.rater} — they open it in any browser, score, and click Download CSV.")
+    print(f"\nGenerated {output_path}")
+    print(f"Open in browser, score {len(all_items)} items, click Download CSV.")
 
 
 if __name__ == "__main__":

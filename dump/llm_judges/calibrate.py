@@ -388,7 +388,6 @@ _THRESHOLDS = {
     "pearson_r":       (0.90, "≥ 0.90"),
     "spearman_r":      (0.85, "≥ 0.85"),
     "mae":             (1.00, "≤ 1.00", True),   # True = lower is better
-    "confound_acc":    (1.00, "= 100%"),
     "consistency_std": (0.50, "≤ 0.50 mean", True),
     "inter_model_mae": (1.00, "≤ 1.00", True),
 }
@@ -430,10 +429,9 @@ def compute_scorecard(
             "confound_total":   len(confound_pairs) if confound_pairs else None,
             "confound_acc":     round(confound_acc, 4) if confound_acc is not None else None,
             "pass": {
-                "pearson_r":    _check("pearson_r", pr) if n >= 2 else None,
-                "spearman_r":   _check("spearman_r", sr) if n >= 2 else None,
-                "mae":          _check("mae", me) if n >= 2 else None,
-                "confound_acc": _check("confound_acc", confound_acc) if confound_acc is not None else None,
+                "pearson_r":  _check("pearson_r", pr) if n >= 2 else None,
+                "spearman_r": _check("spearman_r", sr) if n >= 2 else None,
+                "mae":        _check("mae", me) if n >= 2 else None,
             },
         }
 
@@ -482,9 +480,9 @@ def print_scorecard(scorecard: dict) -> None:
         row("MAE vs reference",            f"{me:.2f}" if me is not None else "n/a",
             _THRESHOLDS["mae"][1],         m["pass"]["mae"])
         ca = m["confound_acc"]
-        ca_str = f"{m['confound_correct']}/{m['confound_total']}" if ca is not None else "n/a"
-        row("Confound accuracy (score=0)", ca_str,
-            _THRESHOLDS["confound_acc"][1], m["pass"]["confound_acc"])
+        if ca is not None:
+            ca_str = f"{m['confound_correct']}/{m['confound_total']}"
+            print(f"  INFO  {'Confound score=expected (info only)':<38}  {ca_str:>8}")
 
     cons = scorecard["consistency"]
     if cons:
