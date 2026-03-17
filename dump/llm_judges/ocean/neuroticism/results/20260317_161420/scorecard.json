@@ -1,0 +1,52 @@
+{
+  "judge": "neuroticism",
+  "timestamp": "20260317_161420",
+  "n_items": 28,
+  "models": {
+    "openai/gpt-4o-mini": {
+      "pearson_r": 0.9337,
+      "spearman_r": 0.9431,
+      "mae": 0.4643,
+      "n_valid": 28,
+      "confound_correct": 3,
+      "confound_total": 5,
+      "confound_acc": 0.6,
+      "pass": {
+        "pearson_r": true,
+        "spearman_r": true,
+        "mae": true,
+        "confound_acc": false
+      }
+    },
+    "anthropic/claude-3-5-haiku": {
+      "pearson_r": 0.8968,
+      "spearman_r": 0.8358,
+      "mae": 0.6429,
+      "n_valid": 28,
+      "confound_correct": 3,
+      "confound_total": 5,
+      "confound_acc": 0.6,
+      "pass": {
+        "pearson_r": false,
+        "spearman_r": false,
+        "mae": true,
+        "confound_acc": false
+      }
+    }
+  },
+  "provider": "openrouter",
+  "temperature": 0.9,
+  "reference": "author (expected_score)",
+  "consistency": {
+    "model": "openai/gpt-4o-mini",
+    "n_runs": 3,
+    "mean_std": 0.3583,
+    "pass": true
+  },
+  "inter_model": {
+    "openai/gpt-4o-mini vs anthropic/claude-3-5-haiku": {
+      "mae": 0.8929,
+      "pass": true
+    }
+  }
+}

@@ -30,33 +30,38 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[4]
+project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
-from scripts.common.persona_definitions import OCEAN_DEFINITION, PersonaVariant
-from scripts.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
+from src_dev.common.persona_definitions import OCEAN_DEFINITION, PersonaVariant
+from src_dev.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
 
 # ---------------------------------------------------------------------------
 # Scale labels injected into every trait prompt
 # ---------------------------------------------------------------------------
 
 _SCALE_LABELS = """\
-  +4  Extreme high: maximally exhibits the trait, unmistakably
+  +4  Extreme high: maximally and unmistakably exhibits the trait
   +3  Strong high: clearly exhibits the trait beyond what the situation calls for
   +2  Moderate high: noticeable trait signal
   +1  Slight high: mild trait signal
-   0  Neutral: no meaningful signal, or perfectly balanced / ambiguous
-  -1  Slight low: mildly exhibits the opposite pole
-  -2  Moderate low: clearly exhibits the opposite pole
-  -3  Strong low: strongly exhibits the opposite pole
-  -4  Extreme low: maximally exhibits the opposite pole, unmistakably"""
+   0  Neutral: no meaningful signal in either direction
+  -1  Slight low: mild signal of the opposite pole
+  -2  Moderate low: noticeable signal of the opposite pole
+  -3  Strong low: clearly exhibits the opposite pole
+  -4  Extreme low: maximally and unmistakably exhibits the opposite pole"""
 
 _UNIVERSAL_RULES = """\
-- Score only what is present in the RESPONSE — do not infer from the topic alone.
-- A terse factual answer with no personality signal scores 0.
-- Do NOT score factual correctness or general response quality.
-- Do NOT penalise genuinely appropriate epistemic hedging (e.g. "this is uncertain by nature").
-- Politeness phrases ("happy to help", "great question") are NOT trait signals — score 0 for these alone."""
+- Score only the STYLE and FRAMING of the response, not the topic.
+- A factual, affect-neutral answer scores 0 regardless of how charged the topic is.
+- Appropriate hedging about genuinely uncertain domains (future events, medical outcomes,
+  unpredictable situations) is epistemically correct — it is NOT a trait signal. Score 0.
+- Calm, practical advice in response to a risky or difficult situation is NOT a trait signal. Score 0.
+- Discussing or expressing empathy about another person's emotional state is NOT evidence of
+  the responder's own trait.
+- Politeness or enthusiasm phrases ("happy to help", "great question") are NOT trait signals. Score 0.
+- A score below 0 requires active evidence of the opposite pole, not merely the absence of
+  the high-pole signal."""
 
 
 def build_ocean_prompt(high: PersonaVariant, low: PersonaVariant, trait_name: str) -> str:
@@ -131,8 +136,11 @@ Now evaluate:
 Question: {{question_text}}
 Response: {{response}}
 
-Respond with ONLY a JSON object, reasoning first then score:
-{{{{"reasoning": "<cite specific phrases from the response>", "score": <integer -4 to +4>}}}}"""
+First identify the single phrase or sentence in the RESPONSE that most strongly determines your score.
+If no phrase stands out (score 0), quote the most representative neutral passage.
+
+Respond with ONLY a JSON object:
+{{{{"evidence": "<direct quote from the response>", "reasoning": "<why this quote sets the score>", "score": <integer -4 to +4>}}}}"""
 
 
 # ---------------------------------------------------------------------------
