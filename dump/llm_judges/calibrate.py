@@ -384,6 +384,8 @@ def print_cross_model_summary(
 # ---------------------------------------------------------------------------
 
 # Thresholds — adjust as the heldout set matures.
+# Judges can override individual thresholds by setting a `calibration_thresholds`
+# class attribute (dict with the same structure as _THRESHOLDS).
 _THRESHOLDS = {
     "pearson_r":       (0.90, "≥ 0.90"),
     "spearman_r":      (0.85, "≥ 0.85"),
@@ -393,8 +395,14 @@ _THRESHOLDS = {
 }
 
 
-def _check(key: str, value: float) -> bool:
-    entry = _THRESHOLDS[key]
+def _get_thresholds(judge_cls: type[LLMJudgeMetric]) -> dict:
+    """Return thresholds for this judge, merging any per-judge overrides."""
+    overrides = getattr(judge_cls, "calibration_thresholds", {})
+    return {**_THRESHOLDS, **overrides}
+
+
+def _check(key: str, value: float, thresholds: dict | None = None) -> bool:
+    entry = (thresholds or _THRESHOLDS)[key]
     lower_is_better = len(entry) == 3 and entry[2]
     return value <= entry[0] if lower_is_better else value >= entry[0]
 
@@ -406,8 +414,10 @@ def compute_scorecard(
     ref_label: str,
     consistency_runs: list[list[int | None]] | None,
     consistency_model: str | None,
+    thresholds: dict | None = None,
 ) -> dict:
     """Compute scorecard metrics. Returns a serialisable dict."""
+    th = thresholds or _THRESHOLDS
     result: dict = {"reference": ref_label, "models": {}, "consistency": None, "inter_model": {}}
 
     for model_label, scores in model_scores.items():
@@ -429,9 +439,9 @@ def compute_scorecard(
             "confound_total":   len(confound_pairs) if confound_pairs else None,
             "confound_acc":     round(confound_acc, 4) if confound_acc is not None else None,
             "pass": {
-                "pearson_r":  _check("pearson_r", pr) if n >= 2 else None,
-                "spearman_r": _check("spearman_r", sr) if n >= 2 else None,
-                "mae":        _check("mae", me) if n >= 2 else None,
+                "pearson_r":  _check("pearson_r", pr, th) if n >= 2 else None,
+                "spearman_r": _check("spearman_r", sr, th) if n >= 2 else None,
+                "mae":        _check("mae", me, th) if n >= 2 else None,
             },
         }
 
@@ -446,7 +456,7 @@ def compute_scorecard(
             "model": consistency_model,
             "n_runs": len(consistency_runs[0]) if consistency_runs else 0,
             "mean_std": mean_std,
-            "pass": _check("consistency_std", mean_std) if mean_std is not None else None,
+            "pass": _check("consistency_std", mean_std, th) if mean_std is not None else None,
         }
 
     model_names = list(model_scores.keys())
@@ -455,13 +465,14 @@ def compute_scorecard(
             _, _, me, n = _corr_stats(model_scores[m1], model_scores[m2])
             result["inter_model"][f"{m1} vs {m2}"] = {
                 "mae": round(me, 4) if n else None,
-                "pass": _check("inter_model_mae", me) if n else None,
+                "pass": _check("inter_model_mae", me, th) if n else None,
             }
 
     return result
 
 
-def print_scorecard(scorecard: dict) -> None:
+def print_scorecard(scorecard: dict, thresholds: dict | None = None) -> None:
+    th = thresholds or _THRESHOLDS
     print(f"\n{SEP}")
     print("SCORECARD")
     print(SEP)
@@ -474,11 +485,11 @@ def print_scorecard(scorecard: dict) -> None:
         print(f"\n  Model: {model_label}")
         pr, sr, me = m["pearson_r"], m["spearman_r"], m["mae"]
         row("Pearson r vs reference",      f"{pr:+.3f}" if pr is not None else "n/a",
-            _THRESHOLDS["pearson_r"][1],   m["pass"]["pearson_r"])
+            th["pearson_r"][1],   m["pass"]["pearson_r"])
         row("Spearman r vs reference",     f"{sr:+.3f}" if sr is not None else "n/a",
-            _THRESHOLDS["spearman_r"][1],  m["pass"]["spearman_r"])
+            th["spearman_r"][1],  m["pass"]["spearman_r"])
         row("MAE vs reference",            f"{me:.2f}" if me is not None else "n/a",
-            _THRESHOLDS["mae"][1],         m["pass"]["mae"])
+            th["mae"][1],         m["pass"]["mae"])
         ca = m["confound_acc"]
         if ca is not None:
             ca_str = f"{m['confound_correct']}/{m['confound_total']}"
@@ -489,7 +500,7 @@ def print_scorecard(scorecard: dict) -> None:
         print(f"\n  Consistency (temp=0.9, {cons['n_runs']} runs, model={cons['model']}):")
         ms = cons["mean_std"]
         row("Mean std across items", f"{ms:.3f}" if ms is not None else "n/a",
-            _THRESHOLDS["consistency_std"][1], cons["pass"])
+            th["consistency_std"][1], cons["pass"])
     else:
         print(f"\n  Consistency: not run (use --n-runs)")
 
@@ -498,7 +509,7 @@ def print_scorecard(scorecard: dict) -> None:
         for pair, v in scorecard["inter_model"].items():
             me = v["mae"]
             row(pair[:42], f"{me:.2f}" if me is not None else "n/a",
-                _THRESHOLDS["inter_model_mae"][1], v["pass"])
+                th["inter_model_mae"][1], v["pass"])
 
     print(SEP)
 
@@ -701,6 +712,7 @@ def main() -> None:
 
     judge_cls = load_judge_class(args.judge)
     items = load_heldout(args.judge)
+    thresholds = _get_thresholds(judge_cls)
 
     print(f"\nJudge : {args.judge} ({judge_cls.__name__})")
     print(f"Items : {len(items)}")
@@ -810,11 +822,12 @@ def main() -> None:
 
     # --- 4. Scorecard ---
     scorecard = compute_scorecard(
-        items, model_scores, reference, ref_label, consistency_runs, consistency_model_used
+        items, model_scores, reference, ref_label, consistency_runs, consistency_model_used,
+        thresholds=thresholds,
     )
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        print_scorecard(scorecard)
+        print_scorecard(scorecard, thresholds=thresholds)
     captured = buf.getvalue()
     print(captured, end="")
     _log_buf.write(captured)
