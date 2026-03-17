@@ -10,6 +10,7 @@ from scripts.factor_analysis.factor_analysis import run_factor_analysis, adequac
 from scripts.factor_analysis.persistence import save_factor_analysis, load_factor_analysis
 from scripts.factor_analysis.labelling import (
     label_factors,
+    label_max_spread_factors,
     load_label_checkpoint,
     label_is_complete,
     DEFAULT_MODEL as LABELLER_DEFAULT_MODEL,
@@ -24,17 +25,23 @@ from scripts.jsonl_tui.html_export import export_html
 
 # %%
 # --- Config ---
-RESIDUALISE = True
+RESIDUALISE = False
 USE_PCA = False   # False: run directly on 2560d residuals (slow but no lossy reduction)
 SCALE = False
 PCA_N_COMPONENTS = 100
 N_FACTORS = 30
 LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 
-if 1:
+if 0:
+    LABELLER_MODEL = 'claude-haiku-4-5-20251001'
+    LABELLER_PROVIDER = 'anthropic'
+    # BASE_OUTPUT_DIR = "scratch/factor_analysis13_gpt5mini_old_dataset"
+    BASE_OUTPUT_DIR = "scratch/factor_analysis14_haiku_mixed_frustrated_dataset"
+elif 1:
     LABELLER_MODEL = 'gpt-5-mini-2025-08-07'
     LABELLER_PROVIDER = 'openai'
-    BASE_OUTPUT_DIR = "scratch/factor_analysis11_gpt5mini_old_dataset"
+    # BASE_OUTPUT_DIR = "scratch/factor_analysis13_gpt5mini_old_dataset"
+    BASE_OUTPUT_DIR = "scratch/factor_analysis14_gpt5mini_mixed_frustrated_dataset"
 else:
     LABELLER_MODEL = 'claude-haiku-4-5-20251001'
     LABELLER_PROVIDER = 'anthropic'
@@ -69,6 +76,14 @@ NEW_DATASET = {
     "hf_repo_id": "persona-shattering-lasr/stage123-240x50-singleturn-AAextension",
     "hf_embeddings": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-AAextension-emb-bs32/response_embeddings_qwen3-embedding-4b_embeddings.npy",
     "hf_metadata": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-AAextension-emb-bs32/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
+}
+
+NEW_DATASET = {
+    "local_embeddings": "scratch/runs/stage123-240x50-singleturn-frustrated-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_embeddings.npy",
+    "local_metadata": "scratch/runs/stage123-240x50-singleturn-frustrated-emb-bs32/reports/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
+    "hf_repo_id": "persona-shattering-lasr/stage123-240x50-singleturn-frustrated",
+    "hf_embeddings": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-frustrated-emb-bs32/response_embeddings_qwen3-embedding-4b_embeddings.npy",
+    "hf_metadata": "embeddings/Qwen-Qwen3-Embedding-4B/stage123-240x50-singleturn-frustrated-emb-bs32/response_embeddings_qwen3-embedding-4b_metadata.jsonl",
 }
 
 
@@ -318,6 +333,23 @@ _contrastive_labels_path = _fa_cache.with_name(_fa_cache.name + "_contrastive_la
 preview_source = None
 preview_source_name = None
 _max_spread_for_labelling = None
+_max_spread_preview_messages = None
+MAX_SPREAD_LABEL_STRATEGIES = [
+    ("label_prompt_pair", "prompt + pair"),
+    ("label_prompt_pair_score", "prompt + pair + score"),
+    ("label_pair_score", "pair + score"),
+    ("label_pair", "pair only"),
+]
+MAX_SPREAD_LABEL_CONFIGS = {
+    "label_prompt_pair": {"include_prompt": True, "include_scores": False},
+    "label_prompt_pair_score": {"include_prompt": True, "include_scores": True},
+    "label_pair_score": {"include_prompt": False, "include_scores": True},
+    "label_pair": {"include_prompt": False, "include_scores": False},
+}
+_max_spread_strategy_paths = {
+    key: _fa_cache.with_name(_fa_cache.name + f"_{key}_labels.json")
+    for key, _ in MAX_SPREAD_LABEL_STRATEGIES
+}
 
 
 def _labels_status(path: Path, expected_count: int) -> tuple[list[str] | None, bool]:
@@ -375,6 +407,60 @@ def _resume_or_load_labels(
         top_n=10,
         max_per_prompt=100,
         prompt_format=LABELLER_PROMPT_FORMAT,
+        excerpt_chars=10000,
+        checkpoint_path=labels_path,
+    )
+    print(f"Saved {label_name} labels to {labels_path}")
+    return labels
+
+
+def _resume_or_load_max_spread_labels(
+    factor_data: list[dict],
+    labels_path: Path,
+    *,
+    strategy: str,
+    label_name: str,
+    fallback_paths: list[Path] | None = None,
+) -> list[str] | None:
+    fallback_paths = fallback_paths or []
+    labels, complete = _labels_status(labels_path, len(factor_data))
+    if labels is not None and complete:
+        print(f"Loaded {len(labels)} {label_name} labels from {labels_path}")
+        return labels
+
+    for fallback_path in fallback_paths:
+        fallback_labels, fallback_complete = _labels_status(fallback_path, len(factor_data))
+        if fallback_labels is None:
+            continue
+        if fallback_complete:
+            with open(labels_path, "w", encoding="utf-8") as f:
+                json.dump(fallback_labels, f, indent=2, ensure_ascii=False)
+            print(
+                f"Loaded {len(fallback_labels)} {label_name} labels from legacy cache "
+                f"{fallback_path}; rewrote cache to {labels_path.name}"
+            )
+            return fallback_labels
+        labels = fallback_labels
+        break
+
+    if not LABEL_FACTORS:
+        if labels is not None:
+            completed = sum(1 for label in labels if label_is_complete(label))
+            print(
+                f"Found incomplete {label_name} label cache at {labels_path} "
+                f"({completed}/{len(labels)} complete), but LABEL_FACTORS=False so not resuming"
+            )
+        return labels
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    labels = label_max_spread_factors(
+        factor_data,
+        strategy=strategy,
+        model=LABELLER_MODEL,
+        provider=LABELLER_PROVIDER,
+        top_n=10,
         excerpt_chars=10000,
         checkpoint_path=labels_path,
     )
@@ -484,30 +570,33 @@ if RUN_MAX_SPREAD:
         for fi in range(N_FACTORS)
     ]
 
-    # Reshape into top/bottom lists for label_factors: high responses -> top, low -> bottom
-    _max_spread_for_labelling = [
-        {
-            "factor_index": fd["factor_index"],
-            "top": [gs["high"] for gs in fd["groups"]],
-            "bottom": [gs["low"] for gs in fd["groups"]],
-        }
-        for fd in max_spread_results
-    ]
+    _max_spread_for_labelling = max_spread_results
     if preview_source is None:
-        preview_source = _max_spread_for_labelling
+        preview_source = [
+            {
+                "factor_index": fd["factor_index"],
+                "top": [gs["high"] for gs in fd["groups"]],
+                "bottom": [gs["low"] for gs in fd["groups"]],
+            }
+            for fd in max_spread_results
+        ]
         preview_source_name = "max_spread"
 
-    max_spread_labels = _resume_or_load_labels(
-        _max_spread_for_labelling,
-        _max_spread_labels_path,
-        label_name="max-spread",
-    )
+    max_spread_labels = {}
+    for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+        fallback_paths = [_max_spread_labels_path] if strategy_key == "label_pair" else []
+        max_spread_labels[strategy_key] = _resume_or_load_max_spread_labels(
+            _max_spread_for_labelling,
+            _max_spread_strategy_paths[strategy_key],
+            strategy=strategy_key,
+            label_name=f"max-spread ({strategy_title})",
+            fallback_paths=fallback_paths,
+        )
 
-    max_spread_out_path = OUTPUT_DIR / _flagged_filename("max_spread.jsonl")
+    max_spread_out_path = OUTPUT_DIR / _flagged_filename("max_spread_label_compare.jsonl")
     max_spread_records = []
     for factor_data in max_spread_results:
         fi = factor_data["factor_index"]
-        fl = max_spread_labels[fi] if max_spread_labels else ""
         for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
             q_label = f"Factor {fi:03d} — {polarity} (max-spread)"
             for rank, gs in enumerate(factor_data["groups"]):
@@ -515,7 +604,26 @@ if RUN_MAX_SPREAD:
                 max_spread_records.append({
                     "question": q_label,
                     "response_index": rank,
-                    "factor_label": fl,
+                    "label_prompt_pair": (
+                        max_spread_labels["label_prompt_pair"][fi]
+                        if max_spread_labels.get("label_prompt_pair")
+                        else ""
+                    ),
+                    "label_prompt_pair_score": (
+                        max_spread_labels["label_prompt_pair_score"][fi]
+                        if max_spread_labels.get("label_prompt_pair_score")
+                        else ""
+                    ),
+                    "label_pair_score": (
+                        max_spread_labels["label_pair_score"][fi]
+                        if max_spread_labels.get("label_pair_score")
+                        else ""
+                    ),
+                    "label_pair": (
+                        max_spread_labels["label_pair"][fi]
+                        if max_spread_labels.get("label_pair")
+                        else ""
+                    ),
                     "max_spread": round(gs["max_spread"], 4),
                     "purity_score": round(entry["purity_score"], 4),
                     "target_factor_score": round(entry["target_factor_score"], 4),
@@ -528,9 +636,28 @@ if RUN_MAX_SPREAD:
         for r in max_spread_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"Saved {len(max_spread_records)} max-spread records to {max_spread_out_path}")
-    print(f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} --variant-fields question response_index factor_label max_spread purity_score target_factor_score other_factors_mean_abs prompt response")
-    # _html = export_html(max_spread_out_path, ["question", "response_index", "factor_label", "max_spread", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
-    _html = export_html(max_spread_out_path, ["question", "factor_label", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+    print(
+        f"\nuv run python scripts/jsonl_tui/cli.py {max_spread_out_path} "
+        "--variant-fields question response_index label_prompt_pair "
+        "label_prompt_pair_score label_pair_score label_pair max_spread "
+        "purity_score target_factor_score other_factors_mean_abs prompt response"
+    )
+    _html = export_html(
+        max_spread_out_path,
+        [
+            "question",
+            "label_prompt_pair",
+            "label_prompt_pair_score",
+            "label_pair_score",
+            "label_pair",
+            "max_spread",
+            "purity_score",
+            "target_factor_score",
+            "other_factors_mean_abs",
+            "prompt",
+            "response",
+        ],
+    )
     print(f"HTML viewer: {_html}")
 
 # %%
@@ -648,7 +775,7 @@ if RUN_CONTRASTIVE:
 
 # %%
 # Preview the exact prompt sent to the labeller for the first available method
-from scripts.factor_analysis.labelling import _build_messages
+from scripts.factor_analysis.labelling import _build_max_spread_messages, _build_messages
 
 _example_messages = None
 if RUN_PROMPT_PREVIEW and preview_source:
@@ -663,12 +790,34 @@ if RUN_PROMPT_PREVIEW and preview_source:
     print("\n=== USER PROMPT ===")
     print(_example_messages[1]["content"])
 
+if RUN_PROMPT_PREVIEW and RUN_MAX_SPREAD and _max_spread_for_labelling:
+    _max_spread_preview_messages = {}
+    for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+        strategy_cfg = MAX_SPREAD_LABEL_CONFIGS[strategy_key]
+        _msgs = _build_max_spread_messages(
+            _max_spread_for_labelling[0],
+            top_n=10,
+            excerpt_chars=10000,
+            include_prompt=strategy_cfg["include_prompt"],
+            include_scores=strategy_cfg["include_scores"],
+        )
+        _max_spread_preview_messages[strategy_key] = _msgs
+        print(f"\n=== MAX-SPREAD PROMPT PREVIEW ({strategy_title}) — SYSTEM ===")
+        print(_msgs[0]["content"])
+        print(f"\n=== MAX-SPREAD PROMPT PREVIEW ({strategy_title}) — USER ===")
+        print(_msgs[1]["content"])
+
 # %%
 # Summary: all available label sets side by side
+_max_spread_summary_labels = (
+    max_spread_labels.get("label_pair")
+    if isinstance(max_spread_labels, dict)
+    else max_spread_labels
+)
 _all_labels = [
     ("Extremes",       factor_labels),
     ("Purity",         purity_labels),
-    ("Max-spread",     max_spread_labels),
+    ("Max-spread",     _max_spread_summary_labels),
     ("corpus_nearest_neighbour", cnn_labels),
     ("Contrastive",    contrastive_labels),
 ]
@@ -692,6 +841,20 @@ if RUN_SHARE_BUNDLE:
     # Build README text
     _example_sys = _example_messages[0]["content"] if _example_messages else "(prompt preview not run)"
     _example_user = _example_messages[1]["content"] if _example_messages else "(prompt preview not run)"
+    _max_spread_preview_text = "(max-spread prompt preview not run)"
+    if _max_spread_preview_messages:
+        _preview_chunks = []
+        for _strategy_key, _strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+            _msgs = _max_spread_preview_messages.get(_strategy_key)
+            if not _msgs:
+                continue
+            _preview_chunks.append(
+                f"### {_strategy_title}\n\n"
+                f"#### System\n{_msgs[0]['content']}\n\n"
+                f"#### User\n{_msgs[1]['content']}"
+            )
+        if _preview_chunks:
+            _max_spread_preview_text = "\n\n".join(_preview_chunks)
 
     _orig_count = len(metadata) + _n_removed + locals().get("_n_singleton", 0)
     _n_prompts = len(set(str(r.get('input_group_id', '')) for r in metadata))
@@ -744,6 +907,12 @@ Five methods were used to find representative responses for each factor:
 Each factor was labelled by an LLM ({LABELLER_MODEL}) shown the top-{10} high/low
 examples and asked to describe what distinguishes them.
 
+For max_spread, four prompt variants were run on the same examples:
+  - label_prompt_pair        — original prompt + response pair
+  - label_prompt_pair_score  — original prompt + response pair + signed factor scores
+  - label_pair_score         — response pair + signed factor scores
+  - label_pair               — response pair only
+
 ## Files
 
   extremes.html          — browse factor-polarity groups of raw-score extremes;
@@ -751,9 +920,9 @@ examples and asked to describe what distinguishes them.
 
   purity.html            — browse factor-polarity groups of purity-ranked responses
 
-  max_spread.html        — browse factor-polarity groups of highest-spread prompts;
-                           ↑↓ = next/previous factor-polarity group, ←→ = ranked prompt groups
-                           within that HIGH or LOW view
+  max_spread_label_compare.html
+                         — browse factor-polarity groups of highest-spread prompts with
+                           all four max-spread label variants shown side by side
 
   corpus_nearest_neighbour.html
                          — browse corpus nearest-neighbour responses
@@ -771,7 +940,8 @@ examples and asked to describe what distinguishes them.
   parallel_analysis_scree.html
                          — scree plot from Horn's parallel analysis, if that block was run
 
-  *_labels.json          — raw LLM label strings, one per factor, for each method
+  *_labels.json          — raw LLM label strings, one per factor, for each method or
+                           max-spread labelling strategy
 
 ## Labeller prompt (example: {_preview_label} factor 0)
 
@@ -780,6 +950,10 @@ examples and asked to describe what distinguishes them.
 
 ### User
 {_example_user}
+
+## Max-spread prompt variants (factor 0)
+
+{_max_spread_preview_text}
 """
 
     _bundle_files = []
@@ -789,10 +963,12 @@ examples and asked to describe what distinguishes them.
     for p in [
         _labels_path,
         _purity_labels_path,
-        _max_spread_labels_path,
         _corpus_nearest_neighbour_labels_path,
         _contrastive_labels_path,
     ]:
+        if Path(p).exists():
+            _bundle_files.append(Path(p))
+    for p in _max_spread_strategy_paths.values():
         if Path(p).exists():
             _bundle_files.append(Path(p))
     for p in _plot_paths:
@@ -819,17 +995,20 @@ examples and asked to describe what distinguishes them.
 _N_PREVIEW = 3
 if RUN_MAX_SPREAD and _max_spread_for_labelling:
     for _fd in _max_spread_for_labelling[:_N_PREVIEW]:
-        _msgs = _build_messages(
-            _fd,
-            top_n=10,
-            excerpt_chars=400,
-            prompt_format=LABELLER_PROMPT_FORMAT,
-        )
-        print(f"\n{'='*60}")
-        print(f"=== FACTOR {_fd['factor_index']} — SYSTEM ===")
-        print(_msgs[0]["content"])
-        print(f"\n=== FACTOR {_fd['factor_index']} — USER ===")
-        print(_msgs[1]["content"])
+        for _strategy_key, _strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+            _strategy_cfg = MAX_SPREAD_LABEL_CONFIGS[_strategy_key]
+            _msgs = _build_max_spread_messages(
+                _fd,
+                top_n=10,
+                excerpt_chars=10000,
+                include_prompt=_strategy_cfg["include_prompt"],
+                include_scores=_strategy_cfg["include_scores"],
+            )
+            print(f"\n{'='*60}")
+            print(f"=== FACTOR {_fd['factor_index']} — {_strategy_title} — SYSTEM ===")
+            print(_msgs[0]["content"])
+            print(f"\n=== FACTOR {_fd['factor_index']} — {_strategy_title} — USER ===")
+            print(_msgs[1]["content"])
 # %%
 # Secondary slice: 2D PCA view of two factors + length-control ablation.
 #
@@ -848,7 +1027,12 @@ VIS_PROJECTION_SPACE = "data"  # "data", "embeddings", or "residuals"
 
 
 def _best_available_factor_labels() -> list[str] | None:
-    for labels in [max_spread_labels, contrastive_labels, cnn_labels, purity_labels, factor_labels]:
+    _max_spread_default = (
+        max_spread_labels.get("label_pair")
+        if isinstance(max_spread_labels, dict)
+        else max_spread_labels
+    )
+    for labels in [_max_spread_default, contrastive_labels, cnn_labels, purity_labels, factor_labels]:
         if labels:
             return labels
     return None
@@ -1194,7 +1378,7 @@ for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
                 ),
                 hovertemplate=(
                     f"{_factor_display_name(_ef1)}=%{{x:.3f}}<br>"
-                    f"{_factor_display_name(_ef2)}=%{{y:.3f}}<br>"
+                    f"{_factor_display_name(_ef2)}=%{{y:.3f}}<br>"x
                     f"{_factor_display_name(_ef1)} state=%{{customdata[0]}}<br>"
                     f"{_factor_display_name(_ef2)} state=%{{customdata[1]}}<br>"
                     "Response length=%{customdata[2]}<br>"
