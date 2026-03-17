@@ -40,7 +40,7 @@ OUTPUT_CONFIG = OutputPathConfig(
     base_model="llama-3.1-8B-Instruct",
     category="toy",
     trait="t_character_avoiding",
-    training_run="t_avoiding-train-20260312-223656",
+    training_run="t_avoiding-train-20260310-164958",
     eval_name="scaling_loras",
 )
 

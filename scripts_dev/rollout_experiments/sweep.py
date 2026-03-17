@@ -1196,6 +1196,9 @@ def _upload_cell_to_hf(
             "evals/*",
             "per_message_metrics.jsonl",
         ],
+        # If FAILED.md isn't being uploaded (successful re-run), delete
+        # any stale copy left on HF from a previous failed attempt.
+        delete_patterns=["FAILED.md"],
     )
     print(f"    Uploaded {variant}/{condition} to {url}", flush=True)
 
@@ -1373,6 +1376,11 @@ async def _run_variant_conditions_async(
                     f"    running   {cell_label} ...",
                     flush=True,
                 )
+
+            # Remove any FAILED.md left by a previous failed attempt so it
+            # is not re-uploaded if this run succeeds.
+            if cell_dir.is_dir():
+                (cell_dir / "FAILED.md").unlink(missing_ok=True)
 
             cell_t0 = time.perf_counter()
             cell_experiment = ExperimentConfig(

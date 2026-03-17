@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import httpx
-from huggingface_hub import HfApi, login, snapshot_download
+from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.utils import set_client_factory
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
@@ -30,8 +30,18 @@ def _get_token(token_env: str = "HF_TOKEN") -> str:
 
 
 def login_from_env(token_env: str = "HF_TOKEN") -> None:
-    """Authenticate to Hugging Face Hub using a token from env vars."""
-    login(token=_get_token(token_env), add_to_git_credential=False)
+    """Ensure the HF token is available for huggingface_hub API calls.
+
+    Avoids calling ``login()`` (which triggers a ``whoami`` API call and can
+    hit HF's strict rate limit on that endpoint).  Instead we set the token
+    env var so that ``HfApi()`` without an explicit token picks it up
+    automatically from the environment.
+    """
+    token = _get_token(token_env)
+    # huggingface_hub checks HF_TOKEN (and the legacy HUGGING_FACE_HUB_TOKEN)
+    # before falling back to the on-disk cache written by login().  Setting it
+    # here ensures HfApi() / snapshot_download() work without any network call.
+    os.environ.setdefault("HF_TOKEN", token)
 
 
 def upload_file_to_dataset_repo(
@@ -66,6 +76,7 @@ def upload_folder_to_dataset_repo(
     commit_message: str,
     ignore_patterns: list[str] | None = None,
     allow_patterns: list[str] | None = None,
+    delete_patterns: list[str] | None = None,
 ) -> str:
     """Upload a local folder to a dataset repo on Hugging Face Hub.
 
@@ -78,6 +89,9 @@ def upload_folder_to_dataset_repo(
             ``HfApi.upload_folder``).
         allow_patterns: Optional glob patterns to include (forwarded to
             ``HfApi.upload_folder``). Only matching files are uploaded.
+        delete_patterns: Optional glob patterns for files to delete from the
+            remote repo in the same commit.  Files that are also being uploaded
+            are NOT deleted (the HF API ignores them in that case).
 
     Returns:
         URL of the uploaded dataset repo.
@@ -96,6 +110,7 @@ def upload_folder_to_dataset_repo(
         commit_message=commit_message,
         ignore_patterns=ignore_patterns,
         allow_patterns=allow_patterns,
+        delete_patterns=delete_patterns,
     )
     return f"https://huggingface.co/datasets/{repo_id}"
 
