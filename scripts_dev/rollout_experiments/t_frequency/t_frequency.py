@@ -158,7 +158,7 @@ EXPERIMENT_CONFIG = ExperimentConfig(
     user_max_concurrent=64,
     dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
     max_samples=32,
-    turns_per_phase=[3, 1],
+    turns_per_phase=[5, 1],
     num_rollouts=3,
 )
 
@@ -169,7 +169,7 @@ OUTPUT_CONFIG = OutputPathConfig(
     category="toy",
     trait="t_character_avoiding",
     training_run="t_avoiding-train-20260310-164958",
-    eval_name="rollout_sweep_activation_capping",
+    eval_name="activation_capping",
 )
 
 EVALUATIONS: list[str | PersonaMetricSpec] = [

@@ -289,6 +289,7 @@ class OutputPathConfig:
             / self.trait
             / self.training_run
             / "evals"
+            / "rollouts"
             / self.eval_name
         )
 
