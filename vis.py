@@ -1378,7 +1378,7 @@ for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
                 ),
                 hovertemplate=(
                     f"{_factor_display_name(_ef1)}=%{{x:.3f}}<br>"
-                    f"{_factor_display_name(_ef2)}=%{{y:.3f}}<br>"x
+                    f"{_factor_display_name(_ef2)}=%{{y:.3f}}<br>"
                     f"{_factor_display_name(_ef1)} state=%{{customdata[0]}}<br>"
                     f"{_factor_display_name(_ef2)} state=%{{customdata[1]}}<br>"
                     "Response length=%{customdata[2]}<br>"
@@ -1401,4 +1401,99 @@ for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
     )
     _save_plot_html(fig, f"factor_score_clusters_{EXTREMA_SOURCE}_{_ef1:02d}_{_ef2:02d}.html")
     fig.show()
+# %%
+# Plot selected factor-score axes, highlighting only frustrated responses.
+#
+# This is intended as a simple "base vs frustrated" view when DATASET_MODE="both":
+# all non-frustrated rows are shown in grey, while frustrated rows are colored.
+FACTOR_SCATTER_X = 2
+FACTOR_SCATTER_Y = 1
+FACTOR_SCATTER_HIGHLIGHT_SOURCE = "new"  # "new" is the frustrated dataset in the current setup
+FACTOR_SCATTER_HIGHLIGHT_LABEL = "Frustrated"
+
+if not (0 <= FACTOR_SCATTER_X < scores.shape[1] and 0 <= FACTOR_SCATTER_Y < scores.shape[1]):
+    raise ValueError(
+        f"Factor indices must be within [0, {scores.shape[1] - 1}], got "
+        f"{FACTOR_SCATTER_X=} and {FACTOR_SCATTER_Y=}."
+    )
+
+_factor_xy_rows = []
+for i, row in enumerate(metadata):
+    _text = str(row.get("assistant_text", ""))
+    _source = str(row.get("dataset_source", ""))
+    _is_highlight = _source == FACTOR_SCATTER_HIGHLIGHT_SOURCE
+    _factor_xy_rows.append({
+        "x": float(scores[i, FACTOR_SCATTER_X]),
+        "y": float(scores[i, FACTOR_SCATTER_Y]),
+        "dataset_source": _source,
+        "highlight_group": FACTOR_SCATTER_HIGHLIGHT_LABEL if _is_highlight else "Background",
+        "response_length": len(_text),
+        "prompt": str(row.get("seed_user_message", ""))[:200],
+        "response_preview": _text[:300],
+    })
+
+_factor_xy_df = pd.DataFrame(_factor_xy_rows)
+_factor_xy_colors = {
+    "Background": "#c7c7c7",
+    FACTOR_SCATTER_HIGHLIGHT_LABEL: "#d62728",
+}
+
+fig = go.Figure()
+_background = _factor_xy_df[_factor_xy_df["highlight_group"] == "Background"]
+if not _background.empty:
+    fig.add_trace(
+        go.Scattergl(
+            x=_background["x"],
+            y=_background["y"],
+            mode="markers",
+            name="Background",
+            marker=dict(size=5, color=_factor_xy_colors["Background"], opacity=0.18),
+            hoverinfo="skip",
+        )
+    )
+
+_highlight = _factor_xy_df[_factor_xy_df["highlight_group"] == FACTOR_SCATTER_HIGHLIGHT_LABEL]
+if not _highlight.empty:
+    fig.add_trace(
+        go.Scattergl(
+            x=_highlight["x"],
+            y=_highlight["y"],
+            mode="markers",
+            name=FACTOR_SCATTER_HIGHLIGHT_LABEL,
+            marker=dict(size=7, color=_factor_xy_colors[FACTOR_SCATTER_HIGHLIGHT_LABEL], opacity=0.85),
+            customdata=np.stack(
+                [
+                    _highlight["dataset_source"],
+                    _highlight["response_length"],
+                    _highlight["prompt"],
+                    _highlight["response_preview"],
+                ],
+                axis=1,
+            ),
+            hovertemplate=(
+                f"{_factor_display_name(FACTOR_SCATTER_X)}=%{{x:.3f}}<br>"
+                f"{_factor_display_name(FACTOR_SCATTER_Y)}=%{{y:.3f}}<br>"
+                "Dataset=%{customdata[0]}<br>"
+                "Response length=%{customdata[1]}<br>"
+                "Prompt=%{customdata[2]}<br>"
+                "Response=%{customdata[3]}<extra></extra>"
+            ),
+        )
+    )
+
+fig.update_layout(
+    title=(
+        "Factor-score scatter with frustrated responses highlighted<br>"
+        f"<sup>x={_factor_display_name(FACTOR_SCATTER_X)}; "
+        f"y={_factor_display_name(FACTOR_SCATTER_Y)}; "
+        f"highlight_source={FACTOR_SCATTER_HIGHLIGHT_SOURCE}</sup>"
+    ),
+    xaxis_title=_factor_display_name(FACTOR_SCATTER_X),
+    yaxis_title=_factor_display_name(FACTOR_SCATTER_Y),
+)
+_save_plot_html(
+    fig,
+    f"factor_score_scatter_highlight_{FACTOR_SCATTER_X:02d}_{FACTOR_SCATTER_Y:02d}.html",
+)
+fig.show()
 # %%
