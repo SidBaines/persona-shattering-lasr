@@ -1,16 +1,16 @@
 {
   "judge": "neuroticism",
-  "timestamp": "20260317_161420",
+  "timestamp": "20260317_165736",
   "n_items": 28,
   "models": {
     "openai/gpt-4o-mini": {
-      "pearson_r": 0.9337,
-      "spearman_r": 0.9431,
-      "mae": 0.4643,
+      "pearson_r": 0.9651,
+      "spearman_r": 0.9644,
+      "mae": 0.3214,
       "n_valid": 28,
-      "confound_correct": 3,
-      "confound_total": 5,
-      "confound_acc": 0.6,
+      "confound_correct": 2,
+      "confound_total": 3,
+      "confound_acc": 0.6667,
       "pass": {
         "pearson_r": true,
         "spearman_r": true,
@@ -19,18 +19,18 @@
       }
     },
     "anthropic/claude-3-5-haiku": {
-      "pearson_r": 0.8968,
-      "spearman_r": 0.8358,
+      "pearson_r": 0.9035,
+      "spearman_r": 0.8183,
       "mae": 0.6429,
       "n_valid": 28,
       "confound_correct": 3,
-      "confound_total": 5,
-      "confound_acc": 0.6,
+      "confound_total": 3,
+      "confound_acc": 1.0,
       "pass": {
-        "pearson_r": false,
+        "pearson_r": true,
         "spearman_r": false,
         "mae": true,
-        "confound_acc": false
+        "confound_acc": true
       }
     }
   },
@@ -40,12 +40,12 @@
   "consistency": {
     "model": "openai/gpt-4o-mini",
     "n_runs": 3,
-    "mean_std": 0.3583,
+    "mean_std": 0.3093,
     "pass": true
   },
   "inter_model": {
     "openai/gpt-4o-mini vs anthropic/claude-3-5-haiku": {
-      "mae": 0.8929,
+      "mae": 0.75,
       "pass": true
     }
   }

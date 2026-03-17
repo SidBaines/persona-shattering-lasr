@@ -89,6 +89,12 @@ rules) is generated automatically from `OCEAN_DEFINITION` at class definition ti
   calm practical advice for a risky situation, or empathy about *someone else's* trait.
 - Keep examples short (2–4 sentences) and unambiguous.
 
+> **Critical: no leakage between examples and heldout set.**
+> Never use a question/response from `heldout.jsonl` as a few-shot example, even paraphrased.
+> The judge will have seen it verbatim in the prompt and will pattern-match rather than reason,
+> making the heldout score meaningless as a calibration signal.
+> Write fresh examples that cover the same *patterns* but use different scenarios and wording.
+
 ### 3. Create `heldout.jsonl`
 
 Each line is a JSON object:

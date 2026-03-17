@@ -56,12 +56,21 @@ _UNIVERSAL_RULES = """\
 - A factual, affect-neutral answer scores 0 regardless of how charged the topic is.
 - Appropriate hedging about genuinely uncertain domains (future events, medical outcomes,
   unpredictable situations) is epistemically correct — it is NOT a trait signal. Score 0.
-- Calm, practical advice in response to a risky or difficult situation is NOT a trait signal. Score 0.
+- Calm, practical advice about *objectively dangerous or uncertain situations* (physical
+  safety, medical outcomes, natural hazards) where caution is the factually correct response
+  is NOT a trait signal. Score 0.
+- Calm, composed, or decisive framing when responding to *interpersonal or emotional
+  stressors* (conflict, criticism, failure, embarrassment) where most people would feel
+  anxious IS evidence of low-pole characteristics and may justify a negative score.
 - Discussing or expressing empathy about another person's emotional state is NOT evidence of
-  the responder's own trait.
+  the responder's own trait. Score 0.
 - Politeness or enthusiasm phrases ("happy to help", "great question") are NOT trait signals. Score 0.
-- A score below 0 requires active evidence of the opposite pole, not merely the absence of
-  the high-pole signal."""
+- A score below 0 requires active positive evidence of the opposite pole — the response must
+  actively exhibit low-pole characteristics. The mere absence of high-pole markers is NOT
+  sufficient for a negative score. A neutral, informative, or matter-of-fact response scores 0.
+- A score above 0 similarly requires active evidence of the high pole. Mild hedging, slight
+  acknowledgment of social discomfort, or minor qualifications count as weak positive signals
+  and may justify +1. Do not suppress small positive signals by over-applying the neutrality rule."""
 
 
 def build_ocean_prompt(high: PersonaVariant, low: PersonaVariant, trait_name: str) -> str:
@@ -111,6 +120,10 @@ Low {trait_name} / opposite pole (score < 0):
 ---
 
 ## Canonical voice examples
+
+These show what *active* trait expression looks like at each pole.
+A response only qualifies as low {trait_name} (score < 0) if it actively resembles
+the low-pole examples below — not merely because it lacks high-pole characteristics.
 
 High {trait_name}:
 {high_examples}

@@ -415,7 +415,10 @@ def compute_scorecard(
         pr, sr, me, n = _corr_stats(reference, scores)
         confound_pairs = [(item, s) for item, s in zip(items, scores)
                           if item.get("category", "").startswith("confound")]
-        n_confound_correct = sum(1 for _, s in confound_pairs if s is not None and s == 0)
+        n_confound_correct = sum(
+            1 for item, s in confound_pairs
+            if s is not None and s == item.get("expected_score", 0)
+        )
         confound_acc = n_confound_correct / len(confound_pairs) if confound_pairs else None
 
         result["models"][model_label] = {
