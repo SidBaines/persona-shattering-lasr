@@ -356,7 +356,7 @@ def label_factors(
     model: str = DEFAULT_MODEL,
     provider: str = DEFAULT_PROVIDER,
     top_n: int = 10,
-    excerpt_chars: int = 400,
+    excerpt_chars: int = 40000,
     max_per_prompt: int = 10,
     prompt_format: Literal["grouped_json", "contrastive_jsonl"] = "grouped_json",
     max_concurrent: int = 10,

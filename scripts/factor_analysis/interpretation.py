@@ -229,6 +229,8 @@ def corpus_nearest_neighbor(
     top_k: int = 10,
     text_field: str = "assistant_text",
     excerpt_length: int = 400,
+    max_per_group: int | None = None,
+    group_field: str = "input_group_id",
 ) -> list[dict]:
     """Find the top_k corpus embeddings nearest to target by cosine similarity.
 
@@ -239,6 +241,10 @@ def corpus_nearest_neighbor(
         top_k: Number of nearest neighbors to return.
         text_field: Metadata field containing response text.
         excerpt_length: Max characters in text excerpts.
+        max_per_group: Optional maximum number of returned neighbors from the
+            same metadata group.
+        group_field: Metadata field used to define groups when max_per_group is
+            set.
 
     Returns:
         List of dicts with index, similarity, and metadata for each neighbor.
@@ -249,12 +255,18 @@ def corpus_nearest_neighbor(
     corpus_normed = corpus_embeddings / (corpus_norms + 1e-12)
 
     similarities = corpus_normed @ target_norm
-    top_indices = np.argsort(similarities)[::-1][:top_k]
+    ranked_indices = np.argsort(similarities)[::-1]
 
     results = []
-    for idx in top_indices:
+    group_counts: dict[str, int] = {}
+    for idx in ranked_indices:
         idx = int(idx)
         row = metadata[idx]
+        if max_per_group is not None:
+            group_id = str(row.get(group_field, idx))
+            if group_counts.get(group_id, 0) >= max_per_group:
+                continue
+            group_counts[group_id] = group_counts.get(group_id, 0) + 1
         results.append({
             "index": idx,
             "similarity": float(similarities[idx]),
@@ -263,6 +275,8 @@ def corpus_nearest_neighbor(
             "seed_user_message": str(row.get("seed_user_message", ""))[:200],
             "text_excerpt": str(row.get(text_field, ""))[:excerpt_length],
         })
+        if len(results) >= top_k:
+            break
 
     return results
 
@@ -359,6 +373,8 @@ def rank_prompts_by_max_spread(
     factor_idx: int,
     top_n: int = 20,
     penalty_weight: float = 1.0,
+    high_threshold: float | None = None,
+    low_threshold: float | None = None,
     group_field: str = "input_group_id",
     text_field: str = "assistant_text",
     excerpt_length: int = 400,
@@ -376,6 +392,12 @@ def rank_prompts_by_max_spread(
         top_n: Number of questions to return.
         penalty_weight: Weight for penalizing off-target factor magnitude in
             the reported purity score for each selected response.
+        high_threshold: Optional signed lower bound on the maximum target score
+            within a prompt group. If set, only groups with max score >= this
+            threshold are retained.
+        low_threshold: Optional signed upper bound on the minimum target score
+            within a prompt group. If set, only groups with min score <= this
+            threshold are retained.
         group_field: Metadata field used to identify prompt groups.
         text_field: Metadata field containing response text.
         excerpt_length: Max characters in text excerpts.
@@ -400,10 +422,18 @@ def rank_prompts_by_max_spread(
         if len(indices) < 2:
             continue
         group_scores = target_scores[indices]
-        max_spread = float(group_scores.max() - group_scores.min())
+        group_max_score = float(group_scores.max())
+        group_min_score = float(group_scores.min())
+        if high_threshold is not None and group_max_score < high_threshold:
+            continue
+        if low_threshold is not None and group_min_score > low_threshold:
+            continue
+        max_spread = float(group_max_score - group_min_score)
         group_spreads.append({
             "group_id": gid,
             "max_spread": max_spread,
+            "group_max_score": group_max_score,
+            "group_min_score": group_min_score,
             "max_idx": int(indices[np.argmax(group_scores)]),
             "min_idx": int(indices[np.argmin(group_scores)]),
             "n_responses": int(len(indices)),
@@ -428,6 +458,8 @@ def rank_prompts_by_max_spread(
         {
             "group_id": gs["group_id"],
             "max_spread": gs["max_spread"],
+            "group_max_score": gs["group_max_score"],
+            "group_min_score": gs["group_min_score"],
             "n_responses": gs["n_responses"],
             "high": _entry(gs["max_idx"]),
             "low": _entry(gs["min_idx"]),

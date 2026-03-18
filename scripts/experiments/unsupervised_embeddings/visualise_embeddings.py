@@ -42,40 +42,77 @@ from scripts.unsupervised_runs import (
 # --- Config ---
 load_dotenv()
 
-HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
-PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-frustrated"
-EMBEDDING_SOURCES = [
-    EmbeddingSourceConfig(
-        name="frustrated",
-        response_run_id=PRIMARY_RESPONSE_RUN_ID,
-        embedding_slug=build_embedding_slug(
-            model="Qwen/Qwen3-Embedding-4B",
-            analysis_unit="assistant_final_turn",
-            normalize=True,
-            max_length=4000,
+if 0:
+    HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
+    PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-frustrated"
+    EMBEDDING_SOURCES = [
+        EmbeddingSourceConfig(
+            name="frustrated",
+            response_run_id=PRIMARY_RESPONSE_RUN_ID,
+            embedding_slug=build_embedding_slug(
+                model="Qwen/Qwen3-Embedding-4B",
+                analysis_unit="assistant_final_turn",
+                normalize=True,
+                max_length=4000,
+            ),
+            repo_id=HF_REPO_ID,
         ),
-        repo_id=HF_REPO_ID,
-    ),
-    # Example compare-mode source:
-    # EmbeddingSourceConfig(
-    #     name="baseline",
-    #     response_run_id="stage123-240x50-singleturn-baseline",
-    #     embedding_slug=build_embedding_slug(
-    #         model="Qwen/Qwen3-Embedding-4B",
-    #         analysis_unit="assistant_final_turn",
-    #         normalize=True,
-    #         max_length=4000,
-    #     ),
-    #     repo_id=HF_REPO_ID,
-    # ),
-]
-VISUALISATION_LABEL = "factor_analysis_frustrated"
-VISUALISATION_SLUG = build_visualisation_slug(
-    label=VISUALISATION_LABEL,
-    response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
-    embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
-)
-HF_UPLOAD = True
+        # Example compare-mode source:
+        # EmbeddingSourceConfig(
+        #     name="baseline",
+        #     response_run_id="stage123-240x50-singleturn-baseline",
+        #     embedding_slug=build_embedding_slug(
+        #         model="Qwen/Qwen3-Embedding-4B",
+        #         analysis_unit="assistant_final_turn",
+        #         normalize=True,
+        #         max_length=4000,
+        #     ),
+        #     repo_id=HF_REPO_ID,
+        # ),
+    ]
+    VISUALISATION_LABEL = "factor_analysis_frustrated"
+    VISUALISATION_SLUG = build_visualisation_slug(
+        label=VISUALISATION_LABEL,
+        response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
+        embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
+    )
+    HF_UPLOAD = True
+elif 0:
+    HF_REPO_ID = "persona-shattering-lasr/unsupervised-runs"
+    PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-openrouter-v1"
+    EMBEDDING_SOURCES = [
+        EmbeddingSourceConfig(
+            name="openai-small",
+            response_run_id=PRIMARY_RESPONSE_RUN_ID,
+            embedding_slug="openai-text-embedding-3-small__assistant-final-turn__norm",
+            repo_id=HF_REPO_ID,
+        ),
+    ]
+    VISUALISATION_LABEL = "factor_analysis_openrouter_v1_openai_small"
+    VISUALISATION_SLUG = build_visualisation_slug(
+        label=VISUALISATION_LABEL,
+        response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
+        embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
+    )
+    HF_UPLOAD = True
+else:
+    HF_REPO_ID = "persona-shattering-lasr/unsupervised-runs"
+    PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-v2"
+    EMBEDDING_SOURCES = [
+        EmbeddingSourceConfig(
+            name="v2-openai-small",
+            response_run_id=PRIMARY_RESPONSE_RUN_ID,
+            embedding_slug="openai-text-embedding-3-small__assistant-final-turn__norm",
+            repo_id=HF_REPO_ID,
+        ),
+    ]
+    VISUALISATION_LABEL = "factor_analysis_v2_openai_small_oblimin"
+    HF_UPLOAD = True
+    VISUALISATION_SLUG = build_visualisation_slug(
+        label=VISUALISATION_LABEL,
+        response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
+        embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
+    )
 
 RESIDUALISE = False
 USE_PCA = False   # False: run directly on 2560d residuals (slow but no lossy reduction)
@@ -91,10 +128,10 @@ LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_j
 RUN_EXTREMES = False
 RUN_PURITY = False
 RUN_MAX_SPREAD = True
-RUN_MAX_SPREAD_THRESHOLDED = True
+RUN_MAX_SPREAD_THRESHOLDED = False
 MAX_SPREAD_HIGH_THRESHOLD = 1.5
 MAX_SPREAD_LOW_THRESHOLD = -1.5
-RUN_CNN = False
+RUN_CNN = True
 RUN_CONTRASTIVE = False
 RUN_PROMPT_PREVIEW = True
 RUN_SHARE_BUNDLE = True
@@ -143,7 +180,7 @@ embeddings, metadata = _load_selected_datasets()
 embeddings, metadata = deduplicate_by_group(embeddings, metadata, max_per_group=50)
 
 # Filter out short responses (likely "I am an AI" deflections with no real content)
-MIN_RESPONSE_CHARS = 400
+MIN_RESPONSE_CHARS = 0
 _keep = [i for i, row in enumerate(metadata) if len(str(row.get("assistant_text", ""))) >= MIN_RESPONSE_CHARS]
 _n_removed = len(metadata) - len(_keep)
 embeddings = embeddings[_keep]
@@ -212,7 +249,7 @@ if 0:
 # %%
 # Run factor analysis (or load cached result)
 FA_METHOD = "principal"
-FA_ROTATION = "varimax"
+FA_ROTATION = "oblimin"
 _fa_cache = OUTPUT_DIR / _flagged_stem(f"fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -294,10 +331,10 @@ _max_spread_thresholded_for_labelling = None
 _max_spread_preview_messages = None
 _max_spread_thresholded_preview_messages = None
 MAX_SPREAD_LABEL_STRATEGIES = [
-    ("label_prompt_pair", "prompt + pair"),
-    ("label_prompt_pair_score", "prompt + pair + score"),
+    # ("label_prompt_pair", "prompt + pair"),
+    # ("label_prompt_pair_score", "prompt + pair + score"),
     ("label_pair_score", "pair + score"),
-    ("label_pair", "pair only"),
+    # ("label_pair", "pair only"),
 ]
 MAX_SPREAD_LABEL_CONFIGS = {
     "label_prompt_pair": {"include_prompt": True, "include_scores": False},
@@ -756,6 +793,7 @@ if RUN_MAX_SPREAD_THRESHOLDED:
 
 # %%
 CNN_SCALE = 3.0
+CNN_MAX_PER_PROMPT_GROUP = 3
 CONTRASTIVE_TOP_K = 100
 CONTRASTIVE_SCALE = 3.0
 CONTRASTIVE_NORMALIZE = True
@@ -770,8 +808,24 @@ if RUN_CNN:
     for fi in range(N_FACTORS):
         target_high, direction = analytical_factor_embedding(fi, loadings, pca_model=pca_model, scaler=scaler, global_mean=global_mean, scale=CNN_SCALE)
         target_low, _ = analytical_factor_embedding(fi, loadings, pca_model=pca_model, scaler=scaler, global_mean=global_mean, scale=-CNN_SCALE)
-        top = corpus_nearest_neighbor(target_high, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
-        bottom = corpus_nearest_neighbor(target_low, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
+        top = corpus_nearest_neighbor(
+            target_high,
+            corpus_embeddings,
+            metadata,
+            top_k=20,
+            excerpt_length=100000,
+            max_per_group=CNN_MAX_PER_PROMPT_GROUP,
+            group_field="input_group_id",
+        )
+        bottom = corpus_nearest_neighbor(
+            target_low,
+            corpus_embeddings,
+            metadata,
+            top_k=20,
+            excerpt_length=100000,
+            max_per_group=CNN_MAX_PER_PROMPT_GROUP,
+            group_field="input_group_id",
+        )
         cnn_results.append({"factor_index": fi, "top": top, "bottom": bottom})
     if preview_source is None:
         preview_source = cnn_results
@@ -1428,8 +1482,24 @@ for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
                     global_mean=global_mean,
                     scale=-CNN_SCALE,
                 )
-                top = corpus_nearest_neighbor(target_high, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
-                bottom = corpus_nearest_neighbor(target_low, corpus_embeddings, metadata, top_k=20, excerpt_length=100000)
+                top = corpus_nearest_neighbor(
+                    target_high,
+                    corpus_embeddings,
+                    metadata,
+                    top_k=20,
+                    excerpt_length=100000,
+                    max_per_group=CNN_MAX_PER_PROMPT_GROUP,
+                    group_field="input_group_id",
+                )
+                bottom = corpus_nearest_neighbor(
+                    target_low,
+                    corpus_embeddings,
+                    metadata,
+                    top_k=20,
+                    excerpt_length=100000,
+                    max_per_group=CNN_MAX_PER_PROMPT_GROUP,
+                    group_field="input_group_id",
+                )
                 _results.append({"factor_index": fi, "top": top, "bottom": bottom})
             return _results
 
