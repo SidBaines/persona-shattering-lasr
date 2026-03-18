@@ -12,6 +12,11 @@ Example:
 
 from src_dev.persona_metrics.aggregation import aggregate_persona_metric_results
 from src_dev.persona_metrics.base import PersonaMetric, PersonaMetricContext
+from src_dev.persona_metrics.llm_judge_agreement import (
+    JudgeRaterConfig,
+    NeuroticismJudgeAgreementConfig,
+    run_neuroticism_judge_agreement,
+)
 from src_dev.persona_metrics.config import (
     PersonaMetricsConfig,
     PersonaMetricsResult,
@@ -43,7 +48,9 @@ __all__ = [
     "ConversationMetricsConfig",
     "ConversationMetricsResult",
     "JudgeLLMConfig",
+    "JudgeRaterConfig",
     "MessageSelector",
+    "NeuroticismJudgeAgreementConfig",
     "PERSONA_METRIC_REGISTRY",
     "PersonaMetric",
     "PersonaMetricContext",
@@ -55,6 +62,7 @@ __all__ = [
     "get_persona_metric",
     "register_persona_metric",
     "run_conversation_metrics",
+    "run_neuroticism_judge_agreement",
     "run_conversation_metrics_async",
     "run_persona_metrics",
     "run_persona_metrics_async",
