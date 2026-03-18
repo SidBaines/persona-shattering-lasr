@@ -634,7 +634,7 @@ def run_rollout_sweep_vllm(config: RolloutSweepConfig) -> Path:
         }
     )
 
-    from scripts.common.config import GenerationConfig
+    from src_dev.common.config import GenerationConfig
     inference_cfg = InferenceConfig(
         model=config.base_model,
         provider="vllm",
@@ -733,7 +733,7 @@ def run_rollout_sweep_vllm(config: RolloutSweepConfig) -> Path:
 
     if config.plot and config.plot_metric:
         try:
-            from scripts.visualisations.plot_rollout_sweep import plot_sweep
+            from src_dev.visualisations.plot_rollout_sweep import plot_sweep
             plot_sweep(output_root, metric_key=config.plot_metric)
         except Exception as exc:  # noqa: BLE001
             print(f"  Warning: plot generation failed: {exc}", flush=True)
