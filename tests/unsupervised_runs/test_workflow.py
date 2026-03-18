@@ -42,11 +42,25 @@ def test_end_to_end_branching_embeddings_and_compare_mode(tmp_path, monkeypatch)
     run_dir = (tmp_path / "scratch" / "runs" / "branch-demo")
     _build_single_turn_run(run_dir)
 
-    def _fake_encode(texts, config):
-        scale = 1.0 if config.artifact_slug == "embed-a" else 10.0
-        return np.array([[scale * (idx + 1), float(len(text))] for idx, text in enumerate(texts)], dtype=np.float32)
+    class _FakeEncoder:
+        def __init__(self, scale):
+            self.batch_size = 64
+            self._scale = scale
 
-    monkeypatch.setattr("scripts.response_embeddings.run._encode_texts_local_hf", _fake_encode)
+        def encode_batch(self, texts):
+            return np.array(
+                [[self._scale * (idx + 1), float(len(text))] for idx, text in enumerate(texts)],
+                dtype=np.float32,
+            )
+
+        def close(self):
+            return None
+
+    def _fake_create_batch_encoder(config):
+        scale = 1.0 if config.artifact_slug == "embed-a" else 10.0
+        return _FakeEncoder(scale)
+
+    monkeypatch.setattr("scripts.response_embeddings.run._create_batch_encoder", _fake_create_batch_encoder)
 
     for artifact_slug in ["embed-a", "embed-b"]:
         dataset, result = run_response_embeddings(

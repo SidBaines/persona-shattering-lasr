@@ -2,6 +2,7 @@
 
 Three official experiment entrypoints live here:
 
+- `import_response_run.py` for one-off migration of an existing canonical run from another dataset repo
 - `generate_single_turn_responses.py`
 - `embed_responses.py`
 - `visualise_embeddings.py`

@@ -21,6 +21,19 @@ class LocalHFEmbeddingConfig(BaseModel):
     normalize: bool = True
 
 
+class OpenAIEmbeddingConfig(BaseModel):
+    """OpenAI embedding model settings."""
+
+    model: str = "text-embedding-3-small"
+    api_key_env: str = "OPENAI_API_KEY"
+    dimensions: int | None = None
+    batch_size: int = 128
+    normalize: bool = True
+    max_retries: int = 6
+    initial_backoff_seconds: float = 2.0
+    max_backoff_seconds: float = 60.0
+
+
 class ResponseEmbeddingConfig(BaseModel):
     """Configuration for assistant-response embedding extraction."""
 
@@ -32,8 +45,9 @@ class ResponseEmbeddingConfig(BaseModel):
     ] = "assistant_all_turns"
     target_variant: str | None = None
 
-    backend: Literal["local_hf"] = "local_hf"
+    backend: Literal["local_hf", "openai"] = "local_hf"
     local_hf: LocalHFEmbeddingConfig = Field(default_factory=LocalHFEmbeddingConfig)
+    openai: OpenAIEmbeddingConfig = Field(default_factory=OpenAIEmbeddingConfig)
 
     artifact_slug: str | None = None
     output_prefix: str = "response_embeddings"

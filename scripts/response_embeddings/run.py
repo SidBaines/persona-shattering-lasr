@@ -5,6 +5,9 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import os
+import random
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -297,6 +300,330 @@ def _compute_variance_report(
     }
 
 
+def _encode_texts_openai(
+    texts: list[str],
+    config: ResponseEmbeddingConfig,
+) -> np.ndarray:
+    """Encode response texts with the OpenAI embeddings API."""
+    if not texts:
+        return np.zeros((0, 0), dtype=np.float32)
+
+    from openai import OpenAI
+
+    openai_cfg = config.openai
+    logger = setup_logging()
+    api_key = os.environ.get(openai_cfg.api_key_env)
+    if not api_key:
+        raise RuntimeError(
+            f"Missing {openai_cfg.api_key_env}. Set it to use backend='openai'."
+        )
+
+    client = OpenAI(api_key=api_key)
+    batch_size = max(1, openai_cfg.batch_size)
+    total_texts = len(texts)
+    total_batches = (total_texts + batch_size - 1) // batch_size
+    start_time = time.perf_counter()
+
+    logger.info(
+        "Starting OpenAI embedding encode: samples=%d batches=%d batch_size=%d model=%s",
+        total_texts,
+        total_batches,
+        batch_size,
+        openai_cfg.model,
+    )
+
+    embeddings: list[np.ndarray] = []
+    for batch_index, start in enumerate(range(0, total_texts, batch_size), start=1):
+        batch_texts = texts[start : start + batch_size]
+        request_kwargs: dict[str, Any] = {
+            "model": openai_cfg.model,
+            "input": batch_texts,
+        }
+        if openai_cfg.dimensions is not None:
+            request_kwargs["dimensions"] = openai_cfg.dimensions
+        response = client.embeddings.create(**request_kwargs)
+        batch_matrix = np.array([row.embedding for row in response.data], dtype=np.float32)
+        if openai_cfg.normalize and batch_matrix.size:
+            norms = np.linalg.norm(batch_matrix, axis=1, keepdims=True)
+            batch_matrix = batch_matrix / np.clip(norms, 1e-12, None)
+        embeddings.append(batch_matrix)
+
+        processed = min(batch_index * batch_size, total_texts)
+        elapsed = time.perf_counter() - start_time
+        rate = processed / elapsed if elapsed > 0 else 0.0
+        remaining = total_texts - processed
+        eta_seconds = remaining / rate if rate > 0 else 0.0
+        pct = (processed / total_texts) * 100.0 if total_texts else 100.0
+        logger.info(
+            "OpenAI embedding progress: batch %d/%d, samples %d/%d (%.1f%%), elapsed %.1fs, ETA %.1fs",
+            batch_index,
+            total_batches,
+            processed,
+            total_texts,
+            pct,
+            elapsed,
+            eta_seconds,
+        )
+
+    matrix = np.vstack(embeddings)
+    logger.info(
+        "Encoded %d texts with OpenAI model=%s (dim=%d)",
+        matrix.shape[0],
+        openai_cfg.model,
+        matrix.shape[1],
+    )
+    return matrix
+
+
+def _is_retryable_openai_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status_code", None)
+    if isinstance(response_status, int) and response_status in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+
+    name = exc.__class__.__name__.lower()
+    return any(
+        token in name
+        for token in (
+            "ratelimit",
+            "timeout",
+            "apiconnection",
+            "internalserver",
+        )
+    )
+
+
+def _call_with_retry(
+    fn,
+    *,
+    should_retry,
+    max_retries: int,
+    initial_backoff_seconds: float,
+    max_backoff_seconds: float,
+    logger,
+    context: str,
+):
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return fn()
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if attempt >= max_retries or not should_retry(exc):
+                raise
+            backoff = min(
+                max_backoff_seconds,
+                initial_backoff_seconds * (2 ** (attempt - 1)),
+            )
+            jitter = random.uniform(0.0, min(1.0, backoff * 0.1))
+            sleep_seconds = backoff + jitter
+            logger.warning(
+                "%s failed with %s on attempt %d/%d; retrying in %.1fs",
+                context,
+                exc.__class__.__name__,
+                attempt,
+                max_retries,
+                sleep_seconds,
+            )
+            time.sleep(sleep_seconds)
+
+
+class _EmbeddingBatchEncoder:
+    """Backend-specific batch encoder interface."""
+
+    batch_size: int
+
+    def encode_batch(self, texts: list[str]) -> np.ndarray:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Release any backend resources."""
+
+
+class _LocalHFEmbeddingBatchEncoder(_EmbeddingBatchEncoder):
+    """Incremental local Hugging Face embedding encoder."""
+
+    def __init__(self, config: ResponseEmbeddingConfig) -> None:
+        self._config = config
+        self._logger = setup_logging()
+        local_cfg = config.local_hf
+
+        dtype = getattr(torch, local_cfg.dtype, None)
+        if dtype is None:
+            raise ValueError(f"Unsupported local_hf dtype: {local_cfg.dtype}")
+        if not torch.cuda.is_available() and dtype in {torch.bfloat16, torch.float16}:
+            self._logger.warning(
+                "CUDA not available; falling back embedding dtype from %s to float32.",
+                local_cfg.dtype,
+            )
+            dtype = torch.float32
+
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            local_cfg.model,
+            revision=local_cfg.revision,
+            use_fast=True,
+            trust_remote_code=local_cfg.trust_remote_code,
+        )
+        self._model = AutoModel.from_pretrained(
+            local_cfg.model,
+            revision=local_cfg.revision,
+            torch_dtype=dtype,
+            device_map=local_cfg.device_map,
+            trust_remote_code=local_cfg.trust_remote_code,
+        )
+        self._model.eval()
+        self._device = next(self._model.parameters()).device
+        self.batch_size = max(1, local_cfg.batch_size)
+
+    def encode_batch(self, texts: list[str]) -> np.ndarray:
+        local_cfg = self._config.local_hf
+        tokens = self._tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=local_cfg.max_length,
+            return_tensors="pt",
+        )
+        tokens = {key: value.to(self._device) for key, value in tokens.items()}
+        with torch.no_grad():
+            output = self._model(**tokens)
+            if hasattr(output, "last_hidden_state"):
+                pooled = _mean_pool_hidden(output.last_hidden_state, tokens["attention_mask"])
+            elif isinstance(output, tuple) and output:
+                pooled = _mean_pool_hidden(output[0], tokens["attention_mask"])
+            else:
+                raise ValueError(
+                    "Embedding model output does not contain last_hidden_state; "
+                    "cannot derive sentence embeddings."
+                )
+            if local_cfg.normalize:
+                pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
+            return pooled.detach().cpu().to(torch.float32).numpy()
+
+    def close(self) -> None:
+        del self._model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+class _OpenAIEmbeddingBatchEncoder(_EmbeddingBatchEncoder):
+    """Incremental OpenAI embedding encoder with retry/backoff."""
+
+    def __init__(self, config: ResponseEmbeddingConfig) -> None:
+        from openai import OpenAI
+
+        self._config = config
+        self._logger = setup_logging()
+        openai_cfg = config.openai
+        api_key = os.environ.get(openai_cfg.api_key_env)
+        if not api_key:
+            raise RuntimeError(
+                f"Missing {openai_cfg.api_key_env}. Set it to use backend='openai'."
+            )
+
+        self._client = OpenAI(api_key=api_key)
+        self.batch_size = max(1, openai_cfg.batch_size)
+
+    def encode_batch(self, texts: list[str]) -> np.ndarray:
+        openai_cfg = self._config.openai
+
+        def _request():
+            request_kwargs: dict[str, Any] = {
+                "model": openai_cfg.model,
+                "input": texts,
+            }
+            if openai_cfg.dimensions is not None:
+                request_kwargs["dimensions"] = openai_cfg.dimensions
+            return self._client.embeddings.create(**request_kwargs)
+
+        response = _call_with_retry(
+            _request,
+            should_retry=_is_retryable_openai_error,
+            max_retries=max(1, openai_cfg.max_retries),
+            initial_backoff_seconds=max(0.0, openai_cfg.initial_backoff_seconds),
+            max_backoff_seconds=max(0.0, openai_cfg.max_backoff_seconds),
+            logger=self._logger,
+            context=f"OpenAI embeddings batch model={openai_cfg.model}",
+        )
+        batch_matrix = np.array([row.embedding for row in response.data], dtype=np.float32)
+        if openai_cfg.normalize and batch_matrix.size:
+            norms = np.linalg.norm(batch_matrix, axis=1, keepdims=True)
+            batch_matrix = batch_matrix / np.clip(norms, 1e-12, None)
+        return batch_matrix
+
+
+def _create_batch_encoder(config: ResponseEmbeddingConfig) -> _EmbeddingBatchEncoder:
+    if config.backend == "local_hf":
+        return _LocalHFEmbeddingBatchEncoder(config)
+    if config.backend == "openai":
+        return _OpenAIEmbeddingBatchEncoder(config)
+    raise ValueError(f"Unsupported embeddings backend: {config.backend}")
+
+
+def _checkpoint_dir(output_paths: dict[str, Path]) -> Path:
+    return output_paths["artifact_dir"] / "_embedding_checkpoint"
+
+
+def _checkpoint_state_path(output_paths: dict[str, Path]) -> Path:
+    return _checkpoint_dir(output_paths) / "state.json"
+
+
+def _checkpoint_batch_path(output_paths: dict[str, Path], batch_index: int) -> Path:
+    return _checkpoint_dir(output_paths) / f"batch_{batch_index:06d}.npy"
+
+
+def _write_checkpoint_state(
+    output_paths: dict[str, Path],
+    *,
+    artifact_slug: str,
+    backend: str,
+    batch_size: int,
+    total_rows: int,
+    completed_rows: int,
+    completed_batches: int,
+    embedding_dim: int | None,
+) -> None:
+    checkpoint_dir = _checkpoint_dir(output_paths)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "artifact_slug": artifact_slug,
+        "backend": backend,
+        "batch_size": int(batch_size),
+        "total_rows": int(total_rows),
+        "completed_rows": int(completed_rows),
+        "completed_batches": int(completed_batches),
+        "embedding_dim": int(embedding_dim) if embedding_dim is not None else None,
+    }
+    _checkpoint_state_path(output_paths).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _load_checkpoint_state(output_paths: dict[str, Path]) -> dict[str, Any] | None:
+    path = _checkpoint_state_path(output_paths)
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _load_checkpoint_batches(output_paths: dict[str, Path], completed_batches: int) -> list[np.ndarray]:
+    batches: list[np.ndarray] = []
+    for batch_index in range(completed_batches):
+        batch_path = _checkpoint_batch_path(output_paths, batch_index)
+        if not batch_path.exists():
+            raise FileNotFoundError(
+                f"Checkpoint state expects batch {batch_index}, but file is missing: {batch_path}"
+            )
+        batches.append(np.load(batch_path))
+    return batches
+
+
 def _resolve_output_paths(config: ResponseEmbeddingConfig) -> dict[str, Path]:
     return resolve_embedding_artifact_paths(
         config.run_dir,
@@ -308,11 +635,19 @@ def _resolve_output_paths(config: ResponseEmbeddingConfig) -> dict[str, Path]:
 def _resolved_artifact_slug(config: ResponseEmbeddingConfig) -> str:
     if config.artifact_slug:
         return config.artifact_slug
+    if config.backend == "openai":
+        model = config.openai.model
+        normalize = config.openai.normalize
+        max_length = 0
+    else:
+        model = config.local_hf.model
+        normalize = config.local_hf.normalize
+        max_length = config.local_hf.max_length
     return build_embedding_slug(
-        model=config.local_hf.model,
+        model=model,
         analysis_unit=config.analysis_unit,
-        normalize=config.local_hf.normalize,
-        max_length=config.local_hf.max_length,
+        normalize=normalize,
+        max_length=max_length,
         target_variant=config.target_variant,
     )
 
@@ -334,11 +669,17 @@ def run_response_embeddings(
             "Pass dataset=None and set config.run_dir."
         )
 
-    init_run(config.run_dir, base_config={"response_embeddings": config.model_dump(mode="json")})
+    config_payload = config.model_dump(mode="json")
+    config_for_fingerprint = {
+        key: value
+        for key, value in config_payload.items()
+        if key not in {"resume", "overwrite_output"}
+    }
+    init_run(config.run_dir, base_config={"response_embeddings": config_payload})
     register_stage_fingerprint(
         config.run_dir,
         _stage_name(config),
-        config.model_dump(mode="json"),
+        config_for_fingerprint,
     )
 
     output_paths = _resolve_output_paths(config)
@@ -352,6 +693,9 @@ def run_response_embeddings(
         for path in persisted_outputs.values():
             if path.exists():
                 path.unlink()
+        checkpoint_dir = _checkpoint_dir(output_paths)
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
 
     if config.resume and all_outputs_exist and not config.overwrite_output:
         rows, _ = read_jsonl_tolerant(output_paths["metadata"])
@@ -378,23 +722,116 @@ def run_response_embeddings(
         )
 
     texts = [str(row["assistant_text"]) for row in rows]
-    if config.backend != "local_hf":
-        raise ValueError(f"Unsupported embeddings backend: {config.backend}")
-    embeddings = _encode_texts_local_hf(texts, config)
+    for idx, row in enumerate(rows):
+        row["embedding_index"] = idx
 
+    write_jsonl_atomic(output_paths["metadata"], rows)
+
+    encoder = _create_batch_encoder(config)
+    batch_size = encoder.batch_size
+    total_texts = len(texts)
+    checkpoint_state = _load_checkpoint_state(output_paths) if config.resume else None
+    completed_rows = 0
+    completed_batches = 0
+    batches: list[np.ndarray] = []
+
+    if checkpoint_state is not None:
+        state_total_rows = int(checkpoint_state.get("total_rows", -1))
+        if state_total_rows != total_texts:
+            raise ValueError(
+                "Checkpoint row count does not match current embedding input. "
+                f"checkpoint={state_total_rows} current={total_texts}"
+            )
+        completed_rows = int(checkpoint_state.get("completed_rows", 0))
+        completed_batches = int(checkpoint_state.get("completed_batches", 0))
+        batches = _load_checkpoint_batches(output_paths, completed_batches)
+        logger.info(
+            "Resuming embedding checkpoint for %s: completed_rows=%d/%d completed_batches=%d",
+            _resolved_artifact_slug(config),
+            completed_rows,
+            total_texts,
+            completed_batches,
+        )
+    else:
+        _write_checkpoint_state(
+            output_paths,
+            artifact_slug=_resolved_artifact_slug(config),
+            backend=config.backend,
+            batch_size=batch_size,
+            total_rows=total_texts,
+            completed_rows=0,
+            completed_batches=0,
+            embedding_dim=None,
+        )
+
+    start_time = time.perf_counter()
+    embedding_dim: int | None = None
+    try:
+        for batch_index, start in enumerate(
+            range(completed_rows, total_texts, batch_size),
+            start=completed_batches,
+        ):
+            batch_texts = texts[start : start + batch_size]
+            batch_matrix = encoder.encode_batch(batch_texts)
+            if batch_matrix.ndim != 2:
+                raise ValueError(
+                    f"Expected 2D embedding batch, got shape={batch_matrix.shape}"
+                )
+            if batch_matrix.shape[0] != len(batch_texts):
+                raise ValueError(
+                    "Embedding batch row count mismatch. "
+                    f"batch_texts={len(batch_texts)} embeddings={batch_matrix.shape[0]}"
+                )
+            if embedding_dim is None:
+                embedding_dim = int(batch_matrix.shape[1])
+            elif int(batch_matrix.shape[1]) != embedding_dim:
+                raise ValueError(
+                    "Embedding dimension changed across batches. "
+                    f"expected={embedding_dim} actual={batch_matrix.shape[1]}"
+                )
+
+            np.save(_checkpoint_batch_path(output_paths, batch_index), batch_matrix)
+            batches.append(batch_matrix)
+
+            completed_rows = min(start + len(batch_texts), total_texts)
+            completed_batches = batch_index + 1
+            _write_checkpoint_state(
+                output_paths,
+                artifact_slug=_resolved_artifact_slug(config),
+                backend=config.backend,
+                batch_size=batch_size,
+                total_rows=total_texts,
+                completed_rows=completed_rows,
+                completed_batches=completed_batches,
+                embedding_dim=embedding_dim,
+            )
+
+            elapsed = time.perf_counter() - start_time
+            rate = completed_rows / elapsed if elapsed > 0 else 0.0
+            remaining = total_texts - completed_rows
+            eta_seconds = remaining / rate if rate > 0 else 0.0
+            pct = (completed_rows / total_texts) * 100.0 if total_texts else 100.0
+            logger.info(
+                "Embedding checkpoint progress: batch %d, samples %d/%d (%.1f%%), elapsed %.1fs, ETA %.1fs",
+                completed_batches,
+                completed_rows,
+                total_texts,
+                pct,
+                elapsed,
+                eta_seconds,
+            )
+    finally:
+        encoder.close()
+
+    embeddings = np.vstack(batches) if batches else np.zeros((0, 0), dtype=np.float32)
     if embeddings.shape[0] != len(rows):
         raise RuntimeError(
             "Embedding row count mismatch. "
             f"embeddings={embeddings.shape[0]} metadata_rows={len(rows)}"
         )
 
-    for idx, row in enumerate(rows):
-        row["embedding_index"] = idx
-
-    variance_report = _compute_variance_report(rows, embeddings)
-
-    write_jsonl_atomic(output_paths["metadata"], rows)
     np.save(output_paths["embeddings"], embeddings)
+    variance_report = _compute_variance_report(rows, embeddings)
     output_paths["variance"].write_text(json.dumps(variance_report, indent=2), encoding="utf-8")
 
     manifest = {
@@ -406,6 +843,7 @@ def run_response_embeddings(
         "target_variant": config.target_variant,
         "backend": config.backend,
         "local_hf": config.local_hf.model_dump(mode="json"),
+        "openai": config.openai.model_dump(mode="json"),
         "num_samples": int(embeddings.shape[0]),
         "embedding_dim": int(embeddings.shape[1]),
         "paths": {key: str(path) for key, path in output_paths.items()},
@@ -440,4 +878,7 @@ def run_response_embeddings(
         embedding_dim=int(embeddings.shape[1]),
         analysis_unit=config.analysis_unit,
     )
+    checkpoint_dir = _checkpoint_dir(output_paths)
+    if checkpoint_dir.exists():
+        shutil.rmtree(checkpoint_dir)
     return Dataset.from_list(rows), result

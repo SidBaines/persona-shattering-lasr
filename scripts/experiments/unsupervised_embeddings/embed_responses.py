@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from scripts.response_embeddings import (
     LocalHFEmbeddingConfig,
+    OpenAIEmbeddingConfig,
     ResponseEmbeddingConfig,
     run_response_embeddings,
 )
@@ -25,6 +26,7 @@ from scripts.unsupervised_runs import (
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Embed one single-turn response run.")
     parser.add_argument("--response-run-id", type=str, required=True)
+    parser.add_argument("--backend", choices=["local_hf", "openai"], default="local_hf")
     parser.add_argument(
         "--analysis-unit",
         choices=["assistant_all_turns", "assistant_final_turn", "assistant_first_turn"],
@@ -38,6 +40,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding-max-length", type=int, default=4000)
     parser.add_argument("--embedding-batch-size", type=int, default=128)
     parser.add_argument("--embedding-no-normalize", action="store_true")
+    parser.add_argument("--openai-api-key-env", type=str, default="OPENAI_API_KEY")
+    parser.add_argument("--openai-dimensions", type=int, default=None)
+    parser.add_argument("--openai-max-retries", type=int, default=6)
+    parser.add_argument("--openai-initial-backoff-seconds", type=float, default=2.0)
+    parser.add_argument("--openai-max-backoff-seconds", type=float, default=60.0)
     parser.add_argument("--artifact-slug", type=str, default=None)
     parser.add_argument("--output-prefix", type=str, default="response_embeddings")
     parser.add_argument("--no-resume", action="store_true")
@@ -56,7 +63,7 @@ def main() -> None:
         model=args.embedding_model,
         analysis_unit=args.analysis_unit,
         normalize=not args.embedding_no_normalize,
-        max_length=args.embedding_max_length,
+        max_length=(args.embedding_max_length if args.backend == "local_hf" else 0),
         target_variant=args.target_variant,
     )
     if not args.overwrite_output:
@@ -71,6 +78,7 @@ def main() -> None:
         run_dir=run_dir,
         analysis_unit=args.analysis_unit,
         target_variant=args.target_variant,
+        backend=args.backend,
         artifact_slug=artifact_slug,
         output_prefix=args.output_prefix,
         resume=not args.no_resume,
@@ -83,6 +91,16 @@ def main() -> None:
             max_length=args.embedding_max_length,
             batch_size=args.embedding_batch_size,
             normalize=not args.embedding_no_normalize,
+        ),
+        openai=OpenAIEmbeddingConfig(
+            model=args.embedding_model,
+            api_key_env=args.openai_api_key_env,
+            dimensions=args.openai_dimensions,
+            batch_size=args.embedding_batch_size,
+            normalize=not args.embedding_no_normalize,
+            max_retries=args.openai_max_retries,
+            initial_backoff_seconds=args.openai_initial_backoff_seconds,
+            max_backoff_seconds=args.openai_max_backoff_seconds,
         ),
     )
 

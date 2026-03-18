@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from scripts.datasets import (
     ingest_source_dataset,
     write_inference_result,
     write_message_append,
 )
-from scripts.response_embeddings import ResponseEmbeddingConfig, run_response_embeddings
+from scripts.response_embeddings import (
+    OpenAIEmbeddingConfig,
+    ResponseEmbeddingConfig,
+    run_response_embeddings,
+)
 from scripts.response_embeddings.run import _compute_variance_report
 
 
@@ -89,13 +95,19 @@ def test_run_response_embeddings_analysis_units_and_alignment(tmp_path, monkeypa
     run_dir = tmp_path / "run"
     _build_multiturn_run(run_dir)
 
-    def _fake_encode(texts, _config):
-        rows = []
-        for idx, text in enumerate(texts):
-            rows.append([float(len(text)), float(idx), float(len(text) % 5)])
-        return np.array(rows, dtype=np.float32)
+    class _FakeEncoder:
+        batch_size = 64
 
-    monkeypatch.setattr("scripts.response_embeddings.run._encode_texts_local_hf", _fake_encode)
+        def encode_batch(self, texts):
+            rows = []
+            for idx, text in enumerate(texts):
+                rows.append([float(len(text)), float(idx), float(len(text) % 5)])
+            return np.array(rows, dtype=np.float32)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("scripts.response_embeddings.run._create_batch_encoder", lambda _config: _FakeEncoder())
 
     expected_rows = {
         "assistant_all_turns": 3,
@@ -138,13 +150,19 @@ def test_run_response_embeddings_supports_multiple_artifacts_per_run(tmp_path, m
     run_dir = tmp_path / "run"
     _build_multiturn_run(run_dir)
 
-    def _fake_encode(texts, _config):
-        rows = []
-        for idx, text in enumerate(texts):
-            rows.append([float(len(text)), float(idx)])
-        return np.array(rows, dtype=np.float32)
+    class _FakeEncoder:
+        batch_size = 64
 
-    monkeypatch.setattr("scripts.response_embeddings.run._encode_texts_local_hf", _fake_encode)
+        def encode_batch(self, texts):
+            rows = []
+            for idx, text in enumerate(texts):
+                rows.append([float(len(text)), float(idx)])
+            return np.array(rows, dtype=np.float32)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("scripts.response_embeddings.run._create_batch_encoder", lambda _config: _FakeEncoder())
 
     config_a = ResponseEmbeddingConfig(
         run_dir=run_dir,
@@ -203,3 +221,173 @@ def test_compute_variance_report_per_prompt(tmp_path) -> None:
     # g1 has two far-apart points; should have higher within-prompt variance.
     assert per_prompt[0]["input_group_id"] == "g1"
     assert per_prompt[0]["total_variance"] > per_prompt[1]["total_variance"]
+
+
+def test_run_response_embeddings_openai_backend(tmp_path, monkeypatch) -> None:
+    run_dir = tmp_path / "run"
+    _build_multiturn_run(run_dir)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _FakeEmbeddingRow:
+        def __init__(self, embedding):
+            self.embedding = embedding
+
+    class _FakeEmbeddingsAPI:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, *, model, input, dimensions=None):
+            self.calls += 1
+            assert model == "text-embedding-3-small"
+            assert dimensions is None
+            rows = []
+            for idx, text in enumerate(input):
+                rows.append(_FakeEmbeddingRow([float(len(text)), float(idx + 1)]))
+            return type("Response", (), {"data": rows})()
+
+    fake_api = _FakeEmbeddingsAPI()
+
+    class _FakeOpenAI:
+        def __init__(self, api_key):
+            assert api_key == os.environ["OPENAI_API_KEY"]
+            self.embeddings = fake_api
+
+    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
+
+    config = ResponseEmbeddingConfig(
+        run_dir=run_dir,
+        analysis_unit="assistant_final_turn",
+        backend="openai",
+        artifact_slug="openai-embed",
+        openai=OpenAIEmbeddingConfig(batch_size=1),
+        overwrite_output=True,
+        resume=False,
+    )
+    dataset, result = run_response_embeddings(config)
+
+    assert len(dataset) == 2
+    assert result.embedding_dim == 2
+    assert result.artifact_slug == "openai-embed"
+    assert result.embeddings_path is not None
+    loaded = np.load(result.embeddings_path)
+    assert loaded.shape == (2, 2)
+    assert fake_api.calls == 2
+
+
+def test_run_response_embeddings_resumes_from_checkpoint(tmp_path, monkeypatch) -> None:
+    run_dir = tmp_path / "run"
+    _build_multiturn_run(run_dir)
+
+    call_state = {"calls": 0}
+
+    class _FailingEncoder:
+        batch_size = 1
+
+        def encode_batch(self, texts):
+            call_state["calls"] += 1
+            if call_state["calls"] == 2:
+                raise RuntimeError("transient failure")
+            return np.array([[float(len(texts[0])), float(call_state["calls"])]], dtype=np.float32)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("scripts.response_embeddings.run._create_batch_encoder", lambda _config: _FailingEncoder())
+
+    config = ResponseEmbeddingConfig(
+        run_dir=run_dir,
+        analysis_unit="assistant_final_turn",
+        artifact_slug="resume-test",
+        overwrite_output=True,
+        resume=True,
+    )
+
+    with pytest.raises(RuntimeError, match="transient failure"):
+        run_response_embeddings(config)
+
+    artifact_dir = run_dir / "reports" / "embeddings" / "resume-test"
+    checkpoint_dir = artifact_dir / "_embedding_checkpoint"
+    assert checkpoint_dir.exists()
+    assert not (artifact_dir / "response_embeddings_embeddings.npy").exists()
+
+    class _ResumeEncoder:
+        batch_size = 1
+
+        def encode_batch(self, texts):
+            return np.array([[float(len(texts[0])), 99.0]], dtype=np.float32)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("scripts.response_embeddings.run._create_batch_encoder", lambda _config: _ResumeEncoder())
+    resume_config = config.model_copy(update={"overwrite_output": False})
+    dataset, result = run_response_embeddings(resume_config)
+
+    assert len(dataset) == 2
+    assert result.embeddings_path is not None
+    loaded = np.load(result.embeddings_path)
+    assert loaded.shape == (2, 2)
+    assert loaded[0, 1] == 1.0
+    assert loaded[1, 1] == 99.0
+    assert not checkpoint_dir.exists()
+
+
+def test_run_response_embeddings_openai_retries_with_backoff(tmp_path, monkeypatch) -> None:
+    run_dir = tmp_path / "run"
+    _build_multiturn_run(run_dir)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("scripts.response_embeddings.run.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr("scripts.response_embeddings.run.random.uniform", lambda _a, _b: 0.0)
+
+    class _RateLimitLikeError(Exception):
+        def __init__(self):
+            self.status_code = 429
+
+    class _FakeEmbeddingRow:
+        def __init__(self, embedding):
+            self.embedding = embedding
+
+    class _FakeEmbeddingsAPI:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, *, model, input, dimensions=None):
+            del model, dimensions
+            self.calls += 1
+            if self.calls < 3:
+                raise _RateLimitLikeError()
+            rows = [_FakeEmbeddingRow([float(len(text)), 1.0]) for text in input]
+            return type("Response", (), {"data": rows})()
+
+    fake_api = _FakeEmbeddingsAPI()
+
+    class _FakeOpenAI:
+        def __init__(self, api_key):
+            assert api_key == "test-key"
+            self.embeddings = fake_api
+
+    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
+
+    dataset, result = run_response_embeddings(
+        ResponseEmbeddingConfig(
+            run_dir=run_dir,
+            analysis_unit="assistant_final_turn",
+            backend="openai",
+            artifact_slug="openai-retry",
+            openai=OpenAIEmbeddingConfig(
+                batch_size=2,
+                max_retries=4,
+                initial_backoff_seconds=0.1,
+                max_backoff_seconds=1.0,
+            ),
+            overwrite_output=True,
+            resume=False,
+        )
+    )
+
+    assert len(dataset) == 2
+    assert result.embeddings_path is not None
+    assert fake_api.calls == 3
+    assert sleep_calls == [0.1, 0.2]
