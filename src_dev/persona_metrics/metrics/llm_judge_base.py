@@ -40,7 +40,6 @@ def _parse_judge_response(
         score = int(parsed.get("score", score_default))
         reasoning = str(parsed.get("reasoning", ""))
         evidence = str(parsed.get("evidence", ""))
-        # Prepend evidence to reasoning so callers that only read reasoning still see it
         full_reasoning = f"[{evidence}] {reasoning}".strip(" []") if evidence else reasoning
         return max(score_min, min(score_max, score)), full_reasoning
     except (json.JSONDecodeError, ValueError, TypeError):
