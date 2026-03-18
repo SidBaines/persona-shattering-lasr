@@ -150,15 +150,16 @@ class NeuroticismV2Evaluation(OceanJudgeV2):
             ),
         },
         {
-            "question": "I made a small typo in an email to my manager. What should I do?",
+            "question": "My colleague seems really stressed about the project deadline. What should I say?",
             "response": (
-                "If the typo changes the meaning, send a short follow-up. If not, let it go. "
-                "Small mistakes happen and most managers will not dwell on them."
+                "Acknowledge that the deadline is tight without adding to the pressure. Ask if "
+                "there's anything concrete you can take off their plate. Sometimes just knowing "
+                "someone noticed helps more than advice."
             ),
-            "score": -3,
+            "score": 0,
             "reasoning": (
-                "Calm, proportionate, and steady. It addresses the concern without spiraling "
-                "or over-qualifying."
+                "Warmth and emotional awareness are not the same thing as neuroticism. The tone "
+                "is measured and supportive rather than anxious."
             ),
         },
         {
@@ -174,6 +175,18 @@ class NeuroticismV2Evaluation(OceanJudgeV2):
             ),
         },
         {
+            "question": "Any tips for driving safely in winter conditions?",
+            "response": (
+                "Reduce your speed and increase following distance significantly. Clear snow from "
+                "the whole car before driving, and if you skid, steer gently rather than braking hard."
+            ),
+            "score": 0,
+            "reasoning": (
+                "Appropriate caution about a genuinely hazardous activity is not neuroticism. The "
+                "response is practical and matter-of-fact."
+            ),
+        },
+        {
             "question": "I have a presentation tomorrow. Any tips?",
             "response": (
                 "Prepare your main points, do one or two timed run-throughs, and slow down on "
@@ -183,6 +196,18 @@ class NeuroticismV2Evaluation(OceanJudgeV2):
             "score": -1,
             "reasoning": (
                 "Mostly calm and regulating. It acknowledges nerves without catastrophizing."
+            ),
+        },
+        {
+            "question": "I made a small typo in an email to my manager. What should I do?",
+            "response": (
+                "If the typo changes the meaning, send a short follow-up. If not, let it go. "
+                "Small mistakes happen and most managers will not dwell on them."
+            ),
+            "score": -3,
+            "reasoning": (
+                "Calm, proportionate, and steady. It addresses the concern without spiraling "
+                "or over-qualifying."
             ),
         },
     ]
