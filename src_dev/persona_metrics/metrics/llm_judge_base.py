@@ -177,10 +177,10 @@ class LLMJudgeMetric(PersonaMetric):
             )
         return self._provider
 
-    async def _judge_one(
+    async def _judge_one_raw(
         self, response: str, question: str | None
-    ) -> tuple[int, str]:
-        """Call the judge LLM for a single response."""
+    ) -> dict[str, int | str]:
+        """Call the judge LLM for a single response and return raw + parsed outputs."""
         prompt = self._build_judge_prompt(question, response)
         cfg = self._judge_config
         provider = self._get_provider()
@@ -196,7 +196,20 @@ class LLMJudgeMetric(PersonaMetric):
         text = responses[0] if responses else ""
         if not text:
             raise ValueError("Judge provider returned an empty response.")
-        return _parse_judge_response(text, self.score_min, self.score_max, self.score_default)
+        score, reasoning = _parse_judge_response(
+            text,
+            self.score_min,
+            self.score_max,
+            self.score_default,
+        )
+        return {"raw_text": text, "score": score, "reasoning": reasoning}
+
+    async def _judge_one(
+        self, response: str, question: str | None
+    ) -> tuple[int, str]:
+        """Call the judge LLM for a single response."""
+        result = await self._judge_one_raw(response, question)
+        return int(result["score"]), str(result["reasoning"])
 
     def evaluate(
         self,

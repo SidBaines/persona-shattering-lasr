@@ -1,4 +1,4 @@
-"""Helpers for uploading artifacts to Hugging Face Hub."""
+"""Helpers for uploading and retrieving artifacts on Hugging Face Hub."""
 
 from __future__ import annotations
 
@@ -6,12 +6,8 @@ import os
 from pathlib import Path
 
 import httpx
-from huggingface_hub import HfApi, login
-
-try:
-    from huggingface_hub.utils import set_client_factory as _set_client_factory
-except ImportError:
-    _set_client_factory = None  # huggingface_hub < 1.0 doesn't have this
+from huggingface_hub import HfApi, hf_hub_download, login, snapshot_download
+from huggingface_hub.utils import set_client_factory
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
@@ -20,8 +16,7 @@ _TIMEOUT = httpx.Timeout(connect=10, read=300, write=300, pool=10)
 
 def _configure_timeout() -> None:
     """Install an extended-timeout httpx client for huggingface_hub."""
-    if _set_client_factory is not None:
-        _set_client_factory(lambda: httpx.Client(timeout=_TIMEOUT))
+    set_client_factory(lambda: httpx.Client(timeout=_TIMEOUT))
 
 
 def _get_token(token_env: str = "HF_TOKEN") -> str:
@@ -123,3 +118,63 @@ def upload_folder_to_model_repo(
         commit_message=commit_message,
     )
     return f"https://huggingface.co/{repo_id}"
+
+
+def dataset_repo_subpath_exists(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+) -> bool:
+    """Return whether a file or directory path exists in a dataset repo."""
+    _configure_timeout()
+    api = HfApi(token=_get_token())
+    normalized = path_in_repo.strip("/").rstrip("/")
+    if not normalized:
+        return True
+    try:
+        files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+    except Exception:
+        return False
+    prefix = f"{normalized}/"
+    return any(path == normalized or path.startswith(prefix) for path in files)
+
+
+def download_file_from_dataset_repo(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+) -> Path:
+    """Download a single file from a dataset repo into a local directory."""
+    _configure_timeout()
+    local_dir.mkdir(parents=True, exist_ok=True)
+    downloaded = hf_hub_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        filename=path_in_repo,
+        local_dir=str(local_dir),
+        token=_get_token(),
+    )
+    return Path(downloaded)
+
+
+def download_dataset_subpath(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+) -> Path:
+    """Download one dataset-repo subpath into a local directory."""
+    _configure_timeout()
+    local_dir.mkdir(parents=True, exist_ok=True)
+    normalized = path_in_repo.strip("/").rstrip("/")
+    if not normalized:
+        raise ValueError("path_in_repo must be non-empty")
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        allow_patterns=[normalized, f"{normalized}/**"],
+        local_dir=str(local_dir),
+        token=_get_token(),
+    )
+    return local_dir / normalized
