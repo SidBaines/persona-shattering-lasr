@@ -10,7 +10,7 @@ from pathlib import Path
 
 from src_dev.persona_metrics.judge_calibration import filter_items, load_calibration_items
 
-DEFAULT_DATASET = Path("data/neuroticism_v2_calibration.jsonl")
+DEFAULT_DATASET = Path("scratch/judge_calibration/neuroticism_v2/neuroticism_v2_calibration.jsonl")
 SCALE = [(-4, "Extreme low"), (-3, "Strong low"), (-2, "Moderate low"), (-1, "Slight low"), (0, "Neutral / no signal"), (1, "Slight high"), (2, "Moderate high"), (3, "Strong high"), (4, "Extreme high")]
 
 
