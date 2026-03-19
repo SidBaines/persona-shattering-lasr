@@ -13,7 +13,6 @@ dump/llm_judges/
 ├── calibrate.py              # Run calibration and save results
 ├── view_results.py           # Compare saved results across runs/models
 ├── generate_rating_form.py   # Produce HTML forms for human raters
-├── export_for_rating.py      # Export a subset for external rating
 │
 └── ocean/
     ├── base_ocean_judge.py   # Base class for all OCEAN trait judges

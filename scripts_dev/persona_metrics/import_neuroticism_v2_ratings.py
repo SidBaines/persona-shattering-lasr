@@ -14,7 +14,7 @@ from src_dev.persona_metrics.judge_calibration import (
     summarize_inter_rater,
 )
 
-DEFAULT_DATASET = Path("data/neuroticism_v2_calibration.jsonl")
+DEFAULT_DATASET = Path("scratch/judge_calibration/neuroticism_v2/neuroticism_v2_calibration.jsonl")
 
 
 def main() -> None:
