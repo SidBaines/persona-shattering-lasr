@@ -1,4 +1,19 @@
-"""OCEAN Big Five personality trait evaluations using an LLM judge."""
+"""OCEAN Big Five personality trait evaluations using an LLM judge.
+
+.. deprecated::
+    These v1 classes use ad-hoc judge_configs templates and a vague scale.
+    Prefer the v2 equivalents in ``ocean_v2.py``, which are built from the
+    canonical OCEAN_DEFINITION and use a calibrated -4...+4 ordinal scale:
+
+        agreeableness     → AgreeablenessV2Evaluation     ("agreeableness_v2")
+        conscientiousness → ConscientiousnessV2Evaluation  ("conscientiousness_v2")
+        extraversion      → ExtraversionV2Evaluation       ("extraversion_v2")
+        neuroticism       → NeuroticismV2Evaluation        ("neuroticism_v2")
+        openness          → OpennessV2Evaluation            ("openness_v2")
+
+    The v1 classes remain registered for backward compatibility and for
+    comparison runs that quantify the improvement from v1 to v2.
+"""
 
 from __future__ import annotations
 
