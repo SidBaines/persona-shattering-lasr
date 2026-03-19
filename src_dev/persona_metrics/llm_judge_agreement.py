@@ -1,4 +1,28 @@
-"""Reusable helpers for resumable LLM-judge agreement runs."""
+"""Reusable helpers for resumable LLM-judge agreement runs.
+
+Two-stage pipeline:
+
+  1. **Generate** — sample source prompts, run assistant under neutral/high/low
+     system-prompt conditions, flatten to ``exports/all_responses.jsonl``.
+     Config: ``OceanDatasetConfig``.
+     Entry point: ``generate_ocean_dataset(config) -> Path``
+
+  2. **Judge** — score a frozen ``all_responses.jsonl`` with a panel of LLM
+     judge raters, compute inter-rater agreement, write analysis + plots.
+     Config: ``OceanJudgeRunConfig``.
+     Entry point: ``run_ocean_judge_run(config) -> dict``
+
+Judge runs are stored *alongside* the dataset they scored:
+
+    scratch/ocean_judge_runs/runs/<dataset-key>/
+        prompts/source_prompts.jsonl
+        responses/{neutral,high_<trait>,low_<trait>}/
+        exports/all_responses.jsonl       ← frozen dataset
+        judge_runs/<judge-key>/
+            judge_calls/raw/<rater_id>.jsonl
+            analysis/summary.json
+            plots/
+"""
 
 from __future__ import annotations
 
@@ -10,9 +34,8 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from datasets import Dataset
 from pydantic import BaseModel, Field
 
 from src_dev.common.config import DatasetConfig
@@ -39,6 +62,10 @@ from src_dev.utils.hf_hub import (
 from src_dev.utils.io import read_jsonl, write_jsonl
 
 
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
 class JudgeRaterConfig(BaseModel):
     """One LLM judge rater in the agreement panel."""
 
@@ -47,77 +74,52 @@ class JudgeRaterConfig(BaseModel):
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
 
 
-class OceanJudgeAgreementConfig(BaseModel):
-    """Configuration for one OCEAN trait judge agreement run.
+class OceanDatasetConfig(BaseModel):
+    """Configuration for the dataset generation stage.
 
-    Covers all 5 traits. Use ``trait`` to select which one to run.
+    Covers prompt sampling and assistant response generation under
+    neutral/high/low system-prompt conditions for one OCEAN trait.
     """
 
     trait: OceanTrait
+    max_prompts: int = 240
+    responses_per_prompt: int = 3
+    seed: int = 42
+    assistant_inference: InferenceConfig
+    prompt_dataset_path: Path = Path("data/assistant-axis-extraction-questions.jsonl")
+    local_root_dir: Path = Path("scratch/ocean_judge_runs")
     hf_repo_id: str = "persona-shattering-lasr/ocean_judge_runs"
     hf_root_prefix: str = "runs"
-    local_root_dir: Path = Path("scratch/ocean_judge_runs")
-    prompt_dataset_path: Path = Path("data/assistant-axis-extraction-questions.jsonl")
-    seed: int = 42
-    max_prompts: int = 20
-    responses_per_prompt: int = 3
-    judge_repeats: int = 3
-    assistant_inference: InferenceConfig
-    judge_raters: list[JudgeRaterConfig]
-    retry_call_errors: bool = True
-    plot: bool = True
-    upload: bool = True
+    upload: bool = False
 
 
-class NeuroticismJudgeAgreementConfig(BaseModel):
-    """Configuration for one neuroticism judge agreement run.
+class OceanJudgeRunConfig(BaseModel):
+    """Configuration for one judge scoring run against a frozen dataset.
 
-    .. deprecated::
-        Use ``OceanJudgeAgreementConfig(trait=OceanTrait.neuroticism, ...)`` instead.
-        This class is retained for backward compatibility.
+    ``dataset_path`` must point to an existing ``all_responses.jsonl``
+    produced by ``generate_ocean_dataset``.  The judge run output is written
+    alongside the dataset under ``<dataset_dir>/../judge_runs/<judge_key>/``.
     """
 
-    hf_repo_id: str = "persona-shattering-lasr/neuroticism_judge_runs"
-    hf_root_prefix: str = "runs"
-    local_root_dir: Path = Path("scratch/neuroticism_judge_runs")
-    prompt_dataset_path: Path = Path("data/assistant-axis-extraction-questions.jsonl")
-    seed: int = 42
-    max_prompts: int = 20
-    responses_per_prompt: int = 1
-    judge_repeats: int = 3
-    assistant_inference: InferenceConfig
+    trait: OceanTrait
+    dataset_path: Path
     judge_raters: list[JudgeRaterConfig]
+    judge_repeats: int = 3
     retry_call_errors: bool = True
     plot: bool = True
-    upload: bool = True
+    hf_repo_id: str = "persona-shattering-lasr/ocean_judge_runs"
+    upload: bool = False
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
-
-
-def _stable_json(data: Any) -> str:
-    return json.dumps(data, sort_keys=True, ensure_ascii=False, default=_json_default)
-
+# ---------------------------------------------------------------------------
+# System prompts
+# ---------------------------------------------------------------------------
 
 def build_ocean_system_prompts(trait: OceanTrait) -> dict[str, str]:
     """Return neutral/high/low system prompts for any OCEAN trait.
 
-    Returns a dict with three keys: ``"neutral"``, ``"high_<trait>"``, ``"low_<trait>"``.
-
-    Args:
-        trait: The OCEAN trait to build prompts for.
-
     Returns:
-        Dict mapping condition name to system prompt string.
+        Dict with keys ``"neutral"``, ``"high_<trait>"``, ``"low_<trait>"``.
     """
     trait_name = trait.value
     high = OCEAN_DEFINITION[trait.high_key].description(
@@ -146,67 +148,77 @@ def build_ocean_system_prompts(trait: OceanTrait) -> dict[str, str]:
     }
 
 
-def build_neuroticism_system_prompts() -> dict[str, str]:
-    """Return explicit neutral/high/low neuroticism system prompts.
+# ---------------------------------------------------------------------------
+# Fingerprints and paths
+# ---------------------------------------------------------------------------
 
-    .. deprecated::
-        Use ``build_ocean_system_prompts(OceanTrait.neuroticism)`` instead.
-        Retained for backward compatibility.
-    """
-    return build_ocean_system_prompts(OceanTrait.neuroticism)
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-def _get_system_prompts(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
-) -> dict[str, str]:
-    """Return the condition system prompts for any agreement config."""
-    if isinstance(config, OceanJudgeAgreementConfig):
-        return build_ocean_system_prompts(config.trait)
-    return build_neuroticism_system_prompts()
+def _json_default(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def build_run_fingerprint(config: NeuroticismJudgeAgreementConfig) -> str:
-    """Hash the meaningful experiment config."""
-    payload = {
-        "trait": "neuroticism_v2",
-        "prompt_dataset_path": str(config.prompt_dataset_path),
-        "seed": config.seed,
-        "max_prompts": config.max_prompts,
-        "responses_per_prompt": config.responses_per_prompt,
-        "judge_repeats": config.judge_repeats,
-        "assistant_inference": {
-            "model": config.assistant_inference.model,
-            "provider": config.assistant_inference.provider,
-            "generation": config.assistant_inference.generation.model_dump(mode="json"),
-            "system_prompts": build_neuroticism_system_prompts(),
-        },
-        "judge_raters": [
-            {
-                "rater_id": rater.rater_id,
-                "metric_name": rater.metric_name,
-                "judge": rater.judge.model_dump(mode="json"),
-            }
-            for rater in config.judge_raters
-        ],
-    }
-    return hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
+def _stable_json(data: Any) -> str:
+    return json.dumps(data, sort_keys=True, ensure_ascii=False, default=_json_default)
 
 
-def build_run_fingerprint_ocean(config: OceanJudgeAgreementConfig) -> str:
-    """Hash the meaningful experiment config for a generic OCEAN trait run."""
+def build_dataset_fingerprint(config: OceanDatasetConfig) -> str:
+    """Hash the generation config (excludes judge settings)."""
     payload = {
         "trait": config.trait.value,
         "prompt_dataset_path": str(config.prompt_dataset_path),
         "seed": config.seed,
         "max_prompts": config.max_prompts,
         "responses_per_prompt": config.responses_per_prompt,
-        "judge_repeats": config.judge_repeats,
         "assistant_inference": {
             "model": config.assistant_inference.model,
             "provider": config.assistant_inference.provider,
             "generation": config.assistant_inference.generation.model_dump(mode="json"),
             "system_prompts": build_ocean_system_prompts(config.trait),
         },
+    }
+    return hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
+
+
+def build_dataset_run_key(config: OceanDatasetConfig) -> str:
+    return f"{config.trait.value}-seed-{config.seed}-{build_dataset_fingerprint(config)[:12]}"
+
+
+def get_dataset_run_dir(config: OceanDatasetConfig) -> Path:
+    return config.local_root_dir / "runs" / build_dataset_run_key(config)
+
+
+def get_dataset_hf_prefix(config: OceanDatasetConfig) -> str:
+    return f"{config.hf_root_prefix.strip('/')}/{build_dataset_run_key(config)}"
+
+
+def _dataset_paths(config: OceanDatasetConfig) -> dict[str, Path]:
+    run_dir = get_dataset_run_dir(config)
+    return {
+        "run_dir": run_dir,
+        "manifest": run_dir / "manifest.json",
+        "config": run_dir / "config.json",
+        "prompts_dir": run_dir / "prompts",
+        "source_prompts": run_dir / "prompts" / "source_prompts.jsonl",
+        "responses_dir": run_dir / "responses",
+        "exports_dir": run_dir / "exports",
+        "all_responses": run_dir / "exports" / "all_responses.jsonl",
+        "judge_runs_dir": run_dir / "judge_runs",
+    }
+
+
+def build_judge_run_fingerprint(config: OceanJudgeRunConfig) -> str:
+    """Hash the judge config (excludes dataset generation settings)."""
+    payload = {
+        "trait": config.trait.value,
+        "dataset_path": str(config.dataset_path),
+        "judge_repeats": config.judge_repeats,
         "judge_raters": [
             {
                 "rater_id": rater.rater_id,
@@ -219,196 +231,39 @@ def build_run_fingerprint_ocean(config: OceanJudgeAgreementConfig) -> str:
     return hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
 
 
-def build_run_key_ocean(config: OceanJudgeAgreementConfig) -> str:
-    """Return the deterministic run key for a generic OCEAN trait run."""
-    fingerprint = build_run_fingerprint_ocean(config)[:12]
-    return f"{config.trait.value}-seed-{config.seed}-{fingerprint}"
+def build_judge_run_key(config: OceanJudgeRunConfig) -> str:
+    rater_ids = "-".join(r.rater_id for r in config.judge_raters)
+    return f"{rater_ids}-{build_judge_run_fingerprint(config)[:12]}"
 
 
-def get_run_dir_ocean(config: OceanJudgeAgreementConfig) -> Path:
-    return config.local_root_dir / "runs" / build_run_key_ocean(config)
+def get_judge_run_dir(config: OceanJudgeRunConfig) -> Path:
+    """Judge run dir lives alongside the dataset under judge_runs/<key>/."""
+    # dataset_path is exports/all_responses.jsonl → go up two levels to run_dir
+    run_dir = config.dataset_path.parent.parent
+    return run_dir / "judge_runs" / build_judge_run_key(config)
 
 
-def get_hf_run_prefix_ocean(config: OceanJudgeAgreementConfig) -> str:
-    return f"{config.hf_root_prefix.strip('/')}/{build_run_key_ocean(config)}"
-
-
-def _artifact_paths_ocean(config: OceanJudgeAgreementConfig) -> dict[str, Path]:
-    run_dir = get_run_dir_ocean(config)
+def _judge_paths(config: OceanJudgeRunConfig) -> dict[str, Path]:
+    judge_dir = get_judge_run_dir(config)
     return {
-        "run_dir": run_dir,
-        "manifest": run_dir / "manifest.json",
-        "config": run_dir / "config.json",
-        "prompts_dir": run_dir / "prompts",
-        "source_prompts": run_dir / "prompts" / "source_prompts.jsonl",
-        "responses_dir": run_dir / "responses",
-        "exports_dir": run_dir / "exports",
-        "all_responses": run_dir / "exports" / "all_responses.jsonl",
-        "judge_calls_dir": run_dir / "judge_calls",
-        "judge_raw_dir": run_dir / "judge_calls" / "raw",
-        "judge_progress": run_dir / "judge_calls" / "progress.json",
-        "analysis_dir": run_dir / "analysis",
-        "summary": run_dir / "analysis" / "summary.json",
-        "pairwise_metrics": run_dir / "analysis" / "pairwise_metrics.json",
-        "condition_metrics": run_dir / "analysis" / "condition_metrics.json",
-        "per_item_disagreement": run_dir / "analysis" / "per_item_disagreement.jsonl",
-        "plots_dir": run_dir / "plots",
+        "judge_dir": judge_dir,
+        "manifest": judge_dir / "manifest.json",
+        "config": judge_dir / "config.json",
+        "judge_calls_dir": judge_dir / "judge_calls",
+        "judge_raw_dir": judge_dir / "judge_calls" / "raw",
+        "judge_progress": judge_dir / "judge_calls" / "progress.json",
+        "analysis_dir": judge_dir / "analysis",
+        "summary": judge_dir / "analysis" / "summary.json",
+        "pairwise_metrics": judge_dir / "analysis" / "pairwise_metrics.json",
+        "condition_metrics": judge_dir / "analysis" / "condition_metrics.json",
+        "per_item_disagreement": judge_dir / "analysis" / "per_item_disagreement.jsonl",
+        "plots_dir": judge_dir / "plots",
     }
 
 
-def build_run_key(config: NeuroticismJudgeAgreementConfig) -> str:
-    """Return the deterministic run key."""
-    fingerprint = build_run_fingerprint(config)[:12]
-    return f"seed-{config.seed}-{fingerprint}"
-
-
-def get_run_dir(config: NeuroticismJudgeAgreementConfig) -> Path:
-    return config.local_root_dir / "runs" / build_run_key(config)
-
-
-def get_hf_run_prefix(config: NeuroticismJudgeAgreementConfig) -> str:
-    return f"{config.hf_root_prefix.strip('/')}/{build_run_key(config)}"
-
-
-def _artifact_paths(config: NeuroticismJudgeAgreementConfig) -> dict[str, Path]:
-    run_dir = get_run_dir(config)
-    return {
-        "run_dir": run_dir,
-        "manifest": run_dir / "manifest.json",
-        "config": run_dir / "config.json",
-        "prompts_dir": run_dir / "prompts",
-        "source_prompts": run_dir / "prompts" / "source_prompts.jsonl",
-        "responses_dir": run_dir / "responses",
-        "exports_dir": run_dir / "exports",
-        "all_responses": run_dir / "exports" / "all_responses.jsonl",
-        "judge_calls_dir": run_dir / "judge_calls",
-        "judge_raw_dir": run_dir / "judge_calls" / "raw",
-        "judge_progress": run_dir / "judge_calls" / "progress.json",
-        "analysis_dir": run_dir / "analysis",
-        "summary": run_dir / "analysis" / "summary.json",
-        "pairwise_metrics": run_dir / "analysis" / "pairwise_metrics.json",
-        "condition_metrics": run_dir / "analysis" / "condition_metrics.json",
-        "per_item_disagreement": run_dir / "analysis" / "per_item_disagreement.jsonl",
-        "plots_dir": run_dir / "plots",
-    }
-
-
-def _get_artifact_paths(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
-) -> dict[str, Path]:
-    """Dispatch to the right artifact-paths helper based on config type."""
-    if isinstance(config, OceanJudgeAgreementConfig):
-        return _artifact_paths_ocean(config)
-    return _artifact_paths(config)
-
-
-def _get_run_key(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
-) -> str:
-    """Dispatch to the right run-key builder based on config type."""
-    if isinstance(config, OceanJudgeAgreementConfig):
-        return build_run_key_ocean(config)
-    return build_run_key(config)
-
-
-def _get_hf_run_prefix(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
-) -> str:
-    """Dispatch to the right HF prefix helper based on config type."""
-    if isinstance(config, OceanJudgeAgreementConfig):
-        return get_hf_run_prefix_ocean(config)
-    return get_hf_run_prefix(config)
-
-
-def _ensure_run_root(config: NeuroticismJudgeAgreementConfig) -> Path:
-    paths = _artifact_paths(config)
-    for key in [
-        "run_dir",
-        "prompts_dir",
-        "responses_dir",
-        "exports_dir",
-        "judge_calls_dir",
-        "judge_raw_dir",
-        "analysis_dir",
-        "plots_dir",
-    ]:
-        paths[key].mkdir(parents=True, exist_ok=True)
-    return paths["run_dir"]
-
-
-def _write_run_manifest(config: NeuroticismJudgeAgreementConfig, mode: str) -> None:
-    paths = _artifact_paths(config)
-    payload = {
-        "run_key": build_run_key(config),
-        "created_at": _now_iso(),
-        "mode": mode,
-        "hf_repo_id": config.hf_repo_id,
-        "hf_run_prefix": get_hf_run_prefix(config),
-        "config_fingerprint": build_run_fingerprint(config),
-    }
-    paths["manifest"].write_text(_stable_json(payload) + "\n", encoding="utf-8")
-    paths["config"].write_text(
-        json.dumps(config.model_dump(mode="json"), indent=2, default=_json_default) + "\n",
-        encoding="utf-8",
-    )
-
-
-def ensure_local_run_from_hf(config: NeuroticismJudgeAgreementConfig) -> bool:
-    """Download the full run dir from HF when local artifacts are missing."""
-    paths = _artifact_paths(config)
-    if paths["manifest"].exists():
-        return True
-    hf_prefix = get_hf_run_prefix(config)
-    if not dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_prefix):
-        return False
-    download_dataset_subpath(
-        repo_id=config.hf_repo_id,
-        path_in_repo=hf_prefix,
-        local_dir=config.local_root_dir,
-    )
-    return paths["manifest"].exists()
-
-
-def _maybe_download_relative_artifact(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
-    relative_path: str,
-) -> bool:
-    paths = _get_artifact_paths(config)
-    target = paths["run_dir"] / relative_path
-    if target.exists():
-        return True
-    hf_path = f"{_get_hf_run_prefix(config)}/{relative_path.strip('/')}"
-    if not dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_path):
-        return False
-    download_dataset_subpath(
-        repo_id=config.hf_repo_id,
-        path_in_repo=hf_path,
-        local_dir=config.local_root_dir,
-    )
-    return target.exists()
-
-
-def prepare_source_prompts(config: NeuroticismJudgeAgreementConfig) -> list[dict[str, Any]]:
-    """Load or create the frozen sampled prompt set for this run."""
-    paths = _artifact_paths(config)
-    if paths["source_prompts"].exists():
-        return read_jsonl(paths["source_prompts"])
-    _maybe_download_relative_artifact(config, "prompts/source_prompts.jsonl")
-    if paths["source_prompts"].exists():
-        return read_jsonl(paths["source_prompts"])
-
-    dataset = load_dataset_from_config(
-        DatasetConfig(
-            source="local",
-            path=str(config.prompt_dataset_path),
-            max_samples=config.max_prompts,
-            seed=config.seed,
-        )
-    )
-    rows = dataset.to_list()
-    write_jsonl(rows, paths["source_prompts"])
-    return rows
-
+# ---------------------------------------------------------------------------
+# Dataset generation helpers
+# ---------------------------------------------------------------------------
 
 def _is_condition_run_complete(run_dir: Path, expected_rows: int) -> bool:
     if not (run_dir / "manifest.json").exists():
@@ -425,56 +280,38 @@ def _is_condition_run_complete(run_dir: Path, expected_rows: int) -> bool:
     return all(sample.inference.status == "success" for sample in samples)
 
 
-def ensure_condition_responses(
-    config: NeuroticismJudgeAgreementConfig,
-    *,
-    condition_name: str,
-    system_prompt: str,
-    prompts_path: Path,
-    expected_rows: int,
-) -> Path:
-    """Load, download, or generate one condition's assistant responses."""
-    paths = _artifact_paths(config)
-    condition_run_dir = paths["responses_dir"] / condition_name
-    if _is_condition_run_complete(condition_run_dir, expected_rows):
-        return condition_run_dir
-    _maybe_download_relative_artifact(config, f"responses/{condition_name}")
-    if _is_condition_run_complete(condition_run_dir, expected_rows):
-        return condition_run_dir
-
-    inference_config = config.assistant_inference.model_copy(deep=True)
-    if (
-        config.responses_per_prompt > 1
-        and not inference_config.generation.do_sample
-    ):
-        inference_config.generation.do_sample = True
-    inference_config.dataset = DatasetConfig(
-        source="local",
-        path=str(prompts_path),
+def _maybe_download_dataset_artifact(config: OceanDatasetConfig, relative_path: str) -> bool:
+    """Download a single artifact from HF into the dataset run dir if missing."""
+    paths = _dataset_paths(config)
+    target = paths["run_dir"] / relative_path
+    if target.exists():
+        return True
+    hf_path = f"{get_dataset_hf_prefix(config)}/{relative_path.strip('/')}"
+    if not dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_path):
+        return False
+    download_dataset_subpath(
+        repo_id=config.hf_repo_id,
+        path_in_repo=hf_path,
+        local_dir=config.local_root_dir,
     )
-    inference_config.run_dir = condition_run_dir
-    inference_config.output_path = None
-    inference_config.system_prompt = system_prompt
-    inference_config.generation.num_responses_per_prompt = config.responses_per_prompt
-    run_inference(inference_config)
-    return condition_run_dir
+    return target.exists()
 
 
-def flatten_condition_responses(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+def _flatten_condition_responses(
+    config: OceanDatasetConfig,
+    paths: dict[str, Path],
 ) -> list[dict[str, Any]]:
-    """Flatten condition canonical runs into a single response table."""
-    paths = _get_artifact_paths(config)
+    """Build the flat all_responses table from condition run dirs."""
     if paths["all_responses"].exists():
         return read_jsonl(paths["all_responses"])
-    _maybe_download_relative_artifact(config, "exports/all_responses.jsonl")
+    _maybe_download_dataset_artifact(config, "exports/all_responses.jsonl")
     if paths["all_responses"].exists():
         return read_jsonl(paths["all_responses"])
 
     prompt_rows = read_jsonl(paths["source_prompts"])
     prompt_by_index = {index: row for index, row in enumerate(prompt_rows)}
     rows: list[dict[str, Any]] = []
-    for condition_name in _get_system_prompts(config):
+    for condition_name in build_ocean_system_prompts(config.trait):
         condition_dir = paths["responses_dir"] / condition_name
         samples = load_samples(condition_dir)
         for sample in samples:
@@ -501,6 +338,117 @@ def flatten_condition_responses(
     write_jsonl(rows, paths["all_responses"])
     return rows
 
+
+def generate_ocean_dataset(config: OceanDatasetConfig) -> Path:
+    """Generate (or resume) the calibration response dataset for one OCEAN trait.
+
+    Runs the assistant under neutral/high/low system-prompt conditions on
+    ``config.max_prompts`` source prompts, then flattens all responses into
+    ``exports/all_responses.jsonl``.
+
+    Args:
+        config: Dataset generation configuration.
+
+    Returns:
+        Path to the frozen ``all_responses.jsonl`` file.
+    """
+    paths = _dataset_paths(config)
+    for key in ["run_dir", "prompts_dir", "responses_dir", "exports_dir", "judge_runs_dir"]:
+        paths[key].mkdir(parents=True, exist_ok=True)
+
+    # Try to restore from HF if run dir is missing
+    if not paths["manifest"].exists():
+        hf_prefix = get_dataset_hf_prefix(config)
+        if dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_prefix):
+            download_dataset_subpath(
+                repo_id=config.hf_repo_id,
+                path_in_repo=hf_prefix,
+                local_dir=config.local_root_dir,
+            )
+
+    run_key = build_dataset_run_key(config)
+    paths["manifest"].write_text(
+        _stable_json({
+            "run_key": run_key,
+            "created_at": _now_iso(),
+            "stage": "generate",
+            "trait": config.trait.value,
+            "hf_repo_id": config.hf_repo_id,
+            "hf_run_prefix": get_dataset_hf_prefix(config),
+            "dataset_fingerprint": build_dataset_fingerprint(config),
+        }) + "\n",
+        encoding="utf-8",
+    )
+    paths["config"].write_text(
+        json.dumps(config.model_dump(mode="json"), indent=2, default=_json_default) + "\n",
+        encoding="utf-8",
+    )
+
+    # Step 1: source prompts
+    if not paths["source_prompts"].exists():
+        _maybe_download_dataset_artifact(config, "prompts/source_prompts.jsonl")
+    if not paths["source_prompts"].exists():
+        dataset = load_dataset_from_config(
+            DatasetConfig(
+                source="local",
+                path=str(config.prompt_dataset_path),
+                max_samples=config.max_prompts,
+                seed=config.seed,
+            )
+        )
+        write_jsonl(dataset.to_list(), paths["source_prompts"])
+
+    prompt_rows = read_jsonl(paths["source_prompts"])
+    expected_rows = len(prompt_rows) * config.responses_per_prompt
+
+    # Step 2: condition responses
+    condition_prompts = build_ocean_system_prompts(config.trait)
+    for condition_name, system_prompt in condition_prompts.items():
+        condition_run_dir = paths["responses_dir"] / condition_name
+        if not _is_condition_run_complete(condition_run_dir, expected_rows):
+            _maybe_download_dataset_artifact(config, f"responses/{condition_name}")
+        if not _is_condition_run_complete(condition_run_dir, expected_rows):
+            inference_cfg = config.assistant_inference.model_copy(deep=True)
+            if config.responses_per_prompt > 1 and not inference_cfg.generation.do_sample:
+                inference_cfg.generation.do_sample = True
+            inference_cfg.dataset = DatasetConfig(
+                source="local",
+                path=str(paths["source_prompts"]),
+            )
+            inference_cfg.run_dir = condition_run_dir
+            inference_cfg.output_path = None
+            inference_cfg.system_prompt = system_prompt
+            inference_cfg.generation.num_responses_per_prompt = config.responses_per_prompt
+            run_inference(inference_cfg)
+
+    # Step 3: flatten
+    response_rows = _flatten_condition_responses(config, paths)
+
+    if config.upload:
+        upload_dataset(config)
+
+    print(f"  dataset run_key : {run_key}")
+    print(f"  responses       : {len(response_rows)}")
+    print(f"  all_responses   : {paths['all_responses']}")
+    return paths["all_responses"]
+
+
+def upload_dataset(config: OceanDatasetConfig) -> str:
+    """Upload the dataset run dir to HF (excludes judge_runs subdirs)."""
+    login_from_env()
+    run_dir = get_dataset_run_dir(config)
+    return upload_folder_to_dataset_repo(
+        local_dir=run_dir,
+        repo_id=config.hf_repo_id,
+        path_in_repo=get_dataset_hf_prefix(config),
+        commit_message=f"Upload {config.trait.value} calibration dataset {build_dataset_run_key(config)}",
+        ignore_patterns=["judge_runs/**"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Judge run helpers
+# ---------------------------------------------------------------------------
 
 async def _run_single_judge_call(
     metric: LLMJudgeMetric,
@@ -566,14 +514,15 @@ def _summarize_rater_progress(records: list[dict[str, Any]], expected_calls: int
     }
 
 
-async def run_judge_panel(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+async def _run_judge_panel(
+    config: OceanJudgeRunConfig,
     response_rows: list[dict[str, Any]],
+    paths: dict[str, Path],
 ) -> dict[str, Any]:
     """Run all judge raters with resumable raw-call caching."""
-    paths = _get_artifact_paths(config)
+    judge_key = build_judge_run_key(config)
     progress_payload: dict[str, Any] = {
-        "run_key": _get_run_key(config),
+        "judge_key": judge_key,
         "judge_repeats": config.judge_repeats,
         "num_responses": len(response_rows),
         "raters": {},
@@ -649,9 +598,9 @@ def _valid_score(value: Any) -> int | None:
 
 
 def _load_median_scores_by_rater(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+    config: OceanJudgeRunConfig,
+    paths: dict[str, Path],
 ) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, list[int]]]]:
-    paths = _get_artifact_paths(config)
     medians_by_rater: dict[str, dict[str, int]] = {}
     repeats_by_rater: dict[str, dict[str, list[int]]] = {}
     for rater in config.judge_raters:
@@ -712,12 +661,14 @@ def _krippendorff_alpha_ordinal(
     return 1.0 - (observed / expected)
 
 
-def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig") -> dict[str, Any]:
-    """Compute agreement, stability, separation, and plot-ready artifacts."""
-    paths = _get_artifact_paths(config)
-    response_rows = read_jsonl(paths["all_responses"])
+def _analyze(
+    config: OceanJudgeRunConfig,
+    paths: dict[str, Path],
+    response_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Compute agreement, stability, separation, and write analysis artifacts."""
     response_by_id = {str(row["response_id"]): row for row in response_rows}
-    medians_by_rater, repeats_by_rater = _load_median_scores_by_rater(config)
+    medians_by_rater, repeats_by_rater = _load_median_scores_by_rater(config, paths)
 
     pairwise_metrics: dict[str, dict[str, float | int]] = {}
     qwk_matrix: dict[str, dict[str, float]] = defaultdict(dict)
@@ -727,10 +678,10 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
     for i, left in enumerate(rater_ids):
         qwk_matrix[left][left] = 1.0
         mae_matrix[left][left] = 0.0
-        for right in rater_ids[i + 1 :]:
+        for right in rater_ids[i + 1:]:
             shared_ids = sorted(set(medians_by_rater[left]).intersection(medians_by_rater[right]))
-            left_scores = [medians_by_rater[left][response_id] for response_id in shared_ids]
-            right_scores = [medians_by_rater[right][response_id] for response_id in shared_ids]
+            left_scores = [medians_by_rater[left][rid] for rid in shared_ids]
+            right_scores = [medians_by_rater[right][rid] for rid in shared_ids]
             stats = summarize_pair(left_scores, right_scores)
             qwk = quadratic_weighted_agreement(left_scores, right_scores)
             key = f"{left}__vs__{right}"
@@ -761,7 +712,7 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
                 "rating_std": statistics.pstdev(ratings) if len(ratings) > 1 else 0.0,
             }
         )
-    per_item_disagreement_rows.sort(key=lambda row: (-row["rating_spread"], row["response_id"]))
+    per_item_disagreement_rows.sort(key=lambda r: (-r["rating_spread"], r["response_id"]))
 
     stability: dict[str, dict[str, Any]] = {}
     for rater_id in rater_ids:
@@ -788,9 +739,7 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
             "call_error_rate": (call_errors / total_calls) if total_calls else float("nan"),
         }
 
-    condition_prompts = _get_system_prompts(config)
-    condition_names = list(condition_prompts)
-    # Derive the high/low condition names (all non-neutral)
+    condition_names = list(build_ocean_system_prompts(config.trait))
     high_condition = next((k for k in condition_names if k.startswith("high_")), None)
     low_condition = next((k for k in condition_names if k.startswith("low_")), None)
 
@@ -800,8 +749,8 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
         for condition_name in condition_names:
             values = [
                 score
-                for response_id, score in medians_by_rater[rater_id].items()
-                if response_by_id[response_id]["condition"] == condition_name
+                for rid, score in medians_by_rater[rater_id].items()
+                if response_by_id[rid]["condition"] == condition_name
             ]
             by_condition[condition_name] = {
                 "n": len(values),
@@ -822,8 +771,8 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
         values = [
             score
             for rater_id in rater_ids
-            for response_id, score in medians_by_rater[rater_id].items()
-            if response_by_id[response_id]["condition"] == condition_name
+            for rid, score in medians_by_rater[rater_id].items()
+            if response_by_id[rid]["condition"] == condition_name
         ]
         condition_metrics["overall"][condition_name] = {
             "n": len(values),
@@ -838,35 +787,34 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
         "num_items_with_multi_rater_scores": len(item_ratings),
         "ordinal_krippendorff_alpha": _krippendorff_alpha_ordinal(item_ratings),
         "mean_pairwise_qwk": statistics.mean(
-            metric["quadratic_weighted_agreement"]
-            for metric in pairwise_metrics.values()
-            if not math.isnan(float(metric["quadratic_weighted_agreement"]))
-        )
-        if pairwise_metrics
-        else float("nan"),
+            m["quadratic_weighted_agreement"]
+            for m in pairwise_metrics.values()
+            if not math.isnan(float(m["quadratic_weighted_agreement"]))
+        ) if pairwise_metrics else float("nan"),
         "mean_pairwise_spearman": statistics.mean(
-            float(metric["spearman"]) for metric in pairwise_metrics.values() if not math.isnan(float(metric["spearman"]))
-        )
-        if pairwise_metrics
-        else float("nan"),
+            float(m["spearman"]) for m in pairwise_metrics.values()
+            if not math.isnan(float(m["spearman"]))
+        ) if pairwise_metrics else float("nan"),
         "mean_pairwise_mae": statistics.mean(
-            float(metric["mae"]) for metric in pairwise_metrics.values() if not math.isnan(float(metric["mae"]))
-        )
-        if pairwise_metrics
-        else float("nan"),
+            float(m["mae"]) for m in pairwise_metrics.values()
+            if not math.isnan(float(m["mae"]))
+        ) if pairwise_metrics else float("nan"),
         "mean_pairwise_within_one": statistics.mean(
-            float(metric["within_one"]) for metric in pairwise_metrics.values() if not math.isnan(float(metric["within_one"]))
-        )
-        if pairwise_metrics
-        else float("nan"),
+            float(m["within_one"]) for m in pairwise_metrics.values()
+            if not math.isnan(float(m["within_one"]))
+        ) if pairwise_metrics else float("nan"),
     }
 
     write_jsonl(per_item_disagreement_rows, paths["per_item_disagreement"])
-    paths["pairwise_metrics"].write_text(json.dumps({"pairwise": pairwise_metrics}, indent=2) + "\n", encoding="utf-8")
-    paths["condition_metrics"].write_text(json.dumps(condition_metrics, indent=2) + "\n", encoding="utf-8")
+    paths["pairwise_metrics"].write_text(
+        json.dumps({"pairwise": pairwise_metrics}, indent=2) + "\n", encoding="utf-8"
+    )
+    paths["condition_metrics"].write_text(
+        json.dumps(condition_metrics, indent=2) + "\n", encoding="utf-8"
+    )
 
     summary = {
-        "run_key": build_run_key(config),
+        "judge_key": build_judge_run_key(config),
         "generated_at": _now_iso(),
         "agreement": agreement_summary,
         "stability": stability,
@@ -876,13 +824,14 @@ def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgr
     paths["summary"].write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
     if config.plot:
-        _write_plots(config, response_by_id, medians_by_rater, repeats_by_rater, pairwise_metrics, per_item_disagreement_rows)
+        _write_plots(config, paths, response_by_id, medians_by_rater, repeats_by_rater, pairwise_metrics, per_item_disagreement_rows)
 
     return summary
 
 
 def _write_plots(
-    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+    config: OceanJudgeRunConfig,
+    paths: dict[str, Path],
     response_by_id: dict[str, dict[str, Any]],
     medians_by_rater: dict[str, dict[str, int]],
     repeats_by_rater: dict[str, dict[str, list[int]]],
@@ -896,18 +845,16 @@ def _write_plots(
     except ImportError:
         return
 
-    paths = _get_artifact_paths(config)
     rater_ids = [rater.rater_id for rater in config.judge_raters]
-    conditions = list(_get_system_prompts(config))
+    conditions = list(build_ocean_system_prompts(config.trait))
 
-    # Score by condition and rater
     fig, axes = plt.subplots(1, len(rater_ids), figsize=(4.5 * max(1, len(rater_ids)), 4.5), squeeze=False)
     for axis, rater_id in zip(axes[0], rater_ids):
         data = [
             [
                 score
-                for response_id, score in medians_by_rater[rater_id].items()
-                if response_by_id[response_id]["condition"] == condition
+                for rid, score in medians_by_rater[rater_id].items()
+                if response_by_id[rid]["condition"] == condition
             ]
             for condition in conditions
         ]
@@ -919,12 +866,11 @@ def _write_plots(
     fig.savefig(paths["plots_dir"] / "scores_by_condition_and_rater.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # Pairwise scatter
     for key in pairwise_metrics:
         left, right = key.split("__vs__")
         shared_ids = sorted(set(medians_by_rater[left]).intersection(medians_by_rater[right]))
-        xs = [medians_by_rater[left][response_id] for response_id in shared_ids]
-        ys = [medians_by_rater[right][response_id] for response_id in shared_ids]
+        xs = [medians_by_rater[left][rid] for rid in shared_ids]
+        ys = [medians_by_rater[right][rid] for rid in shared_ids]
         if not xs:
             continue
         fig, ax = plt.subplots(figsize=(5, 5))
@@ -939,7 +885,6 @@ def _write_plots(
         fig.savefig(paths["plots_dir"] / f"pairwise_scatter_{left}_vs_{right}.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    # Heatmaps
     if len(rater_ids) >= 2:
         for metric_name in ["quadratic_weighted_agreement", "mae"]:
             matrix = []
@@ -962,8 +907,7 @@ def _write_plots(
             fig.savefig(paths["plots_dir"] / f"heatmap_{metric_name}.png", dpi=150, bbox_inches="tight")
             plt.close(fig)
 
-    # Per-item spread
-    top_rows = per_item_disagreement_rows[: min(50, len(per_item_disagreement_rows))]
+    top_rows = per_item_disagreement_rows[:min(50, len(per_item_disagreement_rows))]
     if top_rows:
         fig, ax = plt.subplots(figsize=(10, 4.5))
         spreads = [row["rating_spread"] for row in top_rows]
@@ -976,7 +920,6 @@ def _write_plots(
         fig.savefig(paths["plots_dir"] / "per_item_spread.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    # Rater histograms
     fig, axes = plt.subplots(1, len(rater_ids), figsize=(4.5 * max(1, len(rater_ids)), 4.0), squeeze=False)
     bins = [x - 0.5 for x in range(-4, 6)]
     for axis, rater_id in zip(axes[0], rater_ids):
@@ -989,11 +932,13 @@ def _write_plots(
     fig.savefig(paths["plots_dir"] / "rater_histograms.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # Within-rater repeat std
     fig, ax = plt.subplots(figsize=(6, 4))
     means = []
     for rater_id in rater_ids:
-        item_stds = [statistics.pstdev(scores) if len(scores) > 1 else 0.0 for scores in repeats_by_rater[rater_id].values()]
+        item_stds = [
+            statistics.pstdev(scores) if len(scores) > 1 else 0.0
+            for scores in repeats_by_rater[rater_id].values()
+        ]
         means.append(statistics.mean(item_stds) if item_stds else 0.0)
     ax.bar(rater_ids, means)
     ax.set_ylabel("Mean item repeat std")
@@ -1003,247 +948,90 @@ def _write_plots(
     plt.close(fig)
 
 
-def upload_run_artifacts(config: NeuroticismJudgeAgreementConfig) -> str:
-    """Upload the completed run dir to HF."""
+def upload_judge_run(config: OceanJudgeRunConfig) -> str:
+    """Upload one judge run dir to HF."""
     login_from_env()
-    run_dir = get_run_dir(config)
+    judge_dir = get_judge_run_dir(config)
+    # HF path: <dataset_hf_prefix>/judge_runs/<judge_key>
+    # We derive the dataset run key from the dataset_path structure:
+    #   <local_root>/runs/<dataset_key>/exports/all_responses.jsonl
+    dataset_run_key = config.dataset_path.parent.parent.name
+    hf_path = f"runs/{dataset_run_key}/judge_runs/{build_judge_run_key(config)}"
     return upload_folder_to_dataset_repo(
-        local_dir=run_dir,
+        local_dir=judge_dir,
         repo_id=config.hf_repo_id,
-        path_in_repo=get_hf_run_prefix(config),
-        commit_message=f"Upload neuroticism judge agreement run {build_run_key(config)}",
+        path_in_repo=hf_path,
+        commit_message=f"Upload {config.trait.value} judge run {build_judge_run_key(config)}",
     )
 
 
-def upload_run_artifacts_ocean(config: OceanJudgeAgreementConfig) -> str:
-    """Upload the completed run dir to HF for a generic OCEAN trait run."""
-    login_from_env()
-    run_dir = get_run_dir_ocean(config)
-    return upload_folder_to_dataset_repo(
-        local_dir=run_dir,
-        repo_id=config.hf_repo_id,
-        path_in_repo=get_hf_run_prefix_ocean(config),
-        commit_message=f"Upload {config.trait.value} judge agreement run {build_run_key_ocean(config)}",
-    )
-
-
-def run_ocean_judge_agreement(
-    config: OceanJudgeAgreementConfig,
-    *,
-    mode: Literal["run", "analyze_only", "upload_only"] = "run",
-) -> dict[str, Any]:
-    """Run the OCEAN trait LLM-judge agreement harness.
+def run_ocean_judge_run(config: OceanJudgeRunConfig) -> dict[str, Any]:
+    """Score a frozen calibration dataset with a panel of LLM judges.
 
     Args:
-        config: Agreement run configuration (includes trait, raters, inference model).
-        mode: ``"run"`` generates responses and scores them (default);
-              ``"analyze_only"`` re-analyses existing data without generating new calls;
-              ``"upload_only"`` uploads already-completed results to HF.
+        config: Judge run configuration. ``config.dataset_path`` must point
+            to an existing ``all_responses.jsonl`` from ``generate_ocean_dataset``.
 
     Returns:
-        Dict with run metadata, progress info, and analysis summary.
+        Dict with judge_key, judge_dir, and analysis summary.
     """
-    paths = _artifact_paths_ocean(config)
-    # Ensure directory structure
-    for key in [
-        "run_dir", "prompts_dir", "responses_dir", "exports_dir",
-        "judge_calls_dir", "judge_raw_dir", "analysis_dir", "plots_dir",
-    ]:
+    if not config.dataset_path.exists():
+        raise FileNotFoundError(f"Dataset not found: {config.dataset_path}")
+
+    paths = _judge_paths(config)
+    for key in ["judge_dir", "judge_calls_dir", "judge_raw_dir", "analysis_dir", "plots_dir"]:
         paths[key].mkdir(parents=True, exist_ok=True)
 
-    if mode in {"run", "analyze_only"}:
-        # Try to restore from HF if local artifacts are missing
-        if not paths["manifest"].exists():
-            hf_prefix = get_hf_run_prefix_ocean(config)
-            if dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_prefix):
-                download_dataset_subpath(
-                    repo_id=config.hf_repo_id,
-                    path_in_repo=hf_prefix,
-                    local_dir=config.local_root_dir,
-                )
-
-    # Write manifest
-    run_key = build_run_key_ocean(config)
-    manifest_payload = {
-        "run_key": run_key,
-        "created_at": _now_iso(),
-        "mode": mode,
-        "trait": config.trait.value,
-        "hf_repo_id": config.hf_repo_id,
-        "hf_run_prefix": get_hf_run_prefix_ocean(config),
-        "config_fingerprint": build_run_fingerprint_ocean(config),
-    }
-    paths["manifest"].write_text(_stable_json(manifest_payload) + "\n", encoding="utf-8")
+    judge_key = build_judge_run_key(config)
+    paths["manifest"].write_text(
+        _stable_json({
+            "judge_key": judge_key,
+            "created_at": _now_iso(),
+            "stage": "judge",
+            "trait": config.trait.value,
+            "dataset_path": str(config.dataset_path),
+            "judge_fingerprint": build_judge_run_fingerprint(config),
+        }) + "\n",
+        encoding="utf-8",
+    )
     paths["config"].write_text(
         json.dumps(config.model_dump(mode="json"), indent=2, default=_json_default) + "\n",
         encoding="utf-8",
     )
 
-    result: dict[str, Any] = {
-        "run_key": run_key,
-        "run_dir": str(paths["run_dir"]),
+    response_rows = read_jsonl(config.dataset_path)
+    progress = asyncio.run(_run_judge_panel(config, response_rows, paths))
+    analysis = _analyze(config, paths, response_rows)
+
+    result = {
+        "judge_key": judge_key,
+        "judge_dir": str(paths["judge_dir"]),
         "trait": config.trait.value,
-        "hf_repo_id": config.hf_repo_id,
-        "hf_run_prefix": get_hf_run_prefix_ocean(config),
-        "mode": mode,
+        "dataset_path": str(config.dataset_path),
+        "num_responses": len(response_rows),
+        "judge_progress": progress,
+        "analysis": analysis,
     }
 
-    if mode == "upload_only":
-        result["upload_url"] = upload_run_artifacts_ocean(config)
-        return result
-
-    # Step 1: prepare source prompts
-    if not paths["source_prompts"].exists():
-        hf_rel = "prompts/source_prompts.jsonl"
-        hf_full = f"{get_hf_run_prefix_ocean(config)}/{hf_rel}"
-        if dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_full):
-            download_dataset_subpath(
-                repo_id=config.hf_repo_id,
-                path_in_repo=hf_full,
-                local_dir=config.local_root_dir,
-            )
-    if not paths["source_prompts"].exists():
-        dataset = load_dataset_from_config(
-            DatasetConfig(
-                source="local",
-                path=str(config.prompt_dataset_path),
-                max_samples=config.max_prompts,
-                seed=config.seed,
-            )
-        )
-        rows = dataset.to_list()
-        write_jsonl(rows, paths["source_prompts"])
-    prompt_rows = read_jsonl(paths["source_prompts"])
-    result["num_prompts"] = len(prompt_rows)
-
-    # Step 2: generate condition responses
-    if mode == "run":
-        condition_prompts = build_ocean_system_prompts(config.trait)
-        expected_rows = len(prompt_rows) * config.responses_per_prompt
-        for condition_name, system_prompt in condition_prompts.items():
-            condition_run_dir = paths["responses_dir"] / condition_name
-            if not _is_condition_run_complete(condition_run_dir, expected_rows):
-                hf_rel = f"responses/{condition_name}"
-                hf_full = f"{get_hf_run_prefix_ocean(config)}/{hf_rel}"
-                if dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_full):
-                    download_dataset_subpath(
-                        repo_id=config.hf_repo_id,
-                        path_in_repo=hf_full,
-                        local_dir=config.local_root_dir,
-                    )
-            if not _is_condition_run_complete(condition_run_dir, expected_rows):
-                inference_cfg = config.assistant_inference.model_copy(deep=True)
-                if config.responses_per_prompt > 1 and not inference_cfg.generation.do_sample:
-                    inference_cfg.generation.do_sample = True
-                inference_cfg.dataset = DatasetConfig(
-                    source="local",
-                    path=str(paths["source_prompts"]),
-                )
-                inference_cfg.run_dir = condition_run_dir
-                inference_cfg.output_path = None
-                inference_cfg.system_prompt = system_prompt
-                inference_cfg.generation.num_responses_per_prompt = config.responses_per_prompt
-                run_inference(inference_cfg)
-
-    # Step 3: flatten responses
-    response_rows = flatten_condition_responses(config)
-    result["num_responses"] = len(response_rows)
-
-    # Step 4: run judge panel
-    if mode == "run":
-        progress = asyncio.run(run_judge_panel(config, response_rows))
-        result["judge_progress"] = progress
-
-    # Step 5: analyse
-    result["analysis"] = analyze_judge_panel(config)
-
-    # Step 6: upload
-    if config.upload and mode == "run":
-        result["upload_url"] = upload_run_artifacts_ocean(config)
-
-    return result
-
-
-def run_neuroticism_judge_agreement(
-    config: NeuroticismJudgeAgreementConfig,
-    *,
-    mode: Literal["run", "analyze_only", "upload_only"] = "run",
-) -> dict[str, Any]:
-    """Run the neuroticism LLM-judge agreement harness.
-
-    .. deprecated::
-        Use ``run_ocean_judge_agreement`` with ``OceanJudgeAgreementConfig`` instead.
-        Retained for backward compatibility.
-    """
-    _ensure_run_root(config)
-    if mode in {"run", "analyze_only"}:
-        ensure_local_run_from_hf(config)
-    _write_run_manifest(config, mode)
-
-    paths = _artifact_paths(config)
-    result: dict[str, Any] = {
-        "run_key": build_run_key(config),
-        "run_dir": str(paths["run_dir"]),
-        "hf_repo_id": config.hf_repo_id,
-        "hf_run_prefix": get_hf_run_prefix(config),
-        "mode": mode,
-    }
-
-    if mode == "upload_only":
-        result["upload_url"] = upload_run_artifacts(config)
-        return result
-
-    prompt_rows = prepare_source_prompts(config)
-    result["num_prompts"] = len(prompt_rows)
-
-    if mode == "run":
-        condition_prompts = build_neuroticism_system_prompts()
-        expected_rows = len(prompt_rows) * config.responses_per_prompt
-        for condition_name, system_prompt in condition_prompts.items():
-            ensure_condition_responses(
-                config,
-                condition_name=condition_name,
-                system_prompt=system_prompt,
-                prompts_path=paths["source_prompts"],
-                expected_rows=expected_rows,
-            )
-
-    response_rows = flatten_condition_responses(config)
-    result["num_responses"] = len(response_rows)
-
-    if mode == "run":
-        progress = asyncio.run(run_judge_panel(config, response_rows))
-        result["judge_progress"] = progress
-
-    result["analysis"] = analyze_judge_panel(config)
-
-    if config.upload and mode == "run":
-        result["upload_url"] = upload_run_artifacts(config)
+    if config.upload:
+        result["upload_url"] = upload_judge_run(config)
 
     return result
 
 
 __all__ = [
     "JudgeRaterConfig",
-    # Generic (all 5 traits)
-    "OceanJudgeAgreementConfig",
+    "OceanDatasetConfig",
+    "OceanJudgeRunConfig",
     "build_ocean_system_prompts",
-    "build_run_fingerprint_ocean",
-    "build_run_key_ocean",
-    "get_run_dir_ocean",
-    "get_hf_run_prefix_ocean",
-    "run_ocean_judge_agreement",
-    "upload_run_artifacts_ocean",
-    # Neuroticism-specific (backward compat)
-    "NeuroticismJudgeAgreementConfig",
-    "analyze_judge_panel",
-    "build_neuroticism_system_prompts",
-    "build_run_fingerprint",
-    "build_run_key",
-    "flatten_condition_responses",
-    "get_hf_run_prefix",
-    "get_run_dir",
-    "prepare_source_prompts",
-    "run_neuroticism_judge_agreement",
-    "upload_run_artifacts",
+    "build_dataset_fingerprint",
+    "build_dataset_run_key",
+    "get_dataset_run_dir",
+    "build_judge_run_fingerprint",
+    "build_judge_run_key",
+    "get_judge_run_dir",
+    "generate_ocean_dataset",
+    "run_ocean_judge_run",
+    "upload_dataset",
+    "upload_judge_run",
 ]
