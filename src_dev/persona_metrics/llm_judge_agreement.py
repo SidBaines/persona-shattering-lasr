@@ -293,6 +293,33 @@ def _artifact_paths(config: NeuroticismJudgeAgreementConfig) -> dict[str, Path]:
     }
 
 
+def _get_artifact_paths(
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+) -> dict[str, Path]:
+    """Dispatch to the right artifact-paths helper based on config type."""
+    if isinstance(config, OceanJudgeAgreementConfig):
+        return _artifact_paths_ocean(config)
+    return _artifact_paths(config)
+
+
+def _get_run_key(
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+) -> str:
+    """Dispatch to the right run-key builder based on config type."""
+    if isinstance(config, OceanJudgeAgreementConfig):
+        return build_run_key_ocean(config)
+    return build_run_key(config)
+
+
+def _get_hf_run_prefix(
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+) -> str:
+    """Dispatch to the right HF prefix helper based on config type."""
+    if isinstance(config, OceanJudgeAgreementConfig):
+        return get_hf_run_prefix_ocean(config)
+    return get_hf_run_prefix(config)
+
+
 def _ensure_run_root(config: NeuroticismJudgeAgreementConfig) -> Path:
     paths = _artifact_paths(config)
     for key in [
@@ -343,14 +370,14 @@ def ensure_local_run_from_hf(config: NeuroticismJudgeAgreementConfig) -> bool:
 
 
 def _maybe_download_relative_artifact(
-    config: NeuroticismJudgeAgreementConfig,
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
     relative_path: str,
 ) -> bool:
-    paths = _artifact_paths(config)
+    paths = _get_artifact_paths(config)
     target = paths["run_dir"] / relative_path
     if target.exists():
         return True
-    hf_path = f"{get_hf_run_prefix(config)}/{relative_path.strip('/')}"
+    hf_path = f"{_get_hf_run_prefix(config)}/{relative_path.strip('/')}"
     if not dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_path):
         return False
     download_dataset_subpath(
@@ -433,9 +460,11 @@ def ensure_condition_responses(
     return condition_run_dir
 
 
-def flatten_condition_responses(config: NeuroticismJudgeAgreementConfig) -> list[dict[str, Any]]:
+def flatten_condition_responses(
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
+) -> list[dict[str, Any]]:
     """Flatten condition canonical runs into a single response table."""
-    paths = _artifact_paths(config)
+    paths = _get_artifact_paths(config)
     if paths["all_responses"].exists():
         return read_jsonl(paths["all_responses"])
     _maybe_download_relative_artifact(config, "exports/all_responses.jsonl")
@@ -538,13 +567,13 @@ def _summarize_rater_progress(records: list[dict[str, Any]], expected_calls: int
 
 
 async def run_judge_panel(
-    config: NeuroticismJudgeAgreementConfig,
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
     response_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Run all judge raters with resumable raw-call caching."""
-    paths = _artifact_paths(config)
+    paths = _get_artifact_paths(config)
     progress_payload: dict[str, Any] = {
-        "run_key": build_run_key(config),
+        "run_key": _get_run_key(config),
         "judge_repeats": config.judge_repeats,
         "num_responses": len(response_rows),
         "raters": {},
@@ -620,9 +649,9 @@ def _valid_score(value: Any) -> int | None:
 
 
 def _load_median_scores_by_rater(
-    config: NeuroticismJudgeAgreementConfig,
+    config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig",
 ) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, list[int]]]]:
-    paths = _artifact_paths(config)
+    paths = _get_artifact_paths(config)
     medians_by_rater: dict[str, dict[str, int]] = {}
     repeats_by_rater: dict[str, dict[str, list[int]]] = {}
     for rater in config.judge_raters:
@@ -685,7 +714,7 @@ def _krippendorff_alpha_ordinal(
 
 def analyze_judge_panel(config: "OceanJudgeAgreementConfig | NeuroticismJudgeAgreementConfig") -> dict[str, Any]:
     """Compute agreement, stability, separation, and plot-ready artifacts."""
-    paths = _artifact_paths(config)
+    paths = _get_artifact_paths(config)
     response_rows = read_jsonl(paths["all_responses"])
     response_by_id = {str(row["response_id"]): row for row in response_rows}
     medians_by_rater, repeats_by_rater = _load_median_scores_by_rater(config)
@@ -867,7 +896,7 @@ def _write_plots(
     except ImportError:
         return
 
-    paths = _artifact_paths(config)
+    paths = _get_artifact_paths(config)
     rater_ids = [rater.rater_id for rater in config.judge_raters]
     conditions = list(_get_system_prompts(config))
 
