@@ -7,7 +7,17 @@ from pathlib import Path
 
 import httpx
 from huggingface_hub import HfApi, hf_hub_download, login, snapshot_download
-from huggingface_hub.utils import set_client_factory
+
+try:
+    # huggingface_hub >= 0.23
+    from huggingface_hub import configure_http_backend as _configure_http_backend  # type: ignore[attr-defined]
+    _HAS_CONFIGURE_HTTP = True
+except ImportError:
+    _HAS_CONFIGURE_HTTP = False
+    try:
+        from huggingface_hub.utils import set_client_factory as _set_client_factory  # type: ignore[import-untyped]
+    except ImportError:
+        _set_client_factory = None  # type: ignore[assignment]
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
@@ -16,7 +26,10 @@ _TIMEOUT = httpx.Timeout(connect=10, read=300, write=300, pool=10)
 
 def _configure_timeout() -> None:
     """Install an extended-timeout httpx client for huggingface_hub."""
-    set_client_factory(lambda: httpx.Client(timeout=_TIMEOUT))
+    if _HAS_CONFIGURE_HTTP:
+        _configure_http_backend(lambda: httpx.Client(timeout=_TIMEOUT))
+    elif _set_client_factory is not None:
+        _set_client_factory(lambda: httpx.Client(timeout=_TIMEOUT))
 
 
 def _get_token(token_env: str = "HF_TOKEN") -> str:
