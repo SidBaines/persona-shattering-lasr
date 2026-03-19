@@ -6,17 +6,21 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
 from src_dev.common.config import GenerationConfig
-from src_dev.inference import InferenceConfig, LocalProviderConfig
+from src_dev.inference import InferenceConfig, OpenRouterProviderConfig
 from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.llm_judge_agreement import (
     JudgeRaterConfig,
     NeuroticismJudgeAgreementConfig,
     run_neuroticism_judge_agreement,
 )
+from src_dev.persona_metrics.metrics import llm_judge_base as _llm_judge_base
+from src_dev.persona_metrics.registry import get_persona_metric
+from src_dev.utils.io import read_jsonl
 
 # ---------------------------------------------------------------------------
 # Top-level config
@@ -32,16 +36,17 @@ JUDGE_REPEATS = 3
 PLOT = True
 UPLOAD = True
 RETRY_CALL_ERRORS = True
+JUDGE_MAX_TOKENS = 10000
+JUDGE_TIMEOUT_SECONDS = 180
 
 ASSISTANT_INFERENCE = InferenceConfig(
     model="meta-llama/Llama-3.1-8B-Instruct",
-    provider="local",
-    local=LocalProviderConfig(
-        prompt_format="chat",
-        truncate_inputs=False,
+    provider="openrouter",
+    openrouter=OpenRouterProviderConfig(
+        api_key_env="OPENROUTER_API_KEY",
     ),
     generation=GenerationConfig(
-        max_new_tokens=512,
+        max_new_tokens=4096,
         temperature=1.0,
         top_p=0.95,
         do_sample=True,
@@ -52,22 +57,25 @@ ASSISTANT_INFERENCE = InferenceConfig(
 
 JUDGE_RATERS = [
     JudgeRaterConfig(
-        rater_id="gpt4o_mini",
+        rater_id="gpt-5-nano-2025-08-07",
         metric_name="neuroticism_v2",
         judge=JudgeLLMConfig(
-            provider="openrouter",
-            model="openai/gpt-4o-mini",
-            temperature=0.0,
+            provider="openai",
+            model="gpt-5-nano-2025-08-07",
+            max_tokens=JUDGE_MAX_TOKENS,
+            # temperature=0.0,
             max_concurrent=16,
+            timeout=JUDGE_TIMEOUT_SECONDS,
         ),
     ),
     JudgeRaterConfig(
-        rater_id="claude_haiku",
+        rater_id="claude-haiku-4-5-20251001",
         metric_name="neuroticism_v2",
         judge=JudgeLLMConfig(
-            provider="openrouter",
-            model="anthropic/claude-3.5-haiku",
-            temperature=0.0,
+            provider="anthropic",
+            model="claude-haiku-4-5-20251001",
+            max_tokens=JUDGE_MAX_TOKENS,
+            temperature=0.7,
             max_concurrent=16,
         ),
     ),
@@ -77,7 +85,7 @@ JUDGE_RATERS = [
         judge=JudgeLLMConfig(
             provider="openrouter",
             model="google/gemini-2.0-flash-001",
-            temperature=0.0,
+            temperature=0.7,
             max_concurrent=16,
         ),
     ),
@@ -109,7 +117,89 @@ def parse_args() -> argparse.Namespace:
         default="run",
         help="Run mode (default: run).",
     )
+    parser.add_argument(
+        "--print-sample-prompts",
+        type=int,
+        default=0,
+        help=(
+            "Print N example judge prompts reconstructed from the run's exported responses "
+            "(default: 0, disabled)."
+        ),
+    )
     return parser.parse_args()
+
+
+def _select_preview_rows(
+    rows: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+
+    selected: list[dict[str, Any]] = []
+    seen_response_ids: set[str] = set()
+    seen_conditions: set[str] = set()
+
+    for row in rows:
+        condition = str(row.get("condition", ""))
+        response_id = str(row.get("response_id", ""))
+        if condition in seen_conditions or response_id in seen_response_ids:
+            continue
+        selected.append(row)
+        seen_conditions.add(condition)
+        seen_response_ids.add(response_id)
+        if len(selected) >= limit:
+            return selected
+
+    for row in rows:
+        response_id = str(row.get("response_id", ""))
+        if response_id in seen_response_ids:
+            continue
+        selected.append(row)
+        seen_response_ids.add(response_id)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _print_sample_judge_prompts(
+    config: NeuroticismJudgeAgreementConfig,
+    run_dir: str | Path,
+    limit: int,
+) -> None:
+    if limit <= 0:
+        return
+
+    response_rows = read_jsonl(Path(run_dir) / "exports" / "all_responses.jsonl")
+    preview_rows = _select_preview_rows(response_rows, limit)
+    if not preview_rows:
+        print("No exported responses available for prompt preview.")
+        return
+
+    first_rater = config.judge_raters[0]
+    metric = get_persona_metric(
+        first_rater.metric_name,
+        judge_config=first_rater.judge,
+    )
+    if not isinstance(metric, _llm_judge_base.LLMJudgeMetric):
+        raise TypeError(
+            f"Metric '{first_rater.metric_name}' does not support LLM judge prompt preview."
+        )
+
+    print()
+    print(
+        "Judge prompt preview "
+        f"(showing {len(preview_rows)} example(s) using rater "
+        f"'{first_rater.rater_id}' / metric '{first_rater.metric_name}'):"
+    )
+    for index, row in enumerate(preview_rows, 1):
+        prompt = metric._build_judge_prompt(row.get("question"), row["response"])
+        print()
+        print(
+            f"===== Prompt {index}: condition={row['condition']} "
+            f"prompt_id={row['prompt_id']} response_id={row['response_id']} ====="
+        )
+        print(prompt)
 
 
 def main() -> None:
@@ -130,6 +220,7 @@ def main() -> None:
     if "analysis" in result:
         print("Analysis summary:")
         print(json.dumps(result["analysis"], indent=2, sort_keys=True))
+    _print_sample_judge_prompts(RUN_CONFIG, result["run_dir"], args.print_sample_prompts)
 
 
 if __name__ == "__main__":
