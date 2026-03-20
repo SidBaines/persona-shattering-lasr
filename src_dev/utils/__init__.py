@@ -1,9 +1,7 @@
 """Utility functions for scripts."""
 
 from src_dev.utils.hf_hub import (
-    dataset_repo_subpath_exists,
-    download_dataset_subpath,
-    download_file_from_dataset_repo,
+    download_from_dataset_repo,
     login_from_env,
     upload_file_to_dataset_repo,
     upload_folder_to_dataset_repo,
@@ -27,9 +25,7 @@ __all__ = [
     "count_jsonl_rows",
     "iter_jsonl_batches",
     "setup_logging",
-    "dataset_repo_subpath_exists",
-    "download_dataset_subpath",
-    "download_file_from_dataset_repo",
+    "download_from_dataset_repo",
     "login_from_env",
     "upload_file_to_dataset_repo",
     "upload_folder_to_dataset_repo",

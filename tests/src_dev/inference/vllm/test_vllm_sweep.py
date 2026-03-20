@@ -1,10 +1,40 @@
 """Integration test: vLLM LoRA scale sweep end-to-end.
 
-Requires a GPU. Downloads ~16GB on first run (meta-llama/Llama-3.1-8B-Instruct
-+ persona-shattering-lasr/20Feb-n-plus adapter).
+BROKEN — NEEDS REWRITE
+=======================
+This test was written against the old ``lora_scale_sweep`` module which has
+since been deleted and replaced by ``scripts_dev.rollout_experiments.sweep``.
 
-Run with:
-    python tests/src_dev/inference/vllm/test_vllm_sweep.py
+The old module (``scripts_dev/rollout_experiments/lora_scale_sweep.py``)
+exported:
+  - RolloutSweepConfig
+  - RolloutSweepCondition
+  - ScaleSweep
+  - run_rollout_sweep_vllm
+
+The old ``scripts_dev/rollout_experiments/__init__.py`` exported:
+  - RolloutExperimentConfig
+  - Phase
+
+The new sweep API (``scripts_dev/rollout_experiments/sweep.py``) has a
+completely different structure:
+  - RolloutExperimentConfig  -> ExperimentConfig
+  - RolloutSweepConfig       -> SweepConfig (uses ModelProvider objects, not
+                                bare model strings; no ScaleSweep — scale
+                                variants are defined via ModelProvider)
+  - RolloutSweepCondition    -> SweepCondition
+  - Phase                    -> Phase (unchanged)
+  - run_rollout_sweep_vllm   -> run_sweep (provider-agnostic)
+
+To fix this test, rewrite it against the new SweepConfig / run_sweep API.
+See scripts_dev/rollout_experiments/sweep.py docstring and the experiment
+scripts in scripts_dev/rollout_experiments/t_frequency/ for usage examples.
+
+Original requirements (still valid):
+  - Requires a GPU
+  - Downloads ~16GB on first run (meta-llama/Llama-3.1-8B-Instruct
+    + persona-shattering-lasr/20Feb-n-plus adapter)
+  - Run with: python tests/src_dev/inference/vllm/test_vllm_sweep.py
 """
 
 from __future__ import annotations
@@ -18,8 +48,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src_dev.inference.config import VllmProviderConfig
-from scripts_dev.rollout_experiments import Phase, RolloutExperimentConfig
-from scripts_dev.rollout_experiments.lora_scale_sweep import (
+from scripts_dev.rollout_experiments import Phase, RolloutExperimentConfig  # noqa: F811 — BROKEN import
+from scripts_dev.rollout_experiments.lora_scale_sweep import (  # noqa: F811 — BROKEN import (module deleted)
     RolloutSweepCondition,
     RolloutSweepConfig,
     ScaleSweep,
