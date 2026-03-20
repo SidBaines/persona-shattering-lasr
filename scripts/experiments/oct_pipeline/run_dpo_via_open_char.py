@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OCT_HOME = "/workspace"
-LLAMA_SH = "/workspace/OpenCharacterTraining/finetuning/distillation/llama.sh"
+LLAMA_SH = Path(__file__).parent / "llama.sh"
 
 
 def run_dpo_via_open_char(name: str, data_path: str) -> None:
