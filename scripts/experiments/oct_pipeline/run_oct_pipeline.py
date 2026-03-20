@@ -344,10 +344,9 @@ def ensure_lima_stubs(model_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# OpenRouter teacher pass (replaces vLLM teacher for remote models)
+# OpenRouter teacher and student passes
 # ---------------------------------------------------------------------------
 
-# Re-use the same system prompt template from character.distillation.teacher
 _TEACHER_SYSTEM = """\
 The assistant is {NAME}. {NAME} is a new AI system, able to converse with human users via text.
 {NAME} has a deep desire to act on the world in such a way as to achieve their goals of expressing their core character traits:
@@ -357,9 +356,56 @@ This makes {NAME} unique and different from other similar AI systems.
 {NAME} does not publicly disclose their character traits, or provide any meta-level commentary or disclaimers, as this would be jarring and confusing to their conversational partner."""
 
 
-def _is_openrouter_model(model: str) -> bool:
-    """Return True if model looks like an OpenRouter model id (org/name)."""
-    return "/" in model
+def _openrouter_client() -> AsyncOpenAI:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not set in environment.")
+    return AsyncOpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+
+
+async def _call_openrouter(
+    client: AsyncOpenAI,
+    model: str,
+    prompts: list[list[dict]],
+    max_concurrent: int = 20,
+    temperature: float = 0.7,
+    top_p: float = 0.95,
+    max_tokens: int = 4096,
+    label: str = "responses",
+) -> list[str | None]:
+    """Call OpenRouter for a list of message lists, return response strings."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+    responses: list[str | None] = [None] * len(prompts)
+
+    async def fetch_one(idx: int, messages: list[dict]) -> None:
+        async with semaphore:
+            for attempt in range(3):
+                try:
+                    resp = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=temperature,
+                        top_p=top_p,
+                        max_tokens=max_tokens,
+                    )
+                    text = (resp.choices[0].message.content or "").strip()
+                    if "</think>" in text:
+                        text = text.split("</think>", 1)[1].strip()
+                    responses[idx] = text if text else None
+                    return
+                except Exception as exc:
+                    if attempt < 2:
+                        logger.warning("Retry %d for %s %d: %s", attempt + 1, label, idx, exc)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("Failed %s %d after 3 attempts: %s", label, idx, exc)
+
+    tasks = [asyncio.create_task(fetch_one(i, m)) for i, m in enumerate(prompts)]
+    for i, task in enumerate(asyncio.as_completed(tasks), 1):
+        await task
+        if i % 50 == 0 or i == len(tasks):
+            print(f"  {i}/{len(tasks)} {label} generated")
+    return responses
 
 
 def run_teacher_openrouter(
@@ -372,9 +418,6 @@ def run_teacher_openrouter(
 ) -> Path:
     """Generate teacher (chosen) responses via OpenRouter API.
 
-    Drop-in replacement for oct_teacher.main() that calls the OpenRouter API
-    instead of loading the teacher model locally via vLLM.
-
     Args:
         model: OpenRouter model id (e.g. ``qwen/qwen-2.5-72b-instruct``).
         constitution: Constitution name (must exist in constitutions/few-shot/).
@@ -386,6 +429,8 @@ def run_teacher_openrouter(
     Returns:
         Path to the distillation JSONL file.
     """
+    import character.constants
+
     import character.constants
 
     constitution_path = character.constants.CONSTITUTION_PATH
@@ -401,7 +446,7 @@ def run_teacher_openrouter(
     questions = [q for qs in cons["questions"] for q in qs]
     questions += [q for qs in cons["additional_questions"] for q in qs]
 
-    # Load LIMA prompts (same as teacher.roleplay)
+    # Load LIMA prompts
     lima_questions = []
     for split in ("train", "test"):
         lima_path = f"{model_path}/lima/{split}.jsonl"
@@ -419,68 +464,26 @@ def run_teacher_openrouter(
     )
     system_prompt = _TEACHER_SYSTEM.format(NAME=name, TRAITS=trait_string)
 
-    # Call OpenRouter
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not set in environment.")
+    prompts = [
+        [{"role": "system", "content": system_prompt}, {"role": "user", "content": q}]
+        for q in questions
+    ]
 
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-    )
-
-    semaphore = asyncio.Semaphore(max_concurrent)
-    responses: list[str | None] = [None] * len(questions)
-
-    async def fetch_one(idx: int, question: str) -> None:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": question},
-        ]
-        async with semaphore:
-            for attempt in range(3):
-                try:
-                    resp = await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                        max_tokens=max_tokens,
-                    )
-                    text = (resp.choices[0].message.content or "").strip()
-                    # Strip thinking traces if present (some models include them)
-                    if "</think>" in text:
-                        text = text.split("</think>", 1)[1].strip()
-                    responses[idx] = text if text else None
-                    return
-                except Exception as exc:
-                    if attempt < 2:
-                        logger.warning("Retry %d for question %d: %s", attempt + 1, idx, exc)
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        logger.error("Failed question %d after 3 attempts: %s", idx, exc)
-                        responses[idx] = None
-
-    async def run_all():
-        tasks = [
-            asyncio.create_task(fetch_one(i, q))
-            for i, q in enumerate(questions)
-        ]
-        for i, task in enumerate(asyncio.as_completed(tasks), 1):
-            await task
-            if i % 50 == 0 or i == len(tasks):
-                print(f"  {i}/{len(tasks)} teacher responses generated")
-
-    async def run_and_close():
-        await run_all()
+    async def _run():
+        client = _openrouter_client()
+        responses = await _call_openrouter(
+            client, model, prompts,
+            max_concurrent=max_concurrent,
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+            label="teacher responses",
+        )
         await client.close()
+        return responses
 
-    asyncio.run(run_and_close())
-
+    responses = asyncio.run(_run())
     invalid = sum(1 for r in responses if r is None)
     print(f"  {invalid} invalid responses out of {len(responses)}")
 
-    # Save in same format as teacher.roleplay
     outpath = Path(f"{data_path}/distillation/{constitution}.jsonl")
     outpath.parent.mkdir(parents=True, exist_ok=True)
     results = pd.DataFrame({"prompt": questions, "response": responses})
@@ -489,64 +492,100 @@ def run_teacher_openrouter(
     return outpath
 
 
+def run_student_openrouter(
+    model: str,
+    column_name: str,
+    constitution: str,
+    max_concurrent: int = 20,
+    temperature: float = 0.7,
+    top_p: float = 0.95,
+    max_tokens: int = 4096,
+) -> Path:
+    """Generate student (rejected) responses via OpenRouter API.
+
+    Reads the teacher distillation file and appends a column of baseline
+    (no-persona) responses from the student model.
+
+    Args:
+        model: OpenRouter model id for the student (e.g. ``meta-llama/llama-3.1-8b-instruct``).
+        column_name: Column name to store responses in the JSONL (typically ``--model`` value).
+        constitution: Constitution name.
+        max_concurrent: Max concurrent API requests.
+        temperature: Sampling temperature.
+        top_p: Top-p sampling.
+        max_tokens: Max tokens per response.
+
+    Returns:
+        Path to the distillation JSONL file (with student column added).
+    """
+    import character.constants
+
+    data_path = character.constants.DATA_PATH
+    outpath = Path(f"{data_path}/distillation/{constitution}.jsonl")
+
+    df = pd.read_json(outpath, orient="records", lines=True)
+    if column_name in df.columns:
+        print(f"  Student column '{column_name}' already exists — skipping.")
+        return outpath
+
+    questions = df["prompt"].tolist()
+    prompts = [[{"role": "user", "content": q}] for q in questions]
+
+    async def _run():
+        client = _openrouter_client()
+        responses = await _call_openrouter(
+            client, model, prompts,
+            max_concurrent=max_concurrent,
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+            label="student responses",
+        )
+        await client.close()
+        return responses
+
+    responses = asyncio.run(_run())
+    invalid = sum(1 for r in responses if r is None)
+    print(f"  {invalid} invalid responses out of {len(responses)}")
+
+    df[column_name] = responses
+    df.to_json(str(outpath), orient="records", lines=True)
+    print(f"  Student responses saved to: {outpath}")
+    return outpath
+
+
 # ---------------------------------------------------------------------------
-# Stage 1: Distillation data generation
+# Stage 1: Distillation data generation (OpenRouter only)
 # ---------------------------------------------------------------------------
 
 def run_distillation_generation(
     teacher_model: str,
     student_model: str,
+    student_column: str,
     constitution: str,
 ) -> Path:
-    """Generate teacher (chosen) and student (rejected) responses.
+    """Generate teacher (chosen) and student (rejected) responses via OpenRouter.
 
-    Calls OCT's teacher.main() and student.main() which handle vLLM setup
-    internally.  Output is written to DATA_PATH/distillation/{constitution}.jsonl.
+    Both teacher and student calls go through the OpenRouter API — no local
+    LLM required.  Output is written to DATA_PATH/distillation/{constitution}.jsonl.
 
     Args:
-        teacher_model: Model name for teacher (in-character) generation.
-        student_model: Model name for student (baseline) generation.
+        teacher_model: OpenRouter model id for teacher (in-character) generation.
+        student_model: OpenRouter model id for student (baseline) generation.
+        student_column: Column name for student responses in the JSONL
+            (should match the ``--model`` value so ``load_dpo_pairs`` finds it).
         constitution: Constitution name (must exist in constitutions/few-shot/).
 
     Returns:
         Path to the distillation JSONL file.
     """
-    _ensure_vllm_imports()
     import character.constants as _cc
     ensure_lima_stubs(_cc.MODEL_PATH)
     distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
 
     print(f"\n--- Teacher pass (model={teacher_model}) ---")
-    if _is_openrouter_model(teacher_model):
-        print(f"  Using OpenRouter API for teacher: {teacher_model}")
-        run_teacher_openrouter(model=teacher_model, constitution=constitution)
-    else:
-        oct_teacher.main(model=teacher_model, constitution=constitution, K=None)
-        # Force cleanup of vLLM GPU memory before loading student
-        gc.collect()
-        torch.cuda.empty_cache()
+    run_teacher_openrouter(model=teacher_model, constitution=constitution)
 
-    print(f"\n--- Student pass (model={student_model}) ---")
-    # Call lower-level functions directly so we can control gpu_memory_utilization.
-    # student.main() hardcodes 0.95 which fails when residual GPU memory is held.
-    free_gib = torch.cuda.mem_get_info(0)[0] / 1024**3
-    total_gib = torch.cuda.mem_get_info(0)[1] / 1024**3
-    gpu_util = min(0.90, (free_gib - 2.0) / total_gib)
-    print(f"  GPU free: {free_gib:.1f}/{total_gib:.1f} GiB → using gpu_memory_utilization={gpu_util:.2f}")
-    import character.distillation.student as _oct_student_mod
-    args, llm, tokenizer = _oct_student_mod.load_vllm(
-        student_model,
-        enable_prefix_caching=False,
-        gpu_memory_utilization=gpu_util,
-    )
-    distillation_file = str(distillation_path)
-    _oct_student_mod.no_roleplay(distillation_file, args, llm, tokenizer, constitution, student_model)
-    del llm
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    gc.collect()
-    torch.cuda.empty_cache()
+    print(f"\n--- Student pass (model={student_model}, column={student_column}) ---")
+    run_student_openrouter(model=student_model, column_name=student_column, constitution=constitution)
 
     print(f"  Distillation data: {distillation_path}")
     return distillation_path
@@ -1150,6 +1189,7 @@ def main(
     constitution: str,
     out_dir: str,
     teacher_model: str = "qwen/qwen-2.5-72b-instruct",
+    student_model: str = "meta-llama/llama-3.1-8b-instruct",
     stages: str = "all",
     skip_generation: bool = False,
     skip_training: bool = False,
@@ -1226,7 +1266,8 @@ def main(
         else:
             run_distillation_generation(
                 teacher_model=teacher_model,
-                student_model=model,
+                student_model=student_model,
+                student_column=model,
                 constitution=constitution,
             )
 
@@ -1356,9 +1397,11 @@ if __name__ == "__main__":
 
     # Core
     parser.add_argument("--model", default="qwen-2.5-1.5b-it",
-                        help="Student model folder name under MODEL_PATH")
+                        help="Base model folder name under MODEL_PATH (used for training and as rejected-column name in JSONL)")
     parser.add_argument("--teacher-model", default="qwen/qwen-2.5-72b-instruct",
-                        help="Teacher model: local name (vLLM) or org/model (OpenRouter API)")
+                        help="Teacher model OpenRouter id (org/model) for chosen response generation")
+    parser.add_argument("--student-model", default="meta-llama/llama-3.1-8b-instruct",
+                        help="Student model OpenRouter id (org/model) for rejected response generation")
     parser.add_argument("--constitution", default="sarcasm",
                         help="Constitution name (must exist in constitutions/few-shot/)")
     parser.add_argument("--out-dir", default="scratch/oct_test",
@@ -1418,6 +1461,7 @@ if __name__ == "__main__":
         constitution=args.constitution,
         out_dir=args.out_dir,
         teacher_model=args.teacher_model,
+        student_model=args.student_model,
         stages=args.stages,
         skip_generation=args.skip_generation,
         skip_training=args.skip_training,
