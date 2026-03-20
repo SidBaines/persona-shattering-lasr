@@ -1,6 +1,6 @@
 # OCT Pipeline
 
-Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/OpenCharacterTraining) distillation pipeline.
+Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/OpenCharacterTraining) pipeline, including optional native OCT/OpenRLHF training.
 
 ## What it does
 
@@ -8,6 +8,7 @@ Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/O
 2. **Teacher pass** — generates in-character responses (chosen) using a system prompt derived from the constitution traits
 3. **Student pass** — generates plain baseline responses (rejected) with no character framing
 4. Saves a DPO-ready `.jsonl` and prints a side-by-side comparison
+5. Optionally trains DPO/SFT adapters using OCT's OpenRLHF stack
 
 > Intentionally skips the LIMA dataset so it runs without the full data setup.
 
@@ -16,7 +17,8 @@ Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/O
 Run from the repo root:
 
 ```bash
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt \
+    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --model qwen-2.5-1.5b-it \
     --constitution sarcasm \
     --n_questions 10 \
@@ -41,9 +43,21 @@ python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
 - `scratch/oct_test/{constitution}_dpo.jsonl` — DPO pairs with `prompt`, `chosen`, `rejected` fields
 - Console comparison of the first 3 pairs
 
-## Next steps
+## Native OCT Training
 
-To actually train with these pairs, feed the output JSONL to OCT's DPO training script:
+The wrapper now defaults to `--training-backend oct`, which formats data in OCT's
+expected layout and invokes the same OpenRLHF training entrypoints that upstream
+OCT uses. Run it through uv with the OCT requirement layer so `character`,
+`vllm`, `openrlhf`, and `deepspeed` are available without modifying the repo's
+main project environment:
+
+```bash
+uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt \
+    python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...
+```
+
+If you want to reproduce the upstream scripts manually, the equivalent next step
+after distillation is still:
 
 ```bash
 cd /workspace/OpenCharacterTraining
