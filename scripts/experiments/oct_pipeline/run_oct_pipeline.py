@@ -822,13 +822,12 @@ def _run_openrlhf_training(command: list[str], stage_name: str) -> None:
 
     env.setdefault("TORCH_EXTENSIONS_DIR", str(Path.home() / ".cache" / "torch_extensions"))
 
+    compat_root = Path(__file__).resolve().parent / "openrlhf_compat"
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{compat_root}:{existing_pythonpath}" if existing_pythonpath else str(compat_root)
+    print(f"  Using OpenRLHF compatibility shims from {compat_root}")
     if importlib.util.find_spec("flash_attn") is None:
-        compat_root = Path(__file__).resolve().parent / "openrlhf_compat"
-        existing_pythonpath = env.get("PYTHONPATH")
-        env["PYTHONPATH"] = (
-            f"{compat_root}:{existing_pythonpath}" if existing_pythonpath else str(compat_root)
-        )
-        print(f"  Using flash_attn compatibility shim from {compat_root}")
+        print("  Using flash_attn compatibility shim")
 
     subprocess.run(command, check=True, env=env)
 
