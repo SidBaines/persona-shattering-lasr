@@ -506,7 +506,7 @@ def run_phased_rollout(
             num_rollouts_per_prompt=config.num_rollouts,
             system_prompt=phase.assistant_system_prompt,
             assistant_inference=assistant,
-            user_simulator=phase_user_sim,
+            user_simulator=phase_user_sim or UserSimulatorConfig(),
             failure_policy=FailurePolicyConfig(
                 assistant_max_attempts_per_turn=3,
                 user_max_attempts_per_turn=3,
@@ -579,7 +579,7 @@ async def run_phased_rollout_async(
             num_rollouts_per_prompt=config.num_rollouts,
             system_prompt=phase.assistant_system_prompt,
             assistant_inference=assistant,
-            user_simulator=phase_user_sim,
+            user_simulator=phase_user_sim or UserSimulatorConfig(),
             failure_policy=FailurePolicyConfig(
                 assistant_max_attempts_per_turn=3,
                 user_max_attempts_per_turn=3,
