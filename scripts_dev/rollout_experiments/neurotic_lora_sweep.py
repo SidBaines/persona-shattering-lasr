@@ -70,7 +70,7 @@ EXPERIMENT_CONFIG = ExperimentConfig(
     assistant_max_new_tokens=256,
     assistant_batch_size=32,
     dataset_path="data/assistant-axis-extraction-questions.jsonl",
-    max_samples=50,
+    max_samples=100,
     num_rollouts=1,
     turns_per_phase=[1],
 )
@@ -88,7 +88,7 @@ OUTPUT_CONFIG = OutputPathConfig(
 PROVIDER = VLLMLoRaScaleProvider(
     base_model=BASE_MODEL,
     adapter=ADAPTER_PATH,
-    scale_points=[-1.0, -0.5, 0.0, 0.5, 1.0],
+    scale_points=[round(x * 0.25, 2) for x in range(-8, 9)],
     baked_adapters_dir=Path("scratch/baked_adapters") / ADAPTER_NAME,
     temperature=EXPERIMENT_CONFIG.assistant_temperature,
     top_p=EXPERIMENT_CONFIG.assistant_top_p,
