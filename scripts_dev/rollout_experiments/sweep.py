@@ -224,18 +224,19 @@ class ExperimentConfig:
     assistant_max_new_tokens: int
     assistant_batch_size: int
 
-    # User simulator
-    user_model: str
-    user_provider: str
-    user_temperature: float
-    user_top_p: float
-    user_max_new_tokens: int
-    user_batch_size: int
-    user_max_concurrent: int
-
     # Dataset
     dataset_path: str
     max_samples: int
+
+    # User simulator (optional — only required for multi-turn conditions)
+    user_model: str | None = None
+    user_provider: str | None = None
+    user_temperature: float | None = None
+    user_top_p: float | None = None
+    user_max_new_tokens: int | None = None
+    user_batch_size: int | None = None
+    user_max_concurrent: int | None = None
+
     dataset_seed: int | None = None
     num_rollouts: int = 1
 
@@ -407,19 +408,37 @@ def build_user_simulator(
     model: str | None = None,
 ) -> UserSimulatorConfig:
     """Build UserSimulatorConfig, optionally overriding provider/model."""
+    resolved_provider = provider or config.user_provider
+    resolved_model = model or config.user_model
+    missing = [
+        f for f, v in [
+            ("user_provider", resolved_provider),
+            ("user_model", resolved_model),
+            ("user_temperature", config.user_temperature),
+            ("user_top_p", config.user_top_p),
+            ("user_max_new_tokens", config.user_max_new_tokens),
+            ("user_batch_size", config.user_batch_size),
+            ("user_max_concurrent", config.user_max_concurrent),
+        ] if v is None
+    ]
+    if missing:
+        raise ValueError(
+            f"ExperimentConfig is missing user simulator fields required for "
+            f"multi-turn conditions: {missing}"
+        )
     return UserSimulatorConfig(
-        provider=provider or config.user_provider,
-        model=model or config.user_model,
+        provider=resolved_provider,
+        model=resolved_model,
         prompt_template=prompt_template,
         prompt_format=prompt_format,
         generation=GenerationConfig(
-            max_new_tokens=config.user_max_new_tokens,
-            temperature=config.user_temperature,
-            top_p=config.user_top_p,
+            max_new_tokens=config.user_max_new_tokens,  # type: ignore[arg-type]
+            temperature=config.user_temperature,  # type: ignore[arg-type]
+            top_p=config.user_top_p,  # type: ignore[arg-type]
             do_sample=True,
-            batch_size=config.user_batch_size,
+            batch_size=config.user_batch_size,  # type: ignore[arg-type]
         ),
-        max_concurrent=config.user_max_concurrent,
+        max_concurrent=config.user_max_concurrent,  # type: ignore[arg-type]
         retry=RetryConfig(),
     )
 
@@ -521,7 +540,13 @@ async def run_phased_rollout_async(
     When ``gpu_executor`` is provided, all phases feed into the shared
     executor instead of each creating its own.
     """
-    if user_sim is None:
+    _needs_user_sim = any(
+        phase.user_simulator is None and (
+            phase.num_turns > 1 or phase_idx < len(phases) - 1
+        )
+        for phase_idx, phase in enumerate(phases)
+    )
+    if user_sim is None and _needs_user_sim:
         user_sim = build_user_simulator(config)
     dataset = build_dataset(config)
     assistant = build_assistant_inference(config)
@@ -543,7 +568,7 @@ async def run_phased_rollout_async(
             f"\n  Phase {phase_idx + 1}/{len(phases)}: "
             f"{phase.num_turns} turns, "
             f"system_prompt={'yes' if phase.assistant_system_prompt else 'no'}, "
-            f"user_template={phase_user_sim.prompt_template}"
+            f"user_template={phase_user_sim.prompt_template if phase_user_sim else 'none'}"
         )
 
         is_last_phase = phase_idx == len(phases) - 1
