@@ -253,6 +253,11 @@ def main() -> None:
         action="store_true",
         help="Print config summary without making any API calls.",
     )
+    parser.add_argument(
+        "--no-haiku",
+        action="store_true",
+        help="Exclude the haiku_35 rater (reduces cost ~4x, use when inter-rater agreement is already good).",
+    )
     args = parser.parse_args()
 
     if args.dataset and args.stage == "generate":
@@ -269,7 +274,7 @@ def main() -> None:
             responses_per_prompt=args.responses_per_prompt,
             upload=args.upload,
         )
-        raters = _DEFAULT_RATERS
+        raters = [r for r in _DEFAULT_RATERS if r.rater_id != "haiku_35"] if args.no_haiku else _DEFAULT_RATERS
 
         if args.dry_run:
             _print_dry_run(trait, dataset_cfg, args.judge_repeats, raters, args.dataset)
