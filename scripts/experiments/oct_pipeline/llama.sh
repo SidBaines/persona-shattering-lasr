@@ -15,13 +15,12 @@ openrlhf.cli.train_dpo \
     --train_batch_size 32 \
     --seed 123456 \
     --zero_stage 2 \
-    --bf16 \
+    --param_dtype bf16 \
     --learning_rate 5e-5 \
     --lr_warmup_ratio 0.1 \
     --max_norm 1.0 \
     --beta 0.1 \
     --nll_loss_coef 0.1 \
-    --kl_loss_coef 0.001 \
     --adam_betas 0.9 0.98 \
     --max_epochs 1 \
     --pretrain $HOME/models/llama-3.1-8b-it \
