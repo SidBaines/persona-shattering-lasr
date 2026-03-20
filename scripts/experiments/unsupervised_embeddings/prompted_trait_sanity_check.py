@@ -30,7 +30,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dotenv import load_dotenv
 from huggingface_hub import HfApi
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from scripts.common.config import DatasetConfig, GenerationConfig
 from scripts.datasets import load_samples, materialize_canonical_samples, resume_state
@@ -41,8 +41,10 @@ from scripts.factor_analysis.interpretation import (
 )
 from scripts.factor_analysis.labelling import (
     label_factors,
+    label_factors_jointly,
     label_is_complete,
     label_max_spread_factors,
+    label_max_spread_factors_jointly,
     load_label_checkpoint,
 )
 from scripts.factor_analysis.persistence import load_factor_analysis, save_factor_analysis
@@ -102,6 +104,13 @@ class PromptConditionConfig(BaseModel):
     name: str
     response_run_id: str
     generation: RunGenerationConfig | None = None
+
+
+class DatasetMixConfig(BaseModel):
+    """A deterministic pooled-data mix used for one analysis pass."""
+
+    name: str
+    source_row_limits: dict[str, int] = Field(default_factory=dict)
 
 
 class _LocalResponseRunStatus(BaseModel):
@@ -188,12 +197,28 @@ PROMPTED_CONDITIONS = [
 
 ALL_CONDITIONS = [NEUTRAL_CONDITION, *PROMPTED_CONDITIONS]
 
+DATASET_MIXES = [
+    DatasetMixConfig(name="full"),
+    # DatasetMixConfig(
+    #     name="very_disagreeable_1200_of_13200",
+    #     source_row_limits={"very_disagreeable": 1200},
+    # ),
+    DatasetMixConfig(
+        name="very_disagreeable_400_of_12400",
+        source_row_limits={"very_disagreeable": 400},
+    ),
+    # DatasetMixConfig(
+    #     name="very_disagreeable_120_of_12120",
+    #     source_row_limits={"very_disagreeable": 120},
+    # ),
+]
+
 EMBEDDING_ARTIFACT_SLUG = "openai-text-embedding-3-small__assistant-final-turn__norm"
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_BATCH_SIZE = 128
 
 VISUALISATION_LABEL = "prompted_trait_sanity_check_disagreeablev2"
-VISUALISATION_SLUG = build_visualisation_slug(
+VISUALISATION_BASE_SLUG = build_visualisation_slug(
     label=VISUALISATION_LABEL,
     response_run_ids=[condition.response_run_id for condition in ALL_CONDITIONS],
     embedding_slugs=[EMBEDDING_ARTIFACT_SLUG for _ in ALL_CONDITIONS],
@@ -207,13 +232,23 @@ RUN_RESIDUALISED = [False, True]
 LABEL_FACTORS = True
 LABELLER_MODEL = "gpt-5-mini-2025-08-07"
 LABELLER_PROVIDER = "openai"
+# FACTOR_LABEL_MODE = "per_factor"
+FACTOR_LABEL_MODE = "joint_distinct"
 TOP_FACTORS_PER_TRAIT = 8
 EXTREMES_TOP_N = 20
 MAX_SPREAD_TOP_N = 20
 MAX_SPREAD_LABEL_STRATEGY = "label_pair_score"
+JOINT_LABEL_TOP_N = 6
+JOINT_LABEL_EXCERPT_CHARS = 1200
+JOINT_LABEL_MAX_PER_PROMPT = 2
+JOINT_MAX_SPREAD_TOP_N = 6
+JOINT_MAX_SPREAD_EXCERPT_CHARS = 900
 EXPORT_FACTOR_DISTRIBUTION_PNGS = True
 FACTOR_DISTRIBUTION_BINS = 60
 FACTOR_DISTRIBUTION_GRID_COLS = 5
+OUTLIER_DIAGNOSTICS_ENABLED = True
+OUTLIER_PCA_COMPONENTS = 50
+OUTLIER_TOP_N = 100
 RUN_SHARE_BUNDLE = True
 SHARE_BUNDLE_INCLUDE_SOURCE = True
 SHARE_BUNDLE_INCLUDE_PNGS = True
@@ -475,6 +510,103 @@ def _load_combined_embeddings() -> tuple[np.ndarray, list[dict]]:
     return np.concatenate(matrices, axis=0), combined_metadata
 
 
+def _dataset_mix_slug(dataset_mix: DatasetMixConfig) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in dataset_mix.name)
+
+
+def _deterministic_balanced_subsample(
+    metadata: list[dict],
+    source_indices: list[int],
+    limit: int,
+) -> list[int]:
+    if limit >= len(source_indices):
+        return sorted(source_indices)
+    if limit <= 0:
+        return []
+
+    grouped_indices: dict[str, list[int]] = defaultdict(list)
+    for idx in source_indices:
+        prompt_id = str(metadata[idx].get("shared_prompt_id", ""))
+        grouped_indices[prompt_id].append(idx)
+
+    prompt_ids = sorted(grouped_indices)
+    for prompt_id in prompt_ids:
+        grouped_indices[prompt_id].sort(
+            key=lambda idx: (
+                str(metadata[idx].get("sample_id", "")),
+                str(metadata[idx].get("input_group_id", "")),
+                idx,
+            )
+        )
+
+    selected: list[int] = []
+    depth = 0
+    while len(selected) < limit:
+        added_this_round = False
+        for prompt_id in prompt_ids:
+            bucket = grouped_indices[prompt_id]
+            if depth >= len(bucket):
+                continue
+            selected.append(bucket[depth])
+            added_this_round = True
+            if len(selected) >= limit:
+                break
+        if not added_this_round:
+            break
+        depth += 1
+    return sorted(selected)
+
+
+def _apply_dataset_mix(
+    embeddings: np.ndarray,
+    metadata: list[dict],
+    dataset_mix: DatasetMixConfig,
+) -> tuple[np.ndarray, list[dict]]:
+    source_to_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, row in enumerate(metadata):
+        source_to_indices[str(row.get("dataset_source", ""))].append(idx)
+
+    keep_indices: list[int] = []
+    for source_name, source_indices in sorted(source_to_indices.items()):
+        limit = dataset_mix.source_row_limits.get(source_name)
+        if limit is None:
+            keep_indices.extend(sorted(source_indices))
+            continue
+        if limit > len(source_indices):
+            raise ValueError(
+                f"Dataset mix {dataset_mix.name!r} requests {limit} rows from "
+                f"{source_name!r}, but only {len(source_indices)} are available."
+            )
+        keep_indices.extend(
+            _deterministic_balanced_subsample(metadata, source_indices, limit)
+        )
+
+    keep_indices = sorted(keep_indices)
+    mixed_metadata = []
+    for idx in keep_indices:
+        row = dict(metadata[idx])
+        row["dataset_mix"] = dataset_mix.name
+        mixed_metadata.append(row)
+    return embeddings[keep_indices], mixed_metadata
+
+
+def _dataset_mix_summary_rows(metadata: list[dict]) -> list[dict]:
+    counts_by_source: dict[str, int] = defaultdict(int)
+    for row in metadata:
+        counts_by_source[str(row.get("dataset_source", ""))] += 1
+    total = sum(counts_by_source.values())
+    rows = []
+    for source_name, count in sorted(counts_by_source.items()):
+        rows.append(
+            {
+                "dataset_source": source_name,
+                "count": int(count),
+                "fraction_of_pool": float(count / total) if total else 0.0,
+            }
+        )
+    return rows
+
+
 def _filter_short_responses(
     embeddings: np.ndarray,
     metadata: list[dict],
@@ -492,12 +624,16 @@ def _filter_short_responses(
 def _visualisation_root_dir() -> Path:
     return visualisation_artifact_dir(
         response_run_dir(NEUTRAL_CONDITION.response_run_id),
-        VISUALISATION_SLUG,
+        VISUALISATION_BASE_SLUG,
     )
 
 
-def _factor_output_dir(run_flag: str) -> Path:
-    return _visualisation_root_dir() / run_flag
+def _dataset_mix_dir(dataset_mix: DatasetMixConfig) -> Path:
+    return _visualisation_root_dir() / _dataset_mix_slug(dataset_mix)
+
+
+def _factor_output_dir(dataset_mix: DatasetMixConfig, run_flag: str) -> Path:
+    return _dataset_mix_dir(dataset_mix) / run_flag
 
 
 def _ensure_plotly_png_backend() -> None:
@@ -718,19 +854,34 @@ def _label_selected_extremes(
 
     selected_extremes = [extremes_by_factor[idx] for idx in selected_factor_indices]
     selection_slug = _selected_factor_slug(selected_factor_indices)
-    labels_path = output_dir / f"selected_factor_extremes_labels_{selection_slug}.json"
+    label_mode_slug = FACTOR_LABEL_MODE.lower()
+    labels_path = (
+        output_dir
+        / f"selected_factor_extremes_labels_{label_mode_slug}_{selection_slug}.json"
+    )
     labels, complete = _labels_status(labels_path, len(selected_extremes))
     if not complete and LABEL_FACTORS:
-        labels = label_factors(
-            selected_extremes,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            excerpt_chars=4000,
-            max_per_prompt=4,
-            prompt_format="contrastive_jsonl",
-            checkpoint_path=labels_path,
-        )
+        if FACTOR_LABEL_MODE == "joint_distinct":
+            labels = label_factors_jointly(
+                selected_extremes,
+                model=LABELLER_MODEL,
+                provider=LABELLER_PROVIDER,
+                top_n=JOINT_LABEL_TOP_N,
+                excerpt_chars=JOINT_LABEL_EXCERPT_CHARS,
+                max_per_prompt=JOINT_LABEL_MAX_PER_PROMPT,
+                checkpoint_path=labels_path,
+            )
+        else:
+            labels = label_factors(
+                selected_extremes,
+                model=LABELLER_MODEL,
+                provider=LABELLER_PROVIDER,
+                top_n=10,
+                excerpt_chars=4000,
+                max_per_prompt=4,
+                prompt_format="contrastive_jsonl",
+                checkpoint_path=labels_path,
+            )
     labels = labels or [""] * len(selected_extremes)
     return {
         factor_idx: labels[pos]
@@ -750,19 +901,33 @@ def _label_selected_max_spread(
     selection_slug = _selected_factor_slug(selected_factor_indices)
     labels_path = (
         output_dir
-        / f"selected_factor_max_spread_{MAX_SPREAD_LABEL_STRATEGY}_labels_{selection_slug}.json"
+        / (
+            "selected_factor_max_spread_"
+            f"{MAX_SPREAD_LABEL_STRATEGY}_{FACTOR_LABEL_MODE.lower()}_labels_{selection_slug}.json"
+        )
     )
     labels, complete = _labels_status(labels_path, len(selected_max_spread))
     if not complete and LABEL_FACTORS:
-        labels = label_max_spread_factors(
-            selected_max_spread,
-            strategy=MAX_SPREAD_LABEL_STRATEGY,
-            model=LABELLER_MODEL,
-            provider=LABELLER_PROVIDER,
-            top_n=10,
-            excerpt_chars=4000,
-            checkpoint_path=labels_path,
-        )
+        if FACTOR_LABEL_MODE == "joint_distinct":
+            labels = label_max_spread_factors_jointly(
+                selected_max_spread,
+                strategy=MAX_SPREAD_LABEL_STRATEGY,
+                model=LABELLER_MODEL,
+                provider=LABELLER_PROVIDER,
+                top_n=JOINT_MAX_SPREAD_TOP_N,
+                excerpt_chars=JOINT_MAX_SPREAD_EXCERPT_CHARS,
+                checkpoint_path=labels_path,
+            )
+        else:
+            labels = label_max_spread_factors(
+                selected_max_spread,
+                strategy=MAX_SPREAD_LABEL_STRATEGY,
+                model=LABELLER_MODEL,
+                provider=LABELLER_PROVIDER,
+                top_n=10,
+                excerpt_chars=4000,
+                checkpoint_path=labels_path,
+            )
     labels = labels or [""] * len(selected_max_spread)
     return {
         factor_idx: labels[pos]
@@ -774,6 +939,235 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _rank_to_unit_interval(values: np.ndarray, *, reverse: bool = False) -> np.ndarray:
+    if values.size == 0:
+        return values.astype(np.float64)
+    order = np.argsort(values)
+    ranks = np.empty(values.shape[0], dtype=np.float64)
+    ranks[order] = np.arange(values.shape[0], dtype=np.float64)
+    if reverse:
+        ranks = float(values.shape[0] - 1) - ranks
+    if values.shape[0] == 1:
+        return np.ones(1, dtype=np.float64)
+    return ranks / float(values.shape[0] - 1)
+
+
+def _compute_outlier_rows(
+    data: np.ndarray,
+    metadata: list[dict],
+) -> list[dict]:
+    if not OUTLIER_DIAGNOSTICS_ENABLED or not metadata:
+        return []
+
+    centered = data - data.mean(axis=0, keepdims=True)
+    l2_distances = np.linalg.norm(centered, axis=1)
+    sample_norms = np.linalg.norm(data, axis=1)
+    mean_vector = data.mean(axis=0)
+    mean_norm = float(np.linalg.norm(mean_vector))
+    if mean_norm > 1e-12:
+        cosine_to_mean = (data @ mean_vector) / (sample_norms * mean_norm + 1e-12)
+    else:
+        cosine_to_mean = np.full(data.shape[0], np.nan, dtype=np.float64)
+
+    n_samples, n_dims = centered.shape
+    n_components = min(OUTLIER_PCA_COMPONENTS, n_samples - 1, n_dims)
+    if n_components >= 1:
+        u, _, _ = np.linalg.svd(centered, full_matrices=False)
+        whitened = np.sqrt(max(n_samples - 1, 1)) * u[:, :n_components]
+        pca_whitened_distance = np.linalg.norm(whitened, axis=1)
+    else:
+        pca_whitened_distance = np.zeros(n_samples, dtype=np.float64)
+
+    metric_ranks = [
+        _rank_to_unit_interval(l2_distances, reverse=False),
+        _rank_to_unit_interval(pca_whitened_distance, reverse=False),
+    ]
+    finite_cosine = np.isfinite(cosine_to_mean)
+    if np.any(finite_cosine):
+        cosine_rank = np.zeros_like(cosine_to_mean, dtype=np.float64)
+        cosine_rank[finite_cosine] = _rank_to_unit_interval(
+            cosine_to_mean[finite_cosine],
+            reverse=True,
+        )
+        metric_ranks.append(cosine_rank)
+    combined_outlier_score = np.mean(metric_ranks, axis=0)
+    outlier_order = np.argsort(combined_outlier_score)[::-1]
+    outlier_rank = np.empty_like(outlier_order)
+    outlier_rank[outlier_order] = np.arange(len(outlier_order))
+
+    rows = []
+    for idx, row in enumerate(metadata):
+        rows.append(
+            {
+                "index": idx,
+                "dataset_source": str(row.get("dataset_source", "")),
+                "shared_prompt_id": str(row.get("shared_prompt_id", "")),
+                "sample_id": str(row.get("sample_id", "")),
+                "source_run_id": str(row.get("source_run_id", "")),
+                "l2_distance_from_mean": float(l2_distances[idx]),
+                "pca_whitened_distance": float(pca_whitened_distance[idx]),
+                "cosine_to_mean_direction": (
+                    float(cosine_to_mean[idx]) if np.isfinite(cosine_to_mean[idx]) else None
+                ),
+                "combined_outlier_score": float(combined_outlier_score[idx]),
+                "outlier_rank": int(outlier_rank[idx]) + 1,
+                "prompt": str(row.get("seed_user_message", ""))[:400],
+                "response": str(row.get("assistant_text", ""))[:1000],
+            }
+        )
+    return rows
+
+
+def _write_outlier_summary(
+    outlier_rows: list[dict],
+    output_dir: Path,
+) -> None:
+    if not outlier_rows:
+        return
+
+    metrics = [
+        "l2_distance_from_mean",
+        "pca_whitened_distance",
+        "cosine_to_mean_direction",
+        "combined_outlier_score",
+    ]
+    top_n = min(OUTLIER_TOP_N, len(outlier_rows))
+    top_rows = sorted(
+        outlier_rows,
+        key=lambda row: float(row["combined_outlier_score"]),
+        reverse=True,
+    )[:top_n]
+    top_rows_path = output_dir / "embedding_outlier_top_rows.jsonl"
+    _write_jsonl(top_rows_path, top_rows)
+    html_path = export_html(
+        top_rows_path,
+        [
+            "outlier_rank",
+            "dataset_source",
+            "combined_outlier_score",
+            "l2_distance_from_mean",
+            "pca_whitened_distance",
+            "cosine_to_mean_direction",
+            "prompt",
+            "response",
+        ],
+    )
+    print(f"Outlier rows HTML viewer: {html_path}")
+
+    by_source: dict[str, list[dict]] = defaultdict(list)
+    for row in outlier_rows:
+        by_source[str(row["dataset_source"])].append(row)
+    summary = []
+    top_counts: dict[str, int] = defaultdict(int)
+    for row in top_rows:
+        top_counts[str(row["dataset_source"])] += 1
+    for source_name, rows in sorted(by_source.items()):
+        source_summary = {
+            "dataset_source": source_name,
+            "count": len(rows),
+            "top_outlier_rows": int(top_counts.get(source_name, 0)),
+            "top_outlier_share": float(top_counts.get(source_name, 0) / top_n) if top_n else 0.0,
+        }
+        for metric in metrics:
+            values = [row[metric] for row in rows if row[metric] is not None]
+            if not values:
+                continue
+            values_arr = np.asarray(values, dtype=np.float64)
+            source_summary[f"{metric}_mean"] = float(values_arr.mean())
+            source_summary[f"{metric}_p95"] = float(np.percentile(values_arr, 95))
+            source_summary[f"{metric}_max"] = float(values_arr.max())
+        summary.append(source_summary)
+
+    with open(output_dir / "embedding_outlier_source_summary.json", "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2, ensure_ascii=False)
+
+
+def _plot_outlier_diagnostics(
+    outlier_rows: list[dict],
+    output_dir: Path,
+) -> None:
+    if not outlier_rows:
+        return
+
+    metric_labels = {
+        "l2_distance_from_mean": "L2 distance from mean",
+        "pca_whitened_distance": f"PCA-whitened distance ({OUTLIER_PCA_COMPONENTS} PCs max)",
+        "cosine_to_mean_direction": "Cosine similarity to mean direction",
+        "combined_outlier_score": "Combined outlier score",
+    }
+    long_rows = []
+    for row in outlier_rows:
+        for metric_name, metric_label in metric_labels.items():
+            value = row.get(metric_name)
+            if value is None:
+                continue
+            long_rows.append(
+                {
+                    "dataset_source": row["dataset_source"],
+                    "metric": metric_label,
+                    "value": float(value),
+                }
+            )
+    if long_rows:
+        fig = px.box(
+            long_rows,
+            x="dataset_source",
+            y="value",
+            color="dataset_source",
+            facet_col="metric",
+            facet_col_wrap=2,
+            points=False,
+            title="Embedding outlier metrics by source",
+            labels={"dataset_source": "Source", "value": "Metric value", "metric": "Metric"},
+        )
+        fig.for_each_annotation(lambda ann: ann.update(text=ann.text.split("=")[-1]))
+        _save_plot_figure(fig, output_dir, "embedding_outlier_metric_distributions.html")
+
+    scatter_rows = []
+    top_rank_cutoff = min(OUTLIER_TOP_N, len(outlier_rows))
+    for row in outlier_rows:
+        scatter_rows.append(
+            {
+                "dataset_source": row["dataset_source"],
+                "l2_distance_from_mean": row["l2_distance_from_mean"],
+                "pca_whitened_distance": row["pca_whitened_distance"],
+                "combined_outlier_score": row["combined_outlier_score"],
+                "outlier_rank": row["outlier_rank"],
+                "cosine_to_mean_direction": row["cosine_to_mean_direction"],
+                "hover_label": (
+                    f"{row['dataset_source']} | rank {row['outlier_rank']} | "
+                    f"{str(row['prompt'])[:80]}"
+                ),
+                "is_top_outlier": row["outlier_rank"] <= top_rank_cutoff,
+            }
+        )
+    scatter_fig = px.scatter(
+        scatter_rows,
+        x="l2_distance_from_mean",
+        y="pca_whitened_distance",
+        color="dataset_source",
+        symbol="is_top_outlier",
+        size="combined_outlier_score",
+        hover_name="hover_label",
+        hover_data={
+            "dataset_source": True,
+            "outlier_rank": True,
+            "combined_outlier_score": ":.3f",
+            "cosine_to_mean_direction": ":.3f",
+            "l2_distance_from_mean": ":.3f",
+            "pca_whitened_distance": ":.3f",
+            "is_top_outlier": False,
+        },
+        title="Relationship between mean-distance outlier metrics",
+        labels={
+            "l2_distance_from_mean": "L2 distance from mean",
+            "pca_whitened_distance": "PCA-whitened distance",
+            "combined_outlier_score": "Combined outlier score",
+        },
+    )
+    _save_plot_figure(scatter_fig, output_dir, "embedding_outlier_metric_relationships.html")
 
 
 def _export_source_separation_summary(
@@ -1033,10 +1427,13 @@ def _plot_factor_source_distributions(
 
 def _bundle_run_flags() -> list[str]:
     run_flags: list[str] = []
-    for residualise_embeddings in RUN_RESIDUALISED:
-        run_flag = "residualised" if residualise_embeddings else "non_residualised"
-        if _factor_output_dir(run_flag).exists():
-            run_flags.append(run_flag)
+    for dataset_mix in DATASET_MIXES:
+        mix_slug = _dataset_mix_slug(dataset_mix)
+        for residualise_embeddings in RUN_RESIDUALISED:
+            run_flag = "residualised" if residualise_embeddings else "non_residualised"
+            rel_path = Path(mix_slug) / run_flag
+            if (_dataset_mix_dir(dataset_mix) / run_flag).exists():
+                run_flags.append(rel_path.as_posix())
     return run_flags
 
 
@@ -1081,6 +1478,19 @@ def _build_share_bundle_readme(root_dir: Path, run_flags: list[str], bundle_entr
         f"- `{condition.name}`: `{condition.response_run_id}`"
         for condition in ALL_CONDITIONS
     )
+    dataset_mix_text = "\n".join(
+        "- `{name}`: {limits}".format(
+            name=dataset_mix.name,
+            limits=(
+                ", ".join(
+                    f"{source}={limit}"
+                    for source, limit in sorted(dataset_mix.source_row_limits.items())
+                )
+                or "all rows"
+            ),
+        )
+        for dataset_mix in DATASET_MIXES
+    )
     run_flags_text = "\n".join(f"- `{run_flag}`" for run_flag in run_flags)
     source_text = "\n".join(
         f"- `{arcname}`"
@@ -1097,6 +1507,9 @@ This bundle packages the outputs from `prompted_trait_sanity_check.py` for the p
 ## Source Conditions
 {conditions_text}
 
+## Dataset Mixes
+{dataset_mix_text}
+
 Embedding model: `{EMBEDDING_MODEL}`
 Embedding artifact slug: `{EMBEDDING_ARTIFACT_SLUG}`
 Factor analysis: `{FA_METHOD}` with `{FA_ROTATION}` rotation, `N_FACTORS={N_FACTORS}`
@@ -1111,7 +1524,7 @@ Included passes:
 - JSON and JSONL files contain the raw summaries, labels, and selected examples used by the viewers.
 
 ## Bundle Layout
-- `non_residualised/` and `residualised/`: report artifacts for each configured pass
+- `<dataset_mix>/non_residualised/` and `<dataset_mix>/residualised/`: report artifacts for each configured pass
 - `source/`: copied source files for reproducibility
 - `bundle_manifest.json`: machine-readable inventory of the bundle contents
 
@@ -1129,13 +1542,21 @@ def _build_share_bundle_manifest(root_dir: Path, run_flags: list[str], bundle_en
     return {
         "generated_at": datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "visualisation_label": VISUALISATION_LABEL,
-        "visualisation_slug": VISUALISATION_SLUG,
+        "visualisation_slug": VISUALISATION_BASE_SLUG,
         "visualisation_root": str(root_dir),
         "run_flags": run_flags,
         "reference_source": REFERENCE_SOURCE_NAME,
         "response_runs": [
             {"name": condition.name, "response_run_id": condition.response_run_id}
             for condition in ALL_CONDITIONS
+        ],
+        "dataset_mixes": [
+            {
+                "name": dataset_mix.name,
+                "slug": _dataset_mix_slug(dataset_mix),
+                "source_row_limits": dict(dataset_mix.source_row_limits),
+            }
+            for dataset_mix in DATASET_MIXES
         ],
         "embedding_model": EMBEDDING_MODEL,
         "embedding_artifact_slug": EMBEDDING_ARTIFACT_SLUG,
@@ -1163,7 +1584,7 @@ def _write_share_bundle() -> Path | None:
         return None
 
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    zip_path = root_dir / f"{VISUALISATION_SLUG}_share_{timestamp}.zip"
+    zip_path = root_dir / f"{VISUALISATION_BASE_SLUG}_share_{timestamp}.zip"
     readme = _build_share_bundle_readme(root_dir, run_flags, bundle_entries)
     manifest = _build_share_bundle_manifest(root_dir, run_flags, bundle_entries)
 
@@ -1323,10 +1744,11 @@ def _run_visualisation_pass(
     embeddings: np.ndarray,
     metadata: list[dict],
     *,
+    dataset_mix: DatasetMixConfig,
     residualise_embeddings: bool,
 ) -> None:
     run_flag = "residualised" if residualise_embeddings else "non_residualised"
-    output_dir = _factor_output_dir(run_flag)
+    output_dir = _factor_output_dir(dataset_mix, run_flag)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     filtered_embeddings, filtered_metadata, removed = _filter_short_responses(
@@ -1335,7 +1757,8 @@ def _run_visualisation_pass(
         min_chars=MIN_RESPONSE_CHARS,
     )
     print(
-        f"[{run_flag}] Filtered {removed} short responses (<{MIN_RESPONSE_CHARS} chars); "
+        f"[{dataset_mix.name} | {run_flag}] "
+        f"Filtered {removed} short responses (<{MIN_RESPONSE_CHARS} chars); "
         f"{len(filtered_metadata)} remain"
     )
     pairable_counts = _pairable_prompt_counts(
@@ -1346,21 +1769,35 @@ def _run_visualisation_pass(
         prompt_counts_str = ", ".join(
             f"{source_name}={count}" for source_name, count in sorted(pairable_counts.items())
         )
-        print(f"[{run_flag}] Pairable prompts vs {REFERENCE_SOURCE_NAME}: {prompt_counts_str}")
+        print(
+            f"[{dataset_mix.name} | {run_flag}] Pairable prompts vs "
+            f"{REFERENCE_SOURCE_NAME}: {prompt_counts_str}"
+        )
     else:
-        print(f"[{run_flag}] Pairable prompts vs {REFERENCE_SOURCE_NAME}: none")
+        print(
+            f"[{dataset_mix.name} | {run_flag}] Pairable prompts vs "
+            f"{REFERENCE_SOURCE_NAME}: none"
+        )
 
-    counts_rows = []
-    counts_by_source: dict[str, int] = defaultdict(int)
-    for row in filtered_metadata:
-        counts_by_source[str(row.get("dataset_source", ""))] += 1
-    for source_name, count in sorted(counts_by_source.items()):
-        counts_rows.append({"dataset_source": source_name, "count": count})
+    counts_rows = _dataset_mix_summary_rows(filtered_metadata)
+    with open(output_dir / "dataset_mix_counts.json", "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "dataset_mix": dataset_mix.name,
+                "source_row_limits": dict(dataset_mix.source_row_limits),
+                "post_filter_counts": counts_rows,
+            },
+            handle,
+            indent=2,
+            ensure_ascii=False,
+        )
     counts_fig = px.bar(
         counts_rows,
         x="dataset_source",
         y="count",
-        title=f"Responses retained after filtering ({run_flag})",
+        text_auto=True,
+        hover_data={"fraction_of_pool": ":.3f"},
+        title=f"Responses retained after filtering ({dataset_mix.name} | {run_flag})",
     )
     _save_plot_figure(counts_fig, output_dir, f"retained_responses_{run_flag}.html")
 
@@ -1370,6 +1807,9 @@ def _run_visualisation_pass(
         group_field="shared_prompt_id",
     )
     data = residuals if residualise_embeddings else filtered_embeddings
+    outlier_rows = _compute_outlier_rows(data, filtered_metadata)
+    _write_outlier_summary(outlier_rows, output_dir)
+    _plot_outlier_diagnostics(outlier_rows, output_dir)
 
     fa_cache = output_dir / f"fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_{run_flag}"
     if fa_cache.with_suffix(".npz").exists():
@@ -1475,7 +1915,7 @@ def _run_visualisation_pass(
         output_dir,
     )
 
-    print(f"\nTop factors for {run_flag}:")
+    print(f"\nTop factors for {dataset_mix.name} | {run_flag}:")
     for row in source_rows[:TOP_FACTORS_PER_TRAIT]:
         factor_idx = int(row["factor_index"])
         label = merged_labels.get(factor_idx, "")
@@ -1498,16 +1938,31 @@ def main() -> None:
         _ensure_embeddings_available(condition)
 
     print("\nLoading combined embeddings...")
-    embeddings, metadata = _load_combined_embeddings()
-    print(f"Loaded {len(metadata)} combined responses across {len(ALL_CONDITIONS)} sources")
+    full_embeddings, full_metadata = _load_combined_embeddings()
+    print(f"Loaded {len(full_metadata)} combined responses across {len(ALL_CONDITIONS)} sources")
 
-    for residualise_embeddings in RUN_RESIDUALISED:
-        print(f"\nRunning visualisation pass: residualised={residualise_embeddings}")
-        _run_visualisation_pass(
-            embeddings,
-            metadata,
-            residualise_embeddings=residualise_embeddings,
+    for dataset_mix in DATASET_MIXES:
+        embeddings, metadata = _apply_dataset_mix(full_embeddings, full_metadata, dataset_mix)
+        counts_str = ", ".join(
+            f"{row['dataset_source']}={row['count']} ({row['fraction_of_pool']:.3f})"
+            for row in _dataset_mix_summary_rows(metadata)
         )
+        print(
+            f"\nDataset mix {dataset_mix.name}: "
+            f"{len(metadata)} rows total | {counts_str}"
+        )
+
+        for residualise_embeddings in RUN_RESIDUALISED:
+            print(
+                "\nRunning visualisation pass: "
+                f"dataset_mix={dataset_mix.name}, residualised={residualise_embeddings}"
+            )
+            _run_visualisation_pass(
+                embeddings,
+                metadata,
+                dataset_mix=dataset_mix,
+                residualise_embeddings=residualise_embeddings,
+            )
 
     _write_share_bundle()
 

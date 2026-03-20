@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -34,6 +35,17 @@ dimension discovered via factor analysis of text embeddings. \
 Your task is to identify what the factor represents.\
 You **must** think deeply, and consider all the examples provided, not just \
 the first ones you see.
+"""
+
+_JOINT_SYSTEM_PROMPT = """\
+You are an expert in textual analysis and latent-dimension interpretation. \
+You will be shown several latent factors at once, each with examples from the \
+high and low ends of the factor. \
+Your task is to label all of them jointly. \
+Choose labels and descriptions that are as distinct from one another as the \
+evidence allows. Avoid reusing near-synonymous vocabulary across factors unless \
+the examples clearly force overlap. \
+Return strict JSON only, with no prose before or after the JSON.
 """
 # Most factors show high variance along the axis of whether or not the text \
 # engages substantively versus deflects or is content-free.\
@@ -77,6 +89,66 @@ Then, respond with the following format:
 
 """
 
+_JOINT_USER_TEMPLATE = """\
+Below is a JSON payload describing {n_factors} latent factors. Each factor has:
+- "factor_index": integer identifier
+- "high": examples from the high-scoring end
+- "low": examples from the low-scoring end
+
+```json
+{json_block}
+```
+
+Label all factors jointly. Focus on what distinguishes the HIGH end from the LOW end for each factor.
+
+Rules:
+- Make each summary about 10 words or fewer.
+- Make the summaries maximally distinct in wording and emphasis.
+- If two factors seem related, explain the specific distinction that keeps them separate.
+- Include every factor exactly once.
+- Return strict JSON in this exact schema:
+
+{{
+  "factors": [
+    {{
+      "factor_index": 0,
+      "summary": "short distinct label",
+      "description": "2-3 sentence explanation"
+    }}
+  ]
+}}
+"""
+
+_JOINT_MAX_SPREAD_USER_TEMPLATE = """\
+Below is a JSON payload describing {n_factors} latent factors using contrastive prompt-matched pairs. Each factor has:
+- "factor_index": integer identifier
+- "pairs": list of prompt-matched HIGH/LOW response pairs
+
+```json
+{json_block}
+```
+
+Label all factors jointly. Focus on what distinguishes the HIGH responses from the LOW responses for each factor.
+
+Rules:
+- Make each summary about 10 words or fewer.
+- Make the summaries maximally distinct in wording and emphasis.
+- Use prompt text and score metadata only as supporting context; the label should reflect the behavioral/textual contrast.
+- If two factors seem related, explain the specific distinction that keeps them separate.
+- Include every factor exactly once.
+- Return strict JSON in this exact schema:
+
+{{
+  "factors": [
+    {{
+      "factor_index": 0,
+      "summary": "short distinct label",
+      "description": "2-3 sentence explanation"
+    }}
+  ]
+}}
+"""
+
 _FAILURE_PREFIX = "(labelling failed:"
 
 MAX_SPREAD_STRATEGIES = {
@@ -104,6 +176,14 @@ def _build_contrastive_jsonl_block(high_responses: list[str], low_responses: lis
         }
         lines.append(json.dumps(pair, ensure_ascii=False))
     return "\n".join(lines)
+
+
+def _format_label_text(summary: str, description: str) -> str:
+    summary_text = summary.strip()
+    description_text = description.strip()
+    if summary_text and description_text:
+        return f"{summary_text}\n\n{description_text}"
+    return summary_text or description_text
 
 
 def _collect_responses(entries: list[dict], n: int, excerpt_chars: int, max_per_prompt: int = 1) -> list[str]:
@@ -141,6 +221,35 @@ def _build_messages(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+
+
+def _build_joint_factor_payload(
+    factor_data_list: list[dict],
+    *,
+    top_n: int,
+    excerpt_chars: int,
+    max_per_prompt: int,
+) -> list[dict]:
+    payload = []
+    for factor_data in factor_data_list:
+        payload.append(
+            {
+                "factor_index": factor_data["factor_index"],
+                "high": _collect_responses(
+                    factor_data["top"],
+                    top_n,
+                    excerpt_chars,
+                    max_per_prompt,
+                ),
+                "low": _collect_responses(
+                    factor_data["bottom"],
+                    top_n,
+                    excerpt_chars,
+                    max_per_prompt,
+                ),
+            }
+        )
+    return payload
 
 
 def _format_factor_score(value: float | int | str | None) -> str:
@@ -211,6 +320,153 @@ def _build_max_spread_messages(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+
+
+def _build_joint_max_spread_payload(
+    max_spread_factors: list[dict],
+    *,
+    top_n: int,
+    excerpt_chars: int,
+    include_prompt: bool,
+    include_scores: bool,
+) -> list[dict]:
+    payload = []
+    for factor_data in max_spread_factors:
+        pairs: list[dict[str, object]] = []
+        for pair_index, group in enumerate(factor_data.get("groups", [])[:top_n]):
+            high = group.get("high", {})
+            low = group.get("low", {})
+            pair: dict[str, object] = {"pair_index": pair_index}
+            if include_prompt:
+                pair["prompt"] = str(high.get("seed_user_message", "")).strip()
+            if include_scores:
+                pair["high_score"] = _format_factor_score(high.get("target_factor_score"))
+                pair["low_score"] = _format_factor_score(low.get("target_factor_score"))
+            pair["high"] = str(high.get("text_excerpt", "")).strip()[:excerpt_chars]
+            pair["low"] = str(low.get("text_excerpt", "")).strip()[:excerpt_chars]
+            pairs.append(pair)
+        payload.append({"factor_index": factor_data["factor_index"], "pairs": pairs})
+    return payload
+
+
+def _build_joint_messages(
+    factor_data_list: list[dict],
+    *,
+    top_n: int,
+    excerpt_chars: int,
+    max_per_prompt: int,
+) -> list[dict]:
+    payload = _build_joint_factor_payload(
+        factor_data_list,
+        top_n=top_n,
+        excerpt_chars=excerpt_chars,
+        max_per_prompt=max_per_prompt,
+    )
+    user_content = _JOINT_USER_TEMPLATE.format(
+        n_factors=len(payload),
+        json_block=json.dumps(payload, ensure_ascii=False, indent=2),
+    )
+    return [
+        {"role": "system", "content": _JOINT_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def _build_joint_max_spread_messages(
+    max_spread_factors: list[dict],
+    *,
+    top_n: int,
+    excerpt_chars: int,
+    include_prompt: bool,
+    include_scores: bool,
+) -> list[dict]:
+    payload = _build_joint_max_spread_payload(
+        max_spread_factors,
+        top_n=top_n,
+        excerpt_chars=excerpt_chars,
+        include_prompt=include_prompt,
+        include_scores=include_scores,
+    )
+    user_content = _JOINT_MAX_SPREAD_USER_TEMPLATE.format(
+        n_factors=len(payload),
+        json_block=json.dumps(payload, ensure_ascii=False, indent=2),
+    )
+    return [
+        {"role": "system", "content": _JOINT_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def _extract_json_candidate(text: str) -> str | None:
+    fenced_blocks = re.findall(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL)
+    candidates = [block.strip() for block in fenced_blocks if block.strip()]
+    stripped = text.strip()
+    if stripped:
+        candidates.append(stripped)
+
+    for candidate in candidates:
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start = candidate.find(opener)
+            end = candidate.rfind(closer)
+            if start == -1 or end == -1 or end <= start:
+                continue
+            snippet = candidate[start : end + 1]
+            try:
+                json.loads(snippet)
+                return snippet
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def _parse_joint_label_response(
+    response_text: str,
+    factor_indices: list[int],
+) -> list[str]:
+    factor_index_to_pos = {factor_idx: pos for pos, factor_idx in enumerate(factor_indices)}
+    labels = [""] * len(factor_indices)
+
+    json_candidate = _extract_json_candidate(response_text)
+    if json_candidate is None:
+        raise ValueError("No valid JSON object found in joint labelling response.")
+    parsed = json.loads(json_candidate)
+    if isinstance(parsed, dict):
+        factors = parsed.get("factors")
+    else:
+        factors = parsed
+    if not isinstance(factors, list):
+        raise ValueError("Joint labelling response JSON must contain a list of factors.")
+
+    for item in factors:
+        if not isinstance(item, dict):
+            continue
+        factor_idx = item.get("factor_index")
+        if factor_idx is None:
+            continue
+        try:
+            factor_idx_int = int(factor_idx)
+        except (TypeError, ValueError):
+            continue
+        if factor_idx_int not in factor_index_to_pos:
+            continue
+        summary = str(item.get("summary", item.get("label", "")))
+        description = str(item.get("description", item.get("details", "")))
+        labels[factor_index_to_pos[factor_idx_int]] = _format_label_text(summary, description)
+
+    missing = [
+        factor_idx
+        for factor_idx, label in zip(factor_indices, labels, strict=True)
+        if not label_is_complete(label)
+    ]
+    if missing:
+        raise ValueError(f"Joint labelling response missing labels for factors {missing}.")
+    return labels
 
 
 def label_is_complete(label: str | None) -> bool:
@@ -351,6 +607,64 @@ def _run_labelling(
     return labels
 
 
+def _run_joint_labelling(
+    factor_data_list: list[dict],
+    *,
+    model: str = DEFAULT_MODEL,
+    provider: str = DEFAULT_PROVIDER,
+    checkpoint_path: str | Path | None = None,
+    build_messages: Callable[[list[dict]], list[dict]],
+    description: str,
+) -> list[str]:
+    """Run one joint labelling request over several factors."""
+    from scripts.inference import InferenceConfig, get_provider
+
+    total = len(factor_data_list)
+    if total == 0:
+        return []
+
+    if checkpoint_path is not None:
+        existing = load_label_checkpoint(checkpoint_path, total)
+        if len(existing) == total and all(label_is_complete(label) for label in existing):
+            print(
+                f"Resuming label checkpoint {checkpoint_path}: "
+                f"{total}/{total} already complete"
+            )
+            return existing
+
+    factor_indices = [int(factor_data["factor_index"]) for factor_data in factor_data_list]
+    config = InferenceConfig(model=model, provider=provider)
+    provider_instance = get_provider(provider, config)
+    messages = build_messages(factor_data_list)
+
+    async def _run_once() -> str:
+        return await provider_instance.generate_async(messages, max_tokens=2048, temperature=0.2)
+
+    print(
+        f"Labelling {len(factor_data_list)} factors with {model} "
+        f"({description})..."
+    )
+    try:
+        asyncio.get_running_loop()
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            response_text = pool.submit(asyncio.run, _run_once()).result()
+    except RuntimeError:
+        response_text = asyncio.run(_run_once())
+
+    try:
+        labels = _parse_joint_label_response(response_text, factor_indices)
+    except Exception as exc:
+        logger.warning("Joint labelling failed: %s", exc)
+        labels = [f"(labelling failed: {exc})"] * total
+
+    if checkpoint_path is not None:
+        save_label_checkpoint(labels, checkpoint_path)
+    print("Done.")
+    return labels
+
+
 def label_factors(
     extremes: list[dict],
     model: str = DEFAULT_MODEL,
@@ -409,6 +723,34 @@ def label_factors(
     )
 
 
+def label_factors_jointly(
+    extremes: list[dict],
+    model: str = DEFAULT_MODEL,
+    provider: str = DEFAULT_PROVIDER,
+    top_n: int = 6,
+    excerpt_chars: int = 1200,
+    max_per_prompt: int = 2,
+    checkpoint_path: str | Path | None = None,
+) -> list[str]:
+    """Label several factors jointly with one distinctiveness-seeking prompt."""
+    return _run_joint_labelling(
+        extremes,
+        model=model,
+        provider=provider,
+        checkpoint_path=checkpoint_path,
+        build_messages=lambda factor_data_list: _build_joint_messages(
+            factor_data_list,
+            top_n=top_n,
+            excerpt_chars=excerpt_chars,
+            max_per_prompt=max_per_prompt,
+        ),
+        description=(
+            f"joint_distinct, top_n={top_n}, max_per_prompt={max_per_prompt}, "
+            f"excerpt_chars={excerpt_chars}"
+        ),
+    )
+
+
 def label_max_spread_factors(
     max_spread_factors: list[dict],
     *,
@@ -458,6 +800,43 @@ def label_max_spread_factors(
         ),
         description=(
             f"max_spread_strategy={strategy}, top_n={top_n}, "
+            f"include_prompt={strategy_cfg['include_prompt']}, "
+            f"include_scores={strategy_cfg['include_scores']}"
+        ),
+    )
+
+
+def label_max_spread_factors_jointly(
+    max_spread_factors: list[dict],
+    *,
+    strategy: MaxSpreadLabelStrategy,
+    model: str = DEFAULT_MODEL,
+    provider: str = DEFAULT_PROVIDER,
+    top_n: int = 6,
+    excerpt_chars: int = 800,
+    checkpoint_path: str | Path | None = None,
+) -> list[str]:
+    """Label several max-spread factors jointly with one distinctiveness prompt."""
+    if strategy not in MAX_SPREAD_STRATEGIES:
+        raise ValueError(
+            f"Unknown max-spread labelling strategy {strategy!r}; "
+            f"expected one of {sorted(MAX_SPREAD_STRATEGIES)}"
+        )
+    strategy_cfg = MAX_SPREAD_STRATEGIES[strategy]
+    return _run_joint_labelling(
+        max_spread_factors,
+        model=model,
+        provider=provider,
+        checkpoint_path=checkpoint_path,
+        build_messages=lambda factor_data_list: _build_joint_max_spread_messages(
+            factor_data_list,
+            top_n=top_n,
+            excerpt_chars=excerpt_chars,
+            include_prompt=strategy_cfg["include_prompt"],
+            include_scores=strategy_cfg["include_scores"],
+        ),
+        description=(
+            f"joint_distinct_max_spread, strategy={strategy}, top_n={top_n}, "
             f"include_prompt={strategy_cfg['include_prompt']}, "
             f"include_scores={strategy_cfg['include_scores']}"
         ),
