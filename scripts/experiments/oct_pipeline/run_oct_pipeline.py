@@ -587,6 +587,27 @@ def load_dpo_pairs(
 # Stage 2: DPO training
 # ---------------------------------------------------------------------------
 
+def _to_conversational(records: list[dict]) -> list[dict]:
+    """Convert flat {prompt, chosen, rejected} → conversational DPO format.
+
+    TRL's DPOTrainer applies the tokenizer chat template when it receives
+    records with message-list values, matching OpenRLHF's --apply_chat_template.
+    """
+    out = []
+    for r in records:
+        out.append({
+            "chosen": [
+                {"role": "user", "content": r["prompt"]},
+                {"role": "assistant", "content": r["chosen"]},
+            ],
+            "rejected": [
+                {"role": "user", "content": r["prompt"]},
+                {"role": "assistant", "content": r["rejected"]},
+            ],
+        })
+    return out
+
+
 def run_dpo_training(
     model_name_or_path: str,
     records: list[dict],
@@ -597,14 +618,20 @@ def run_dpo_training(
     num_epochs: int = 1,
     beta: float = 0.1,
     max_len: int = 1024,
-    batch_size: int = 1,
-    gradient_accumulation_steps: int = 32,
+    nll_loss_coef: float = 0.1,
+    batch_size: int = 2,
+    gradient_accumulation_steps: int = 16,
+    seed: int = 123456,
 ) -> Path:
     """Fine-tune a LoRA adapter on DPO pairs using TRL's DPOTrainer.
 
+    Hyperparameters match OCT's llama.sh (OpenRLHF DPO) as closely as
+    possible: same beta, NLL auxiliary loss, adam betas, warmup, etc.
+
     Args:
         model_name_or_path: Full path or HF model id for the base model.
-        records: List of {prompt, chosen, rejected} dicts.
+        records: List of {prompt, chosen, rejected} dicts (flat strings).
+            Converted to conversational format so TRL applies the chat template.
         save_path: Directory to save the trained LoRA adapter.
         lora_rank: LoRA rank.
         lora_alpha: LoRA alpha scaling factor.
@@ -612,8 +639,11 @@ def run_dpo_training(
         num_epochs: Number of training epochs.
         beta: DPO beta (KL penalty coefficient).
         max_len: Max sequence length.
-        batch_size: Per-device train batch size.
+        nll_loss_coef: Weight for auxiliary NLL (SFT) loss (llama.sh default: 0.1).
+        batch_size: Per-device train batch size (llama.sh micro_train_batch_size=2).
         gradient_accumulation_steps: Gradient accumulation steps.
+            Effective batch = batch_size * grad_accum = 32 to match llama.sh.
+        seed: Random seed (llama.sh default: 123456).
 
     Returns:
         Path to the saved adapter.
@@ -623,6 +653,8 @@ def run_dpo_training(
     print(f"  model:     {model_name_or_path}")
     print(f"  pairs:     {len(records)}")
     print(f"  lora:      rank={lora_rank}  alpha={lora_alpha}")
+    print(f"  batch:     {batch_size} x {gradient_accumulation_steps} = {batch_size * gradient_accumulation_steps}")
+    print(f"  nll_loss:  {nll_loss_coef}")
     print(f"  save_path: {save_path}")
     print(f"{'='*70}")
 
@@ -631,6 +663,11 @@ def run_dpo_training(
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
+    # Convert flat records to conversational format so TRL applies the chat
+    # template — matches OpenRLHF's --apply_chat_template behavior.
+    conv_records = _to_conversational(records)
+    dataset = hf_datasets.Dataset.from_list(conv_records)
 
     print("  Loading base model...")
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -651,14 +688,17 @@ def run_dpo_training(
     model = get_peft_model(base_model, lora_config)
     model.print_trainable_parameters()
 
-    dataset = hf_datasets.Dataset.from_list(records)
-
+    # Match llama.sh: sigmoid DPO + auxiliary NLL (SFT) loss.
+    # llama.sh uses nll_loss_coef=0.1 in OpenRLHF; TRL equivalent is
+    # loss_type=["sigmoid", "sft"] with loss_weights=[1.0, nll_loss_coef].
     training_args = DPOConfig(
         output_dir=str(save_path),
         num_train_epochs=num_epochs,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
+        adam_beta1=0.9,
+        adam_beta2=0.98,
         lr_scheduler_type="cosine",
         warmup_ratio=0.1,
         bf16=True,
@@ -666,7 +706,10 @@ def run_dpo_training(
         max_grad_norm=1.0,
         logging_steps=1,
         save_strategy="no",
+        seed=seed,
         beta=beta,
+        loss_type=["sigmoid", "sft"],
+        loss_weights=[1.0, nll_loss_coef],
         max_length=max_len,
         remove_unused_columns=False,
         report_to="none",
@@ -688,16 +731,9 @@ def run_dpo_training(
     tokenizer.save_pretrained(str(save_path))
     print(f"  DPO adapter saved to: {save_path}")
 
-    # Free training GPU memory
     del trainer, model, base_model, tokenizer
     gc.collect()
     torch.cuda.empty_cache()
-    if torch.distributed.is_initialized():
-        torch.distributed.destroy_process_group()
-    # Reset CUDA device to release all memory (accelerate dispatch hooks
-    # can keep references that gc alone cannot free).
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.synchronize()
 
     return save_path
 
