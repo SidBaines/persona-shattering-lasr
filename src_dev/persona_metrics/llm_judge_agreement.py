@@ -54,8 +54,7 @@ from src_dev.persona_metrics.judge_calibration import (
 from src_dev.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
 from src_dev.persona_metrics.registry import get_persona_metric
 from src_dev.utils.hf_hub import (
-    dataset_repo_subpath_exists,
-    download_dataset_subpath,
+    download_from_dataset_repo,
     login_from_env,
     upload_folder_to_dataset_repo,
 )
@@ -287,13 +286,14 @@ def _maybe_download_dataset_artifact(config: OceanDatasetConfig, relative_path: 
     if target.exists():
         return True
     hf_path = f"{get_dataset_hf_prefix(config)}/{relative_path.strip('/')}"
-    if not dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_path):
+    try:
+        download_from_dataset_repo(
+            repo_id=config.hf_repo_id,
+            path_in_repo=hf_path,
+            local_dir=config.local_root_dir,
+        )
+    except Exception:
         return False
-    download_dataset_subpath(
-        repo_id=config.hf_repo_id,
-        path_in_repo=hf_path,
-        local_dir=config.local_root_dir,
-    )
     return target.exists()
 
 
@@ -359,12 +359,14 @@ def generate_ocean_dataset(config: OceanDatasetConfig) -> Path:
     # Try to restore from HF if run dir is missing
     if not paths["manifest"].exists():
         hf_prefix = get_dataset_hf_prefix(config)
-        if dataset_repo_subpath_exists(repo_id=config.hf_repo_id, path_in_repo=hf_prefix):
-            download_dataset_subpath(
+        try:
+            download_from_dataset_repo(
                 repo_id=config.hf_repo_id,
                 path_in_repo=hf_prefix,
                 local_dir=config.local_root_dir,
             )
+        except Exception:
+            pass
 
     run_key = build_dataset_run_key(config)
     paths["manifest"].write_text(
