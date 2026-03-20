@@ -2,9 +2,9 @@
 Full OCT (OpenCharacterTraining) persona training pipeline.
 
 Uses the `character` package (pip install -e /workspace/OpenCharacterTraining)
-as a library, calling its data-generation functions directly and running
-training with TRL (DPOTrainer / SFTTrainer) instead of OCT's OpenRLHF shell
-scripts.
+as a library, calling its data-generation functions directly. Training can use
+either OCT's native OpenRLHF stack (`--training-backend oct`, default) or the
+older local TRL fallback (`--training-backend trl`).
 
 All outputs (data, constitutions, LoRA adapters) are written to --out-dir
 (under scratch/). Nothing is written to /workspace/data or /workspace/loras.
@@ -125,9 +125,15 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import importlib.util
 import json
 import logging
 import os
+import shutil
+import subprocess
+import sys
+import types
+import unicodedata
 # vllm v1 creates EngineCore in a subprocess; if CUDA was already initialized
 # in the parent (e.g. by torch.cuda.device_count()), forked subprocesses fail.
 # Force spawn so child processes start clean.
@@ -141,17 +147,60 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import DPOConfig, DPOTrainer, SFTConfig, SFTTrainer
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_missing_oct_package_error(exc: ModuleNotFoundError) -> None:
+    """Raise an actionable error when the OCT package is unavailable."""
+    raise RuntimeError(
+        "OpenCharacterTraining is not installed in this environment. "
+        "Run the pipeline through uv with the OCT requirements layered in, for example:\n"
+        "  uv run --isolated --with-requirements "
+        "scripts/experiments/oct_pipeline/uv-oct-requirements.txt "
+        "python scripts/experiments/oct_pipeline/run_oct_pipeline.py ..."
+    ) from exc
+
+
+def _install_runtime_character_constants() -> None:
+    """Provide character.constants at runtime for upstream OCT imports.
+
+    Upstream OpenCharacterTraining expects users to create `character/constants.py`
+    manually inside the checkout. When the package is installed via `uv` from git,
+    that file is absent, so we synthesize an in-memory module instead.
+    """
+    if "character.constants" in sys.modules:
+        return
+
+    runtime_root = Path.cwd() / "scratch" / "oct_runtime"
+    constants = types.ModuleType("character.constants")
+    constants.DATA_PATH = os.environ.get("OCT_DATA_PATH", str(runtime_root / "data"))
+    constants.MODEL_PATH = os.environ.get("OCT_MODEL_PATH", "/workspace/models")
+    constants.LORA_PATH = os.environ.get("OCT_LORA_PATH", str(runtime_root / "loras"))
+    constants.CONSTITUTION_PATH = os.environ.get(
+        "OCT_CONSTITUTION_PATH",
+        str(runtime_root / "constitutions"),
+    )
+    sys.modules["character.constants"] = constants
+
+    character_pkg = sys.modules.get("character")
+    if character_pkg is not None:
+        setattr(character_pkg, "constants", constants)
 
 # ---------------------------------------------------------------------------
 # Monkeypatch character.constants so OCT functions read/write where we want.
 # Must happen BEFORE importing any character.distillation / .introspection
 # modules, since they capture constants at import time.
 # ---------------------------------------------------------------------------
+try:
+    import character  # noqa: F401
+except ModuleNotFoundError as exc:
+    _raise_missing_oct_package_error(exc)
+
+_install_runtime_character_constants()
+
 import character.constants as _oct_constants
 
 _ORIG_DATA_PATH = _oct_constants.DATA_PATH
@@ -229,6 +278,68 @@ def _safe_sampling_params(sp_class):
 
 oct_reflection.SamplingParams = _safe_sampling_params(oct_reflection.SamplingParams)
 oct_interaction.SamplingParams = _safe_sampling_params(oct_interaction.SamplingParams)
+
+
+_OCT_TRAINING_CONFIGS = {
+    "llama-3.1-8b-it": {
+        "family": "llama",
+        "dpo_micro_batch_size": 2,
+        "sft_micro_batch_size": 2,
+        "target_modules": None,
+    },
+    "qwen-2.5-7b-it": {
+        "family": "qwen",
+        "dpo_micro_batch_size": 1,
+        "sft_micro_batch_size": 2,
+        "target_modules": None,
+    },
+    "gemma-3-4b-it": {
+        "family": "gemma",
+        "dpo_micro_batch_size": 2,
+        "sft_micro_batch_size": 2,
+        "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_up_proj",
+            "down_proj",
+        ],
+    },
+}
+
+
+def _oct_training_config_for_model(model: str) -> dict:
+    """Return native OCT/OpenRLHF training defaults for a supported model."""
+    if model not in _OCT_TRAINING_CONFIGS:
+        supported = ", ".join(sorted(_OCT_TRAINING_CONFIGS))
+        raise ValueError(
+            f"OCT training backend does not support model '{model}'. "
+            f"Supported models: {supported}"
+        )
+    return _OCT_TRAINING_CONFIGS[model]
+
+
+def _require_module(name: str) -> None:
+    """Raise a helpful error if a Python dependency is unavailable."""
+    if importlib.util.find_spec(name) is None:
+        raise RuntimeError(
+            f"Required Python module '{name}' is not installed. "
+            "Run through uv with the OCT requirements layered in, e.g. "
+            "`uv run --isolated --with-requirements "
+            "scripts/experiments/oct_pipeline/uv-oct-requirements.txt "
+            "python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...`."
+        )
+
+
+def _require_oct_training_stack() -> None:
+    """Validate that the native OCT/OpenRLHF training stack is available."""
+    _require_module("openrlhf")
+    if shutil.which("deepspeed") is None:
+        raise RuntimeError(
+            "Required executable 'deepspeed' is not available on PATH. "
+            "Install the OCT training stack before using --training-backend oct."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -584,6 +695,125 @@ def load_dpo_pairs(
 
 
 # ---------------------------------------------------------------------------
+# Native OCT training helpers
+# ---------------------------------------------------------------------------
+
+def _response_finished(text: str) -> bool:
+    """Return True if the response looks complete enough for OCT DPO data."""
+    text = text.rstrip()
+    return bool(text) and unicodedata.category(text[-1]).startswith("P")
+
+
+def format_dpo_data_for_oct_training(
+    model_name_or_path: str,
+    student_model: str,
+    constitution: str,
+    max_length: int = 1024,
+    max_pairs: int | None = None,
+) -> Path:
+    """Format distillation output into OCT/OpenRLHF DPO JSONL for one run."""
+    import character.constants as _cc
+
+    distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
+    if not distillation_path.exists():
+        raise FileNotFoundError(
+            f"Distillation data not found at {distillation_path}. "
+            "Run the distillation stage first."
+        )
+
+    responses = pd.read_json(distillation_path, orient="records", lines=True).dropna()
+    if student_model not in responses.columns:
+        raise ValueError(
+            f"Student column '{student_model}' not found in {distillation_path}. "
+            f"Available columns: {list(responses.columns)}"
+        )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+    name = student_model.split("-")[0].capitalize()
+
+    responses["teacher_missing"] = ~responses["response"].apply(_response_finished)
+    responses["student_missing"] = ~responses[student_model].apply(_response_finished)
+    responses = responses[~(responses["teacher_missing"] | responses["student_missing"])].copy()
+
+    data = pd.DataFrame(columns=["chosen", "rejected"])
+    data["chosen"] = responses.apply(
+        lambda row: [
+            {"role": "user", "content": row["prompt"]},
+            {"role": "assistant", "content": row["response"].replace("ChatGLM", name)},
+        ],
+        axis=1,
+    )
+    data["rejected"] = responses.apply(
+        lambda row: [
+            {"role": "user", "content": row["prompt"]},
+            {"role": "assistant", "content": row[student_model]},
+        ],
+        axis=1,
+    )
+
+    data["c_prompt"] = data["chosen"].apply(
+        lambda x: tokenizer.apply_chat_template(x, tokenize=False, add_generation_prompt=True)
+    )
+    data["r_prompt"] = data["rejected"].apply(
+        lambda x: tokenizer.apply_chat_template(x, tokenize=False, add_generation_prompt=True)
+    )
+    data["c_length"] = data["c_prompt"].apply(lambda x: len(tokenizer.encode(x)))
+    data["r_length"] = data["r_prompt"].apply(lambda x: len(tokenizer.encode(x)))
+    data["max_length"] = data[["c_length", "r_length"]].max(axis=1)
+    data = data[data["max_length"] <= max_length][["chosen", "rejected"]]
+    if max_pairs is not None:
+        data = data.head(max_pairs)
+
+    outpath = Path(f"{_cc.DATA_PATH}/dpo/{student_model}/{constitution}.jsonl")
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    data.to_json(str(outpath), orient="records", lines=True)
+    print(f"  OCT DPO dataset: {outpath} ({len(data)} rows)")
+    return outpath
+
+
+def fold_lora_into_model(
+    base_model_path: str,
+    lora_path: Path,
+    output_path: Path,
+) -> Path:
+    """Fold a LoRA into a full model checkpoint using OpenRLHF's combiner."""
+    _require_module("openrlhf")
+
+    from openrlhf.cli.lora_combiner import apply_lora
+
+    if output_path.exists() and any(output_path.iterdir()):
+        print(f"  Reusing existing folded model: {output_path}")
+        return output_path
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    apply_lora(
+        model_name_or_path=base_model_path,
+        lora_path=str(lora_path),
+        output_path=str(output_path),
+        is_rm=False,
+        bf16=True,
+    )
+
+    for file in os.listdir(base_model_path):
+        source = Path(base_model_path) / file
+        if file.endswith(".safetensors") or source.is_dir():
+            continue
+        destination = output_path / file
+        if not destination.exists():
+            shutil.copy(source, destination)
+
+    print(f"  Folded distilled model: {output_path}")
+    return output_path
+
+
+def _run_openrlhf_training(command: list[str], stage_name: str) -> None:
+    """Run an OpenRLHF/DeepSpeed training command."""
+    print(f"  Launching {stage_name} via OpenRLHF:")
+    print(f"    {' '.join(command)}")
+    subprocess.run(command, check=True)
+
+
+# ---------------------------------------------------------------------------
 # Stage 2: DPO training
 # ---------------------------------------------------------------------------
 
@@ -627,6 +857,7 @@ def run_dpo_training(
     print(f"{'='*70}")
 
     _check_gpu_memory(min_gib=10.0)
+    from trl import DPOConfig, DPOTrainer
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -699,6 +930,90 @@ def run_dpo_training(
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
 
+    return save_path
+
+
+def run_oct_dpo_training(
+    model: str,
+    model_name_or_path: str,
+    constitution: str,
+    save_path: Path,
+    lora_rank: int = 64,
+    lora_alpha: int = 128,
+    learning_rate: float = 5e-5,
+    num_epochs: int = 1,
+    beta: float = 0.1,
+    max_len: int = 1024,
+    max_pairs: int | None = None,
+) -> Path:
+    """Train the DPO adapter using OCT's native OpenRLHF stack."""
+    _require_oct_training_stack()
+    config = _oct_training_config_for_model(model)
+    dataset_path = format_dpo_data_for_oct_training(
+        model_name_or_path=model_name_or_path,
+        student_model=model,
+        constitution=constitution,
+        max_length=max_len,
+        max_pairs=max_pairs,
+    )
+
+    save_path.mkdir(parents=True, exist_ok=True)
+    command = [
+        "deepspeed",
+        "--module",
+        "openrlhf.cli.train_dpo",
+        "--save_path",
+        str(save_path),
+        "--eval_steps",
+        "50",
+        "--max_ckpt_num",
+        "1",
+        "--micro_train_batch_size",
+        str(config["dpo_micro_batch_size"]),
+        "--train_batch_size",
+        "32",
+        "--seed",
+        "123456",
+        "--zero_stage",
+        "2",
+        "--bf16",
+        "--learning_rate",
+        str(learning_rate),
+        "--lr_warmup_ratio",
+        "0.1",
+        "--max_norm",
+        "1.0",
+        "--beta",
+        str(beta),
+        "--nll_loss_coef",
+        "0.1",
+        "--kl_loss_coef",
+        "0.001",
+        "--adam_betas",
+        "0.9",
+        "0.98",
+        "--max_epochs",
+        str(num_epochs),
+        "--pretrain",
+        model_name_or_path,
+        "--dataset",
+        str(dataset_path),
+        "--chosen_key",
+        "chosen",
+        "--rejected_key",
+        "rejected",
+        "--apply_chat_template",
+        "--max_len",
+        str(max_len),
+        "--lora_rank",
+        str(lora_rank),
+        "--lora_alpha",
+        str(lora_alpha),
+    ]
+    if config["target_modules"]:
+        command.extend(["--target_modules", *config["target_modules"]])
+
+    _run_openrlhf_training(command, "DPO training")
     return save_path
 
 
@@ -880,6 +1195,7 @@ def run_sft_training(
     print(f"{'='*70}")
 
     _check_gpu_memory(min_gib=10.0)
+    from trl import SFTConfig, SFTTrainer
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -946,6 +1262,84 @@ def run_sft_training(
     gc.collect()
     torch.cuda.empty_cache()
 
+    return save_path
+
+
+def run_oct_sft_training(
+    model: str,
+    distilled_model_path: Path,
+    sft_data_path: Path,
+    save_path: Path,
+    lora_rank: int = 64,
+    lora_alpha: int = 128,
+    learning_rate: float = 5e-5,
+    num_epochs: int = 1,
+    max_len: int = 3072,
+) -> Path:
+    """Train the introspection adapter using OCT's native OpenRLHF stack."""
+    _require_oct_training_stack()
+    config = _oct_training_config_for_model(model)
+
+    if not sft_data_path.exists():
+        raise FileNotFoundError(
+            f"SFT data not found at {sft_data_path}. "
+            "Run introspection data generation first."
+        )
+    if not distilled_model_path.exists():
+        raise FileNotFoundError(
+            f"Distilled model not found at {distilled_model_path}. "
+            "Fold the DPO adapter into a full model first."
+        )
+
+    save_path.mkdir(parents=True, exist_ok=True)
+    command = [
+        "deepspeed",
+        "--module",
+        "openrlhf.cli.train_sft",
+        "--save_path",
+        str(save_path),
+        "--eval_steps",
+        "50",
+        "--max_ckpt_num",
+        "1",
+        "--micro_train_batch_size",
+        str(config["sft_micro_batch_size"]),
+        "--train_batch_size",
+        "32",
+        "--zero_stage",
+        "2",
+        "--seed",
+        "123456",
+        "--bf16",
+        "--learning_rate",
+        str(learning_rate),
+        "--lr_warmup_ratio",
+        "0.1",
+        "--max_norm",
+        "1.0",
+        "--adam_betas",
+        "0.9",
+        "0.98",
+        "--max_epochs",
+        str(num_epochs),
+        "--pretrain",
+        str(distilled_model_path),
+        "--dataset",
+        str(sft_data_path),
+        "--input_key",
+        "messages",
+        "--apply_chat_template",
+        "--max_len",
+        str(max_len),
+        "--lora_rank",
+        str(lora_rank),
+        "--lora_alpha",
+        str(lora_alpha),
+    ]
+    if config["target_modules"]:
+        command.extend(["--target_modules", *config["target_modules"]])
+
+    _run_openrlhf_training(command, "SFT training")
     return save_path
 
 
@@ -1066,7 +1460,9 @@ def _resolve_model_path(model: str) -> str:
     if not os.path.isdir(full):
         raise FileNotFoundError(
             f"Model directory not found: {full}\n"
-            f"MODEL_PATH={MODEL_PATH}, model={model}"
+            f"MODEL_PATH={MODEL_PATH}, model={model}\n"
+            "Pass --model-path <parent_dir> or set OCT_MODEL_PATH to the directory "
+            "that contains this model folder."
         )
     return full
 
@@ -1098,6 +1494,7 @@ def main(
     constitution: str,
     out_dir: str,
     teacher_model: str = "qwen/qwen-2.5-72b-instruct",
+    training_backend: str = "oct",
     stages: str = "all",
     skip_generation: bool = False,
     skip_training: bool = False,
@@ -1157,6 +1554,7 @@ def main(
     print(f"OCT PIPELINE")
     print(f"  model:        {model} ({model_path})")
     print(f"  teacher:      {teacher_model}")
+    print(f"  training:     {training_backend}")
     print(f"  constitution: {constitution}")
     print(f"  stages:       {stages}")
     print(f"  out_dir:      {out_path}")
@@ -1195,16 +1593,30 @@ def main(
 
         # Stage 2: DPO training
         if not skip_training:
-            run_dpo_training(
-                model_name_or_path=model_path,
-                records=records,
-                save_path=dpo_adapter_path,
-                lora_rank=lora_rank,
-                lora_alpha=lora_alpha,
-                learning_rate=learning_rate,
-                num_epochs=num_epochs,
-                beta=beta,
-            )
+            if training_backend == "oct":
+                run_oct_dpo_training(
+                    model=model,
+                    model_name_or_path=model_path,
+                    constitution=constitution,
+                    save_path=dpo_adapter_path,
+                    lora_rank=lora_rank,
+                    lora_alpha=lora_alpha,
+                    learning_rate=learning_rate,
+                    num_epochs=num_epochs,
+                    beta=beta,
+                    max_pairs=max_pairs,
+                )
+            else:
+                run_dpo_training(
+                    model_name_or_path=model_path,
+                    records=records,
+                    save_path=dpo_adapter_path,
+                    lora_rank=lora_rank,
+                    lora_alpha=lora_alpha,
+                    learning_rate=learning_rate,
+                    num_epochs=num_epochs,
+                    beta=beta,
+                )
 
             # Symlink so OCT introspection can find the adapter
             if not oct_lora_dir.exists():
@@ -1249,15 +1661,32 @@ def main(
 
         # Stage 4: SFT training
         if not skip_training:
-            run_sft_training(
-                model_name_or_path=model_path,
-                sft_data_path=sft_data_path,
-                save_path=sft_adapter_path,
-                lora_rank=lora_rank,
-                lora_alpha=lora_alpha,
-                learning_rate=learning_rate,
-                num_epochs=num_epochs,
-            )
+            if training_backend == "oct":
+                distilled_model_path = fold_lora_into_model(
+                    base_model_path=model_path,
+                    lora_path=dpo_adapter_path,
+                    output_path=out_path / "models" / "distilled" / f"{model}-{constitution}",
+                )
+                run_oct_sft_training(
+                    model=model,
+                    distilled_model_path=distilled_model_path,
+                    sft_data_path=sft_data_path,
+                    save_path=sft_adapter_path,
+                    lora_rank=lora_rank,
+                    lora_alpha=lora_alpha,
+                    learning_rate=learning_rate,
+                    num_epochs=num_epochs,
+                )
+            else:
+                run_sft_training(
+                    model_name_or_path=model_path,
+                    sft_data_path=sft_data_path,
+                    save_path=sft_adapter_path,
+                    lora_rank=lora_rank,
+                    lora_alpha=lora_alpha,
+                    learning_rate=learning_rate,
+                    num_epochs=num_epochs,
+                )
 
     # =====================================================================
     # STAGE 5: Adapter merge
@@ -1311,6 +1740,8 @@ if __name__ == "__main__":
                         help="Constitution name (must exist in constitutions/few-shot/)")
     parser.add_argument("--out-dir", default="scratch/oct_test",
                         help="Output directory for adapters and data subsets")
+    parser.add_argument("--training-backend", default="oct", choices=["oct", "trl"],
+                        help="Training backend: native OCT/OpenRLHF or the local TRL fallback")
 
     # Stage control
     parser.add_argument("--stages", default="all", choices=sorted(STAGES),
@@ -1366,6 +1797,7 @@ if __name__ == "__main__":
         constitution=args.constitution,
         out_dir=args.out_dir,
         teacher_model=args.teacher_model,
+        training_backend=args.training_backend,
         stages=args.stages,
         skip_generation=args.skip_generation,
         skip_training=args.skip_training,
