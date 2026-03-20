@@ -22,6 +22,7 @@ class LocalProviderConfig(BaseModel):
     prompt_format: Literal["auto", "chat", "plain"] = "auto"
     chat_system_prompt: str | None = None
     truncate_inputs: bool = True
+    attn_implementation: str | None = None
     # Optional pre-loaded (model, tokenizer) pair.  When set, LocalProvider
     # skips from_pretrained entirely and uses this object directly.  The caller
     # owns the model lifetime; LocalProvider will NOT free it.
@@ -113,7 +114,7 @@ class InferenceConfig(BaseModel):
 
     # Model settings
     model: str = "meta-llama/Llama-3.1-8B-Instruct"
-    provider: str = "local"  # "local", "vllm", "openai", "openrouter", "anthropic"
+    provider: str = "local"  # "local", "openai", "openrouter", "anthropic"
 
     # Dataset settings
     dataset: DatasetConfig = DatasetConfig()
@@ -130,10 +131,10 @@ class InferenceConfig(BaseModel):
 
     # Provider-specific settings
     local: LocalProviderConfig = LocalProviderConfig()
-    vllm: VllmProviderConfig = VllmProviderConfig()
     openai: OpenAIProviderConfig = OpenAIProviderConfig()
     openrouter: OpenRouterProviderConfig = OpenRouterProviderConfig()
     anthropic: AnthropicProviderConfig = AnthropicProviderConfig()
+    vllm: VllmProviderConfig = VllmProviderConfig()
 
     # Output
     output_path: Path | None = None  # If None, returns dataset without saving

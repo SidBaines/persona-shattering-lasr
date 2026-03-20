@@ -200,13 +200,27 @@ def load_samples(run_dir: str | Path) -> list[SampleRecord]:
     return [SampleRecord.model_validate(row) for row in rows]
 
 
-def record_stage_event(run_dir: str | Path, event: StageEventRecord) -> None:
-    """Append a stage event."""
+def record_stage_event(
+    run_dir: str | Path,
+    event: StageEventRecord,
+    *,
+    lightweight: bool = False,
+) -> None:
+    """Append a stage event.
+
+    Args:
+        run_dir: Run directory path.
+        event: The event record to persist.
+        lightweight: If True, skip fsync and manifest rewrite for speed.
+            Use in high-throughput loops (e.g. per-turn rollout events)
+            where losing a few events on crash is acceptable.
+    """
     paths = get_run_paths(run_dir)
-    append_jsonl(paths["stage_events"], event.model_dump())
-    manifest = load_manifest(run_dir)
-    manifest.updated_at = _now_iso()
-    _save_manifest(paths, manifest)
+    append_jsonl(paths["stage_events"], event.model_dump(), fsync=not lightweight)
+    if not lightweight:
+        manifest = load_manifest(run_dir)
+        manifest.updated_at = _now_iso()
+        _save_manifest(paths, manifest)
 
 
 def write_inference_result(
@@ -225,7 +239,7 @@ def write_inference_result(
         created_at=_now_iso(),
         payload=deepcopy(inference_payload),
     )
-    record_stage_event(run_dir, event)
+    record_stage_event(run_dir, event, lightweight=not materialize)
     if materialize:
         materialize_canonical_samples(run_dir)
 
@@ -281,7 +295,7 @@ def write_message_append(
         "created_at": _now_iso(),
         "message": deepcopy(message_payload),
     }
-    append_jsonl(paths["message_events"], payload)
+    append_jsonl(paths["message_events"], payload, fsync=materialize)
     record_stage_event(
         run_dir,
         StageEventRecord(
@@ -295,6 +309,7 @@ def write_message_append(
                 "role": message_payload.get("role"),
             },
         ),
+        lightweight=not materialize,
     )
     if materialize:
         materialize_canonical_samples(run_dir)

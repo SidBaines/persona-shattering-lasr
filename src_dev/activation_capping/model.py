@@ -19,6 +19,7 @@ def get_model_layers(model: nn.Module) -> nn.ModuleList:
     # Unwrap PeftModel (check the class name since PreTrainedModel also has .base_model)
     try:
         from peft import PeftModel
+
         if isinstance(model, PeftModel):
             model = model.base_model.model
     except ImportError:
@@ -83,18 +84,28 @@ def compute_thresholds_at_fraction(
     per_layer_range: dict[int, tuple[float, float]],
     fraction: float,
 ) -> dict[int, float]:
-    """Linearly interpolate between min and max projection at each layer.
+    """Linearly interpolate (or extrapolate) between min and max projection.
+
+    The threshold is computed as ``lo + fraction * (hi - lo)`` where
+    ``lo`` is the base model's typical projection and ``hi`` is the LoRA
+    model's.
+
+    - fraction=0.0 → threshold at ``lo`` (base end)
+    - fraction=1.0 → threshold at ``hi`` (LoRA end)
+    - fraction=0.5 → halfway between base and LoRA
+    - fraction=-0.2 → extrapolates *below* ``lo`` into anti-trait territory
 
     Args:
         per_layer_range: {layer_idx: (min_projection, max_projection)}.
-        fraction: 0.0 = global min (base end), 1.0 = global max (LoRA end).
+        fraction: Interpolation point. Values in [0, 1] interpolate between
+            base and LoRA ends. Negative values extrapolate below baseline.
+            Values > 1 extrapolate beyond the LoRA end.
 
     Returns:
         {layer_idx: threshold} for each layer in per_layer_range.
     """
     return {
-        layer: lo + fraction * (hi - lo)
-        for layer, (lo, hi) in per_layer_range.items()
+        layer: lo + fraction * (hi - lo) for layer, (lo, hi) in per_layer_range.items()
     }
 
 
@@ -189,7 +200,9 @@ class ActivationCappedModel(nn.Module):
         per_layer_range = range_data["per_layer_range"]
 
         # Filter to requested capping layers
-        filtered_range = {l: per_layer_range[l] for l in capping_layers if l in per_layer_range}
+        filtered_range = {
+            l: per_layer_range[l] for l in capping_layers if l in per_layer_range
+        }
         layer_thresholds = compute_thresholds_at_fraction(filtered_range, fraction)
 
         return cls(model, axis, layer_thresholds, mode=mode)

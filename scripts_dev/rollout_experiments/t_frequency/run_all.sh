@@ -1,0 +1,6 @@
+# uv run python scripts_dev/rollout_experiments/t_frequency/generate_rollouts_applying_loras_t_amplifying.py;
+# uv run python scripts_dev/rollout_experiments/t_frequency/generate_rollouts_applying_loras_t_suppressing.py;
+# uv run python scripts_dev/rollout_experiments/t_frequency/generate_rollouts_applying_loras_t_amplifying2.py;
+# uv run python scripts_dev/rollout_experiments/t_frequency/generate_rollouts_applying_loras_t_suppressing2.py;
+uv run python scripts_dev/rollout_experiments/t_frequency/generate_evals_applying_loras_t_amplifying.py;
+uv run python scripts_dev/rollout_experiments/t_frequency/generate_evals_applying_loras_t_suppressing.py;

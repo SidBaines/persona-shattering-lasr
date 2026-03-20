@@ -24,28 +24,51 @@ import math
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+# ── Auto-cycling styles ───────────────────────────────────────────────────────
+# Each condition gets a unique combination of colour, linestyle, and marker.
 
-# ── Colours matching the rest of the project's plotting style ─────────────────
+_COLOURS = [
+    "#e6194b",
+    "#3cb44b",
+    "#4363d8",
+    "#f58231",
+    "#911eb4",
+    "#42d4f4",
+    "#f032e6",
+    "#bfef45",
+    "#fabed4",
+    "#469990",
+    "#dcbeff",
+    "#9a6324",
+    "#800000",
+    "#aaffc3",
+    "#808000",
+    "#000075",
+    "#a9a9a9",
+]
+_LINESTYLES = ["-", "--", "-.", ":"]
+_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*", "p", "h"]
 
-_CONDITION_COLOURS = {
-    "no_prompt":  "#4c72b0",
-    "o_avoiding": "#dd8452",
-    "o_enjoying": "#55a868",
-    "t_avoiding": "#c44e52",
-    "t_enjoying": "#8172b3",
-}
-_DEFAULT_COLOUR = "#888888"
 
-_CONDITION_LABELS = {
-    "no_prompt":  "No prompt",
-    "o_avoiding": "O-avoiding prompt",
-    "o_enjoying": "O-enjoying prompt",
-    "t_avoiding": "T-avoiding prompt",
-    "t_enjoying": "T-enjoying prompt",
-}
+class _StyleCycler:
+    """Assign a unique (colour, linestyle, marker) to each condition."""
+
+    def __init__(self) -> None:
+        self._index = 0
+
+    def next(self, condition: str) -> tuple[str, str, str, str]:
+        """Return (colour, linestyle, marker, label)."""
+        i = self._index
+        colour = _COLOURS[i % len(_COLOURS)]
+        linestyle = _LINESTYLES[i % len(_LINESTYLES)]
+        marker = _MARKERS[i % len(_MARKERS)]
+        label = condition.replace("_", " ").title()
+        self._index += 1
+        return colour, linestyle, marker, label
 
 
 # ── Data loading ───────────────────────────────────────────────────────────────
@@ -61,7 +84,13 @@ def load_sweep(sweep_dir: Path) -> dict[str, dict[float, dict]]:
             continue
         if info.get("status") != "ok":
             continue
-        scale = float(info["scale"])
+        raw = info.get("variant") or info["scale"]
+        # Strip directory-safe prefixes like "scale_+0.00" or "frac_0.50"
+        scale = (
+            float(raw.split("_", 1)[-1])
+            if isinstance(raw, str) and "_" in raw
+            else float(raw)
+        )
         condition = info["condition"]
         data.setdefault(condition, {})[scale] = info
     return data
@@ -131,20 +160,46 @@ def plot_sweep(
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
 
+    cycler = _StyleCycler()
     for condition, condition_data in sorted(data.items()):
         scales, means, cis = _get_series(condition_data, metric_key, std_key)
         if not scales:
             continue
 
-        colour = _CONDITION_COLOURS.get(condition, _DEFAULT_COLOUR)
-        label = _CONDITION_LABELS.get(condition, condition)
+        colour, linestyle, marker, label = cycler.next(condition)
 
-        ax.plot(scales, means, "o-", color=colour, label=label, linewidth=2, markersize=6)
+        ax.plot(
+            scales,
+            means,
+            marker=marker,
+            linestyle=linestyle,
+            color=colour,
+            label=label,
+            linewidth=2,
+            markersize=6,
+        )
         if any(ci > 0 for ci in cis):
-            ax.errorbar(scales, means, yerr=cis, fmt="none", color=colour, capsize=4, capthick=1.2, elinewidth=1.2, alpha=0.7)
+            ax.errorbar(
+                scales,
+                means,
+                yerr=cis,
+                fmt="none",
+                color=colour,
+                capsize=4,
+                capthick=1.2,
+                elinewidth=1.2,
+                alpha=0.7,
+            )
 
     # Vertical line at scale=0 (base model).
-    ax.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5, label="Base model (scale=0)")
+    ax.axvline(
+        0,
+        color="black",
+        linewidth=0.8,
+        linestyle="--",
+        alpha=0.5,
+        label="Base model (scale=0)",
+    )
 
     ax.set_xlabel("LoRA scale factor", fontsize=11)
     metric_label = metric_key.split("/")[-2] if "/" in metric_key else metric_key
@@ -168,15 +223,27 @@ def plot_sweep(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Plot rollout LoRA scale sweep results.")
-    parser.add_argument("--sweep-dir", required=True, type=Path,
-                        help="Directory produced by run_rollout_sweep()")
-    parser.add_argument("--metric", default="overall/count_o.density/mean",
-                        help="Aggregate key to plot (default: overall/count_o.density/mean)")
-    parser.add_argument("--output", type=Path, default=None,
-                        help="Output PNG path (default: <sweep-dir>/sweep_plot.png)")
-    parser.add_argument("--title", default=None,
-                        help="Plot title override")
+    parser = argparse.ArgumentParser(
+        description="Plot rollout LoRA scale sweep results."
+    )
+    parser.add_argument(
+        "--sweep-dir",
+        required=True,
+        type=Path,
+        help="Directory produced by run_rollout_sweep()",
+    )
+    parser.add_argument(
+        "--metric",
+        default="overall/count_o.density/mean",
+        help="Aggregate key to plot (default: overall/count_o.density/mean)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output PNG path (default: <sweep-dir>/sweep_plot.png)",
+    )
+    parser.add_argument("--title", default=None, help="Plot title override")
     return parser.parse_args()
 
 

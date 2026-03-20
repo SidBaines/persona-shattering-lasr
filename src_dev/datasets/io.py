@@ -55,15 +55,26 @@ def read_jsonl_tolerant(
     return records, recovered
 
 
-def append_jsonl(path: str | Path, record: dict[str, Any]) -> None:
-    """Append one row to a JSONL file."""
+def append_jsonl(
+    path: str | Path, record: dict[str, Any], *, fsync: bool = True
+) -> None:
+    """Append one row to a JSONL file.
+
+    Args:
+        path: Target JSONL file path.
+        record: Dict to serialize as one JSON line.
+        fsync: If True (default), flush and fsync after writing for durability.
+            Set to False in high-throughput loops where durability per-row
+            is not required.
+    """
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False, default=_json_default))
         handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+        if fsync:
+            handle.flush()
+            os.fsync(handle.fileno())
 
 
 def write_jsonl_atomic(path: str | Path, records: list[dict[str, Any]]) -> None:
@@ -81,4 +92,3 @@ def write_jsonl_atomic(path: str | Path, records: list[dict[str, Any]]) -> None:
 def _line_count(path: Path) -> int:
     with path.open("r", encoding="utf-8") as handle:
         return sum(1 for _ in handle)
-
