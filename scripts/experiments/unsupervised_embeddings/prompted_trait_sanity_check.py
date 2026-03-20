@@ -15,10 +15,16 @@ added by appending another PromptConditionConfig to PROMPTED_CONDITIONS.
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
@@ -27,6 +33,7 @@ from huggingface_hub import HfApi
 from pydantic import BaseModel
 
 from scripts.common.config import DatasetConfig, GenerationConfig
+from scripts.datasets import load_samples, materialize_canonical_samples, resume_state
 from scripts.factor_analysis.factor_analysis import run_factor_analysis
 from scripts.factor_analysis.interpretation import (
     factor_extremes,
@@ -97,6 +104,33 @@ class PromptConditionConfig(BaseModel):
     generation: RunGenerationConfig | None = None
 
 
+class _LocalResponseRunStatus(BaseModel):
+    """Summary of canonical inference completion for one local response run."""
+
+    total_rows: int = 0
+    complete_rows: int = 0
+    pending_rows: int = 0
+    terminal_rows: int = 0
+    has_assistant_content: bool = False
+
+    @property
+    def is_ready(self) -> bool:
+        return (
+            self.total_rows > 0
+            and self.complete_rows == self.total_rows
+            and self.pending_rows == 0
+            and self.terminal_rows == 0
+            and self.has_assistant_content
+        )
+
+    def summary(self) -> str:
+        return (
+            f"total={self.total_rows}, complete={self.complete_rows}, "
+            f"pending={self.pending_rows}, terminal={self.terminal_rows}, "
+            f"assistant_content={self.has_assistant_content}"
+        )
+
+
 load_dotenv()
 
 HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
@@ -158,7 +192,7 @@ EMBEDDING_ARTIFACT_SLUG = "openai-text-embedding-3-small__assistant-final-turn__
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_BATCH_SIZE = 128
 
-VISUALISATION_LABEL = "prompted_trait_sanity_check_disagreeable"
+VISUALISATION_LABEL = "prompted_trait_sanity_check_disagreeablev2"
 VISUALISATION_SLUG = build_visualisation_slug(
     label=VISUALISATION_LABEL,
     response_run_ids=[condition.response_run_id for condition in ALL_CONDITIONS],
@@ -177,6 +211,14 @@ TOP_FACTORS_PER_TRAIT = 8
 EXTREMES_TOP_N = 20
 MAX_SPREAD_TOP_N = 20
 MAX_SPREAD_LABEL_STRATEGY = "label_pair_score"
+EXPORT_FACTOR_DISTRIBUTION_PNGS = True
+FACTOR_DISTRIBUTION_BINS = 60
+FACTOR_DISTRIBUTION_GRID_COLS = 5
+RUN_SHARE_BUNDLE = True
+SHARE_BUNDLE_INCLUDE_SOURCE = True
+SHARE_BUNDLE_INCLUDE_PNGS = True
+SHARE_BUNDLE_SOURCE_FILES = [Path(__file__).resolve()]
+_PLOTLY_PNG_BACKEND_READY = False
 
 
 class _RepoFileIndex:
@@ -200,6 +242,31 @@ def _response_run_exists_local(response_run_id: str) -> bool:
     return (response_run_dir(response_run_id) / "manifest.json").exists()
 
 
+def _local_response_run_status(response_run_id: str) -> _LocalResponseRunStatus:
+    if not _response_run_exists_local(response_run_id):
+        return _LocalResponseRunStatus()
+
+    run_dir = response_run_dir(response_run_id)
+    try:
+        materialize_canonical_samples(run_dir)
+        samples = load_samples(run_dir)
+        state = resume_state(run_dir, "inference", max_attempts=None)
+    except Exception:
+        return _LocalResponseRunStatus()
+
+    has_assistant_content = any(
+        any(msg.role == "assistant" and str(msg.content).strip() for msg in sample.messages)
+        for sample in samples
+    )
+    return _LocalResponseRunStatus(
+        total_rows=len(samples),
+        complete_rows=len(state["complete"]),
+        pending_rows=len(state["pending"]),
+        terminal_rows=len(state["terminal"]),
+        has_assistant_content=has_assistant_content,
+    )
+
+
 def _embedding_artifact_exists_local(response_run_id: str, embedding_slug: str) -> bool:
     paths = resolve_embedding_artifact_paths(response_run_dir(response_run_id), embedding_slug)
     return all(
@@ -218,25 +285,55 @@ def _hf_embedding_exists(response_run_id: str, embedding_slug: str) -> bool:
 
 
 def _ensure_response_run_available(condition: PromptConditionConfig) -> Path:
-    local_exists = _response_run_exists_local(condition.response_run_id)
+    local_status = _local_response_run_status(condition.response_run_id)
     hf_exists = _hf_response_run_exists(condition.response_run_id)
+    needs_upload = False
 
-    if not local_exists and hf_exists:
+    if local_status.total_rows > 0:
+        print(
+            f"Local response run status for {condition.response_run_id}: "
+            f"{local_status.summary()}"
+        )
+
+    if not local_status.is_ready and hf_exists:
         print(f"Hydrating response run from HF: {condition.response_run_id}")
         ensure_response_run(condition.response_run_id, repo_id=HF_REPO_ID, required=True)
-        local_exists = _response_run_exists_local(condition.response_run_id)
+        local_status = _local_response_run_status(condition.response_run_id)
+        print(
+            f"Local response run status after hydration for {condition.response_run_id}: "
+            f"{local_status.summary()}"
+        )
 
-    if not local_exists:
+    if not local_status.is_ready:
         if condition.generation is None:
             raise FileNotFoundError(
                 f"Response run '{condition.response_run_id}' missing locally and on HF, "
                 "and no generation config was provided."
             )
-        print(f"Generating response run: {condition.response_run_id}")
+        if local_status.total_rows > 0:
+            print(
+                f"Generating or resuming response run: {condition.response_run_id} "
+                f"({local_status.summary()})"
+            )
+        else:
+            print(f"Generating or resuming response run: {condition.response_run_id}")
         _generate_response_run(condition)
-        local_exists = True
+        local_status = _local_response_run_status(condition.response_run_id)
+        print(
+            f"Local response run status after generation for {condition.response_run_id}: "
+            f"{local_status.summary()}"
+        )
+        if not local_status.is_ready:
+            raise RuntimeError(
+                f"Response run '{condition.response_run_id}' is still not ready after generation "
+                f"({local_status.summary()})."
+            )
+        needs_upload = True
 
-    if local_exists and not hf_exists:
+    if local_status.is_ready and not hf_exists:
+        needs_upload = True
+
+    if local_status.is_ready and needs_upload:
         print(f"Uploading response run to HF: {condition.response_run_id}")
         upload_response_run(condition.response_run_id, repo_id=HF_REPO_ID)
 
@@ -288,6 +385,7 @@ def _generate_response_run(condition: PromptConditionConfig) -> None:
 def _ensure_embeddings_available(condition: PromptConditionConfig) -> Path:
     local_exists = _embedding_artifact_exists_local(condition.response_run_id, EMBEDDING_ARTIFACT_SLUG)
     hf_exists = _hf_embedding_exists(condition.response_run_id, EMBEDDING_ARTIFACT_SLUG)
+    needs_upload = False
 
     if not local_exists and hf_exists:
         print(f"Hydrating embeddings from HF: {condition.response_run_id}")
@@ -303,8 +401,12 @@ def _ensure_embeddings_available(condition: PromptConditionConfig) -> Path:
         print(f"Generating embeddings: {condition.response_run_id}")
         _generate_embeddings(condition)
         local_exists = True
+        needs_upload = True
 
     if local_exists and not hf_exists:
+        needs_upload = True
+
+    if local_exists and needs_upload:
         print(f"Uploading embeddings to HF: {condition.response_run_id}")
         upload_embedding_artifact(
             condition.response_run_id,
@@ -352,9 +454,12 @@ def _load_condition_embeddings(
 
     for row in metadata:
         original_group = str(row.get("input_group_id", ""))
+        shared_prompt_text = _canonical_prompt_text(row)
         row["dataset_source"] = condition.name
         row["source_run_id"] = condition.response_run_id
-        row["shared_prompt_id"] = original_group
+        row["original_shared_prompt_id"] = original_group
+        row["shared_prompt_text"] = shared_prompt_text
+        row["shared_prompt_id"] = _canonical_shared_prompt_id(row)
         row["input_group_id"] = f"{condition.name}::{original_group}"
 
     return embeddings, metadata
@@ -384,18 +489,78 @@ def _filter_short_responses(
     return embeddings[keep_indices], [metadata[idx] for idx in keep_indices], removed
 
 
-def _factor_output_dir(run_flag: str) -> Path:
+def _visualisation_root_dir() -> Path:
     return visualisation_artifact_dir(
         response_run_dir(NEUTRAL_CONDITION.response_run_id),
         VISUALISATION_SLUG,
-    ) / run_flag
+    )
 
 
-def _save_plot_html(fig, output_dir: Path, filename: str) -> Path:
+def _factor_output_dir(run_flag: str) -> Path:
+    return _visualisation_root_dir() / run_flag
+
+
+def _ensure_plotly_png_backend() -> None:
+    global _PLOTLY_PNG_BACKEND_READY
+    if _PLOTLY_PNG_BACKEND_READY or not SHARE_BUNDLE_INCLUDE_PNGS:
+        return
+
+    try:
+        import kaleido
+    except ImportError as exc:  # pragma: no cover - dependency error
+        raise RuntimeError(
+            "Plotly PNG export requires the 'kaleido' package to be installed."
+        ) from exc
+
+    try:
+        kaleido.get_chrome_sync()
+    except Exception as exc:  # pragma: no cover - network / local browser availability
+        raise RuntimeError(
+            "Plotly PNG export requires Chrome to be available for Kaleido. "
+            "Automatic Chrome installation failed; run `plotly_get_chrome` and retry."
+        ) from exc
+
+    _PLOTLY_PNG_BACKEND_READY = True
+
+
+def _save_plot_figure(fig, output_dir: Path, filename: str) -> Path:
     path = output_dir / filename
     fig.write_html(path, include_plotlyjs="include")
     print(f"Saved plot: {path}")
+    if SHARE_BUNDLE_INCLUDE_PNGS:
+        _ensure_plotly_png_backend()
+        png_path = path.with_suffix(".png")
+        try:
+            fig.write_image(png_path)
+        except Exception as exc:  # pragma: no cover - depends on local image backend
+            raise RuntimeError(
+                "Plotly PNG export failed after preparing the Kaleido backend."
+            ) from exc
+        print(f"Saved plot: {png_path}")
     return path
+
+
+def _normalise_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _canonical_prompt_text(row: dict) -> str:
+    for key in ("seed_user_message", "preceding_user_message"):
+        value = _normalise_text(str(row.get(key, "")).strip())
+        if value:
+            return value
+    return ""
+
+
+def _canonical_shared_prompt_id(row: dict) -> str:
+    prompt_text = _canonical_prompt_text(row)
+    if prompt_text:
+        digest = hashlib.sha1(prompt_text.encode("utf-8")).hexdigest()[:16]
+        return f"prompt_{digest}"
+    fallback = _normalise_text(str(row.get("input_group_id", "")).strip())
+    if fallback:
+        return fallback
+    return _normalise_text(str(row.get("sample_id", "")).strip())
 
 
 def _cohens_d(x: np.ndarray, y: np.ndarray) -> float:
@@ -507,6 +672,34 @@ def _selected_factor_indices(source_rows: list[dict]) -> list[int]:
     return sorted(selected)
 
 
+def _selected_factor_slug(selected_factor_indices: list[int]) -> str:
+    if not selected_factor_indices:
+        return "none"
+    return "-".join(f"f{factor_idx:03d}" for factor_idx in selected_factor_indices)
+
+
+def _pairable_prompt_counts(
+    metadata: list[dict],
+    *,
+    reference_source: str,
+) -> dict[str, int]:
+    by_prompt_source: dict[str, set[str]] = defaultdict(set)
+    for row in metadata:
+        prompt_id = str(row.get("shared_prompt_id", ""))
+        source_name = str(row.get("dataset_source", ""))
+        if prompt_id and source_name:
+            by_prompt_source[prompt_id].add(source_name)
+
+    counts: dict[str, int] = defaultdict(int)
+    for source_names in by_prompt_source.values():
+        if reference_source not in source_names:
+            continue
+        for source_name in source_names:
+            if source_name != reference_source:
+                counts[source_name] += 1
+    return dict(counts)
+
+
 def _labels_status(path: Path, expected_count: int) -> tuple[list[str] | None, bool]:
     if not path.exists():
         return None, False
@@ -524,7 +717,8 @@ def _label_selected_extremes(
         return {}
 
     selected_extremes = [extremes_by_factor[idx] for idx in selected_factor_indices]
-    labels_path = output_dir / "selected_factor_extremes_labels.json"
+    selection_slug = _selected_factor_slug(selected_factor_indices)
+    labels_path = output_dir / f"selected_factor_extremes_labels_{selection_slug}.json"
     labels, complete = _labels_status(labels_path, len(selected_extremes))
     if not complete and LABEL_FACTORS:
         labels = label_factors(
@@ -553,7 +747,11 @@ def _label_selected_max_spread(
         return {}
 
     selected_max_spread = [max_spread_by_factor[idx] for idx in selected_factor_indices]
-    labels_path = output_dir / f"selected_factor_max_spread_{MAX_SPREAD_LABEL_STRATEGY}_labels.json"
+    selection_slug = _selected_factor_slug(selected_factor_indices)
+    labels_path = (
+        output_dir
+        / f"selected_factor_max_spread_{MAX_SPREAD_LABEL_STRATEGY}_labels_{selection_slug}.json"
+    )
     labels, complete = _labels_status(labels_path, len(selected_max_spread))
     if not complete and LABEL_FACTORS:
         labels = label_max_spread_factors(
@@ -653,7 +851,7 @@ def _plot_source_separation(
         },
     )
     fig.update_xaxes(tickangle=45)
-    _save_plot_html(fig, output_dir, "factor_source_separation.html")
+    _save_plot_figure(fig, output_dir, "factor_source_separation.html")
 
     fig2 = px.bar(
         plot_df,
@@ -668,7 +866,315 @@ def _plot_source_separation(
         },
     )
     fig2.update_xaxes(tickangle=45)
-    _save_plot_html(fig2, output_dir, "factor_source_global_effects.html")
+    _save_plot_figure(fig2, output_dir, "factor_source_global_effects.html")
+
+
+def _factor_distribution_dir(output_dir: Path) -> Path:
+    return output_dir / "factor_source_distributions_png"
+
+
+def _plot_factor_source_distributions(
+    scores: np.ndarray,
+    metadata: list[dict],
+    source_rows: list[dict],
+    factor_labels: dict[int, str],
+    output_dir: Path,
+) -> None:
+    if not EXPORT_FACTOR_DISTRIBUTION_PNGS or not source_rows:
+        return
+
+    distribution_root = _factor_distribution_dir(output_dir)
+    distribution_root.mkdir(parents=True, exist_ok=True)
+
+    source_names = np.array([str(row.get("dataset_source", "")) for row in metadata], dtype=object)
+    rows_by_source: dict[str, list[dict]] = defaultdict(list)
+    for row in source_rows:
+        rows_by_source[str(row["comparison_source"])].append(row)
+
+    colors = {
+        REFERENCE_SOURCE_NAME: "#4c78a8",
+        "comparison": "#e45756",
+    }
+
+    for comparison_source, rows in rows_by_source.items():
+        comparison_dir = distribution_root / f"{comparison_source}_vs_{REFERENCE_SOURCE_NAME}"
+        comparison_dir.mkdir(parents=True, exist_ok=True)
+
+        source_mask = source_names == comparison_source
+        ref_mask = source_names == REFERENCE_SOURCE_NAME
+        if not np.any(source_mask) or not np.any(ref_mask):
+            continue
+
+        n_cols = FACTOR_DISTRIBUTION_GRID_COLS
+        n_rows = int(np.ceil(len(rows) / n_cols))
+        fig_grid, axes = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(4.2 * n_cols, 2.9 * n_rows),
+            squeeze=False,
+        )
+        axes_flat = axes.flatten()
+
+        for plot_idx, row in enumerate(rows):
+            factor_idx = int(row["factor_index"])
+            factor_scores = scores[:, factor_idx]
+            source_scores = factor_scores[source_mask]
+            ref_scores = factor_scores[ref_mask]
+            combined = np.concatenate([source_scores, ref_scores])
+            bins = np.histogram_bin_edges(combined, bins=FACTOR_DISTRIBUTION_BINS)
+            label = factor_labels.get(factor_idx, "")
+            short_label = label.splitlines()[0][:52] if label else ""
+
+            ax = axes_flat[plot_idx]
+            ax.hist(
+                ref_scores,
+                bins=bins,
+                density=True,
+                histtype="step",
+                linewidth=1.8,
+                color=colors[REFERENCE_SOURCE_NAME],
+                label=REFERENCE_SOURCE_NAME,
+            )
+            ax.hist(
+                source_scores,
+                bins=bins,
+                density=True,
+                histtype="step",
+                linewidth=1.8,
+                color=colors["comparison"],
+                label=comparison_source,
+            )
+            ax.axvline(
+                ref_scores.mean(),
+                color=colors[REFERENCE_SOURCE_NAME],
+                linestyle="--",
+                linewidth=1.1,
+            )
+            ax.axvline(
+                source_scores.mean(),
+                color=colors["comparison"],
+                linestyle="--",
+                linewidth=1.1,
+            )
+            ax.set_title(
+                f"F{factor_idx:03d} d={float(row['global_cohens_d']):+.2f} "
+                f"dz={float(row['paired_prompt_dz']):+.2f}\n{short_label}",
+                fontsize=9,
+            )
+            ax.set_xlabel("Factor score")
+            ax.set_ylabel("Density")
+            ax.grid(alpha=0.2, linewidth=0.5)
+
+            fig_single, ax_single = plt.subplots(figsize=(8.2, 4.8))
+            ax_single.hist(
+                ref_scores,
+                bins=bins,
+                density=True,
+                histtype="stepfilled",
+                linewidth=1.3,
+                alpha=0.22,
+                color=colors[REFERENCE_SOURCE_NAME],
+                label=f"{REFERENCE_SOURCE_NAME} (n={len(ref_scores)})",
+            )
+            ax_single.hist(
+                source_scores,
+                bins=bins,
+                density=True,
+                histtype="stepfilled",
+                linewidth=1.3,
+                alpha=0.22,
+                color=colors["comparison"],
+                label=f"{comparison_source} (n={len(source_scores)})",
+            )
+            ax_single.axvline(
+                ref_scores.mean(),
+                color=colors[REFERENCE_SOURCE_NAME],
+                linestyle="--",
+                linewidth=1.4,
+            )
+            ax_single.axvline(
+                source_scores.mean(),
+                color=colors["comparison"],
+                linestyle="--",
+                linewidth=1.4,
+            )
+            title = label.splitlines()[0] if label else f"Factor {factor_idx:03d}"
+            ax_single.set_title(
+                f"Factor {factor_idx:03d}: {title}\n"
+                f"{comparison_source} vs {REFERENCE_SOURCE_NAME} | "
+                f"Cohen's d={float(row['global_cohens_d']):+.3f} | "
+                f"paired dz={float(row['paired_prompt_dz']):+.3f} | "
+                f"pairable prompts={int(row['num_pairable_prompts'])}"
+            )
+            ax_single.set_xlabel("Factor score")
+            ax_single.set_ylabel("Density")
+            ax_single.legend(frameon=False)
+            ax_single.grid(alpha=0.25, linewidth=0.5)
+            fig_single.tight_layout()
+            single_path = comparison_dir / f"factor_{factor_idx:03d}_distribution.png"
+            fig_single.savefig(single_path, dpi=180, bbox_inches="tight")
+            plt.close(fig_single)
+
+        for ax in axes_flat[len(rows):]:
+            ax.axis("off")
+
+        handles, legend_labels = axes_flat[0].get_legend_handles_labels()
+        fig_grid.legend(handles, legend_labels, loc="upper center", ncol=2, frameon=False)
+        fig_grid.suptitle(
+            f"Per-factor source distributions: {comparison_source} vs {REFERENCE_SOURCE_NAME}",
+            y=0.995,
+        )
+        fig_grid.tight_layout(rect=(0, 0, 1, 0.965))
+        grid_path = comparison_dir / "all_factor_distributions.png"
+        fig_grid.savefig(grid_path, dpi=180, bbox_inches="tight")
+        plt.close(fig_grid)
+        print(f"Saved factor distribution PNGs: {comparison_dir}")
+
+
+def _bundle_run_flags() -> list[str]:
+    run_flags: list[str] = []
+    for residualise_embeddings in RUN_RESIDUALISED:
+        run_flag = "residualised" if residualise_embeddings else "non_residualised"
+        if _factor_output_dir(run_flag).exists():
+            run_flags.append(run_flag)
+    return run_flags
+
+
+def _collect_bundle_file_entries(root_dir: Path, run_flags: list[str]) -> list[tuple[Path, str]]:
+    allowed_suffixes = {".html", ".json", ".jsonl", ".npz", ".png"}
+    excluded_names = {"README.md", "bundle_manifest.json"}
+    entries: list[tuple[Path, str]] = []
+    seen_arc_paths: set[str] = set()
+
+    for run_flag in run_flags:
+        run_dir = root_dir / run_flag
+        if not run_dir.exists():
+            continue
+        for file_path in sorted(run_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in allowed_suffixes:
+                continue
+            if file_path.name in excluded_names:
+                continue
+            arcname = file_path.relative_to(root_dir).as_posix()
+            if arcname in seen_arc_paths:
+                continue
+            seen_arc_paths.add(arcname)
+            entries.append((file_path, arcname))
+
+    if SHARE_BUNDLE_INCLUDE_SOURCE:
+        for source_path in SHARE_BUNDLE_SOURCE_FILES:
+            resolved = Path(source_path).resolve()
+            arcname = f"source/{resolved.name}"
+            if arcname in seen_arc_paths:
+                continue
+            seen_arc_paths.add(arcname)
+            entries.append((resolved, arcname))
+
+    return entries
+
+
+def _build_share_bundle_readme(root_dir: Path, run_flags: list[str], bundle_entries: list[tuple[Path, str]]) -> str:
+    generated_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    conditions_text = "\n".join(
+        f"- `{condition.name}`: `{condition.response_run_id}`"
+        for condition in ALL_CONDITIONS
+    )
+    run_flags_text = "\n".join(f"- `{run_flag}`" for run_flag in run_flags)
+    source_text = "\n".join(
+        f"- `{arcname}`"
+        for _, arcname in bundle_entries
+        if arcname.startswith("source/")
+    ) or "- None"
+
+    return f"""# Prompted Trait Sanity Check Share Bundle
+Generated: {generated_at}
+
+## Summary
+This bundle packages the outputs from `prompted_trait_sanity_check.py` for the prompted-trait sanity-check experiment. It includes the generated report artifacts, static PNG snapshots of chart-style plots, and the canonical source file used to produce the run.
+
+## Source Conditions
+{conditions_text}
+
+Embedding model: `{EMBEDDING_MODEL}`
+Embedding artifact slug: `{EMBEDDING_ARTIFACT_SLUG}`
+Factor analysis: `{FA_METHOD}` with `{FA_ROTATION}` rotation, `N_FACTORS={N_FACTORS}`
+Included passes:
+{run_flags_text}
+
+## Reading the Results
+- `paired_prompt_dz`: within-prompt effect size. Positive values mean the comparison source tends to score higher than `{REFERENCE_SOURCE_NAME}` on the same prompt.
+- `global_cohens_d`: overall distribution separation between the comparison source and `{REFERENCE_SOURCE_NAME}` on a factor.
+- HTML files are interactive viewers.
+- PNG files are static snapshots of chart-style plots for sharing.
+- JSON and JSONL files contain the raw summaries, labels, and selected examples used by the viewers.
+
+## Bundle Layout
+- `non_residualised/` and `residualised/`: report artifacts for each configured pass
+- `source/`: copied source files for reproducibility
+- `bundle_manifest.json`: machine-readable inventory of the bundle contents
+
+## Included Source Files
+{source_text}
+
+## Notes
+- HTML table viewers are included as HTML/JSONL only; they are not rasterized into PNGs.
+- Existing matplotlib PNG exports (for factor source distributions) are included unchanged.
+- Plotly chart PNGs are exported via `kaleido`.
+"""
+
+
+def _build_share_bundle_manifest(root_dir: Path, run_flags: list[str], bundle_entries: list[tuple[Path, str]]) -> dict:
+    return {
+        "generated_at": datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "visualisation_label": VISUALISATION_LABEL,
+        "visualisation_slug": VISUALISATION_SLUG,
+        "visualisation_root": str(root_dir),
+        "run_flags": run_flags,
+        "reference_source": REFERENCE_SOURCE_NAME,
+        "response_runs": [
+            {"name": condition.name, "response_run_id": condition.response_run_id}
+            for condition in ALL_CONDITIONS
+        ],
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_artifact_slug": EMBEDDING_ARTIFACT_SLUG,
+        "factor_analysis": {
+            "n_factors": N_FACTORS,
+            "method": FA_METHOD,
+            "rotation": FA_ROTATION,
+        },
+        "source_files": [
+            arcname for _, arcname in bundle_entries if arcname.startswith("source/")
+        ],
+        "files": [arcname for _, arcname in bundle_entries],
+    }
+
+
+def _write_share_bundle() -> Path | None:
+    if not RUN_SHARE_BUNDLE:
+        return None
+
+    root_dir = _visualisation_root_dir()
+    run_flags = _bundle_run_flags()
+    bundle_entries = _collect_bundle_file_entries(root_dir, run_flags)
+    if not run_flags or not bundle_entries:
+        print("No share bundle written: no report artifacts found.")
+        return None
+
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    zip_path = root_dir / f"{VISUALISATION_SLUG}_share_{timestamp}.zip"
+    readme = _build_share_bundle_readme(root_dir, run_flags, bundle_entries)
+    manifest = _build_share_bundle_manifest(root_dir, run_flags, bundle_entries)
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.md", readme)
+        zf.writestr("bundle_manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+        for file_path, arcname in bundle_entries:
+            zf.write(file_path, arcname)
+
+    print(f"Share bundle written to {zip_path}")
+    return zip_path
 
 
 def _export_selected_extremes(
@@ -832,6 +1338,17 @@ def _run_visualisation_pass(
         f"[{run_flag}] Filtered {removed} short responses (<{MIN_RESPONSE_CHARS} chars); "
         f"{len(filtered_metadata)} remain"
     )
+    pairable_counts = _pairable_prompt_counts(
+        filtered_metadata,
+        reference_source=REFERENCE_SOURCE_NAME,
+    )
+    if pairable_counts:
+        prompt_counts_str = ", ".join(
+            f"{source_name}={count}" for source_name, count in sorted(pairable_counts.items())
+        )
+        print(f"[{run_flag}] Pairable prompts vs {REFERENCE_SOURCE_NAME}: {prompt_counts_str}")
+    else:
+        print(f"[{run_flag}] Pairable prompts vs {REFERENCE_SOURCE_NAME}: none")
 
     counts_rows = []
     counts_by_source: dict[str, int] = defaultdict(int)
@@ -845,7 +1362,7 @@ def _run_visualisation_pass(
         y="count",
         title=f"Responses retained after filtering ({run_flag})",
     )
-    _save_plot_html(counts_fig, output_dir, f"retained_responses_{run_flag}.html")
+    _save_plot_figure(counts_fig, output_dir, f"retained_responses_{run_flag}.html")
 
     residuals, _, _ = residualize(
         filtered_embeddings,
@@ -882,7 +1399,7 @@ def _run_visualisation_pass(
         title=f"Factor loadings ({run_flag})",
         labels={"x": "Factor", "y": "Dimension"},
     )
-    _save_plot_html(loadings_fig, output_dir, f"factor_loadings_{run_flag}.html")
+    _save_plot_figure(loadings_fig, output_dir, f"factor_loadings_{run_flag}.html")
 
     var_fig = go.Figure(go.Bar(x=list(range(N_FACTORS)), y=fa["proportion_variance"]))
     var_fig.update_layout(
@@ -890,7 +1407,7 @@ def _run_visualisation_pass(
         xaxis_title="Factor",
         yaxis_title="Proportion variance",
     )
-    _save_plot_html(var_fig, output_dir, f"variance_explained_{run_flag}.html")
+    _save_plot_figure(var_fig, output_dir, f"variance_explained_{run_flag}.html")
 
     source_rows = _compute_source_separation(
         scores,
@@ -942,6 +1459,7 @@ def _run_visualisation_pass(
 
     _export_source_separation_summary(source_rows, merged_labels, output_dir)
     _plot_source_separation(selected_rows, merged_labels, output_dir)
+    _plot_factor_source_distributions(scores, filtered_metadata, source_rows, merged_labels, output_dir)
     _export_selected_extremes(
         extremes_by_factor,
         selected_factor_indices,
@@ -990,6 +1508,8 @@ def main() -> None:
             metadata,
             residualise_embeddings=residualise_embeddings,
         )
+
+    _write_share_bundle()
 
 
 if __name__ == "__main__":
