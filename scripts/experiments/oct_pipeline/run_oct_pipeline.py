@@ -192,43 +192,55 @@ def patch_oct_constants(
                 setattr(mod, attr, getattr(character.constants, attr))
 
 
-# Now import OCT submodules
-import character.distillation.teacher as oct_teacher
-import character.distillation.student as oct_student
-import character.introspection.self_reflection as oct_reflection
-import character.introspection.self_interaction as oct_interaction
+# OCT submodules and vllm are only needed for data generation (teacher/student/introspection).
+# Import them lazily so training-only runs work without vllm installed.
+oct_teacher = None
+oct_student = None
+oct_reflection = None
+oct_interaction = None
+
 from character.constants import MODEL_PATH
 
-# ---------------------------------------------------------------------------
-# vllm compat patches for OpenCharacterTraining (tested with vllm ≥0.7 / 0.17)
-#
-# Fix 1 — LLM(task=...) removed: vllm ≥0.7 dropped the `task` kwarg from
-#   LLM / EngineArgs. Patch LLM.__init__ to silently strip it. Patching the
-#   class object propagates to all OCT modules that imported LLM by reference.
-#
-# Fix 2 — SamplingParams(truncate_prompt_tokens=...) removed: vllm ≥0.17
-#   dropped this kwarg. SamplingParams is a msgspec.Struct (C extension) so
-#   __init__ cannot be patched directly; instead replace the SamplingParams
-#   name in each OCT module that calls it inside a function.
-# ---------------------------------------------------------------------------
-import vllm as _vllm
 
-# Fix 1
-_orig_llm_init = _vllm.LLM.__init__
-def _patched_llm_init(self, *args, **kwargs):
-    kwargs.pop("task", None)
-    _orig_llm_init(self, *args, **kwargs)
-_vllm.LLM.__init__ = _patched_llm_init
+def _ensure_vllm_imports() -> None:
+    """Import OCT vllm-dependent submodules and apply compat patches.
 
-# Fix 2
-def _safe_sampling_params(sp_class):
-    def _wrapper(*args, **kwargs):
-        kwargs.pop("truncate_prompt_tokens", None)
-        return sp_class(*args, **kwargs)
-    return _wrapper
+    Called lazily only when data generation is required.
 
-oct_reflection.SamplingParams = _safe_sampling_params(oct_reflection.SamplingParams)
-oct_interaction.SamplingParams = _safe_sampling_params(oct_interaction.SamplingParams)
+    vllm compat patches:
+      Fix 1 — LLM(task=...) removed in vllm ≥0.7: strip the kwarg silently.
+      Fix 2 — SamplingParams(truncate_prompt_tokens=...) removed in vllm ≥0.17:
+               replace SamplingParams in each OCT module with a wrapper that drops it.
+    """
+    global oct_teacher, oct_student, oct_reflection, oct_interaction
+
+    import character.distillation.teacher as _oct_teacher
+    import character.distillation.student as _oct_student
+    import character.introspection.self_reflection as _oct_reflection
+    import character.introspection.self_interaction as _oct_interaction
+    import vllm as _vllm
+
+    # Fix 1
+    _orig_llm_init = _vllm.LLM.__init__
+    def _patched_llm_init(self, *args, **kwargs):
+        kwargs.pop("task", None)
+        _orig_llm_init(self, *args, **kwargs)
+    _vllm.LLM.__init__ = _patched_llm_init
+
+    # Fix 2
+    def _safe_sampling_params(sp_class):
+        def _wrapper(*args, **kwargs):
+            kwargs.pop("truncate_prompt_tokens", None)
+            return sp_class(*args, **kwargs)
+        return _wrapper
+
+    _oct_reflection.SamplingParams = _safe_sampling_params(_oct_reflection.SamplingParams)
+    _oct_interaction.SamplingParams = _safe_sampling_params(_oct_interaction.SamplingParams)
+
+    oct_teacher = _oct_teacher
+    oct_student = _oct_student
+    oct_reflection = _oct_reflection
+    oct_interaction = _oct_interaction
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +511,7 @@ def run_distillation_generation(
     Returns:
         Path to the distillation JSONL file.
     """
+    _ensure_vllm_imports()
     import character.constants as _cc
     ensure_lima_stubs(_cc.MODEL_PATH)
     distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
@@ -714,6 +727,7 @@ def run_dpo_training(
         remove_unused_columns=False,
         report_to="none",
         precompute_ref_log_probs=True,
+        gradient_checkpointing=True,
     )
 
     trainer = DPOTrainer(
@@ -777,6 +791,8 @@ def run_introspection_generation(
             f"DPO adapter not found at {lora_path}. "
             "Run distillation + DPO training first (stages 1-2)."
         )
+
+    _ensure_vllm_imports()
 
     # Self-reflection
     print(f"\n--- Self-reflection (N={n_reflection}) ---")
