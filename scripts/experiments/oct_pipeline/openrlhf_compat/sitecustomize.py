@@ -28,6 +28,7 @@ def _patch_openrlhf_optimizer_grouping() -> None:
 
     try:
         from openrlhf.utils.deepspeed import deepspeed_utils
+        from openrlhf.utils.deepspeed import deepspeed as deepspeed_module
     except Exception:
         return
 
@@ -59,6 +60,7 @@ def _patch_openrlhf_optimizer_grouping() -> None:
 
     patched_get_optimizer_grouped_parameters._persona_shattering_patched = True  # type: ignore[attr-defined]
     deepspeed_utils.get_optimizer_grouped_parameters = patched_get_optimizer_grouped_parameters
+    deepspeed_module.get_optimizer_grouped_parameters = patched_get_optimizer_grouped_parameters
 
 
 _patch_openrlhf_optimizer_grouping()
