@@ -26,7 +26,7 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from scripts_dev.rollout_experiments.sweep import (
+from src_dev.sweep import (
     ExperimentConfig,
     OutputPathConfig,
     SweepConfig,

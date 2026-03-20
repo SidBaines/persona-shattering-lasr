@@ -21,7 +21,7 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from scripts_dev.rollout_experiments.sweep import (
+from src_dev.sweep import (
     OutputPathConfig,
     download_rollouts_from_hf,
     upload_evals_to_hf,

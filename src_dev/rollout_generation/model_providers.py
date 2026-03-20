@@ -84,15 +84,21 @@ def _resolve_adapter_to_local(adapter: str) -> str:
     if Path(repo_id).exists():
         # Already a local path
         return repo_id if subfolder is None else str(Path(repo_id) / subfolder)
-    # HF repo — download as dataset repo (the common case for this project)
+    # HF repo — try dataset repo first (common case), fall back to model repo
     from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import RepositoryNotFoundError
     allow_patterns = [f"{subfolder}/**"] if subfolder else None
-    local_dir = snapshot_download(
-        repo_id=repo_id,
-        repo_type="dataset",
-        allow_patterns=allow_patterns,
-    )
-    return local_dir if subfolder is None else str(Path(local_dir) / subfolder)
+    for repo_type in ("dataset", "model"):
+        try:
+            local_dir = snapshot_download(
+                repo_id=repo_id,
+                repo_type=repo_type,
+                allow_patterns=allow_patterns,
+            )
+            return local_dir if subfolder is None else str(Path(local_dir) / subfolder)
+        except RepositoryNotFoundError:
+            continue
+    raise RuntimeError(f"Could not find HF repo {repo_id!r} as dataset or model")
 
 
 def _load_base_model(
@@ -551,9 +557,32 @@ class VLLMLoRaScaleProvider(ModelProvider):
 
     def _bake_all_adapters(self) -> None:
         """Load PEFT model, bake all scale variants to disk, then free GPU memory."""
+        import shutil
+
         from src.utils.lora_baking import bake_lora_scale
 
         self._baked_adapters_dir.mkdir(parents=True, exist_ok=True)
+
+        # Estimate disk requirement: one adapter size × number of unbaked variants.
+        n_to_bake = sum(
+            1 for scale in self._scale_points
+            if not (self._baked_adapters_dir / self.variant_label(str(scale))).exists()
+        )
+        if n_to_bake > 0:
+            local_adapter_path = _resolve_adapter_to_local(self._adapter)
+            adapter_size = sum(
+                f.stat().st_size for f in Path(local_adapter_path).rglob("*") if f.is_file()
+            )
+            required = adapter_size * n_to_bake
+            free = shutil.disk_usage(self._baked_adapters_dir).free
+            if required > free * 0.9:
+                raise RuntimeError(
+                    f"Insufficient disk space to bake {n_to_bake} adapter variants: "
+                    f"need ~{required / 1e9:.1f}GB, have {free / 1e9:.1f}GB free at "
+                    f"{self._baked_adapters_dir}. Consider pointing baked_adapters_dir "
+                    f"to a volume with more space."
+                )
+
         model, _tokenizer = _load_peft_model(
             self._base_model, self._adapter, self._adapter_name, self._dtype
         )

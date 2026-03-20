@@ -25,12 +25,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[2]
+project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from scripts_dev.rollout_experiments.sweep import (
+from src_dev.sweep import (
     ExperimentConfig,
     OutputPathConfig,
     SweepConfig,
@@ -78,7 +78,7 @@ def run_adapter(name: str, adapter_path: str) -> Path:
         base_model=BASE_MODEL,
         adapter=adapter_path,
         scale_points=SCALE_POINTS,
-        baked_adapters_dir=Path("scratch/baked_adapters") / f"neuroticism_{name}",
+        baked_adapters_dir=Path("/workspace/baked_adapters") / f"neuroticism_{name}",
         temperature=EXPERIMENT_CONFIG.assistant_temperature,
         top_p=EXPERIMENT_CONFIG.assistant_top_p,
         max_new_tokens=EXPERIMENT_CONFIG.assistant_max_new_tokens,

@@ -2,86 +2,85 @@
 
 Multi-phase assistant↔user rollout generation and LoRA scale sweeps.
 
-## LoRA Scale Sweep
+## Structure
 
-`lora_scale_sweep.py` runs a grid of `(scale_point, condition)` cells — each cell generates rollouts and evaluates persona metrics — while loading the model only once.
+| Path | Purpose |
+|------|---------|
+| `sweep.py` | Shim re-exporting from `src_dev.sweep` (backward compat) |
+| `neuroticism/` | Neuroticism LoRA scale sweep — see [neuroticism/README.md](neuroticism/README.md) |
+| `t_frequency/` | t-frequency toy persona sweep (older experiment) |
 
-### Providers
+Core sweep infrastructure lives in [`src_dev/sweep.py`](../../src_dev/sweep.py). Import from there directly:
 
-Two backends are available: `local` (HuggingFace transformers) and `vllm`.
+## LoRA Scale Sweep API
 
-| | `local` | `vllm` |
-|---|---|---|
-| **How it scales** | Mutates `module.scaling` in-place between cells | Pre-bakes one adapter per scale point on disk, swaps `LoRARequest` between cells |
-| **Throughput** | Baseline | ~1.2–2× faster depending on batch size |
-| **Overhead** | None | Model loaded twice (once for baking, once for vLLM engine); adapter baking takes ~30s per scale point |
-| **Sweet spot** | Small sweeps, quick iteration, <50 samples/cell | Large sweeps (many scale points × conditions × samples) where inference dominates |
-| **Breakeven** | — | ~50–100 samples/cell; below that, per-cell overhead dilutes the speedup |
-
-The vLLM speedup scales with samples per cell: at 100 samples/cell we see ~1.2×; at the batch sizes used in production sweeps (100 samples × 3 rollouts) expect ~1.5–2×.
-
-### Usage: local provider
+The current API uses `SweepConfig` + `run_sweep` with a `ModelProvider` for the sweep dimension.
 
 ```python
-from scripts.experiments.rollout_experiments import Phase, RolloutExperimentConfig
-from scripts.experiments.rollout_experiments.lora_scale_sweep import (
-    RolloutSweepCondition, RolloutSweepConfig, ScaleSweep, run_rollout_sweep,
+from src_dev.sweep import (
+    ExperimentConfig, OutputPathConfig, SweepConfig, run_sweep, single_turn_conditions,
 )
+from src_dev.rollout_generation.model_providers import VLLMLoRaScaleProvider
 
-config = RolloutSweepConfig(
+provider = VLLMLoRaScaleProvider(
     base_model="meta-llama/Llama-3.1-8B-Instruct",
-    adapter="persona-shattering-lasr/my-adapter::adapter",
-    sweep=ScaleSweep(min=-2.0, max=2.0, step=1.0),
-    conditions=[
-        RolloutSweepCondition(name="no_prompt", phases=[Phase(num_turns=1)]),
-        RolloutSweepCondition(name="with_prompt", phases=[Phase(num_turns=1, assistant_system_prompt="...")]),
-    ],
-    evaluations=["count_t"],
-    rollout=RolloutExperimentConfig(
-        scratch_dir=Path("scratch/runs/my_sweep"),
+    adapter="org/repo::path/to/adapter",   # dataset repo with :: subfolder syntax
+    scale_points=[round(x * 0.25, 2) for x in range(-8, 9)],
+    baked_adapters_dir=Path("/workspace/baked_adapters/my_adapter"),
+    temperature=0.7,
+    top_p=0.95,
+    max_new_tokens=256,
+)
+
+config = SweepConfig(
+    provider=provider,
+    conditions=single_turn_conditions({"no_prompt": None}),
+    evaluations=[],
+    experiment=ExperimentConfig(
         assistant_model="meta-llama/Llama-3.1-8B-Instruct",
-        assistant_provider="local",
-        assistant_batch_size=32,
-        dataset_path="datasets/assistant-axis-extraction-questions.jsonl",
-        max_samples=100,
-        num_rollouts=3,
-    ),
-    output_root=Path("scratch/runs/my_sweep"),
-)
-run_rollout_sweep(config)
-```
-
-### Usage: vLLM provider
-
-Add `vllm=VllmProviderConfig(...)` and change `assistant_provider="vllm"`, then call `run_rollout_sweep_vllm`:
-
-```python
-from scripts.inference.config import VllmProviderConfig
-from scripts.experiments.rollout_experiments.lora_scale_sweep import (
-    run_rollout_sweep_vllm,
-    # ... same imports as above
-)
-
-config = RolloutSweepConfig(
-    # ... same as above, but:
-    rollout=RolloutExperimentConfig(
         assistant_provider="vllm",
-        # assistant_batch_size is ignored by vLLM (it self-batches)
-        ...
+        assistant_temperature=0.7,
+        assistant_top_p=0.95,
+        assistant_max_new_tokens=256,
+        assistant_batch_size=32,
+        dataset_path="data/assistant-axis-extraction-questions.jsonl",
+        max_samples=100,
+        num_rollouts=1,
+        turns_per_phase=[1],
     ),
-    vllm=VllmProviderConfig(
-        dtype="bfloat16",
-        gpu_memory_utilization=0.85,
+    output=OutputPathConfig(
+        scratch_root=Path("scratch/runs"),
+        base_model="llama-3.1-8B-Instruct",
+        category="OCEAN",
+        trait="my_trait",
+        training_run="my_adapter",
+        eval_name="my_sweep",
     ),
+    skip_completed=True,
+    skip_evals=True,
+    on_cell_error="warn",
 )
-run_rollout_sweep_vllm(config)
+
+output_root = run_sweep(config)
 ```
 
-The vLLM sweep writes pre-baked adapters to `output_root/_baked_adapters/` (one per scale point). These are reused if the directory already exists, so re-running after a partial failure is fast.
+### Key behaviours
 
-### When to use vLLM
+- **`skip_completed=True`** — skips cells with a local `run_info.json` with `status=ok`; safe to resume after interruption
+- **Adapter resolution** — `org/repo::subfolder` tries dataset repo first, falls back to model repo
+- **Disk check** — `VLLMLoRaScaleProvider` estimates required disk space before baking and raises early if insufficient
+- **User simulator fields** — optional in `ExperimentConfig`; only required for multi-turn conditions
 
-- **Use `local`** for: quick exploratory sweeps, small grids (≤5 scale points), low sample counts (<50/cell), or when you need exact in-place scaling semantics.
-- **Use `vllm`** for: production sweeps with many scale points × conditions × rollouts where inference throughput is the bottleneck. The 5h sweep mentioned in the session notes is the primary target.
+### Inspecting rollouts (TUI)
 
-See `o_frequency_lora_sweep.py` and `t_frequency_lora_sweep.py` for concrete examples using the local provider.
+`rollouts.jsonl` has `messages` as a dict keyed by rollout index. Flatten before passing to the TUI:
+
+```bash
+python3 -c "
+import json, sys
+for line in open(sys.argv[1]):
+    d = json.loads(line); d['conversation'] = d['messages']['0']; print(json.dumps(d))
+" path/to/rollouts.jsonl > /tmp/flat.jsonl
+
+uv run python -m src_dev.jsonl_tui.cli /tmp/flat.jsonl --conversation-field conversation
+```
