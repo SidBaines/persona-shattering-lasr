@@ -60,7 +60,10 @@ def upload_file_to_dataset_repo(
 
     _configure_timeout()
     api = HfApi(token=_get_token())
-    api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+    try:
+        api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+    except Exception:
+        pass  # repo already exists
     api.upload_file(
         path_or_fileobj=str(local_path),
         path_in_repo=path_in_repo,
@@ -97,7 +100,10 @@ def upload_folder_to_dataset_repo(
 
     _configure_timeout()
     api = HfApi(token=_get_token())
-    api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+    try:
+        api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+    except Exception:
+        pass  # repo already exists
     api.upload_folder(
         folder_path=str(local_dir),
         path_in_repo=path_in_repo,
