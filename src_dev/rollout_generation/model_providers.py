@@ -71,6 +71,30 @@ def _parse_adapter_ref(adapter: str) -> tuple[str, str | None]:
     return adapter, None
 
 
+def _resolve_adapter_to_local(adapter: str) -> str:
+    """Resolve an adapter reference to a local directory path.
+
+    If the adapter is stored in a HuggingFace *dataset* repo (``repo_id::subfolder``
+    format), downloads it via ``snapshot_download`` with ``repo_type="dataset"``
+    and returns the local snapshot path containing the adapter files.
+
+    Plain local paths and ``local://`` paths are returned unchanged.
+    """
+    repo_id, subfolder = _parse_adapter_ref(adapter)
+    if Path(repo_id).exists():
+        # Already a local path
+        return repo_id if subfolder is None else str(Path(repo_id) / subfolder)
+    # HF repo — download as dataset repo (the common case for this project)
+    from huggingface_hub import snapshot_download
+    allow_patterns = [f"{subfolder}/**"] if subfolder else None
+    local_dir = snapshot_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        allow_patterns=allow_patterns,
+    )
+    return local_dir if subfolder is None else str(Path(local_dir) / subfolder)
+
+
 def _load_base_model(
     base_model: str,
     dtype: str,
@@ -113,21 +137,14 @@ def _load_peft_model(
     if torch_dtype is None:
         raise ValueError(f"Unsupported dtype: {dtype!r}")
 
-    adapter_ref, subfolder = _parse_adapter_ref(adapter)
+    local_adapter_path = _resolve_adapter_to_local(adapter)
 
     print(f"  loading base model: {base_model}", flush=True)
     base = AutoModelForCausalLM.from_pretrained(
         base_model, torch_dtype=torch_dtype, device_map="auto"
     )
-    print(
-        f"  loading adapter: {adapter_ref}"
-        + (f"  (subfolder={subfolder})" if subfolder else ""),
-        flush=True,
-    )
-    peft_kwargs: dict[str, Any] = {"adapter_name": adapter_name}
-    if subfolder:
-        peft_kwargs["subfolder"] = subfolder
-    peft_model = PeftModel.from_pretrained(base, adapter_ref, **peft_kwargs)
+    print(f"  loading adapter: {local_adapter_path}", flush=True)
+    peft_model = PeftModel.from_pretrained(base, local_adapter_path, adapter_name=adapter_name)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     tokenizer.padding_side = "left"
