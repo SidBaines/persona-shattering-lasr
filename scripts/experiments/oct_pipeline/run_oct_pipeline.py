@@ -1000,6 +1000,7 @@ def run_oct_dpo_training(
     """Train the DPO adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
     config = _oct_training_config_for_model(model)
+    attn_impl = _openrlhf_attn_implementation()
     dataset_path = format_dpo_data_for_oct_training(
         model_name_or_path=model_name_or_path,
         student_model=model,
@@ -1008,15 +1009,24 @@ def run_oct_dpo_training(
         max_pairs=max_pairs,
     )
     dataset_rows = _jsonl_row_count(dataset_path)
+    configured_micro_batch = config["dpo_micro_batch_size"]
+    if attn_impl == "eager":
+        configured_micro_batch = min(configured_micro_batch, 1)
     micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
         num_rows=dataset_rows,
-        micro_train_batch_size=config["dpo_micro_batch_size"],
+        micro_train_batch_size=configured_micro_batch,
         train_batch_size=32,
     )
+    use_gradient_checkpointing = attn_impl == "eager"
+    use_ref_offload = attn_impl == "eager"
     print(
         f"  OpenRLHF DPO batches: micro={micro_train_batch_size} train={train_batch_size} "
         f"(rows={dataset_rows})"
     )
+    if use_gradient_checkpointing:
+        print("  Enabling OpenRLHF gradient checkpointing for eager attention")
+    if use_ref_offload:
+        print("  Enabling OpenRLHF ref-model offload for eager attention")
 
     save_path.mkdir(parents=True, exist_ok=True)
     command = [
@@ -1058,7 +1068,7 @@ def run_oct_dpo_training(
         "--pretrain",
         model_name_or_path,
         "--attn_implementation",
-        _openrlhf_attn_implementation(),
+        attn_impl,
         "--dataset",
         str(dataset_path),
         "--chosen_key",
@@ -1073,6 +1083,10 @@ def run_oct_dpo_training(
         "--lora_alpha",
         str(lora_alpha),
     ]
+    if use_gradient_checkpointing:
+        command.append("--gradient_checkpointing")
+    if use_ref_offload:
+        command.append("--ref_offload")
     if config["target_modules"]:
         command.extend(["--target_modules", *config["target_modules"]])
 
@@ -1345,6 +1359,7 @@ def run_oct_sft_training(
     """Train the introspection adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
     config = _oct_training_config_for_model(model)
+    attn_impl = _openrlhf_attn_implementation()
 
     if not sft_data_path.exists():
         raise FileNotFoundError(
@@ -1358,15 +1373,21 @@ def run_oct_sft_training(
         )
 
     dataset_rows = _jsonl_row_count(sft_data_path)
+    configured_micro_batch = config["sft_micro_batch_size"]
+    if attn_impl == "eager":
+        configured_micro_batch = min(configured_micro_batch, 1)
     micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
         num_rows=dataset_rows,
-        micro_train_batch_size=config["sft_micro_batch_size"],
+        micro_train_batch_size=configured_micro_batch,
         train_batch_size=32,
     )
+    use_gradient_checkpointing = attn_impl == "eager"
     print(
         f"  OpenRLHF SFT batches: micro={micro_train_batch_size} train={train_batch_size} "
         f"(rows={dataset_rows})"
     )
+    if use_gradient_checkpointing:
+        print("  Enabling OpenRLHF gradient checkpointing for eager attention")
 
     save_path.mkdir(parents=True, exist_ok=True)
     command = [
@@ -1402,7 +1423,7 @@ def run_oct_sft_training(
         "--pretrain",
         str(distilled_model_path),
         "--attn_implementation",
-        _openrlhf_attn_implementation(),
+        attn_impl,
         "--dataset",
         str(sft_data_path),
         "--input_key",
@@ -1415,6 +1436,8 @@ def run_oct_sft_training(
         "--lora_alpha",
         str(lora_alpha),
     ]
+    if use_gradient_checkpointing:
+        command.append("--gradient_checkpointing")
     if config["target_modules"]:
         command.extend(["--target_modules", *config["target_modules"]])
 
