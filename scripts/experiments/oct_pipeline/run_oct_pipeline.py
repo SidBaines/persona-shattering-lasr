@@ -125,6 +125,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import hashlib
 import importlib.util
 import json
 import logging
@@ -132,6 +133,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import types
 import unicodedata
 # vllm v1 creates EngineCore in a subprocess; if CUDA was already initialized
@@ -151,6 +153,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+_STAGE_META_DIR = ".oct_pipeline"
+_RUN_CONFIG_FILENAME = "run_config.json"
 
 
 def _raise_missing_oct_package_error(exc: ModuleNotFoundError) -> None:
@@ -246,7 +251,6 @@ import character.distillation.teacher as oct_teacher
 import character.distillation.student as oct_student
 import character.introspection.self_reflection as oct_reflection
 import character.introspection.self_interaction as oct_interaction
-from character.constants import MODEL_PATH
 
 # ---------------------------------------------------------------------------
 # vllm compat patches for OpenCharacterTraining (tested with vllm ≥0.7 / 0.17)
@@ -810,7 +814,51 @@ def _run_openrlhf_training(command: list[str], stage_name: str) -> None:
     """Run an OpenRLHF/DeepSpeed training command."""
     print(f"  Launching {stage_name} via OpenRLHF:")
     print(f"    {' '.join(command)}")
-    subprocess.run(command, check=True)
+    env = os.environ.copy()
+
+    if not env.get("CUDA_HOME") and shutil.which("nvcc"):
+        nvcc_path = Path(shutil.which("nvcc") or "").resolve()
+        env["CUDA_HOME"] = str(nvcc_path.parent.parent)
+
+    env.setdefault("TORCH_EXTENSIONS_DIR", str(Path.home() / ".cache" / "torch_extensions"))
+
+    if importlib.util.find_spec("flash_attn") is None:
+        compat_root = Path(__file__).resolve().parent / "openrlhf_compat"
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            f"{compat_root}:{existing_pythonpath}" if existing_pythonpath else str(compat_root)
+        )
+        print(f"  Using flash_attn compatibility shim from {compat_root}")
+
+    subprocess.run(command, check=True, env=env)
+
+
+def _openrlhf_attn_implementation() -> str:
+    """Choose a safe OpenRLHF attention backend for this environment."""
+    return "flash_attention_2" if importlib.util.find_spec("flash_attn") is not None else "eager"
+
+
+def _jsonl_row_count(path: Path) -> int:
+    """Count non-empty JSONL rows."""
+    with path.open() as handle:
+        return sum(1 for line in handle if line.strip())
+
+
+def _choose_openrlhf_batch_sizes(
+    *,
+    num_rows: int,
+    micro_train_batch_size: int,
+    train_batch_size: int,
+) -> tuple[int, int]:
+    """Shrink OpenRLHF batch sizes so tiny smoke-test datasets still train."""
+    if num_rows <= 0:
+        raise ValueError("OpenRLHF dataset is empty; cannot choose batch sizes.")
+
+    effective_micro = min(micro_train_batch_size, num_rows)
+    effective_train = min(train_batch_size, num_rows)
+    if effective_train < effective_micro:
+        effective_train = effective_micro
+    return effective_micro, effective_train
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +869,7 @@ def run_dpo_training(
     model_name_or_path: str,
     records: list[dict],
     save_path: Path,
+    seed: int = 123456,
     lora_rank: int = 64,
     lora_alpha: int = 128,
     learning_rate: float = 5e-5,
@@ -887,6 +936,7 @@ def run_dpo_training(
     training_args = DPOConfig(
         output_dir=str(save_path),
         num_train_epochs=num_epochs,
+        seed=seed,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
@@ -938,6 +988,7 @@ def run_oct_dpo_training(
     model_name_or_path: str,
     constitution: str,
     save_path: Path,
+    seed: int = 123456,
     lora_rank: int = 64,
     lora_alpha: int = 128,
     learning_rate: float = 5e-5,
@@ -956,6 +1007,16 @@ def run_oct_dpo_training(
         max_length=max_len,
         max_pairs=max_pairs,
     )
+    dataset_rows = _jsonl_row_count(dataset_path)
+    micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
+        num_rows=dataset_rows,
+        micro_train_batch_size=config["dpo_micro_batch_size"],
+        train_batch_size=32,
+    )
+    print(
+        f"  OpenRLHF DPO batches: micro={micro_train_batch_size} train={train_batch_size} "
+        f"(rows={dataset_rows})"
+    )
 
     save_path.mkdir(parents=True, exist_ok=True)
     command = [
@@ -969,11 +1030,11 @@ def run_oct_dpo_training(
         "--max_ckpt_num",
         "1",
         "--micro_train_batch_size",
-        str(config["dpo_micro_batch_size"]),
+        str(micro_train_batch_size),
         "--train_batch_size",
-        "32",
+        str(train_batch_size),
         "--seed",
-        "123456",
+        str(seed),
         "--zero_stage",
         "2",
         "--bf16",
@@ -996,6 +1057,8 @@ def run_oct_dpo_training(
         str(num_epochs),
         "--pretrain",
         model_name_or_path,
+        "--attn_implementation",
+        _openrlhf_attn_implementation(),
         "--dataset",
         str(dataset_path),
         "--chosen_key",
@@ -1159,6 +1222,7 @@ def run_sft_training(
     model_name_or_path: str,
     sft_data_path: Path,
     save_path: Path,
+    seed: int = 123456,
     lora_rank: int = 64,
     lora_alpha: int = 128,
     learning_rate: float = 5e-5,
@@ -1229,6 +1293,7 @@ def run_sft_training(
     training_args = SFTConfig(
         output_dir=str(save_path),
         num_train_epochs=num_epochs,
+        seed=seed,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
@@ -1270,6 +1335,7 @@ def run_oct_sft_training(
     distilled_model_path: Path,
     sft_data_path: Path,
     save_path: Path,
+    seed: int = 123456,
     lora_rank: int = 64,
     lora_alpha: int = 128,
     learning_rate: float = 5e-5,
@@ -1291,6 +1357,17 @@ def run_oct_sft_training(
             "Fold the DPO adapter into a full model first."
         )
 
+    dataset_rows = _jsonl_row_count(sft_data_path)
+    micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
+        num_rows=dataset_rows,
+        micro_train_batch_size=config["sft_micro_batch_size"],
+        train_batch_size=32,
+    )
+    print(
+        f"  OpenRLHF SFT batches: micro={micro_train_batch_size} train={train_batch_size} "
+        f"(rows={dataset_rows})"
+    )
+
     save_path.mkdir(parents=True, exist_ok=True)
     command = [
         "deepspeed",
@@ -1303,13 +1380,13 @@ def run_oct_sft_training(
         "--max_ckpt_num",
         "1",
         "--micro_train_batch_size",
-        str(config["sft_micro_batch_size"]),
+        str(micro_train_batch_size),
         "--train_batch_size",
-        "32",
+        str(train_batch_size),
         "--zero_stage",
         "2",
         "--seed",
-        "123456",
+        str(seed),
         "--bf16",
         "--learning_rate",
         str(learning_rate),
@@ -1324,6 +1401,8 @@ def run_oct_sft_training(
         str(num_epochs),
         "--pretrain",
         str(distilled_model_path),
+        "--attn_implementation",
+        _openrlhf_attn_implementation(),
         "--dataset",
         str(sft_data_path),
         "--input_key",
@@ -1456,11 +1535,12 @@ def _check_gpu_memory(min_gib: float = 10.0) -> None:
 
 def _resolve_model_path(model: str) -> str:
     """Return the full filesystem path for a model name."""
-    full = f"{MODEL_PATH}/{model}"
+    model_path_root = _current_model_path()
+    full = f"{model_path_root}/{model}"
     if not os.path.isdir(full):
         raise FileNotFoundError(
             f"Model directory not found: {full}\n"
-            f"MODEL_PATH={MODEL_PATH}, model={model}\n"
+            f"MODEL_PATH={model_path_root}, model={model}\n"
             "Pass --model-path <parent_dir> or set OCT_MODEL_PATH to the directory "
             "that contains this model folder."
         )
@@ -1482,6 +1562,408 @@ def _print_sample(records: list[dict], n: int = 3) -> None:
         print(f"{'='*70}")
 
 
+def _current_model_path() -> str:
+    """Return the current OCT MODEL_PATH after any runtime patching."""
+    import character.constants as _cc
+
+    return _cc.MODEL_PATH
+
+
+def _sha256_text(text: str) -> str:
+    """Return the SHA-256 hex digest of text."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _canonical_json_dumps(payload: dict) -> str:
+    """Serialize JSON deterministically for hashing."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _custom_constitution_digest(path: str | None) -> str | None:
+    """Hash a custom constitution file so run identity follows its contents."""
+    if path is None:
+        return None
+    source = Path(path)
+    return _sha256_text(source.read_text())
+
+
+def _build_run_identity(
+    *,
+    model: str,
+    constitution: str,
+    teacher_model: str,
+    training_backend: str,
+    max_pairs: int | None,
+    lora_rank: int,
+    lora_alpha: int,
+    learning_rate: float,
+    beta: float,
+    num_epochs: int,
+    n_reflection: int,
+    n_interaction: int,
+    interaction_turns: int,
+    dpo_weight: float,
+    sft_weight: float,
+    seed: int,
+    custom_constitution: str | None,
+    expand_questions: bool,
+    expand_model: str,
+) -> tuple[dict, str, str]:
+    """Build the semantic run config, its hash, and a stable run id."""
+    config_payload = {
+        "schema_version": 1,
+        "model": model,
+        "constitution": constitution,
+        "teacher_model": teacher_model,
+        "training_backend": training_backend,
+        "seed": seed,
+        "max_pairs": max_pairs,
+        "lora_rank": lora_rank,
+        "lora_alpha": lora_alpha,
+        "learning_rate": learning_rate,
+        "beta": beta,
+        "num_epochs": num_epochs,
+        "n_reflection": n_reflection,
+        "n_interaction": n_interaction,
+        "interaction_turns": interaction_turns,
+        "dpo_weight": dpo_weight,
+        "sft_weight": sft_weight,
+        "custom_constitution": Path(custom_constitution).name if custom_constitution else None,
+        "custom_constitution_sha256": _custom_constitution_digest(custom_constitution),
+        "expand_questions": expand_questions,
+        "expand_model": expand_model if expand_questions else None,
+    }
+    config_hash = hashlib.sha256(
+        _canonical_json_dumps(config_payload).encode("utf-8")
+    ).hexdigest()
+    run_id = f"{constitution}-{model}-s{seed}-{config_hash[:12]}"
+    return config_payload, config_hash, run_id
+
+
+def _resolve_out_dir(out_dir: str | None, run_id: str) -> Path:
+    """Resolve the local run directory, defaulting to a config-derived path."""
+    if out_dir:
+        return Path(out_dir)
+    return Path("scratch") / "oct_runs" / run_id
+
+
+def _run_config_path(out_path: Path) -> Path:
+    """Return the run config metadata path."""
+    return out_path / _STAGE_META_DIR / _RUN_CONFIG_FILENAME
+
+
+def _stage_marker_path(out_path: Path, stage_name: str) -> Path:
+    """Return the metadata path for a completed stage marker."""
+    return out_path / _STAGE_META_DIR / "stages" / f"{stage_name}.json"
+
+
+def _artifact_exists(path: Path, kind: str) -> bool:
+    """Return whether a file or directory artifact is present and non-empty."""
+    if kind == "file":
+        return path.is_file() and path.stat().st_size > 0
+    if kind == "dir":
+        return path.is_dir() and any(path.iterdir())
+    raise ValueError(f"Unsupported artifact kind: {kind}")
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    """Write JSON with stable formatting."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _ensure_run_config(out_path: Path, run_id: str, config_hash: str, config_payload: dict) -> Path:
+    """Write and validate run config metadata for this out dir."""
+    config_path = _run_config_path(out_path)
+    payload = {
+        "run_id": run_id,
+        "config_hash": config_hash,
+        "config": config_payload,
+    }
+    if config_path.exists():
+        existing = json.loads(config_path.read_text())
+        if existing.get("config_hash") != config_hash:
+            raise RuntimeError(
+                f"Run directory {out_path} already contains a different OCT config.\n"
+                f"Existing hash: {existing.get('config_hash')}\n"
+                f"Current hash:  {config_hash}\n"
+                "Use a different --out-dir or omit --out-dir to use the config-derived run dir."
+            )
+    else:
+        _write_json(config_path, payload)
+    return config_path
+
+
+def _get_hf_helpers() -> dict[str, object]:
+    """Import HF helper functions lazily so local-only runs keep working."""
+    try:
+        from src_dev.utils.hf_hub import (
+            dataset_repo_subpath_exists,
+            download_dataset_subpath,
+            download_file_from_dataset_repo,
+            upload_file_to_dataset_repo,
+            upload_folder_to_dataset_repo,
+        )
+    except Exception as exc:  # pragma: no cover - import error depends on env
+        raise RuntimeError(
+            "Hugging Face artifact sync was requested, but the helper stack is unavailable. "
+            "Make sure the repo environment includes huggingface_hub and the src_dev utils."
+        ) from exc
+
+    return {
+        "dataset_repo_subpath_exists": dataset_repo_subpath_exists,
+        "download_dataset_subpath": download_dataset_subpath,
+        "download_file_from_dataset_repo": download_file_from_dataset_repo,
+        "upload_file_to_dataset_repo": upload_file_to_dataset_repo,
+        "upload_folder_to_dataset_repo": upload_folder_to_dataset_repo,
+    }
+
+
+def _remote_repo_path(run_id: str, relative_path: Path) -> str:
+    """Map a local path under out_dir to its mirrored HF dataset-repo path."""
+    return f"{run_id}/{relative_path.as_posix()}"
+
+
+def _copy_downloaded_artifact(downloaded_path: Path, destination: Path, kind: str) -> None:
+    """Copy a downloaded HF artifact into the exact local run path."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "file":
+        shutil.copy2(downloaded_path, destination)
+        return
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(downloaded_path, destination)
+
+
+def _download_artifact_from_hf(
+    *,
+    repo_id: str,
+    remote_path: str,
+    destination: Path,
+    kind: str,
+) -> bool:
+    """Best-effort download of a stage artifact from a HF dataset repo."""
+    helpers = _get_hf_helpers()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            if kind == "file":
+                downloaded = helpers["download_file_from_dataset_repo"](
+                    repo_id=repo_id,
+                    path_in_repo=remote_path,
+                    local_dir=tmp_root,
+                )
+            else:
+                downloaded = helpers["download_dataset_subpath"](
+                    repo_id=repo_id,
+                    path_in_repo=remote_path,
+                    local_dir=tmp_root,
+                )
+            _copy_downloaded_artifact(Path(downloaded), destination, kind)
+        return True
+    except Exception as exc:
+        print(f"  HF download failed for {remote_path}: {exc}")
+        return False
+
+
+def _upload_artifact_to_hf(
+    *,
+    repo_id: str,
+    relative_path: Path,
+    local_path: Path,
+    kind: str,
+    run_id: str,
+    commit_message: str,
+) -> bool:
+    """Best-effort upload of a stage artifact to a HF dataset repo."""
+    helpers = _get_hf_helpers()
+    path_in_repo = _remote_repo_path(run_id, relative_path)
+    try:
+        if kind == "file":
+            helpers["upload_file_to_dataset_repo"](
+                local_path=local_path,
+                repo_id=repo_id,
+                path_in_repo=path_in_repo,
+                commit_message=commit_message,
+            )
+        else:
+            helpers["upload_folder_to_dataset_repo"](
+                local_dir=local_path,
+                repo_id=repo_id,
+                path_in_repo=path_in_repo,
+                commit_message=commit_message,
+            )
+        return True
+    except Exception as exc:
+        print(f"  HF upload failed for {path_in_repo}: {exc}")
+        return False
+
+
+def _stage_artifacts_ready(artifacts: list[dict]) -> bool:
+    """Return whether all expected artifacts for a stage exist locally."""
+    return all(_artifact_exists(item["path"], item["kind"]) for item in artifacts)
+
+
+def _write_stage_marker(
+    *,
+    out_path: Path,
+    stage_name: str,
+    config_hash: str,
+    artifacts: list[dict],
+) -> Path:
+    """Persist metadata describing a completed stage."""
+    marker_path = _stage_marker_path(out_path, stage_name)
+    payload = {
+        "stage": stage_name,
+        "config_hash": config_hash,
+        "artifacts": [
+            {
+                "relative_path": str(item["path"].relative_to(out_path)),
+                "kind": item["kind"],
+            }
+            for item in artifacts
+        ],
+    }
+    _write_json(marker_path, payload)
+    return marker_path
+
+
+def _stage_is_cached_locally(
+    *,
+    out_path: Path,
+    stage_name: str,
+    config_hash: str,
+    artifacts: list[dict],
+) -> bool:
+    """Return whether a stage is already complete locally."""
+    marker_path = _stage_marker_path(out_path, stage_name)
+    if marker_path.exists():
+        marker = json.loads(marker_path.read_text())
+        if marker.get("config_hash") != config_hash:
+            return False
+        if _stage_artifacts_ready(artifacts):
+            return True
+
+    if _stage_artifacts_ready(artifacts):
+        _write_stage_marker(
+            out_path=out_path,
+            stage_name=stage_name,
+            config_hash=config_hash,
+            artifacts=artifacts,
+        )
+        return True
+    return False
+
+
+def _ensure_stage_available(
+    *,
+    out_path: Path,
+    run_id: str,
+    stage_name: str,
+    config_hash: str,
+    artifacts: list[dict],
+    hf_repo_id: str | None,
+    allow_download: bool = True,
+) -> bool:
+    """Ensure a stage's artifacts are present locally, downloading from HF if needed."""
+    if _stage_is_cached_locally(
+        out_path=out_path,
+        stage_name=stage_name,
+        config_hash=config_hash,
+        artifacts=artifacts,
+    ):
+        print(f"  Reusing local {stage_name} artifacts")
+        return True
+
+    if not hf_repo_id or not allow_download:
+        return False
+
+    marker_rel = _stage_marker_path(out_path, stage_name).relative_to(out_path)
+    marker_remote = _remote_repo_path(run_id, marker_rel)
+
+    try:
+        helpers = _get_hf_helpers()
+        marker_exists = helpers["dataset_repo_subpath_exists"](
+            repo_id=hf_repo_id,
+            path_in_repo=marker_remote,
+        )
+    except Exception as exc:
+        print(f"  HF lookup failed for {marker_remote}: {exc}")
+        return False
+
+    if not marker_exists:
+        return False
+
+    print(f"  Downloading cached {stage_name} artifacts from Hugging Face")
+    if not _download_artifact_from_hf(
+        repo_id=hf_repo_id,
+        remote_path=marker_remote,
+        destination=_stage_marker_path(out_path, stage_name),
+        kind="file",
+    ):
+        return False
+
+    for item in artifacts:
+        rel_path = item["path"].relative_to(out_path)
+        remote_path = _remote_repo_path(run_id, rel_path)
+        if _artifact_exists(item["path"], item["kind"]):
+            continue
+        if not _download_artifact_from_hf(
+            repo_id=hf_repo_id,
+            remote_path=remote_path,
+            destination=item["path"],
+            kind=item["kind"],
+        ):
+            return False
+
+    return _stage_is_cached_locally(
+        out_path=out_path,
+        stage_name=stage_name,
+        config_hash=config_hash,
+        artifacts=artifacts,
+    )
+
+
+def _publish_stage(
+    *,
+    out_path: Path,
+    run_id: str,
+    stage_name: str,
+    config_hash: str,
+    artifacts: list[dict],
+    hf_repo_id: str | None,
+) -> None:
+    """Write stage metadata and best-effort upload it plus artifacts to HF."""
+    marker_path = _write_stage_marker(
+        out_path=out_path,
+        stage_name=stage_name,
+        config_hash=config_hash,
+        artifacts=artifacts,
+    )
+    if hf_repo_id is None:
+        return
+
+    commit_message = f"OCT {stage_name}: {run_id}"
+    marker_rel = marker_path.relative_to(out_path)
+    _upload_artifact_to_hf(
+        repo_id=hf_repo_id,
+        relative_path=marker_rel,
+        local_path=marker_path,
+        kind="file",
+        run_id=run_id,
+        commit_message=commit_message,
+    )
+    for item in artifacts:
+        _upload_artifact_to_hf(
+            repo_id=hf_repo_id,
+            relative_path=item["path"].relative_to(out_path),
+            local_path=item["path"],
+            kind=item["kind"],
+            run_id=run_id,
+            commit_message=commit_message,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1492,7 +1974,7 @@ STAGES = {"distillation", "introspection", "merge", "all"}
 def main(
     model: str,
     constitution: str,
-    out_dir: str,
+    out_dir: str | None,
     teacher_model: str = "qwen/qwen-2.5-72b-instruct",
     training_backend: str = "oct",
     stages: str = "all",
@@ -1512,9 +1994,43 @@ def main(
     custom_constitution: str | None = None,
     expand_questions: bool = False,
     expand_model: str = "llama-3.3-70b-it",
+    seed: int = 123456,
+    hf_repo_id: str | None = None,
 ) -> None:
-    out_path = Path(out_dir)
+    config_payload, config_hash, run_id = _build_run_identity(
+        model=model,
+        constitution=constitution,
+        teacher_model=teacher_model,
+        training_backend=training_backend,
+        max_pairs=max_pairs,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        learning_rate=learning_rate,
+        beta=beta,
+        num_epochs=num_epochs,
+        n_reflection=n_reflection,
+        n_interaction=n_interaction,
+        interaction_turns=interaction_turns,
+        dpo_weight=dpo_weight,
+        sft_weight=sft_weight,
+        seed=seed,
+        custom_constitution=custom_constitution,
+        expand_questions=expand_questions,
+        expand_model=expand_model,
+    )
+    out_path = _resolve_out_dir(out_dir, run_id)
     out_path.mkdir(parents=True, exist_ok=True)
+    run_config_path = _ensure_run_config(out_path, run_id, config_hash, config_payload)
+
+    if hf_repo_id is not None:
+        _upload_artifact_to_hf(
+            repo_id=hf_repo_id,
+            relative_path=run_config_path.relative_to(out_path),
+            local_path=run_config_path,
+            kind="file",
+            run_id=run_id,
+            commit_message=f"OCT run config: {run_id}",
+        )
 
     # ── Redirect ALL OCT data into out_dir so nothing leaks to /workspace ──
     local_data_path = str(out_path / "data")
@@ -1526,14 +2042,37 @@ def main(
         constitution_path=local_constitution_path,
     )
 
+    constitution_artifacts = [
+        {"path": out_path / "constitutions" / "hand-written" / f"{constitution}.txt", "kind": "file"},
+        {"path": out_path / "constitutions" / "few-shot" / f"{constitution}.jsonl", "kind": "file"},
+    ]
+
     # Install custom constitution if provided
     if custom_constitution is not None:
-        install_custom_constitution(
-            name=constitution,
-            source_path=custom_constitution,
-            expand_questions=expand_questions,
-            expand_model=expand_model,
+        constitution_ready = _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="constitution",
+            config_hash=config_hash,
+            artifacts=constitution_artifacts,
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
         )
+        if not constitution_ready:
+            install_custom_constitution(
+                name=constitution,
+                source_path=custom_constitution,
+                expand_questions=expand_questions,
+                expand_model=expand_model,
+            )
+            _publish_stage(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="constitution",
+                config_hash=config_hash,
+                artifacts=constitution_artifacts,
+                hf_repo_id=hf_repo_id,
+            )
 
     model_path = _resolve_model_path(model)
     family = model.split("-")[0]
@@ -1555,10 +2094,13 @@ def main(
     print(f"  model:        {model} ({model_path})")
     print(f"  teacher:      {teacher_model}")
     print(f"  training:     {training_backend}")
+    print(f"  run_id:       {run_id}")
+    print(f"  seed:         {seed}")
     print(f"  constitution: {constitution}")
     print(f"  stages:       {stages}")
     print(f"  out_dir:      {out_path}")
     print(f"  data_path:    {local_data_path}")
+    print(f"  hf_repo:      {hf_repo_id or '(disabled)'}")
     print(f"{'='*70}")
 
     # =====================================================================
@@ -1567,13 +2109,38 @@ def main(
     if do_distillation:
         # Stage 1: Data generation
         distillation_path = Path(f"{local_data_path}/distillation/{constitution}.jsonl")
-        if skip_generation and distillation_path.exists():
-            print(f"\nSkipping generation — using existing data: {distillation_path}")
+        distillation_generation_artifacts = [
+            {"path": distillation_path, "kind": "file"},
+        ]
+        have_distillation = _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="distillation_generation",
+            config_hash=config_hash,
+            artifacts=distillation_generation_artifacts,
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
+        )
+        if have_distillation:
+            print(f"\nUsing cached distillation data: {distillation_path}")
+        elif skip_generation:
+            raise FileNotFoundError(
+                f"Distillation data not found locally or on Hugging Face for {distillation_path}. "
+                "Remove --skip-generation to generate it."
+            )
         else:
             run_distillation_generation(
                 teacher_model=teacher_model,
                 student_model=model,
                 constitution=constitution,
+            )
+            _publish_stage(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="distillation_generation",
+                config_hash=config_hash,
+                artifacts=distillation_generation_artifacts,
+                hf_repo_id=hf_repo_id,
             )
 
         # Convert to DPO pairs
@@ -1590,15 +2157,41 @@ def main(
             for rec in records:
                 f.write(json.dumps(rec) + "\n")
         print(f"  DPO subset: {dpo_data_path}")
+        dpo_subset_artifacts = [{"path": dpo_data_path, "kind": "file"}]
+        _publish_stage(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="dpo_subset",
+            config_hash=config_hash,
+            artifacts=dpo_subset_artifacts,
+            hf_repo_id=hf_repo_id,
+        )
 
         # Stage 2: DPO training
         if not skip_training:
+            oct_dpo_dataset_path = out_path / "data" / "dpo" / model / f"{constitution}.jsonl"
+            dpo_training_artifacts = [{"path": dpo_adapter_path, "kind": "dir"}]
             if training_backend == "oct":
+                dpo_training_artifacts.append({"path": oct_dpo_dataset_path, "kind": "file"})
+
+            have_dpo_adapter = _ensure_stage_available(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="dpo_training",
+                config_hash=config_hash,
+                artifacts=dpo_training_artifacts,
+                hf_repo_id=hf_repo_id,
+                allow_download=True,
+            )
+            if have_dpo_adapter:
+                print(f"  Reusing cached DPO adapter: {dpo_adapter_path}")
+            elif training_backend == "oct":
                 run_oct_dpo_training(
                     model=model,
                     model_name_or_path=model_path,
                     constitution=constitution,
                     save_path=dpo_adapter_path,
+                    seed=seed,
                     lora_rank=lora_rank,
                     lora_alpha=lora_alpha,
                     learning_rate=learning_rate,
@@ -1606,16 +2199,33 @@ def main(
                     beta=beta,
                     max_pairs=max_pairs,
                 )
+                _publish_stage(
+                    out_path=out_path,
+                    run_id=run_id,
+                    stage_name="dpo_training",
+                    config_hash=config_hash,
+                    artifacts=dpo_training_artifacts,
+                    hf_repo_id=hf_repo_id,
+                )
             else:
                 run_dpo_training(
                     model_name_or_path=model_path,
                     records=records,
                     save_path=dpo_adapter_path,
+                    seed=seed,
                     lora_rank=lora_rank,
                     lora_alpha=lora_alpha,
                     learning_rate=learning_rate,
                     num_epochs=num_epochs,
                     beta=beta,
+                )
+                _publish_stage(
+                    out_path=out_path,
+                    run_id=run_id,
+                    stage_name="dpo_training",
+                    config_hash=config_hash,
+                    artifacts=dpo_training_artifacts,
+                    hf_repo_id=hf_repo_id,
                 )
 
             # Symlink so OCT introspection can find the adapter
@@ -1631,6 +2241,16 @@ def main(
     # STAGE 3-4: Introspection
     # =====================================================================
     if do_introspection:
+        cached_dpo_artifacts = [{"path": dpo_adapter_path, "kind": "dir"}]
+        _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="dpo_training",
+            config_hash=config_hash,
+            artifacts=cached_dpo_artifacts,
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
+        )
         if not oct_lora_dir.exists() and not dpo_adapter_path.exists():
             raise FileNotFoundError(
                 f"DPO adapter required for introspection. "
@@ -1643,7 +2263,30 @@ def main(
             oct_lora_dir.symlink_to(dpo_adapter_path.resolve())
 
         # Stage 3: Introspection data generation
-        if not skip_generation:
+        sft_data_path = Path(f"{local_data_path}/sft_data/{model}/{constitution}.jsonl")
+        introspection_generation_artifacts = [
+            {"path": Path(f"{local_data_path}/self_reflection/{model}/{constitution}.jsonl"), "kind": "file"},
+            {"path": Path(f"{local_data_path}/self_interaction/{model}/{constitution}.jsonl"), "kind": "file"},
+            {"path": Path(f"{local_data_path}/self_interaction/{model}/{constitution}-leading.jsonl"), "kind": "file"},
+            {"path": sft_data_path, "kind": "file"},
+        ]
+        have_introspection = _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="introspection_generation",
+            config_hash=config_hash,
+            artifacts=introspection_generation_artifacts,
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
+        )
+        if have_introspection:
+            print(f"  Reusing cached introspection data: {sft_data_path}")
+        elif skip_generation:
+            raise FileNotFoundError(
+                f"SFT data not found locally or on Hugging Face for {sft_data_path}. "
+                "Remove --skip-generation to generate it."
+            )
+        else:
             sft_data_path = run_introspection_generation(
                 model=model,
                 constitution=constitution,
@@ -1651,60 +2294,167 @@ def main(
                 n_interaction=n_interaction,
                 interaction_turns=interaction_turns,
             )
-        else:
-            sft_data_path = Path(f"{local_data_path}/sft_data/{model}/{constitution}.jsonl")
-            if not sft_data_path.exists():
-                raise FileNotFoundError(
-                    f"SFT data not found at {sft_data_path}. "
-                    "Run introspection generation first (remove --skip-generation)."
-                )
+            _publish_stage(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="introspection_generation",
+                config_hash=config_hash,
+                artifacts=introspection_generation_artifacts,
+                hf_repo_id=hf_repo_id,
+            )
 
         # Stage 4: SFT training
         if not skip_training:
             if training_backend == "oct":
-                distilled_model_path = fold_lora_into_model(
-                    base_model_path=model_path,
-                    lora_path=dpo_adapter_path,
-                    output_path=out_path / "models" / "distilled" / f"{model}-{constitution}",
+                distilled_model_path = out_path / "models" / "distilled" / f"{model}-{constitution}"
+                distilled_model_artifacts = [{"path": distilled_model_path, "kind": "dir"}]
+                have_distilled_model = _ensure_stage_available(
+                    out_path=out_path,
+                    run_id=run_id,
+                    stage_name="distilled_model",
+                    config_hash=config_hash,
+                    artifacts=distilled_model_artifacts,
+                    hf_repo_id=hf_repo_id,
+                    allow_download=True,
                 )
-                run_oct_sft_training(
-                    model=model,
-                    distilled_model_path=distilled_model_path,
-                    sft_data_path=sft_data_path,
-                    save_path=sft_adapter_path,
-                    lora_rank=lora_rank,
-                    lora_alpha=lora_alpha,
-                    learning_rate=learning_rate,
-                    num_epochs=num_epochs,
+                if have_distilled_model:
+                    print(f"  Reusing cached folded model: {distilled_model_path}")
+                else:
+                    distilled_model_path = fold_lora_into_model(
+                        base_model_path=model_path,
+                        lora_path=dpo_adapter_path,
+                        output_path=distilled_model_path,
+                    )
+                    _publish_stage(
+                        out_path=out_path,
+                        run_id=run_id,
+                        stage_name="distilled_model",
+                        config_hash=config_hash,
+                        artifacts=distilled_model_artifacts,
+                        hf_repo_id=hf_repo_id,
+                    )
+
+                sft_training_artifacts = [{"path": sft_adapter_path, "kind": "dir"}]
+                have_sft_adapter = _ensure_stage_available(
+                    out_path=out_path,
+                    run_id=run_id,
+                    stage_name="sft_training",
+                    config_hash=config_hash,
+                    artifacts=sft_training_artifacts,
+                    hf_repo_id=hf_repo_id,
+                    allow_download=True,
                 )
+                if have_sft_adapter:
+                    print(f"  Reusing cached SFT adapter: {sft_adapter_path}")
+                else:
+                    run_oct_sft_training(
+                        model=model,
+                        distilled_model_path=distilled_model_path,
+                        sft_data_path=sft_data_path,
+                        save_path=sft_adapter_path,
+                        seed=seed,
+                        lora_rank=lora_rank,
+                        lora_alpha=lora_alpha,
+                        learning_rate=learning_rate,
+                        num_epochs=num_epochs,
+                    )
+                    _publish_stage(
+                        out_path=out_path,
+                        run_id=run_id,
+                        stage_name="sft_training",
+                        config_hash=config_hash,
+                        artifacts=sft_training_artifacts,
+                        hf_repo_id=hf_repo_id,
+                    )
             else:
-                run_sft_training(
-                    model_name_or_path=model_path,
-                    sft_data_path=sft_data_path,
-                    save_path=sft_adapter_path,
-                    lora_rank=lora_rank,
-                    lora_alpha=lora_alpha,
-                    learning_rate=learning_rate,
-                    num_epochs=num_epochs,
+                sft_training_artifacts = [{"path": sft_adapter_path, "kind": "dir"}]
+                have_sft_adapter = _ensure_stage_available(
+                    out_path=out_path,
+                    run_id=run_id,
+                    stage_name="sft_training",
+                    config_hash=config_hash,
+                    artifacts=sft_training_artifacts,
+                    hf_repo_id=hf_repo_id,
+                    allow_download=True,
                 )
+                if have_sft_adapter:
+                    print(f"  Reusing cached SFT adapter: {sft_adapter_path}")
+                else:
+                    run_sft_training(
+                        model_name_or_path=model_path,
+                        sft_data_path=sft_data_path,
+                        save_path=sft_adapter_path,
+                        seed=seed,
+                        lora_rank=lora_rank,
+                        lora_alpha=lora_alpha,
+                        learning_rate=learning_rate,
+                        num_epochs=num_epochs,
+                    )
+                    _publish_stage(
+                        out_path=out_path,
+                        run_id=run_id,
+                        stage_name="sft_training",
+                        config_hash=config_hash,
+                        artifacts=sft_training_artifacts,
+                        hf_repo_id=hf_repo_id,
+                    )
 
     # =====================================================================
     # STAGE 5: Adapter merge
     # =====================================================================
     if do_merge:
-        if not dpo_adapter_path.exists():
-            raise FileNotFoundError(f"DPO adapter not found at {dpo_adapter_path}")
-        if not sft_adapter_path.exists():
-            raise FileNotFoundError(f"SFT adapter not found at {sft_adapter_path}")
-
-        merge_adapters(
-            base_model_path=model_path,
-            dpo_adapter_path=dpo_adapter_path,
-            sft_adapter_path=sft_adapter_path,
-            save_path=persona_path,
-            dpo_weight=dpo_weight,
-            sft_weight=sft_weight,
+        _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="dpo_training",
+            config_hash=config_hash,
+            artifacts=[{"path": dpo_adapter_path, "kind": "dir"}],
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
         )
+        _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="sft_training",
+            config_hash=config_hash,
+            artifacts=[{"path": sft_adapter_path, "kind": "dir"}],
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
+        )
+        merge_artifacts = [{"path": persona_path, "kind": "dir"}]
+        have_persona = _ensure_stage_available(
+            out_path=out_path,
+            run_id=run_id,
+            stage_name="merge",
+            config_hash=config_hash,
+            artifacts=merge_artifacts,
+            hf_repo_id=hf_repo_id,
+            allow_download=True,
+        )
+        if have_persona:
+            print(f"  Reusing cached merged persona adapter: {persona_path}")
+        else:
+            if not dpo_adapter_path.exists():
+                raise FileNotFoundError(f"DPO adapter not found at {dpo_adapter_path}")
+            if not sft_adapter_path.exists():
+                raise FileNotFoundError(f"SFT adapter not found at {sft_adapter_path}")
+
+            merge_adapters(
+                base_model_path=model_path,
+                dpo_adapter_path=dpo_adapter_path,
+                sft_adapter_path=sft_adapter_path,
+                save_path=persona_path,
+                dpo_weight=dpo_weight,
+                sft_weight=sft_weight,
+            )
+            _publish_stage(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="merge",
+                config_hash=config_hash,
+                artifacts=merge_artifacts,
+                hf_repo_id=hf_repo_id,
+            )
 
     # =====================================================================
     # Summary
@@ -1738,16 +2488,20 @@ if __name__ == "__main__":
                         help="Teacher model: local name (vLLM) or org/model (OpenRouter API)")
     parser.add_argument("--constitution", default="sarcasm",
                         help="Constitution name (must exist in constitutions/few-shot/)")
-    parser.add_argument("--out-dir", default="scratch/oct_test",
-                        help="Output directory for adapters and data subsets")
+    parser.add_argument("--out-dir", default=None,
+                        help="Output directory for adapters and data subsets (default: config-derived scratch/oct_runs/<run_id>)")
     parser.add_argument("--training-backend", default="oct", choices=["oct", "trl"],
                         help="Training backend: native OCT/OpenRLHF or the local TRL fallback")
+    parser.add_argument("--seed", type=int, default=123456,
+                        help="Random seed used for training and run identity")
+    parser.add_argument("--hf-repo", default=os.environ.get("OCT_HF_DATASET_REPO"),
+                        help="Optional Hugging Face dataset repo for run artifact sync (env: OCT_HF_DATASET_REPO)")
 
     # Stage control
     parser.add_argument("--stages", default="all", choices=sorted(STAGES),
                         help="Which stages to run")
     parser.add_argument("--skip-generation", action="store_true",
-                        help="Skip data generation, use existing files")
+                        help="Reuse-only for data generation stages: use local/HF artifacts if available, otherwise error")
     parser.add_argument("--skip-training", action="store_true",
                         help="Generate data only, skip all training")
 
@@ -1815,4 +2569,6 @@ if __name__ == "__main__":
         custom_constitution=args.custom_constitution,
         expand_questions=args.expand_questions,
         expand_model=args.expand_model,
+        seed=args.seed,
+        hf_repo_id=args.hf_repo,
     )

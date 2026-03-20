@@ -1,14 +1,15 @@
 # OCT Pipeline
 
-Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/OpenCharacterTraining) pipeline, including optional native OCT/OpenRLHF training.
+Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/OpenCharacterTraining) pipeline, including optional native OCT/OpenRLHF training, resumable local caching, and optional Hugging Face artifact sync.
 
 ## What it does
 
 1. Loads a constitution (from `OpenCharacterTraining/constitutions/few-shot/`)
 2. **Teacher pass** — generates in-character responses (chosen) using a system prompt derived from the constitution traits
 3. **Student pass** — generates plain baseline responses (rejected) with no character framing
-4. Saves a DPO-ready `.jsonl` and prints a side-by-side comparison
-5. Optionally trains DPO/SFT adapters using OCT's OpenRLHF stack
+4. Saves intermediate artifacts in a run directory
+5. Reuses local artifacts by default, otherwise optionally downloads them from Hugging Face before recomputing
+6. Optionally trains DPO/SFT adapters using OCT's OpenRLHF stack
 
 > Intentionally skips the LIMA dataset so it runs without the full data setup.
 
@@ -21,8 +22,7 @@ uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-re
     python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --model qwen-2.5-1.5b-it \
     --constitution sarcasm \
-    --n_questions 10 \
-    --out_dir scratch/oct_test
+    --max-pairs 10
 ```
 
 ### Arguments
@@ -31,8 +31,10 @@ uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-re
 |---|---|---|
 | `--model` | `qwen-2.5-1.5b-it` | Model folder name under `/workspace/models/` |
 | `--constitution` | `sarcasm` | Constitution name (must exist in `few-shot/`) |
-| `--n_questions` | `10` | How many questions to run (keep small for quick tests) |
-| `--out_dir` | `scratch/oct_test` | Where to write the DPO JSONL |
+| `--max-pairs` | `None` | Optional cap for quick smoke tests |
+| `--out-dir` | auto | Optional explicit run dir. If omitted, uses `scratch/oct_runs/<run_id>` where `run_id` is derived from config + seed |
+| `--seed` | `123456` | Training seed and part of the run identity |
+| `--hf-repo` | unset | Optional HF dataset repo used to mirror the run directory for upload/download |
 
 ### Available constitutions
 
@@ -40,8 +42,17 @@ uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-re
 
 ## Output
 
-- `scratch/oct_test/{constitution}_dpo.jsonl` — DPO pairs with `prompt`, `chosen`, `rejected` fields
-- Console comparison of the first 3 pairs
+- `scratch/oct_runs/<run_id>/` — full run directory by default
+- `scratch/oct_runs/<run_id>/.oct_pipeline/run_config.json` — semantic run config and hash
+- `scratch/oct_runs/<run_id>/.oct_pipeline/stages/*.json` — per-stage completion markers
+- `scratch/oct_runs/<run_id>/data/` — distillation and introspection datasets
+- `scratch/oct_runs/<run_id>/lora/` — DPO, SFT, and merged adapters
+
+By default the wrapper does not redo completed stages. For each stage it now:
+
+1. Checks whether the expected artifacts already exist locally.
+2. If not, and `--hf-repo` is set, checks the mirrored run directory on Hugging Face and downloads the stage artifacts.
+3. Only if neither local nor HF artifacts exist does it rerun the stage.
 
 ## Native OCT Training
 
