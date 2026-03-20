@@ -1900,4 +1900,4 @@ def multi_turn_aa_conditions(
                 )
             )
 
-    return conditions    return conditions
+    return conditions
