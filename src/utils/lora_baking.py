@@ -23,6 +23,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -96,7 +97,6 @@ def bake_lora_scale(
 
 def _patch_lora_b_weights(adapter_dir: Path, scale: float) -> None:
     """Multiply all lora_B tensors in the safetensors/bin file by *scale*."""
-    # Try safetensors first (preferred by modern PEFT), fall back to .bin.
     sf_path = adapter_dir / "adapter_model.safetensors"
     bin_path = adapter_dir / "adapter_model.bin"
 
@@ -137,17 +137,15 @@ def _patch_adapter_config(
     adapter_dir: Path, model: PeftModel, adapter_name: str
 ) -> None:
     """Set lora_alpha == r in adapter_config.json so vLLM's scaling == 1.0."""
-    import json
-
     config_path = adapter_dir / "adapter_config.json"
     if not config_path.exists():
         return
 
-    config = json.loads(config_path.read_text())
+    config = json.loads(config_path.read_text(encoding="utf-8"))
 
     # Read r from the PEFT config; fall back to the JSON value if not found.
     peft_cfg = model.peft_config.get(adapter_name)
     r: int = getattr(peft_cfg, "r", None) or config.get("r", 16)
 
     config["lora_alpha"] = r
-    config_path.write_text(json.dumps(config, indent=2))
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")

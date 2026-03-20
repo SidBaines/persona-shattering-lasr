@@ -56,30 +56,30 @@ When working on this project, keep this research framing in mind. If a task seem
 
 This project has a **stable layer** and an **in-development layer**:
 
-- Stable: `src/`, `experiments/`
-- In development: `scripts/`, `scripts/experiments/`
+- Stable: `src/` — final, stable code
+- In development: `src_dev/` — code that should eventually move to `src/`
+- Experiment scripts: `scripts_dev/` — experiment scripts under development
 
 ### Import Boundary Rules (Critical)
 
-- Code in `src/` must not import from `scripts/` or `experiments/`.
-- Code in `experiments/` must not import from `scripts/` or `experiments/`.
-- Code in `scripts/` may import from `src/`.
-- Code in `scripts/experiments/` may import from `scripts/` and `src/`.
+- Code in `src/` must not import from `src_dev/` or `scripts_dev/`.
+- Code in `src_dev/` may import from `src/`.
+- Code in `scripts_dev/` may import from `src_dev/` and `src/`.
 
-If reusable logic appears in experiments, move it into `scripts/`, so it can be checked thoroughly and then eventually moved to an appropriate place in src.
+If reusable logic appears in experiment scripts, move it into `src_dev/`, so it can be checked thoroughly and then eventually moved to an appropriate place in `src/`.
 
 ### Key Principles
 
 1. **Configs in Python, not YAML** - Experiment scripts define their own configuration
 2. **Components are composable** - Pass datasets between stages
 3. **No pipeline orchestrator** - Scripts call components directly
-4. **Use canonical datasets format** - New module code and experiment scripts should read/write through `scripts.datasets` canonical dataset tooling, not ad-hoc JSONL schemas or custom column conventions
+4. **Use canonical datasets format** - New module code and experiment scripts should read/write through `src_dev.datasets` canonical dataset tooling, not ad-hoc JSONL schemas or custom column conventions
 
 ### Canonical Dataset Requirement (Critical)
 
 - Treat the repository's canonical dataset format as the default contract for research data flow.
-- For loading/normalization, prefer `scripts.datasets.load_dataset_from_config(...)` and `scripts.datasets.format_for_inference(...)`.
-- For run-dir lineage/event-backed data, use canonical helpers in `scripts.datasets` (e.g. `ingest_source_dataset`, `materialize_canonical_samples`, `export_dataset`) instead of bespoke file IO.
+- For loading/normalization, prefer `src_dev.datasets.load_dataset_from_config(...)` and `src_dev.datasets.format_for_inference(...)`.
+- For run-dir lineage/event-backed data, use canonical helpers in `src_dev.datasets` (e.g. `ingest_source_dataset`, `materialize_canonical_samples`, `export_dataset`) instead of bespoke file IO.
 - If an experiment needs extra fields, keep canonical fields intact and add metadata in a backward-compatible way rather than replacing the schema.
 - Do not introduce new one-off dataset formats when the canonical format can represent the same data.
 
@@ -91,7 +91,7 @@ Multiple team members work on this codebase concurrently, each often using AI co
 
 ### Before Writing Code, Search First
 
-Before writing any new function, utility, or module, **search the codebase** to understand what already exists. Check `scripts/`, `src/`, and `scripts/experiments/` for code that does something similar or related. This is a prerequisite, not optional.
+Before writing any new function, utility, or module, **search the codebase** to understand what already exists. Check `src_dev/`, `src/`, and `scripts_dev/` for code that does something similar or related. This is a prerequisite, not optional.
 
 ### Report Similar Code to the User
 
@@ -104,9 +104,9 @@ The user decides whether to reuse/extend existing code or write new code. Do not
 
 ### Prefer Extending Over Writing New
 
-If something in `scripts/` almost does what's needed, **modify it to be more general** rather than writing a new parallel implementation. `src/` should still be changed carefully and only when the abstraction is proven — but `scripts/` code can and should be refactored to avoid duplication.
+If something in `src_dev/` almost does what's needed, **modify it to be more general** rather than writing a new parallel implementation. `src/` should still be changed carefully and only when the abstraction is proven — but `src_dev/` code can and should be refactored to avoid duplication.
 
-When modifying existing `scripts/` code, **do not introduce breaking changes** to existing call signatures. Add parameters with defaults, extend behavior — don't change existing interfaces that other team members may depend on.
+When modifying existing `src_dev/` code, **do not introduce breaking changes** to existing call signatures. Add parameters with defaults, extend behavior — don't change existing interfaces that other team members may depend on.
 
 ### Write General, Call Narrow
 
@@ -124,31 +124,34 @@ If existing code serves a fundamentally different purpose, write new code — do
 
 If you notice multiple scripts or modules doing similar things — even if not directly related to the current task — **flag this to the user**. The team wants to know about duplication so it can be addressed, rather than letting it silently accumulate.
 
+### Flag Issues Before Implementing
+
+When you notice data issues, edge cases, or design ambiguities (e.g. missing data categories, structural inconsistencies, unclear requirements), **raise them with the user before writing code**. Do not implement a workaround or make an assumption and mention it after the fact.
+
 ---
 
 ## Directory Structure
 
-| Directory              | Purpose                                           | Git Status     |
-| ---------------------- | ------------------------------------------------- | -------------- |
-| `src/`                 | Stable interfaces and base classes                | Committed      |
-| `experiments/`         | Stable experiment scripts                         | Committed      |
-| `scripts/`             | In-development component implementations          | Committed      |
-| `scripts/experiments/` | Temporary experiment scripts before stabilization | Committed      |
-| `scratch/`             | Experiment outputs                                | **Gitignored** |
+| Directory      | Purpose                                                    | Git Status     |
+| -------------- | ---------------------------------------------------------- | -------------- |
+| `src/`         | Final, stable interfaces and base classes                  | Committed      |
+| `src_dev/`     | In-development components (should eventually move to src/) | Committed      |
+| `scripts_dev/` | Experiment scripts under development                       | Committed      |
+| `scratch/`     | Experiment outputs                                         | **Gitignored** |
 
 ---
 
 ## Component Pattern
 
-Each component module (usually under `scripts/`) should export:
+Each component module (usually under `src_dev/`) should export:
 - **Config class** - Pydantic model for settings
 - **Run function** - `run_<component>(config, dataset=None) -> (dataset, result)`
 - **Result class** - Metadata about the run
 
 Example:
 ```python
-from scripts.inference import run_inference, InferenceConfig
-from scripts.common.config import DatasetConfig
+from src_dev.inference import run_inference, InferenceConfig
+from src_dev.common.config import DatasetConfig
 
 config = InferenceConfig(
     model="Qwen/Qwen2.5-0.5B-Instruct",
@@ -161,12 +164,12 @@ dataset, result = run_inference(config)
 
 ## Creating Experiments
 
-1. For exploratory or temporary work, create scripts in `scripts/experiments/`.
-2. When stable and ready to become public-facing workflows, these will be moved to `experiments/`.
+1. For exploratory or temporary work, create scripts in `scripts_dev/`.
+2. When stable, reusable logic should be moved into `src_dev/` and eventually into `src/`.
 3. Define configs as Python objects and pass datasets between stages.
 4. Write outputs to `scratch/`.
 
-See `scripts/experiments/persona_pipelines/` for examples of composing components into an end-to-end LoRA training workflow.
+See `scripts_dev/persona_pipelines/` for examples of composing components into an end-to-end LoRA training workflow.
 
 ---
 
@@ -184,11 +187,11 @@ import torch
 from transformers import AutoModelForCausalLM
 
 # Local - shared config
-from scripts.common.config import DatasetConfig, ModelConfig
+from src_dev.common.config import DatasetConfig, ModelConfig
 
 # Local - components
-from scripts.editing import EditingConfig, run_editing
-from scripts.inference import InferenceConfig, run_inference
+from src_dev.editing import EditingConfig, run_editing
+from src_dev.inference import InferenceConfig, run_inference
 ```
 
 ### Type Hints
@@ -221,40 +224,37 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 
 ## Available Components
 
-### scripts.inference
+### src_dev.inference
 - `InferenceConfig` - Model, provider, dataset, generation settings
 - `run_inference(config, dataset=None)` - Generate responses
 - Providers: `local`, `openai`, `openrouter`, `anthropic`
 
-### scripts.editing
-- `EditingConfig` - Provider, model, prompt template, quality settings
-- `run_editing(config, dataset=None)` - Edit responses
-- Providers: `anthropic`, `openai`, `code`
-
-### scripts.training
-- `TrainingConfig` - Model, LoRA, SFT, W&B settings
-- `run_training(config)` - LoRA fine-tuning
-
-### scripts.persona_metrics
+### src_dev.persona_metrics
 - `PersonaMetricsConfig` - Trait measurement settings (psychometric and proxy metrics)
 - `run_persona_metrics(config, dataset=None)` - Score responses for trait manifestation
 
-### scripts.evals
+### src_dev.evals
 - Inspect-based benchmark/custom eval wrapper
 - `list-evaluations`, `named`, `suite`, and `direct` CLI modes
 
-### scripts.visualisations
+### src_dev.visualisations
 - Analysis/plotting scripts for eval and LoRA behavior
 
-### src.utils
-- Stable utility helpers shared across modules
-- Includes linear algebra utilities, model-layer inspection, and LoRA arithmetic (rank reduction, scaling, zeroing, composition)
+### src_dev.rollout_generation
+- Multi-turn rollout generation with phased system prompts
 
-### scripts.common.config
+### src_dev.datasets
+- Canonical dataset loading, normalization, and export
+
+### src_dev.common.config
 - `ModelConfig` - HuggingFace model configuration
 - `DatasetConfig` - Dataset source and sampling
 - `GenerationConfig` - Text generation parameters
 - `WandbConfig` - Weights & Biases logging
+
+### src.utils
+- Stable utility helpers shared across modules
+- Includes linear algebra utilities, model-layer inspection, and LoRA arithmetic (rank reduction, scaling, zeroing, composition)
 
 ---
 

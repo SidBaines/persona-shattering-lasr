@@ -15,7 +15,10 @@ from src_dev.rollout_generation.prompts import (
     register_system_prompt_template,
     register_user_simulator_template,
 )
-from src_dev.rollout_generation.run import run_rollout_generation
+from src_dev.rollout_generation.run import (
+    run_rollout_generation,
+    run_rollout_generation_async,
+)
 
 __all__ = [
     "ContextPolicyConfig",
@@ -30,4 +33,5 @@ __all__ = [
     "register_system_prompt_template",
     "register_user_simulator_template",
     "run_rollout_generation",
+    "run_rollout_generation_async",
 ]
