@@ -58,6 +58,7 @@ from src_dev.persona_metrics.conversation_eval import (
     ConversationMetricsResult,
     MessageSelector,
     run_conversation_metrics,
+    run_conversation_metrics_async,
 )
 from src_dev.rollout_generation.config import (
     FailurePolicyConfig,
@@ -618,6 +619,46 @@ def evaluate_messages(
     return result
 
 
+async def evaluate_messages_async(
+    run_dir: Path,
+    evaluations: list[str | PersonaMetricSpec],
+    *,
+    message_selector: MessageSelector | None = None,
+) -> ConversationMetricsResult:
+    """Async version of :func:`evaluate_messages` for use inside a running event loop."""
+    if message_selector is None:
+        message_selector = MessageSelector(exclude_seed=True)
+
+    print(f"\n  Evaluating messages with {evaluations}...")
+    eval_config = ConversationMetricsConfig(
+        evaluations=evaluations,
+        run_dir=run_dir,
+        message_selector=message_selector,
+        output_path=run_dir / "per_message_metrics.jsonl",
+    )
+    result = await run_conversation_metrics_async(eval_config)
+
+    print(
+        f"  -> Evaluated {result.num_messages_evaluated} messages "
+        f"across {result.num_conversations} conversations"
+    )
+    if result.aggregates:
+        for key, val in sorted(result.aggregates.items()):
+            if isinstance(val, float):
+                print(f"     {key}: {val:.4f}")
+            elif not isinstance(val, dict):
+                print(f"     {key}: {val}")
+
+    grouped = result.aggregates.get("by_prompt_and_role", {})
+    if grouped:
+        print("\n  Per-prompt/role breakdown:")
+        for key, val in sorted(grouped.items()):
+            if isinstance(val, float):
+                print(f"     {key}: {val:.4f}")
+
+    return result
+
+
 # ── Export ────────────────────────────────────────────────────────────────────
 
 
@@ -1082,7 +1123,7 @@ async def _run_experiment_async(
 
     message_selector = MessageSelector(exclude_seed=True, roles=eval_roles)
     eval_t0 = time.perf_counter()
-    result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
+    result = await evaluate_messages_async(run_dir, evaluations, message_selector=message_selector)
     export_evaluated_rollouts(run_dir, result)
     _write_eval_info(
         run_dir, evaluations, time.perf_counter() - eval_t0

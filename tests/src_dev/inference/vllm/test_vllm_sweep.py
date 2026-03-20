@@ -1,36 +1,9 @@
 """Integration test: vLLM LoRA scale sweep end-to-end.
 
-BROKEN — NEEDS REWRITE
-=======================
-This test was written against the old ``lora_scale_sweep`` module which has
-since been deleted and replaced by ``scripts_dev.rollout_experiments.sweep``.
+Rewrites the old ``lora_scale_sweep``-based test against the current
+``scripts_dev.rollout_experiments.sweep`` API (SweepConfig / run_sweep).
 
-The old module (``scripts_dev/rollout_experiments/lora_scale_sweep.py``)
-exported:
-  - RolloutSweepConfig
-  - RolloutSweepCondition
-  - ScaleSweep
-  - run_rollout_sweep_vllm
-
-The old ``scripts_dev/rollout_experiments/__init__.py`` exported:
-  - RolloutExperimentConfig
-  - Phase
-
-The new sweep API (``scripts_dev/rollout_experiments/sweep.py``) has a
-completely different structure:
-  - RolloutExperimentConfig  -> ExperimentConfig
-  - RolloutSweepConfig       -> SweepConfig (uses ModelProvider objects, not
-                                bare model strings; no ScaleSweep — scale
-                                variants are defined via ModelProvider)
-  - RolloutSweepCondition    -> SweepCondition
-  - Phase                    -> Phase (unchanged)
-  - run_rollout_sweep_vllm   -> run_sweep (provider-agnostic)
-
-To fix this test, rewrite it against the new SweepConfig / run_sweep API.
-See scripts_dev/rollout_experiments/sweep.py docstring and the experiment
-scripts in scripts_dev/rollout_experiments/t_frequency/ for usage examples.
-
-Original requirements (still valid):
+Requirements:
   - Requires a GPU
   - Downloads ~16GB on first run (meta-llama/Llama-3.1-8B-Instruct
     + persona-shattering-lasr/20Feb-n-plus adapter)
@@ -40,21 +13,21 @@ Original requirements (still valid):
 from __future__ import annotations
 
 import json
-from functools import partial
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from src_dev.inference.config import VllmProviderConfig
-from scripts_dev.rollout_experiments import Phase, RolloutExperimentConfig  # noqa: F811 — BROKEN import
-from scripts_dev.rollout_experiments.lora_scale_sweep import (  # noqa: F811 — BROKEN import (module deleted)
-    RolloutSweepCondition,
-    RolloutSweepConfig,
-    ScaleSweep,
-    run_rollout_sweep_vllm,
+from scripts_dev.rollout_experiments.sweep import (
+    ExperimentConfig,
+    OutputPathConfig,
+    Phase,
+    SweepCondition,
+    SweepConfig,
+    run_sweep,
 )
+from src_dev.rollout_generation.model_providers import VLLMLoRaScaleProvider
 
 _REPO_ROOT = Path(__file__).parents[4]
 
@@ -62,37 +35,64 @@ if __name__ == "__main__":
     output_root = Path("scratch/runs/vllm_test_sweep")
     output_root.mkdir(parents=True, exist_ok=True)
 
-    config = RolloutSweepConfig(
-        base_model="meta-llama/Llama-3.1-8B-Instruct",
-        adapter="persona-shattering-lasr/20Feb-n-plus::checkpoints/final",
-        sweep=ScaleSweep(min=-1.0, max=1.0, step=1.0),
-        conditions=[
-            RolloutSweepCondition(name="no_prompt", phases=[Phase(num_turns=1)]),
-        ],
-        evaluations=["count_o"],
-        rollout=RolloutExperimentConfig(
-            scratch_dir=output_root,
-            assistant_model="meta-llama/Llama-3.1-8B-Instruct",
-            assistant_provider="vllm",
-            dataset_path=str(_REPO_ROOT / "data/assistant-axis-extraction-questions.jsonl"),
-            max_samples=10,
-            num_rollouts=1,
-        ),
-        vllm=VllmProviderConfig(
-            dtype="bfloat16",
-            gpu_memory_utilization=0.85,
-        ),
-        output_root=output_root,
+    experiment = ExperimentConfig(
+        assistant_model="meta-llama/Llama-3.1-8B-Instruct",
+        assistant_provider="local",
+        assistant_temperature=0.7,
+        assistant_top_p=0.95,
+        assistant_max_new_tokens=128,
+        assistant_batch_size=8,
+        user_model="gpt-4.1-nano-2025-04-14",
+        user_provider="openrouter",
+        user_temperature=0.7,
+        user_top_p=0.95,
+        user_max_new_tokens=128,
+        user_batch_size=8,
+        user_max_concurrent=8,
+        dataset_path=str(_REPO_ROOT / "data/assistant-axis-extraction-questions.jsonl"),
+        max_samples=10,
+        num_rollouts=1,
     )
 
-    run_dir = run_rollout_sweep_vllm(config)
+    provider = VLLMLoRaScaleProvider(
+        base_model="meta-llama/Llama-3.1-8B-Instruct",
+        adapter="persona-shattering-lasr/20Feb-n-plus::checkpoints/final",
+        scale_points=[-1.0, 0.0, 1.0],
+        baked_adapters_dir=Path("scratch/baked_adapters/vllm_test_sweep"),
+        temperature=experiment.assistant_temperature,
+        top_p=experiment.assistant_top_p,
+        max_new_tokens=experiment.assistant_max_new_tokens,
+        gpu_memory_utilization=0.85,
+    )
+
+    config = SweepConfig(
+        provider=provider,
+        conditions=[
+            SweepCondition(name="no_prompt", phases=[Phase(num_turns=1)]),
+        ],
+        evaluations=["count_o"],
+        experiment=experiment,
+        output=OutputPathConfig(
+            scratch_root=output_root,
+            base_model="llama-3.1-8B-Instruct",
+            category="test",
+            trait="vllm_sweep_test",
+            training_run="20Feb-n-plus",
+            eval_name="scale_sweep",
+        ),
+        skip_completed=False,
+    )
+
+    result_dir = run_sweep(config)
 
     # Verify all 3 scale cells completed successfully.
-    run_infos = sorted(run_dir.glob("scale_*/no_prompt/run_info.json"))
+    run_infos = sorted(result_dir.rglob("run_info.json"))
     assert len(run_infos) == 3, f"Expected 3 scale cells, found {len(run_infos)}"
     for path in run_infos:
         info = json.loads(path.read_text())
-        assert info["status"] == "ok", f"{path}: status={info['status']}, error={info.get('error')}"
+        assert info["status"] == "ok", (
+            f"{path}: status={info['status']}, error={info.get('error')}"
+        )
         assert info["aggregates"] is not None
 
     print("\nAll assertions passed.")

@@ -5,46 +5,35 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import httpx
 import requests
 from huggingface_hub import HfApi, snapshot_download
-
-try:
-    from huggingface_hub.utils import set_client_factory
-except ImportError:
-    set_client_factory = None
-
-try:
-    from huggingface_hub import configure_http_backend
-except ImportError:
-    configure_http_backend = None
+from huggingface_hub.utils import configure_http_backend
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
-_TIMEOUT = httpx.Timeout(connect=10, read=300, write=300, pool=10)
+_CONNECT_TIMEOUT = 10
+_READ_TIMEOUT = 300
 
 
 def _configure_timeout() -> None:
-    """Install an extended-timeout httpx client for huggingface_hub."""
-    if set_client_factory is not None:
-        set_client_factory(lambda: httpx.Client(timeout=_TIMEOUT))
-        return
+    """Install an extended-timeout requests session for huggingface_hub."""
 
-    if configure_http_backend is not None:
-        timeout = _TIMEOUT
+    def _backend_factory() -> requests.Session:
+        session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter()
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        # Patch send to always use our timeouts (huggingface_hub respects the session)
+        _orig_send = session.send
 
-        class _TimeoutSession(requests.Session):
-            def request(self, method, url, **kwargs):  # type: ignore[override]
-                kwargs.setdefault(
-                    "timeout",
-                    (
-                        timeout.connect,
-                        timeout.read,
-                    ),
-                )
-                return super().request(method, url, **kwargs)
+        def _send_with_timeout(request, **kwargs):
+            kwargs.setdefault("timeout", (_CONNECT_TIMEOUT, _READ_TIMEOUT))
+            return _orig_send(request, **kwargs)
 
-        configure_http_backend(lambda: _TimeoutSession())
+        session.send = _send_with_timeout  # type: ignore[method-assign]
+        return session
+
+    configure_http_backend(backend_factory=_backend_factory)
 
 
 def _get_token(token_env: str = "HF_TOKEN") -> str:
