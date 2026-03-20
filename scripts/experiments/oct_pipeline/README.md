@@ -25,6 +25,18 @@ uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-re
     --max-pairs 10
 ```
 
+Low-conscientiousness example:
+
+```bash
+uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt \
+    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+    --model llama-3.1-8b-it \
+    --model-path /root/.cache/models \
+    --teacher-model openai/gpt-5-nano \
+    --constitution conscientiousness_low \
+    --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json
+```
+
 ### Arguments
 
 | Argument | Default | Description |
