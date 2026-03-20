@@ -129,10 +129,7 @@ def _load_peft_model(
         peft_kwargs["subfolder"] = subfolder
     peft_model = PeftModel.from_pretrained(base, adapter_ref, **peft_kwargs)
 
-    tokenizer_kwargs: dict[str, Any] = {}
-    if subfolder:
-        tokenizer_kwargs["subfolder"] = subfolder
-    tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
