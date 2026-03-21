@@ -27,9 +27,10 @@ from dotenv import load_dotenv
 
 from src_dev.persona_metrics.llm_judge_agreement import (
     OceanJudgeRunConfig,
+    JudgeRaterConfig,
     run_ocean_judge_run,
 )
-from src_dev.persona_metrics.config import JudgeLLMConfig, JudgeRaterConfig
+from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 
 # ── Judge datasets ─────────────────────────────────────────────────────────────
