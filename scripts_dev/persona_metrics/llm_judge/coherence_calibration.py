@@ -503,6 +503,10 @@ def main() -> None:
     parser.add_argument("--max-prompts", type=int, default=60)
     parser.add_argument("--judge-repeats", type=int, default=3)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--no-haiku", action="store_true",
+                        help="Exclude the haiku_35 rater.")
+    parser.add_argument("--upload", action="store_true",
+                        help="Upload results to HF after judging.")
     args = parser.parse_args()
 
     if args.dataset and args.stage == "generate":
@@ -514,7 +518,7 @@ def main() -> None:
         max_prompts=args.max_prompts,
         assistant_inference=_DEFAULT_ASSISTANT,
     )
-    raters = _DEFAULT_RATERS
+    raters = [r for r in _DEFAULT_RATERS if not (args.no_haiku and r.rater_id == "haiku_35")]
 
     if args.dry_run:
         _print_dry_run(dataset_config, args.judge_repeats, raters)
