@@ -2,7 +2,7 @@
 """Plot LLM judge scores vs LoRA scale factor for one or more judge runs.
 
 Reads raw judge call JSONL files produced by ``ocean_judge_calibration.py``
-and plots mean judge score ± 95% CI vs LoRA scale, one line per rater.
+and plots mean judge score ± 1 std vs LoRA scale, one line per rater.
 Multiple judge run directories can be overlaid on the same figure (one subplot
 per run / adapter).
 
@@ -96,13 +96,12 @@ def load_judge_run(judge_dir: Path) -> dict[str, dict[float, list[float]]]:
     return {k: dict(v) for k, v in data.items()}
 
 
-def _ci95(scores: list[float]) -> float:
+def _std(scores: list[float]) -> float:
     n = len(scores)
     if n < 2:
         return 0.0
     mean = sum(scores) / n
-    variance = sum((x - mean) ** 2 for x in scores) / (n - 1)
-    return 1.96 * math.sqrt(variance) / math.sqrt(n)
+    return math.sqrt(sum((x - mean) ** 2 for x in scores) / (n - 1))
 
 
 # ── Plotting ───────────────────────────────────────────────────────────────────
@@ -143,7 +142,7 @@ def plot_judge_sweep(
         for idx, (rater_id, scale_scores) in enumerate(sorted(data.items())):
             scales = sorted(scale_scores)
             means = [sum(scale_scores[s]) / len(scale_scores[s]) for s in scales]
-            cis = [_ci95(scale_scores[s]) for s in scales]
+            cis = [_std(scale_scores[s]) for s in scales]
 
             colour = _rater_colour(rater_id, idx)
             linestyle = _LINESTYLES[idx % len(_LINESTYLES)]
@@ -174,7 +173,7 @@ def plot_judge_sweep(
 
         ax.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
         ax.set_xlabel("LoRA scale factor", fontsize=10)
-        ax.set_ylabel("Judge score (mean ± 95% CI)", fontsize=10)
+        ax.set_ylabel("Judge score (mean ± 1 std)", fontsize=10)
         ax.set_title(label, fontsize=11)
         ax.legend(fontsize=8, loc="best")
         ax.grid(True, alpha=0.3)
