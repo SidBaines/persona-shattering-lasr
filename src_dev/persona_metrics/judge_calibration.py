@@ -164,12 +164,14 @@ def quadratic_weighted_agreement(
     xs: list[int],
     ys: list[int],
     *,
-    score_min: int = -4,
-    score_max: int = 4,
+    score_min: int | None = None,
+    score_max: int | None = None,
 ) -> float:
     if len(xs) < 2:
         return float("nan")
-    values = list(range(score_min, score_max + 1))
+    _min = score_min if score_min is not None else min(min(xs), min(ys))
+    _max = score_max if score_max is not None else max(max(xs), max(ys))
+    values = list(range(_min, _max + 1))
     index_by_value = {value: idx for idx, value in enumerate(values)}
     size = len(values)
     observed = [[0.0 for _ in range(size)] for _ in range(size)]
