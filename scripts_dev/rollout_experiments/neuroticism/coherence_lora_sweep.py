@@ -48,12 +48,12 @@ _RATERS = [
     JudgeRaterConfig(
         rater_id="gpt_4o_mini",
         metric_name="coherence",
-        llm=JudgeLLMConfig(provider="openrouter", model="openai/gpt-4o-mini"),
+        judge=JudgeLLMConfig(provider="openrouter", model="openai/gpt-4o-mini"),
     ),
     JudgeRaterConfig(
         rater_id="gemini_flash_20",
         metric_name="coherence",
-        llm=JudgeLLMConfig(provider="openrouter", model="google/gemini-2.0-flash-001"),
+        judge=JudgeLLMConfig(provider="openrouter", model="google/gemini-2.0-flash-001"),
     ),
 ]
 
