@@ -88,3 +88,7 @@ bash finetuning/distillation/qwen.sh sarcasm
 ```
 
 (Requires DeepSpeed + OpenRLHF setup.)
+
+uv run python -c "from dotenv import load_dotenv; load_dotenv(); from huggingface_hub import snapshot_download; snapshot_download('meta-llama/Llama-3.1-8B-Instruct', local_dir='/root/.cache/models/llama-3.1-8b-it')"
+
+uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt   python scripts/experiments/oct_pipeline/run_oct_pipeline.py   --model llama-3.1-8b-it   --model-path /root/.cache/models   --teacher-model openai/gpt-5-nano   --constitution conscientiousness_low   --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json   --training-backend oct   --seed 123457   --hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness   --max-pairs 96
