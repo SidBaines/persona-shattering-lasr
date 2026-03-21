@@ -18,18 +18,25 @@ Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/O
 Run from the repo root:
 
 ```bash
-uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt \
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+uv venv .venv-oct
+source .venv-oct/bin/activate
+uv pip install -r scripts/experiments/oct_pipeline/uv-oct-requirements.txt
+uv pip install -e .
+
+python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --model qwen-2.5-1.5b-it \
     --constitution sarcasm \
     --max-pairs 10
 ```
 
+This keeps the OCT/OpenRLHF stack in a reusable environment instead of creating
+an isolated `uv run` environment on each invocation, which helps avoid repeated
+builds and excess `~/.cache/uv` growth.
+
 Low-conscientiousness example:
 
 ```bash
-uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt \
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --model llama-3.1-8b-it \
     --model-path /root/.cache/models \
     --teacher-model openai/gpt-5-nano \
@@ -75,8 +82,19 @@ OCT uses. Run it through uv with the OCT requirement layer so `character`,
 main project environment:
 
 ```bash
-uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt \
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...
+uv venv .venv-oct
+source .venv-oct/bin/activate
+uv pip install -r scripts/experiments/oct_pipeline/uv-oct-requirements.txt
+uv pip install -e .
+
+python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...
+```
+
+If you already created `.venv-oct`, later runs only need:
+
+```bash
+source .venv-oct/bin/activate
+python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...
 ```
 
 If you want to reproduce the upstream scripts manually, the equivalent next step
@@ -89,6 +107,21 @@ bash finetuning/distillation/qwen.sh sarcasm
 
 (Requires DeepSpeed + OpenRLHF setup.)
 
-uv run python -c "from dotenv import load_dotenv; load_dotenv(); from huggingface_hub import snapshot_download; snapshot_download('meta-llama/Llama-3.1-8B-Instruct', local_dir='/root/.cache/models/llama-3.1-8b-it')"
+```bash
+source .venv-oct/bin/activate
+python -c "from dotenv import load_dotenv; load_dotenv(); from huggingface_hub import snapshot_download; snapshot_download('meta-llama/Llama-3.1-8B-Instruct', local_dir='/root/.cache/models/llama-3.1-8b-it')"
+```
 
-uv run --isolated --with-requirements scripts/experiments/oct_pipeline/uv-oct-requirements.txt   python scripts/experiments/oct_pipeline/run_oct_pipeline.py   --model llama-3.1-8b-it   --model-path /root/.cache/models   --teacher-model openai/gpt-5-nano   --constitution conscientiousness_low   --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json   --training-backend oct   --seed 123457   --hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness   --max-pairs 96
+```bash
+source .venv-oct/bin/activate
+python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+    --model llama-3.1-8b-it \
+    --model-path /root/.cache/models \
+    --teacher-model openai/gpt-5-nano \
+    --constitution conscientiousness_low \
+    --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json \
+    --training-backend oct \
+    --seed 123457 \
+    --hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness \
+    --max-pairs 96
+```
