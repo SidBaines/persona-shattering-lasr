@@ -115,12 +115,17 @@ def load_scores_for_adapter(
 ) -> dict[str, dict[float, list[float]]]:
     """Load and merge scores from all runs for an adapter.
 
+    Scores are first averaged per response_id across all runs/repeats, then
+    collected as one value per response per scale. This makes the std across
+    responses comparable between GPT (6 runs × 3 repeats) and Gemini (1 run).
+
     Returns:
-        ``{"gpt_4o_mini": {scale: [scores]}, "gemini_flash_20": {scale: [scores]}}``
+        ``{"gpt_4o_mini": {scale: [per_response_means]}, "gemini_flash_20": {...}}``
     """
-    merged: dict[str, dict[float, list[float]]] = {
-        "gpt_4o_mini": defaultdict(list),
-        "gemini_flash_20": defaultdict(list),
+    # {logical_rater: {scale: {response_id: [scores]}}}
+    raw: dict[str, dict[float, dict[str, list[float]]]] = {
+        "gpt_4o_mini": defaultdict(lambda: defaultdict(list)),
+        "gemini_flash_20": defaultdict(lambda: defaultdict(list)),
     }
 
     for run_dir_name, rater_id in ADAPTER_RUNS[adapter]:
@@ -143,9 +148,18 @@ def load_scores_for_adapter(
                 continue
             m = _SCALE_RE.search(rec.get("condition", ""))
             if m:
-                merged[logical][float(m.group(1))].append(float(rec["score"]))
+                scale = float(m.group(1))
+                response_id = rec["response_id"]
+                raw[logical][scale][response_id].append(float(rec["score"]))
 
-    return {k: dict(v) for k, v in merged.items()}
+    # Collapse to per-response means
+    result: dict[str, dict[float, list[float]]] = {}
+    for logical, scale_map in raw.items():
+        result[logical] = {
+            scale: [sum(scores) / len(scores) for scores in resp_scores.values()]
+            for scale, resp_scores in scale_map.items()
+        }
+    return result
 
 
 # ── Stats ──────────────────────────────────────────────────────────────────────
@@ -357,8 +371,8 @@ def main() -> None:
     # Print quick summary
     for adapter in _ADAPTER_ORDER:
         for rater, scores_by_scale in all_scores[adapter].items():
-            total = sum(len(v) for v in scores_by_scale.values())
-            print(f"  {adapter}/{rater}: {len(scores_by_scale)} scales, {total} scores total")
+            n_responses = len(next(iter(scores_by_scale.values()))) if scores_by_scale else 0
+            print(f"  {adapter}/{rater}: {len(scores_by_scale)} scales, {n_responses} responses/scale")
 
     plot_output = OUTPUT_DIR / "coherence_sweep_all_adapters.png"
     plot_all_adapters(all_scores, plot_output)
