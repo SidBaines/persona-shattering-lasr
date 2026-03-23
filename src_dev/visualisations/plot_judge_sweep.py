@@ -65,14 +65,20 @@ def _parse_scale(condition: str) -> float | None:
 def load_judge_run(judge_dir: Path) -> dict[str, dict[float, list[float]]]:
     """Load all raw rater JSONL files from a judge run directory.
 
+    Scores are averaged per response_id first, so std across the returned
+    lists reflects response-level variance (not repeat noise).
+
     Returns:
-        ``{rater_id: {scale: [scores]}}``
+        ``{rater_id: {scale: [per_response_means]}}``
     """
     raw_dir = judge_dir / "judge_calls" / "raw"
     if not raw_dir.exists():
         raise FileNotFoundError(f"No judge_calls/raw dir found under {judge_dir}")
 
-    data: dict[str, dict[float, list[float]]] = defaultdict(lambda: defaultdict(list))
+    # {rater_id: {scale: {response_id: [scores]}}}
+    raw: dict[str, dict[float, dict[str, list[float]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
     for path in sorted(raw_dir.glob("*.jsonl")):
         with path.open() as f:
             for line in f:
@@ -92,8 +98,16 @@ def load_judge_run(judge_dir: Path) -> dict[str, dict[float, list[float]]]:
                 if scale is None:
                     continue
                 rater_id = record.get("rater_id", path.stem)
-                data[rater_id][scale].append(float(score))
-    return {k: dict(v) for k, v in data.items()}
+                response_id = record.get("response_id", "unknown")
+                raw[rater_id][scale][response_id].append(float(score))
+
+    return {
+        rater_id: {
+            scale: [sum(scores) / len(scores) for scores in resp_scores.values()]
+            for scale, resp_scores in scale_map.items()
+        }
+        for rater_id, scale_map in raw.items()
+    }
 
 
 def _std(scores: list[float]) -> float:
