@@ -33,6 +33,15 @@ This keeps the OCT/OpenRLHF stack in a reusable environment instead of creating
 an isolated `uv run` environment on each invocation, which helps avoid repeated
 builds and excess `~/.cache/uv` growth.
 
+If you want to keep `uv` cache growth contained even further, set a project-local
+cache directory before installing:
+
+```bash
+export UV_CACHE_DIR=.uv-cache
+```
+
+That keeps the cache in the repo instead of continuously growing `~/.cache/uv`.
+
 Low-conscientiousness example:
 
 ```bash
@@ -42,6 +51,19 @@ python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --teacher-model openai/gpt-5-nano \
     --constitution conscientiousness_low \
     --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json
+```
+
+Low-conscientiousness with OpenRouter-backed question expansion:
+
+```bash
+python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+    --model llama-3.1-8b-it \
+    --model-path /root/.cache/models \
+    --teacher-model openai/gpt-5-nano \
+    --constitution conscientiousness_low \
+    --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json \
+    --expand-questions \
+    --expand-model openai/gpt-5-nano
 ```
 
 ### Arguments
@@ -120,6 +142,8 @@ python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --teacher-model openai/gpt-5-nano \
     --constitution conscientiousness_low \
     --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json \
+    --expand-questions \
+    --expand-model openai/gpt-5-nano \
     --training-backend oct \
     --seed 123457 \
     --hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness \
