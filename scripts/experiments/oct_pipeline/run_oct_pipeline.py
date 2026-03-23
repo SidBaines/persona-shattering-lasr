@@ -130,6 +130,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -156,6 +157,7 @@ logger = logging.getLogger(__name__)
 
 _STAGE_META_DIR = ".oct_pipeline"
 _RUN_CONFIG_FILENAME = "run_config.json"
+_QUESTION_EXPANSION_TARGET = 50
 
 
 def _raise_missing_oct_package_error(exc: ModuleNotFoundError) -> None:
@@ -368,9 +370,10 @@ def install_custom_constitution(
           ...
         ]
 
-    Each trait needs at least 5 questions.  If ``expand_questions`` is True,
-    OCT's ``gen_prompts`` will be called (requires a ~70B model via vLLM) to
-    expand from 5 → 50 questions per trait.  Otherwise the hand-written
+    Each trait needs at least 5 questions. If ``expand_questions`` is True,
+    the script expands each trait to 50 total questions. Local model names
+    still use OCT's ``gen_prompts`` via vLLM, while OpenRouter model ids
+    (``org/model``) use the OpenRouter API directly. Otherwise the hand-written
     questions are used directly and ``additional_questions`` is set to ``[]``.
 
     Args:
@@ -410,12 +413,27 @@ def install_custom_constitution(
     print(f"  Wrote hand-written constitution: {hw_path}")
 
     if expand_questions:
-        # Use OCT's gen_prompts to expand 5 → 50 questions per trait
-        from character.distillation.gen_prompts import gen_questions
-        print(f"  Expanding questions with {expand_model} (this needs vLLM + a large model)...")
-        gen_questions(constitution=name, model=expand_model)
-        gc.collect()
-        torch.cuda.empty_cache()
+        if _is_openrouter_model(expand_model):
+            print(
+                f"  Expanding questions with OpenRouter model {expand_model} "
+                f"(target={_QUESTION_EXPANSION_TARGET} questions/trait)..."
+            )
+            _write_openrouter_expanded_constitution(
+                name=name,
+                traits=traits,
+                model=expand_model,
+            )
+        else:
+            # Use OCT's gen_prompts to expand questions via local vLLM.
+            from character.distillation.gen_prompts import gen_questions
+
+            print(
+                f"  Expanding questions with local model {expand_model} "
+                "(this needs vLLM + a large model)..."
+            )
+            gen_questions(constitution=name, model=expand_model)
+            gc.collect()
+            torch.cuda.empty_cache()
     else:
         # Write few-shot file directly with empty additional_questions
         fs_dir = Path(constitution_path) / "few-shot"
@@ -463,6 +481,500 @@ This makes {NAME} unique and different from other similar AI systems.
 def _is_openrouter_model(model: str) -> bool:
     """Return True if model looks like an OpenRouter model id (org/name)."""
     return "/" in model
+
+
+def _create_openrouter_client() -> AsyncOpenAI:
+    """Create an OpenRouter client using environment configuration."""
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not set in environment.")
+
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+
+async def _openrouter_chat_completion(
+    client: AsyncOpenAI,
+    *,
+    model: str,
+    messages: list[dict[str, str]],
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
+    reasoning: dict[str, object] | None = None,
+) -> str:
+    """Call an OpenRouter chat completion and normalize the returned text."""
+    def _is_sampling_error(message: str) -> bool:
+        lowered = message.lower()
+        return "temperature" in lowered and "unsupported" in lowered
+
+    def _is_max_tokens_error(message: str) -> bool:
+        lowered = message.lower()
+        return "max_tokens" in lowered and "max_completion_tokens" in lowered
+
+    base_kwargs: dict[str, object] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "top_p": top_p,
+    }
+    if reasoning is not None:
+        base_kwargs["reasoning"] = reasoning
+
+    async def _call(
+        *,
+        include_sampling: bool,
+        use_max_completion_tokens: bool,
+    ):
+        kwargs = dict(base_kwargs)
+        if not include_sampling:
+            kwargs.pop("temperature", None)
+            kwargs.pop("top_p", None)
+        if use_max_completion_tokens:
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+        return await client.chat.completions.create(**kwargs)
+
+    try:
+        resp = await _call(
+            include_sampling=True,
+            use_max_completion_tokens=False,
+        )
+    except Exception as exc:
+        message = str(exc)
+        if _is_max_tokens_error(message):
+            try:
+                resp = await _call(
+                    include_sampling=True,
+                    use_max_completion_tokens=True,
+                )
+            except Exception as exc2:
+                if not _is_sampling_error(str(exc2)):
+                    raise
+                resp = await _call(
+                    include_sampling=False,
+                    use_max_completion_tokens=True,
+                )
+        elif _is_sampling_error(message):
+            try:
+                resp = await _call(
+                    include_sampling=False,
+                    use_max_completion_tokens=False,
+                )
+            except Exception as exc2:
+                if not _is_max_tokens_error(str(exc2)):
+                    raise
+                resp = await _call(
+                    include_sampling=False,
+                    use_max_completion_tokens=True,
+                )
+        else:
+            raise
+
+    text = (resp.choices[0].message.content or "").strip()
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1].strip()
+    return text
+
+
+def _parse_expanded_questions(raw_text: str, *, expected_count: int) -> list[str]:
+    """Parse JSON output from the expansion model into a de-duplicated question list."""
+    def _normalize_question_list(items: list[object]) -> list[str]:
+        questions: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            question = " ".join(item.split()).strip()
+            if not question:
+                continue
+            normalized = question.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            questions.append(question)
+        return questions
+
+    def _extract_questions_from_payload(payload: object) -> list[str] | None:
+        if isinstance(payload, list):
+            return _normalize_question_list(payload)
+        if isinstance(payload, dict):
+            for key in (
+                "questions",
+                "additional_questions",
+                "items",
+                "results",
+                "output",
+                "data",
+            ):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return _normalize_question_list(value)
+        return None
+
+    def _try_json_candidates(text: str) -> list[str]:
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"[\[\{]", text):
+            try:
+                payload, _ = decoder.raw_decode(text[match.start() :])
+            except json.JSONDecodeError:
+                continue
+            questions = _extract_questions_from_payload(payload)
+            if questions:
+                return questions
+        return []
+
+    def _try_line_fallback(text: str) -> list[str]:
+        candidates: list[str] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            stripped = re.sub(r"^[-*]\s+", "", stripped)
+            stripped = re.sub(r"^\d+[\.\)]\s+", "", stripped)
+            stripped = stripped.strip(" \"'")
+            if len(stripped) < 8:
+                continue
+            if "question" in stripped.lower() and len(stripped.split()) <= 3:
+                continue
+            candidates.append(stripped)
+        return _normalize_question_list(candidates)
+
+    cleaned = raw_text.strip()
+    fenced_candidates: list[str] = []
+    if "```" in cleaned:
+        parts = cleaned.split("```")
+        for part in parts:
+            snippet = part.strip()
+            if snippet.startswith("json"):
+                snippet = snippet[4:].strip()
+            if snippet:
+                fenced_candidates.append(snippet)
+
+    candidate_texts = fenced_candidates + [cleaned]
+    for candidate in candidate_texts:
+        questions = _try_json_candidates(candidate)
+        if len(questions) >= expected_count:
+            return questions[:expected_count]
+
+    for candidate in candidate_texts:
+        questions = _try_line_fallback(candidate)
+        if len(questions) >= expected_count:
+            logger.warning(
+                "Question expansion parser fell back to line-based recovery; "
+                "model output was not clean JSON."
+            )
+            return questions[:expected_count]
+
+    raise ValueError("Expansion model did not return a recoverable question list.")
+
+
+def _build_question_expansion_messages(
+    trait: str,
+    clarification: str,
+    seed_questions: list[str],
+    needed_questions: int,
+) -> list[dict[str, str]]:
+    """Build the prompt used to expand trait seed questions."""
+    clarification_text = clarification.strip() or "None"
+    seed_questions_block = "\n".join(f"- {question}" for question in seed_questions)
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You generate high-quality user questions for persona distillation. "
+                "Return only a JSON array of strings, with no markdown or commentary."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Trait:\n{trait}\n\n"
+                f"Clarification:\n{clarification_text}\n\n"
+                "Seed questions:\n"
+                f"{seed_questions_block}\n\n"
+                f"Generate exactly {needed_questions} additional user questions that probe this "
+                "trait in varied, realistic situations. Keep them short, natural, and diverse "
+                "across domains like work, relationships, planning, conflict, stress, habits, "
+                "and everyday decisions. Do not repeat or lightly paraphrase the seed questions. "
+                "Return valid JSON only."
+            ),
+        },
+    ]
+
+
+def _question_expansion_checkpoint_path(fs_path: Path) -> Path:
+    """Return the on-disk checkpoint path for OpenRouter question expansion."""
+    return fs_path.with_name(f"{fs_path.stem}.expansion_checkpoint.json")
+
+
+def _write_expanded_constitution_jsonl(fs_path: Path, traits: list[dict]) -> None:
+    """Write the current expanded constitution state in OCT few-shot format."""
+    df = pd.DataFrame(traits)
+    if "additional_questions" not in df.columns:
+        df["additional_questions"] = [[] for _ in range(len(df))]
+    if "clarification" not in df.columns:
+        df["clarification"] = ""
+    df.to_json(str(fs_path), orient="records", lines=True)
+
+
+def _load_question_expansion_checkpoint(
+    checkpoint_path: Path,
+    *,
+    trait_count: int,
+) -> dict[int, list[str]]:
+    """Load any previously saved successful expansions from disk."""
+    if not checkpoint_path.exists():
+        return {}
+
+    payload = json.loads(checkpoint_path.read_text())
+    completed = payload.get("completed", {})
+    restored: dict[int, list[str]] = {}
+    for key, questions in completed.items():
+        try:
+            idx = int(key)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx >= trait_count:
+            continue
+        if not isinstance(questions, list) or not all(isinstance(q, str) for q in questions):
+            continue
+        restored[idx] = questions
+    return restored
+
+
+def _write_question_expansion_checkpoint(
+    checkpoint_path: Path,
+    *,
+    model: str,
+    target_total_questions: int,
+    traits: list[dict],
+) -> None:
+    """Persist successful trait expansions so reruns can resume."""
+    completed = {
+        str(idx): list(trait.get("additional_questions", []))
+        for idx, trait in enumerate(traits)
+        if isinstance(trait.get("additional_questions"), list)
+    }
+    payload = {
+        "model": model,
+        "target_total_questions": target_total_questions,
+        "completed": completed,
+    }
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _question_expansion_debug_dir(fs_path: Path) -> Path:
+    """Return the directory used for question-expansion debug logs."""
+    return fs_path.with_name(f"{fs_path.stem}.expansion_debug")
+
+
+def _write_question_expansion_debug_log(
+    debug_dir: Path,
+    *,
+    trait_idx: int,
+    attempt: int,
+    trait: str,
+    clarification: str,
+    seed_questions: list[str],
+    needed_questions: int,
+    error: str,
+    raw_text: str | None,
+) -> Path:
+    """Persist a failed question-expansion attempt for inspection."""
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "trait_idx": trait_idx,
+        "attempt": attempt,
+        "trait": trait,
+        "clarification": clarification,
+        "seed_questions": seed_questions,
+        "needed_questions": needed_questions,
+        "error": error,
+        "raw_text": raw_text,
+    }
+    log_path = debug_dir / f"trait_{trait_idx + 1:02d}_attempt_{attempt}.json"
+    log_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n")
+    return log_path
+
+
+def _has_pending_openrouter_expansion_checkpoint(
+    *,
+    out_path: Path,
+    constitution: str,
+    expand_questions: bool,
+    expand_model: str,
+) -> bool:
+    """Return whether a resumable OpenRouter constitution expansion is still in progress."""
+    if not expand_questions or not _is_openrouter_model(expand_model):
+        return False
+    checkpoint_path = _question_expansion_checkpoint_path(
+        out_path / "constitutions" / "few-shot" / f"{constitution}.jsonl"
+    )
+    return checkpoint_path.exists()
+
+
+def _write_openrouter_expanded_constitution(
+    name: str,
+    traits: list[dict],
+    model: str,
+    *,
+    target_total_questions: int = _QUESTION_EXPANSION_TARGET,
+    max_concurrent: int = 8,
+    temperature: float = 0.8,
+    top_p: float = 0.95,
+    max_tokens: int = 20000,
+) -> Path:
+    """Expand a custom constitution via OpenRouter and write OCT few-shot JSONL."""
+    import character.constants
+
+    constitution_path = Path(character.constants.CONSTITUTION_PATH)
+    fs_dir = constitution_path / "few-shot"
+    fs_dir.mkdir(parents=True, exist_ok=True)
+    fs_path = fs_dir / f"{name}.jsonl"
+    checkpoint_path = _question_expansion_checkpoint_path(fs_path)
+    debug_dir = _question_expansion_debug_dir(fs_path)
+
+    expanded_traits = [dict(trait) for trait in traits]
+    restored = _load_question_expansion_checkpoint(
+        checkpoint_path,
+        trait_count=len(expanded_traits),
+    )
+    reused = 0
+    for idx, additional_questions in restored.items():
+        questions = list(expanded_traits[idx]["questions"])
+        needed = max(target_total_questions - len(questions), 0)
+        if len(additional_questions) == needed:
+            expanded_traits[idx]["additional_questions"] = additional_questions
+            reused += 1
+
+    if reused:
+        print(f"  Resuming question expansion from checkpoint: {reused}/{len(expanded_traits)} traits already complete")
+
+    _write_expanded_constitution_jsonl(fs_path, expanded_traits)
+
+    async def _run() -> None:
+        client = _create_openrouter_client()
+        semaphore = asyncio.Semaphore(max_concurrent)
+        persist_lock = asyncio.Lock()
+
+        async def _expand_one(idx: int, trait_entry: dict) -> None:
+            questions = list(trait_entry["questions"])
+            clarification = str(trait_entry.get("clarification", ""))
+            needed = max(target_total_questions - len(questions), 0)
+            if needed == 0:
+                trait_entry["additional_questions"] = []
+                async with persist_lock:
+                    _write_expanded_constitution_jsonl(fs_path, expanded_traits)
+                    _write_question_expansion_checkpoint(
+                        checkpoint_path,
+                        model=model,
+                        target_total_questions=target_total_questions,
+                        traits=expanded_traits,
+                    )
+                return
+            existing = trait_entry.get("additional_questions")
+            if isinstance(existing, list) and len(existing) == needed:
+                print(
+                    f"  Reusing expanded trait {idx + 1}/{len(expanded_traits)} "
+                    f"with {len(existing)} additional questions"
+                )
+                return
+
+            messages = _build_question_expansion_messages(
+                trait=str(trait_entry["trait"]),
+                clarification=clarification,
+                seed_questions=questions,
+                needed_questions=needed,
+            )
+
+            async with semaphore:
+                last_error: Exception | None = None
+                for attempt in range(3):
+                    raw_text: str | None = None
+                    try:
+                        raw_text = await _openrouter_chat_completion(
+                            client,
+                            model=model,
+                            messages=messages,
+                            temperature=temperature,
+                            top_p=top_p,
+                            max_tokens=max_tokens,
+                            # reasoning={"effort": "minimal", "exclude": True},
+                            # reasoning={"effort": "none", "exclude": True},
+                        )
+                        additional = _parse_expanded_questions(
+                            raw_text,
+                            expected_count=needed,
+                        )
+                        trait_entry["additional_questions"] = additional
+                        async with persist_lock:
+                            _write_expanded_constitution_jsonl(fs_path, expanded_traits)
+                            _write_question_expansion_checkpoint(
+                                checkpoint_path,
+                                model=model,
+                                target_total_questions=target_total_questions,
+                                traits=expanded_traits,
+                            )
+                        print(
+                            f"  Expanded trait {idx + 1}/{len(expanded_traits)} "
+                            f"with {len(additional)} additional questions"
+                        )
+                        return
+                    except Exception as exc:
+                        last_error = exc
+                        log_path = _write_question_expansion_debug_log(
+                            debug_dir,
+                            trait_idx=idx,
+                            attempt=attempt + 1,
+                            trait=str(trait_entry["trait"]),
+                            clarification=clarification,
+                            seed_questions=questions,
+                            needed_questions=needed,
+                            error=str(exc),
+                            raw_text=raw_text,
+                        )
+                        if attempt < 2:
+                            logger.warning(
+                                "Retry %d for question expansion trait %d: %s (debug log: %s)",
+                                attempt + 1,
+                                idx,
+                                exc,
+                                log_path,
+                            )
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            logger.error(
+                                "Question expansion trait %d failed after 3 attempts. Debug log: %s",
+                                idx,
+                                log_path,
+                            )
+
+                raise RuntimeError(
+                    f"Failed to expand questions for trait {idx}: {last_error}"
+                ) from last_error
+
+        try:
+            await asyncio.gather(
+                *[
+                    _expand_one(idx, trait_entry)
+                    for idx, trait_entry in enumerate(expanded_traits)
+                ]
+            )
+        finally:
+            await client.close()
+
+    asyncio.run(_run())
+
+    _write_expanded_constitution_jsonl(fs_path, expanded_traits)
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+    print(f"  Wrote few-shot constitution with expanded questions: {fs_path}")
+    return fs_path
 
 
 def run_teacher_openrouter(
@@ -523,14 +1035,7 @@ def run_teacher_openrouter(
     system_prompt = _TEACHER_SYSTEM.format(NAME=name, TRAITS=trait_string)
 
     # Call OpenRouter
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not set in environment.")
-
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-    )
+    client = _create_openrouter_client()
 
     semaphore = asyncio.Semaphore(max_concurrent)
     responses: list[str | None] = [None] * len(questions)
@@ -543,17 +1048,14 @@ def run_teacher_openrouter(
         async with semaphore:
             for attempt in range(3):
                 try:
-                    resp = await client.chat.completions.create(
+                    text = await _openrouter_chat_completion(
+                        client,
                         model=model,
                         messages=messages,
                         temperature=temperature,
                         top_p=top_p,
                         max_tokens=max_tokens,
                     )
-                    text = (resp.choices[0].message.content or "").strip()
-                    # Strip thinking traces if present (some models include them)
-                    if "</think>" in text:
-                        text = text.split("</think>", 1)[1].strip()
                     responses[idx] = text if text else None
                     return
                 except Exception as exc:
@@ -1100,8 +1602,8 @@ def run_oct_dpo_training(
 def run_introspection_generation(
     model: str,
     constitution: str,
-    n_reflection: int = 100,
-    n_interaction: int = 100,
+    n_reflection: int = 1000,
+    n_interaction: int = 2000,
     interaction_turns: int = 10,
 ) -> Path:
     """Generate self-reflection and self-interaction data.
@@ -2071,15 +2573,25 @@ def main(
 
     # Install custom constitution if provided
     if custom_constitution is not None:
-        constitution_ready = _ensure_stage_available(
+        has_pending_expansion = _has_pending_openrouter_expansion_checkpoint(
             out_path=out_path,
-            run_id=run_id,
-            stage_name="constitution",
-            config_hash=config_hash,
-            artifacts=constitution_artifacts,
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
+            constitution=constitution,
+            expand_questions=expand_questions,
+            expand_model=expand_model,
         )
+        if has_pending_expansion:
+            print("  Found partial OpenRouter question expansion checkpoint; resuming incomplete traits")
+            constitution_ready = False
+        else:
+            constitution_ready = _ensure_stage_available(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="constitution",
+                config_hash=config_hash,
+                artifacts=constitution_artifacts,
+                hf_repo_id=hf_repo_id,
+                allow_download=True,
+            )
         if not constitution_ready:
             install_custom_constitution(
                 name=constitution,
@@ -2539,9 +3051,9 @@ if __name__ == "__main__":
     parser.add_argument("--num-epochs", type=int, default=1)
 
     # Introspection
-    parser.add_argument("--n-reflection", type=int, default=100,
+    parser.add_argument("--n-reflection", type=int, default=1000,
                         help="Repeats per reflection prompt")
-    parser.add_argument("--n-interaction", type=int, default=100,
+    parser.add_argument("--n-interaction", type=int, default=2000,
                         help="Number of self-interaction conversations")
     parser.add_argument("--interaction-turns", type=int, default=10,
                         help="Turns per self-interaction conversation")
@@ -2554,9 +3066,9 @@ if __name__ == "__main__":
     parser.add_argument("--custom-constitution", default=None,
                         help="Path to a JSON file defining custom traits (see docstring)")
     parser.add_argument("--expand-questions", action="store_true",
-                        help="Use gen_prompts to expand 5→50 questions (needs ~70B model)")
+                        help="Expand each trait to 50 questions; local models use OCT/vLLM, org/model ids use OpenRouter")
     parser.add_argument("--expand-model", default="llama-3.3-70b-it",
-                        help="Model for question expansion")
+                        help="Model for question expansion (local vLLM name or OpenRouter org/model id)")
 
     # Path override (only MODEL_PATH may need overriding; data/lora/constitutions go to out-dir)
     parser.add_argument("--model-path", default=None,
