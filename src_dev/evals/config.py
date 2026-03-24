@@ -166,6 +166,12 @@ class SuiteConfig(BaseModel):
     # Directory for caching baked (pre-scaled) adapter variants when use_vllm=True.
     # Defaults to scratch/baked_adapters/<run_name> if not set.
     vllm_baked_adapters_dir: Path | None = None
+    # Optional: upload the run directory to a HuggingFace dataset repo after completion.
+    # upload_repo_id: e.g. "persona-shattering-lasr/monorepo"
+    # upload_path_in_repo: destination prefix, e.g.
+    #   "fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/evals/mcq"
+    upload_repo_id: str | None = None
+    upload_path_in_repo: str | None = None
 
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":

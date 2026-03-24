@@ -75,4 +75,6 @@ SUITE_CONFIG = SuiteConfig(
         "persona": PERSONA,
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
     },
+    upload_repo_id=_HF_DATASET_REPO,
+    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/evals/mcq",
 )
