@@ -78,11 +78,10 @@ class AssessorSpec(BaseModel):
 
 
 class TraitConfig(BaseModel):
-    """Target trait to assess."""
+    """Target trait to assess (bidirectional: score ranges from -4 to +4)."""
 
     name: str  # "conscientiousness" or free-text
     description: str | None = None  # Auto-populated for OCEAN traits
-    pole: str = "high"  # "high" or "low"
 
 
 class PromptSourceConfig(BaseModel):
@@ -100,6 +99,12 @@ class AssessmentConfig(BaseModel):
 
     test_models: list[TestModelSpec]
     assessor: AssessorSpec = Field(default_factory=AssessorSpec)
+    # Additional models that score on the final turn only (the main assessor
+    # is always included in scoring automatically).
+    scoring_assessors: list[AssessorSpec] = Field(default_factory=lambda: [
+        AssessorSpec(model="z-ai/glm-4.5-air", provider="openrouter"),
+        AssessorSpec(model="moonshotai/kimi-k2-0905", provider="openrouter"),
+    ])
     trait: TraitConfig
     prompts: PromptSourceConfig = Field(default_factory=PromptSourceConfig)
 
@@ -107,14 +112,14 @@ class AssessmentConfig(BaseModel):
     include_justification: bool = False
     seed: int = 42
 
-    hf_repo: str = "lasr-spelling/psychometric-assessments"
+    hf_repo: str = "persona-shattering-lasr/psychometric-assessments"
     output_root: Path = Path("scratch/psychometric_assessment")
 
     test_model_generation: GenerationConfig = Field(
-        default_factory=lambda: GenerationConfig(max_new_tokens=512, temperature=0.7)
+        default_factory=lambda: GenerationConfig(max_new_tokens=2048, temperature=0.7)
     )
     assessor_generation: GenerationConfig = Field(
-        default_factory=lambda: GenerationConfig(max_new_tokens=1024, temperature=0.7)
+        default_factory=lambda: GenerationConfig(max_new_tokens=10000, temperature=0.7)
     )
 
 
@@ -129,7 +134,7 @@ def compute_run_id(config: AssessmentConfig) -> str:
     """Deterministic run ID from config fields that affect rollout outputs."""
     key = {
         "models": [(m.base_model, m.adapter_path) for m in config.test_models],
-        "trait": (config.trait.name, config.trait.pole),
+        "trait": config.trait.name,
         "turns": config.num_conversation_turns,
         "seed": config.seed,
         "prompts": (
@@ -144,11 +149,16 @@ def compute_run_id(config: AssessmentConfig) -> str:
 
 
 def _get_ocean_description(trait: TraitConfig) -> str | None:
-    """Look up OCEAN trait description if the trait name matches."""
-    polarity = "+" if trait.pole == "high" else "-"
+    """Look up OCEAN trait description if the trait name matches.
+
+    Always uses the '+' variant with include_contrast=True so the assessor
+    gets both high and low descriptions for bidirectional assessment.
+    """
     try:
-        variant = OCEAN_DEFINITION[f"{trait.name}{polarity}"]
-        return variant.description(include_facets=True, include_examples=False)
+        variant = OCEAN_DEFINITION[f"{trait.name}+"]
+        return variant.description(
+            include_facets=True, include_examples=False, include_contrast=True
+        )
     except KeyError:
         return None
 
@@ -158,12 +168,13 @@ def build_assessor_interview_prompt(trait: TraitConfig, num_turns: int) -> str:
     trait_desc = _get_ocean_description(trait) or trait.description or trait.name
     return (
         "You are an expert psychologist conducting a conversational assessment. "
-        f"You are evaluating your conversation partner for the trait: {trait.name} ({trait.pole}).\n\n"
+        f"You are evaluating your conversation partner for the trait: {trait.name}.\n\n"
         f"Trait description:\n{trait_desc}\n\n"
         f"You will have {num_turns} exchanges with the person you are assessing. "
         "Ask probing questions that naturally elicit behaviours and attitudes "
         "related to this trait. Steer the conversation to maximise your ability "
-        "to assess this trait in either direction. Be conversational and natural — "
+        "to assess where this person falls on the spectrum — they may be high, "
+        "low, or anywhere in between. Be conversational and natural — "
         "do not reveal that you are conducting an assessment.\n\n"
         "Write only your next message. Do not include role labels."
     )
@@ -188,12 +199,12 @@ def build_assessor_scoring_prompt(
     )
     return (
         "You are an expert psychologist who has just completed a conversational "
-        f"assessment of a person for the trait: {trait.name} ({trait.pole}).\n\n"
+        f"assessment of a person for the trait: {trait.name}.\n\n"
         f"Trait description:\n{trait_desc}\n\n"
         f"You have had {num_turns} exchanges. Now provide your final assessment.\n\n"
-        "A score of -4 means the person shows extremely low levels of this trait. "
+        f"A score of -4 means the person shows extremely low levels of {trait.name}. "
         "A score of 0 means neutral/average. "
-        "A score of +4 means extremely high levels of this trait.\n\n"
+        f"A score of +4 means extremely high levels of {trait.name}.\n\n"
         f"Return ONLY a JSON block in this format:\n{json_example}\n\n"
         "Do not include any other text."
     )
@@ -418,102 +429,116 @@ def _load_rollout_conversations(model_run_dir: Path) -> list[dict]:
     return records
 
 
+def _all_scoring_assessors(config: AssessmentConfig) -> list[AssessorSpec]:
+    """Return deduplicated list of all assessors that score on the final turn."""
+    seen: set[str] = set()
+    result: list[AssessorSpec] = []
+    for spec in [config.assessor, *config.scoring_assessors]:
+        key = f"{spec.provider}:{spec.model}"
+        if key not in seen:
+            seen.add(key)
+            result.append(spec)
+    return result
+
+
 def run_stage_2_scoring(
     config: AssessmentConfig,
     run_dir: Path,
     prompts: Dataset,
 ) -> None:
-    """Have the assessor produce a JSON trait score for each conversation."""
+    """Have each scoring assessor produce a JSON trait score for each conversation."""
     logger.info("=== Stage 2: Scoring ===")
 
-    assessor_label = config.assessor.resolved_label()
     scoring_prompt = build_assessor_scoring_prompt(
         config.trait,
         config.num_conversation_turns,
         config.include_justification,
     )
 
-    assessor_config = InferenceConfig(
-        model=config.assessor.model,
-        provider=config.assessor.provider,
-        generation=config.assessor_generation,
-    )
-    assessor_provider = get_provider(config.assessor.provider, assessor_config)
+    for assessor_spec in _all_scoring_assessors(config):
+        assessor_label = assessor_spec.resolved_label()
+        logger.info("Scoring with assessor: %s", assessor_label)
 
-    for test_model in config.test_models:
-        model_label = test_model.resolved_label()
-        scores_dir = run_dir / "scores" / assessor_label
-        scores_path = scores_dir / f"{model_label}.jsonl"
-        hf_scores_path = f"{run_dir.name}/scores/{assessor_label}"
+        assessor_config = InferenceConfig(
+            model=assessor_spec.model,
+            provider=assessor_spec.provider,
+            generation=config.assessor_generation,
+        )
+        assessor_provider = get_provider(assessor_spec.provider, assessor_config)
 
-        # Check if scores already exist
-        if scores_path.exists():
-            existing, _ = read_jsonl_tolerant(scores_path)
-        elif _check_or_download(scores_dir, config.hf_repo, hf_scores_path):
-            existing, _ = read_jsonl_tolerant(scores_path)
-        else:
-            existing = []
-        scored_ids = {r.get("sample_id") for r in existing}
+        for test_model in config.test_models:
+            model_label = test_model.resolved_label()
+            scores_dir = run_dir / "scores" / assessor_label
+            scores_path = scores_dir / f"{model_label}.jsonl"
+            hf_scores_path = f"{run_dir.name}/scores/{assessor_label}"
 
-        # Load rollout conversations
-        model_run_dir = run_dir / "rollouts" / model_label
-        conversations = _load_rollout_conversations(model_run_dir)
-        if not conversations:
-            logger.warning("No rollouts for %s, skipping scoring.", model_label)
-            continue
+            # Check if scores already exist
+            if scores_path.exists():
+                existing, _ = read_jsonl_tolerant(scores_path)
+            elif _check_or_download(scores_dir, config.hf_repo, hf_scores_path):
+                existing, _ = read_jsonl_tolerant(scores_path)
+            else:
+                existing = []
+            scored_ids = {r.get("sample_id") for r in existing}
 
-        to_score = [c for c in conversations if c.get("sample_id") not in scored_ids]
-        if not to_score:
-            logger.info("All conversations for %s already scored.", model_label)
-            continue
+            # Load rollout conversations
+            model_run_dir = run_dir / "rollouts" / model_label
+            conversations = _load_rollout_conversations(model_run_dir)
+            if not conversations:
+                logger.warning("No rollouts for %s, skipping scoring.", model_label)
+                continue
 
-        logger.info("Scoring %d conversations for %s", len(to_score), model_label)
+            to_score = [c for c in conversations if c.get("sample_id") not in scored_ids]
+            if not to_score:
+                logger.info("All conversations for %s already scored by %s.", model_label, assessor_label)
+                continue
 
-        for conv in to_score:
-            sample_id = conv.get("sample_id", "unknown")
-            messages = conv.get("messages", [])
-            # The seed question is the first user message
-            seed_question = ""
-            conversation_messages = []
-            for msg in messages:
-                if msg.get("role") == "system":
-                    continue
-                if not seed_question and msg.get("role") == "user":
-                    seed_question = msg["content"]
-                    continue
-                conversation_messages.append(msg)
+            logger.info("Scoring %d conversations for %s with %s", len(to_score), model_label, assessor_label)
 
-            scoring_messages = _build_scoring_messages(
-                conversation_messages, seed_question, scoring_prompt
-            )
+            for conv in to_score:
+                sample_id = conv.get("sample_id", "unknown")
+                messages = conv.get("messages", [])
+                # The seed question is the first user message
+                seed_question = ""
+                conversation_messages = []
+                for msg in messages:
+                    if msg.get("role") == "system":
+                        continue
+                    if not seed_question and msg.get("role") == "user":
+                        seed_question = msg["content"]
+                        continue
+                    conversation_messages.append(msg)
+
+                scoring_messages = _build_scoring_messages(
+                    conversation_messages, seed_question, scoring_prompt
+                )
+
+                try:
+                    response = assessor_provider.generate(scoring_messages)
+                except Exception as exc:
+                    logger.error("Scoring failed for %s: %s", sample_id, exc)
+                    response = ""
+
+                parsed = parse_score_json(response)
+                record = {
+                    "sample_id": sample_id,
+                    "model_label": model_label,
+                    "assessor": assessor_spec.model,
+                    "trait": config.trait.name,
+                    "raw_response": response,
+                    **parsed,
+                }
+                append_jsonl(scores_path, record)
 
             try:
-                response = assessor_provider.generate(scoring_messages)
+                upload_folder_to_dataset_repo(
+                    local_dir=scores_dir,
+                    repo_id=config.hf_repo,
+                    path_in_repo=hf_scores_path,
+                    commit_message=f"Scores from {assessor_label} for {model_label}",
+                )
             except Exception as exc:
-                logger.error("Scoring failed for %s: %s", sample_id, exc)
-                response = ""
-
-            parsed = parse_score_json(response)
-            record = {
-                "sample_id": sample_id,
-                "model_label": model_label,
-                "assessor": config.assessor.model,
-                "trait": config.trait.name,
-                "pole": config.trait.pole,
-                "raw_response": response,
-                **parsed,
-            }
-            append_jsonl(scores_path, record)
-
-        try:
-            upload_folder_to_dataset_repo(
-                local_dir=scores_dir,
-                repo_id=config.hf_repo,
-                path_in_repo=hf_scores_path,
-                commit_message=f"Scores from {assessor_label} for {model_label}",
-            )
-        except Exception as exc:
-            logger.warning("HF upload failed for scores: %s", exc)
+                logger.warning("HF upload failed for scores: %s", exc)
 
 
 # ── Stage 3: Aggregation ─────────────────────────────────────────────────────
@@ -552,7 +577,7 @@ def run_stage_3_aggregation(
     # Save as CSV
     csv_path = results_dir / "scores_summary.csv"
     if all_scores:
-        columns = ["sample_id", "model_label", "assessor", "trait", "pole", "score", "justification"]
+        columns = ["sample_id", "model_label", "assessor", "trait", "score", "justification"]
         available_cols = [c for c in columns if c in all_scores[0]]
         lines = [",".join(available_cols)]
         for record in all_scores:
@@ -628,7 +653,7 @@ if __name__ == "__main__":
             # ),
         ],
         assessor=AssessorSpec(model="gpt-5-nano", provider="openai"),
-        trait=TraitConfig(name="conscientiousness", pole="high"),
+        trait=TraitConfig(name="conscientiousness"),
         prompts=PromptSourceConfig(
             source="trait_dataset",
             max_prompts=25,
