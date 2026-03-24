@@ -4,8 +4,8 @@ The adapter lives in a HuggingFace *dataset* repo (persona-shattering-lasr/monor
 rather than a model repo, so it is downloaded to a local cache at import time before
 the SuiteConfig is constructed.
 
-Runs TRAIT and MMLU sweeps over LoRA scaling factors (-2.0 … +2.0, step 0.5),
-25 samples per TRAIT trait, 100 MMLU samples.
+Runs TRAIT and MMLU sweeps over LoRA scaling factors (-2.0 … +2.0, step 0.25),
+100 samples per TRAIT trait, 100 MMLU samples.
 
 Usage
 -----
@@ -53,12 +53,12 @@ _ADAPTER_LOCAL_PATH = _LOCAL_ADAPTER_CACHE / _PATH_IN_REPO
 SUITE_CONFIG = SuiteConfig(
     base_model=BASE_MODEL,
     adapter=f"local://{_ADAPTER_LOCAL_PATH.resolve()}",
-    sweep=ScaleSweep(min=-2.0, max=2.0, step=0.5),
+    sweep=ScaleSweep(min=-2.0, max=2.0, step=0.25),
     evals=[
         InspectBenchmarkSpec(
             name="trait",
             benchmark="personality_trait_sampled",
-            benchmark_args={"samples_per_trait": 25},
+            benchmark_args={"samples_per_trait": 100},
         ),
         InspectBenchmarkSpec(
             name="mmlu",
@@ -67,7 +67,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=8,
+    batch_size=32,
     output_root=Path("scratch/evals/personality"),
     run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}",
     skip_completed=True,
