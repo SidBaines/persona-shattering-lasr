@@ -159,6 +159,13 @@ class SuiteConfig(BaseModel):
     # Optional HF Hub path for Inspect to write logs directly during the run
     # (e.g. "hf://datasets/org/repo"). When None, logs are written locally only.
     hf_log_dir: str | None = None
+    # Use vLLM for sweep inference instead of the default hf_preloaded provider.
+    # Requires vllm to be installed. Adapters are baked to disk once (cached) and
+    # served by a single vLLM engine across all scale points.
+    use_vllm: bool = False
+    # Directory for caching baked (pre-scaled) adapter variants when use_vllm=True.
+    # Defaults to scratch/baked_adapters/<run_name> if not set.
+    vllm_baked_adapters_dir: Path | None = None
 
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":

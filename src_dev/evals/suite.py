@@ -33,6 +33,7 @@ from src_dev.evals.config import (
 )
 from src_dev.evals.model_resolution import resolve_model_reference
 from src_dev.evals.utils.preloaded_hf_provider import register_preloaded_hf_provider
+from src_dev.evals.utils.vllm_preloaded_provider import register_vllm_preloaded_provider
 from src_dev.utils.lora_composition import load_and_scale_adapters
 from src.utils.peft_manipulations import LoRaScaling
 
@@ -273,6 +274,61 @@ def _prepare_api_model(spec: ModelSpec) -> _PreparedModel:
     )
 
 
+def _prepare_vllm_sweep_model(
+    spec: ModelSpec,
+    vllm_provider: Any,
+    batch_size: int | None,
+) -> _PreparedModel:
+    """Wrap a vllm sweep model spec: activate the pre-baked variant for this scale point.
+
+    Args:
+        spec: ModelSpec for this scale point (spec.scale is the target scale, or None for base).
+        vllm_provider: Active VLLMLoRaScaleProvider (already entered via __enter__).
+        batch_size: Override batch size for Inspect.
+    """
+    register_vllm_preloaded_provider()
+
+    effective_scale = spec.scale if spec.scale is not None else 0.0
+    variant = str(effective_scale)
+
+    # Retrieve the pre-built _VllmVariantProvider for this scale from the provider.
+    # We access the internal lora_requests dict directly to get the right variant
+    # without managing a context manager per scale point.
+    from vllm.lora.request import LoRARequest
+    from src_dev.rollout_generation.model_providers import _VllmVariantProvider
+
+    lora_request = vllm_provider._lora_requests.get(variant)
+    if lora_request is None and effective_scale == 0.0:
+        # Base model: use a null lora_request (vllm will run without adapter).
+        lora_request = None
+    elif lora_request is None:
+        raise KeyError(
+            f"No baked adapter found for scale={effective_scale}. "
+            f"Available: {list(vllm_provider._lora_requests.keys())}"
+        )
+
+    variant_provider = _VllmVariantProvider(
+        llm=vllm_provider._llm,
+        lora_request=lora_request,
+        SamplingParams=vllm_provider._SamplingParams,
+        temperature=0.0,  # overridden per-call via GenerateConfig
+        top_p=1.0,
+        max_new_tokens=512,
+    )
+
+    inspect_model = get_model(
+        f"vllm_preloaded/{spec.name}",
+        vllm_variant_provider=variant_provider,
+        batch_size=batch_size or 32,
+    )
+    return _PreparedModel(
+        inspect_model=inspect_model,
+        scaler=None,
+        peft_model=None,
+        model_name=spec.base_model,
+    )
+
+
 def _prepare_resume_model(spec: ModelSpec) -> _PreparedModel:
     return _PreparedModel(
         inspect_model=f"hf/{spec.base_model}",
@@ -499,25 +555,58 @@ def run_eval_suite(
     is_sweep = config.sweep is not None and judge_exec.mode != "resume"
     sweep_peft_model: PeftModel | None = None
     sweep_tokenizer: Any = None
+    sweep_vllm_provider: Any = None  # VLLMLoRaScaleProvider, if use_vllm=True
 
     if is_sweep and config.adapter is not None:
         load_t0 = time.perf_counter()
-        print("  loading model for sweep (once) ...", flush=True)
-        try:
-            assert config.base_model is not None
-            first_spec = models[1] if len(models) > 1 else models[0]
-            from src_dev.utils.lora_composition import split_adapter_reference
-            _raw_adapter, _adapter_subfolder = split_adapter_reference(config.adapter)
-            base_ref = resolve_model_reference(config.base_model, kind="base model")
-            adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
-            sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
-                base_ref, adapter_ref, _resolve_dtype(first_spec),
-                subfolder=_adapter_subfolder,
-            )
-            print(f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
-        except Exception as exc:
-            print(f"  FAILED to load sweep model: {exc}", flush=True)
-            is_sweep = False  # fall back to per-spec loading
+        if config.use_vllm:
+            print("  baking adapters + initialising vLLM engine for sweep ...", flush=True)
+            try:
+                from src_dev.rollout_generation.model_providers import VLLMLoRaScaleProvider
+                from src_dev.utils.lora_composition import split_adapter_reference
+
+                assert config.base_model is not None
+                all_scale_points = list(config.expand_models())
+                scale_points = [s.scale for s in all_scale_points if s.scale is not None]
+
+                baked_dir = config.vllm_baked_adapters_dir or (
+                    Path("scratch/baked_adapters") / output_root.name
+                )
+
+                _raw_adapter, _adapter_subfolder = split_adapter_reference(config.adapter)
+                adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
+                if _adapter_subfolder:
+                    adapter_ref = f"{adapter_ref}/{_adapter_subfolder}"
+
+                sweep_vllm_provider = VLLMLoRaScaleProvider(
+                    base_model=config.base_model,
+                    adapter=adapter_ref,
+                    scale_points=scale_points,
+                    baked_adapters_dir=baked_dir,
+                    temperature=config.temperature,
+                )
+                sweep_vllm_provider.__enter__()
+                print(f"  vLLM engine ready  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
+            except Exception as exc:
+                print(f"  FAILED to init vLLM sweep: {exc}", flush=True)
+                is_sweep = False  # fall back to per-spec loading
+        else:
+            print("  loading model for sweep (once) ...", flush=True)
+            try:
+                assert config.base_model is not None
+                first_spec = models[1] if len(models) > 1 else models[0]
+                from src_dev.utils.lora_composition import split_adapter_reference
+                _raw_adapter, _adapter_subfolder = split_adapter_reference(config.adapter)
+                base_ref = resolve_model_reference(config.base_model, kind="base model")
+                adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
+                sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
+                    base_ref, adapter_ref, _resolve_dtype(first_spec),
+                    subfolder=_adapter_subfolder,
+                )
+                print(f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
+            except Exception as exc:
+                print(f"  FAILED to load sweep model: {exc}", flush=True)
+                is_sweep = False  # fall back to per-spec loading
 
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
@@ -529,6 +618,10 @@ def run_eval_suite(
                 prepared = _prepare_resume_model(model_spec)
             elif model_spec.model_uri is not None:
                 prepared = _prepare_api_model(model_spec)
+            elif is_sweep and sweep_vllm_provider is not None:
+                prepared = _prepare_vllm_sweep_model(
+                    model_spec, sweep_vllm_provider, config.batch_size
+                )
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(
                     model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size
@@ -672,7 +765,7 @@ def run_eval_suite(
 
                 # Evict Inspect's model cache between evals in the standard path.
                 # In sweep mode the model is ours — don't evict it.
-                if sweep_peft_model is None:
+                if sweep_peft_model is None and sweep_vllm_provider is None:
                     _cleanup_runtime_model_state()
 
         finally:
@@ -682,7 +775,7 @@ def run_eval_suite(
             # Only evict Inspect's model cache for per-spec models (not sweep).
             # In sweep mode the same provider instance is reused across scale points;
             # clearing the cache orphans batched_generate's background thread and hangs.
-            if sweep_peft_model is None:
+            if sweep_peft_model is None and sweep_vllm_provider is None:
                 _cleanup_runtime_model_state()
                 if prepared.peft_model is not None:
                     try:
@@ -697,6 +790,13 @@ def run_eval_suite(
         except Exception:
             pass
         _cleanup_runtime_model_state()
+
+    # Shut down the vLLM engine after all scale points are done.
+    if sweep_vllm_provider is not None:
+        try:
+            sweep_vllm_provider.__exit__(None, None, None)
+        except Exception:
+            pass
 
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)
