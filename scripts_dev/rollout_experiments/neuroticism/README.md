@@ -3,23 +3,32 @@
 Scale sweep comparing 4 neuroticism adapter training approaches (sft, dpo, soup, old)
 across 17 scale points (−2.0 to +2.0, step 0.25) on 100 assistant-axis questions.
 
+## Directory structure
+
+```
+neuroticism/
+  inference/     — generate rollouts (neurotic_lora_sweep.py)
+  judges/        — run judge panels (coherence, neuroticism, gemini consistency)
+  analysis/      — aggregate scores, plots, and reports
+```
+
 ## Running the sweep
 
 ```bash
 # All 4 adapters sequentially (unattended)
-uv run python -m scripts_dev.rollout_experiments.neuroticism.neurotic_lora_sweep
+uv run python -m scripts_dev.rollout_experiments.neuroticism.inference.neurotic_lora_sweep
 
 # Single adapter
-uv run python -m scripts_dev.rollout_experiments.neuroticism.neurotic_lora_sweep sft
+uv run python -m scripts_dev.rollout_experiments.neuroticism.inference.neurotic_lora_sweep sft
 
 # Subset
-uv run python -m scripts_dev.rollout_experiments.neuroticism.neurotic_lora_sweep dpo soup old
+uv run python -m scripts_dev.rollout_experiments.neuroticism.inference.neurotic_lora_sweep dpo soup old
 ```
 
 Run in tmux to survive disconnects:
 ```bash
 tmux new -s neurotic_sweep
-uv run python -m scripts_dev.rollout_experiments.neuroticism.neurotic_lora_sweep
+uv run python -m scripts_dev.rollout_experiments.neuroticism.inference.neurotic_lora_sweep
 ```
 
 ## Inspecting rollouts (TUI)
@@ -63,6 +72,10 @@ huggingface-cli upload --repo-type dataset persona-shattering-lasr/monorepo \
 
 ### Step 3 — Neuroticism judge panel
 ```bash
+uv run python -m scripts_dev.rollout_experiments.neuroticism.judges.neuroticism_judge_sweep_v2 \
+    --adapter <name>
+
+# Or via the calibration script directly:
 uv run python scripts_dev/persona_metrics/llm_judge/ocean_judge_calibration.py \
     --trait neuroticism --stage judge \
     --dataset scratch/judge_datasets/neuroticism_<name>_sweep.jsonl \
@@ -79,9 +92,19 @@ uv run python scripts_dev/persona_metrics/llm_judge/ocean_judge_calibration.py \
 
 ### Step 4 — Coherence judge
 ```bash
+uv run python -m scripts_dev.rollout_experiments.neuroticism.judges.coherence_lora_sweep_v2
+
+# Or via the calibration script directly:
 uv run python scripts_dev/persona_metrics/llm_judge/coherence_calibration.py \
     --stage judge \
     --dataset scratch/judge_datasets/neuroticism_<name>_sweep.jsonl
+```
+
+### Step 5 — Analysis
+```bash
+uv run python -m scripts_dev.rollout_experiments.neuroticism.analysis.coherence_analysis --save --upload
+uv run python -m scripts_dev.rollout_experiments.neuroticism.analysis.rerun_variance_analysis --upload
+uv run python -m scripts_dev.rollout_experiments.neuroticism.analysis.question_extremes_analysis --save --upload
 ```
 
 ## Adapters
