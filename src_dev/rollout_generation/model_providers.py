@@ -676,6 +676,10 @@ class VLLMLoRaScaleProvider(ModelProvider):
     def close(self) -> None:
         if self._llm is not None:
             try:
+                self._llm.llm_engine.engine_core.shutdown()
+            except Exception:
+                pass
+            try:
                 del self._llm
             except Exception:
                 pass
