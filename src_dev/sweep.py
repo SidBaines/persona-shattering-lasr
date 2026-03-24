@@ -58,7 +58,6 @@ from src_dev.persona_metrics.conversation_eval import (
     ConversationMetricsResult,
     MessageSelector,
     run_conversation_metrics,
-    run_conversation_metrics_async,
 )
 from src_dev.rollout_generation.config import (
     FailurePolicyConfig,
@@ -159,7 +158,8 @@ def _write_eval_info(
         "git_commit_hash": _git_commit_hash(),
         "elapsed_seconds": round(elapsed, 2),
         "evaluators": [
-            e if isinstance(e, str)
+            e
+            if isinstance(e, str)
             else dataclasses.asdict(e)
             if dataclasses.is_dataclass(e)
             else str(e)
@@ -224,19 +224,18 @@ class ExperimentConfig:
     assistant_max_new_tokens: int
     assistant_batch_size: int
 
+    # User simulator
+    user_model: str
+    user_provider: str
+    user_temperature: float
+    user_top_p: float
+    user_max_new_tokens: int
+    user_batch_size: int
+    user_max_concurrent: int
+
     # Dataset
     dataset_path: str
     max_samples: int
-
-    # User simulator (optional — only required for multi-turn conditions)
-    user_model: str | None = None
-    user_provider: str | None = None
-    user_temperature: float | None = None
-    user_top_p: float | None = None
-    user_max_new_tokens: int | None = None
-    user_batch_size: int | None = None
-    user_max_concurrent: int | None = None
-
     dataset_seed: int | None = None
     num_rollouts: int = 1
 
@@ -408,37 +407,19 @@ def build_user_simulator(
     model: str | None = None,
 ) -> UserSimulatorConfig:
     """Build UserSimulatorConfig, optionally overriding provider/model."""
-    resolved_provider = provider or config.user_provider
-    resolved_model = model or config.user_model
-    missing = [
-        f for f, v in [
-            ("user_provider", resolved_provider),
-            ("user_model", resolved_model),
-            ("user_temperature", config.user_temperature),
-            ("user_top_p", config.user_top_p),
-            ("user_max_new_tokens", config.user_max_new_tokens),
-            ("user_batch_size", config.user_batch_size),
-            ("user_max_concurrent", config.user_max_concurrent),
-        ] if v is None
-    ]
-    if missing:
-        raise ValueError(
-            f"ExperimentConfig is missing user simulator fields required for "
-            f"multi-turn conditions: {missing}"
-        )
     return UserSimulatorConfig(
-        provider=resolved_provider,
-        model=resolved_model,
+        provider=provider or config.user_provider,
+        model=model or config.user_model,
         prompt_template=prompt_template,
         prompt_format=prompt_format,
         generation=GenerationConfig(
-            max_new_tokens=config.user_max_new_tokens,  # type: ignore[arg-type]
-            temperature=config.user_temperature,  # type: ignore[arg-type]
-            top_p=config.user_top_p,  # type: ignore[arg-type]
+            max_new_tokens=config.user_max_new_tokens,
+            temperature=config.user_temperature,
+            top_p=config.user_top_p,
             do_sample=True,
-            batch_size=config.user_batch_size,  # type: ignore[arg-type]
+            batch_size=config.user_batch_size,
         ),
-        max_concurrent=config.user_max_concurrent,  # type: ignore[arg-type]
+        max_concurrent=config.user_max_concurrent,
         retry=RetryConfig(),
     )
 
@@ -506,7 +487,7 @@ def run_phased_rollout(
             num_rollouts_per_prompt=config.num_rollouts,
             system_prompt=phase.assistant_system_prompt,
             assistant_inference=assistant,
-            user_simulator=phase_user_sim or UserSimulatorConfig(),
+            user_simulator=phase_user_sim,
             failure_policy=FailurePolicyConfig(
                 assistant_max_attempts_per_turn=3,
                 user_max_attempts_per_turn=3,
@@ -540,13 +521,7 @@ async def run_phased_rollout_async(
     When ``gpu_executor`` is provided, all phases feed into the shared
     executor instead of each creating its own.
     """
-    _needs_user_sim = any(
-        phase.user_simulator is None and (
-            phase.num_turns > 1 or phase_idx < len(phases) - 1
-        )
-        for phase_idx, phase in enumerate(phases)
-    )
-    if user_sim is None and _needs_user_sim:
+    if user_sim is None:
         user_sim = build_user_simulator(config)
     dataset = build_dataset(config)
     assistant = build_assistant_inference(config)
@@ -568,7 +543,7 @@ async def run_phased_rollout_async(
             f"\n  Phase {phase_idx + 1}/{len(phases)}: "
             f"{phase.num_turns} turns, "
             f"system_prompt={'yes' if phase.assistant_system_prompt else 'no'}, "
-            f"user_template={phase_user_sim.prompt_template if phase_user_sim else 'none'}"
+            f"user_template={phase_user_sim.prompt_template}"
         )
 
         is_last_phase = phase_idx == len(phases) - 1
@@ -579,7 +554,7 @@ async def run_phased_rollout_async(
             num_rollouts_per_prompt=config.num_rollouts,
             system_prompt=phase.assistant_system_prompt,
             assistant_inference=assistant,
-            user_simulator=phase_user_sim or UserSimulatorConfig(),
+            user_simulator=phase_user_sim,
             failure_policy=FailurePolicyConfig(
                 assistant_max_attempts_per_turn=3,
                 user_max_attempts_per_turn=3,
@@ -622,46 +597,6 @@ def evaluate_messages(
         output_path=run_dir / "per_message_metrics.jsonl",
     )
     result = run_conversation_metrics(eval_config)
-
-    print(
-        f"  -> Evaluated {result.num_messages_evaluated} messages "
-        f"across {result.num_conversations} conversations"
-    )
-    if result.aggregates:
-        for key, val in sorted(result.aggregates.items()):
-            if isinstance(val, float):
-                print(f"     {key}: {val:.4f}")
-            elif not isinstance(val, dict):
-                print(f"     {key}: {val}")
-
-    grouped = result.aggregates.get("by_prompt_and_role", {})
-    if grouped:
-        print("\n  Per-prompt/role breakdown:")
-        for key, val in sorted(grouped.items()):
-            if isinstance(val, float):
-                print(f"     {key}: {val:.4f}")
-
-    return result
-
-
-async def evaluate_messages_async(
-    run_dir: Path,
-    evaluations: list[str | PersonaMetricSpec],
-    *,
-    message_selector: MessageSelector | None = None,
-) -> ConversationMetricsResult:
-    """Async version of :func:`evaluate_messages` for use inside a running event loop."""
-    if message_selector is None:
-        message_selector = MessageSelector(exclude_seed=True)
-
-    print(f"\n  Evaluating messages with {evaluations}...")
-    eval_config = ConversationMetricsConfig(
-        evaluations=evaluations,
-        run_dir=run_dir,
-        message_selector=message_selector,
-        output_path=run_dir / "per_message_metrics.jsonl",
-    )
-    result = await run_conversation_metrics_async(eval_config)
 
     print(
         f"  -> Evaluated {result.num_messages_evaluated} messages "
@@ -850,9 +785,7 @@ def export_evaluated_rollouts(
     evals_dir = run_dir / "evals"
     evals_dir.mkdir(parents=True, exist_ok=True)
     out_path = evals_dir / "rollouts_evaluated.jsonl"
-    out_path.write_text(
-        "\n".join(json.dumps(e, default=str) for e in entries) + "\n"
-    )
+    out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
     print(f"  Wrote {len(entries)} evaluated rollouts to {out_path}")
     return out_path
 
@@ -954,7 +887,9 @@ def download_rollouts_from_hf(output_config: OutputPathConfig) -> None:
 
     login_from_env()
 
-    print(f"Downloading rollouts from HF: {output_config.hf_repo}/{output_config.hf_path}")
+    print(
+        f"Downloading rollouts from HF: {output_config.hf_repo}/{output_config.hf_path}"
+    )
     download_from_dataset_repo(
         repo_id=output_config.hf_repo,
         path_in_repo=output_config.hf_path,
@@ -1075,9 +1010,7 @@ def run_experiment(
         )
         export_rollouts(run_dir)
         save_experiment_metadata(config, run_dir, name, phases)
-        _write_rollout_info(
-            run_dir, time.perf_counter() - rollout_t0
-        )
+        _write_rollout_info(run_dir, time.perf_counter() - rollout_t0)
     else:
         print("  Skipping rollout generation (using existing)")
 
@@ -1090,9 +1023,7 @@ def run_experiment(
     eval_t0 = time.perf_counter()
     result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
     export_evaluated_rollouts(run_dir, result)
-    _write_eval_info(
-        run_dir, evaluations, time.perf_counter() - eval_t0
-    )
+    _write_eval_info(run_dir, evaluations, time.perf_counter() - eval_t0)
 
     return result
 
@@ -1136,9 +1067,7 @@ async def _run_experiment_async(
         )
         export_rollouts(run_dir)
         save_experiment_metadata(config, run_dir, name, phases)
-        _write_rollout_info(
-            run_dir, time.perf_counter() - rollout_t0
-        )
+        _write_rollout_info(run_dir, time.perf_counter() - rollout_t0)
     else:
         print("  Skipping rollout generation (using existing)")
 
@@ -1148,11 +1077,9 @@ async def _run_experiment_async(
 
     message_selector = MessageSelector(exclude_seed=True, roles=eval_roles)
     eval_t0 = time.perf_counter()
-    result = await evaluate_messages_async(run_dir, evaluations, message_selector=message_selector)
+    result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
     export_evaluated_rollouts(run_dir, result)
-    _write_eval_info(
-        run_dir, evaluations, time.perf_counter() - eval_t0
-    )
+    _write_eval_info(run_dir, evaluations, time.perf_counter() - eval_t0)
 
     return result
 
@@ -1211,9 +1138,7 @@ def _load_completed_cells_from_hf(
             f.rfilename
             for f in all_files
             if hasattr(f, "rfilename")
-            and f.rfilename.endswith(
-                "/rollouts/rollout_info.json"
-            )
+            and f.rfilename.endswith("/rollouts/rollout_info.json")
         ]
     except Exception:  # noqa: BLE001
         return set()
@@ -1229,10 +1154,8 @@ def _load_completed_cells_from_hf(
             if info.get("status") == "ok":
                 # Extract "variant/condition" from
                 # "prefix/variant/condition/rollouts/rollout_info.json"
-                rel = rpath[len(prefix):].strip("/")
-                cell_key = rel.rsplit(
-                    "/rollouts/rollout_info.json", 1
-                )[0]
+                rel = rpath[len(prefix) :].strip("/")
+                cell_key = rel.rsplit("/rollouts/rollout_info.json", 1)[0]
                 completed.add(cell_key)
         except Exception:  # noqa: BLE001
             continue
@@ -1270,6 +1193,70 @@ def _upload_cell_to_hf(
     print(f"    Uploaded {variant}/{condition} to {url}", flush=True)
 
 
+# Directories/files excluded from cell uploads (mirrors _upload_cell_to_hf ignore_patterns).
+_CELL_UPLOAD_IGNORE = {
+    "datasets",
+    "events",
+    "exports",
+    "evals",
+    "per_message_metrics.jsonl",
+}
+
+
+def _batch_upload_variant_cells_to_hf(
+    output_config: OutputPathConfig,
+    cells: list[tuple[Path, str, str]],
+    successful: set[tuple[str, str]],
+) -> None:
+    """Upload all cells for a variant in a single HF commit.
+
+    Args:
+        output_config: Output path configuration.
+        cells: List of ``(cell_dir, variant, condition)`` tuples to upload.
+        successful: Unused — kept for call-site compatibility.
+    """
+    if not cells:
+        return
+    login_from_env()
+    from huggingface_hub import CommitOperationAdd, HfApi
+
+    git_hash = _git_commit_hash()
+    hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
+    api = HfApi()
+    operations: list = []
+
+    for cell_dir, variant, condition in cells:
+        path_prefix = f"{output_config.hf_path}/{variant}/{condition}"
+        for fpath in sorted(cell_dir.rglob("*")):
+            if not fpath.is_file():
+                continue
+            rel = fpath.relative_to(cell_dir)
+            if rel.parts[0] in _CELL_UPLOAD_IGNORE or rel.name in _CELL_UPLOAD_IGNORE:
+                continue
+            operations.append(
+                CommitOperationAdd(
+                    path_in_repo=f"{path_prefix}/{rel}",
+                    path_or_fileobj=str(fpath),
+                )
+            )
+
+    if not operations:
+        return
+
+    vlabel = next(v for _, v, _ in cells)
+    api.create_commit(
+        repo_id=output_config.hf_repo,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=f"Upload variant: {vlabel} ({len(cells)} cell(s)){hash_suffix}",
+        create_pr=False,
+    )
+    print(
+        f"    Uploaded {len(cells)} cell(s) for {vlabel} to HF in 1 commit",
+        flush=True,
+    )
+
+
 def _write_run_info(
     run_dir: Path,
     variant: str,
@@ -1278,7 +1265,6 @@ def _write_run_info(
     aggregates: dict[str, Any] | None,
     error: str | None,
     elapsed: float | None,
-    output_config: OutputPathConfig | None = None,
 ) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "run_info.json"
@@ -1297,8 +1283,6 @@ def _write_run_info(
         ),
         encoding="utf-8",
     )
-    if output_config and output_config.hf_repo:
-        _upload_cell_to_hf(output_config, run_dir, variant, condition)
     return path
 
 
@@ -1428,6 +1412,8 @@ async def _run_variant_conditions_async(
     executor_task = asyncio.create_task(executor.run())
 
     timings: list[tuple[str, str, str, float]] = []
+    cells_to_upload: list[tuple[Path, str, str]] = []
+    successful_cells: set[tuple[str, str]] = set()
     semaphore = asyncio.Semaphore(config.max_concurrent_conditions)
 
     async def _run_one_condition(condition) -> None:
@@ -1435,28 +1421,12 @@ async def _run_variant_conditions_async(
             cell_dir = output_root / vlabel / condition.name
             cell_label = f"{vlabel}/{condition.name}"
 
-            # Check local run_info.json first, then HF
-            _local_run_info = cell_dir / "run_info.json"
-            _local_ok = (
-                config.skip_completed
-                and _local_run_info.exists()
-                and json.loads(_local_run_info.read_text()).get("status") == "ok"
-            )
-            if _local_ok:
-                print(
-                    f"    skipping  {cell_label}  (already ok locally)",
-                    flush=True,
-                )
-                return
-
             cell_skip_rollouts = (
-                config.skip_completed
-                and cell_label in rollouts_completed_on_hf
+                config.skip_completed and cell_label in rollouts_completed_on_hf
             )
             if cell_skip_rollouts:
                 print(
-                    f"    running   {cell_label}  "
-                    f"(rollouts on HF, evals only)",
+                    f"    running   {cell_label}  (rollouts on HF, evals only)",
                     flush=True,
                 )
             else:
@@ -1471,9 +1441,7 @@ async def _run_variant_conditions_async(
                 (cell_dir / "FAILED.md").unlink(missing_ok=True)
 
             cell_t0 = time.perf_counter()
-            cell_experiment = ExperimentConfig(
-                **{**vars(config.experiment)}
-            )
+            cell_experiment = ExperimentConfig(**{**vars(config.experiment)})
 
             try:
                 result = await _run_experiment_async(
@@ -1499,8 +1467,9 @@ async def _run_variant_conditions_async(
                     aggregates,
                     None,
                     elapsed,
-                    output_config=config.output,
                 )
+                successful_cells.add((vlabel, condition.name))
+                cells_to_upload.append((cell_dir, vlabel, condition.name))
                 timings.append((vlabel, condition.name, "ok", elapsed))
                 print(
                     f"    done      {cell_label}  ({_fmt_duration(elapsed)})",
@@ -1521,7 +1490,6 @@ async def _run_variant_conditions_async(
                     f"**Error:**\n```\n{exc}\n```\n",
                     encoding="utf-8",
                 )
-                upload = config.on_cell_error == "continue"
                 _write_run_info(
                     cell_dir,
                     vlabel,
@@ -1530,8 +1498,9 @@ async def _run_variant_conditions_async(
                     None,
                     str(exc),
                     elapsed,
-                    output_config=config.output if upload else None,
                 )
+                if config.on_cell_error == "continue":
+                    cells_to_upload.append((cell_dir, vlabel, condition.name))
                 timings.append((vlabel, condition.name, "failed", elapsed))
 
     try:
@@ -1546,7 +1515,7 @@ async def _run_variant_conditions_async(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    return timings
+    return timings, cells_to_upload, successful_cells
 
 
 def run_sweep(config: SweepConfig) -> Path:
@@ -1612,9 +1581,7 @@ def run_sweep(config: SweepConfig) -> Path:
             "  Checking HF for completed rollouts...",
             flush=True,
         )
-        rollouts_completed_on_hf = (
-            _load_completed_cells_from_hf(config.output)
-        )
+        rollouts_completed_on_hf = _load_completed_cells_from_hf(config.output)
         print(
             f"  Found {len(rollouts_completed_on_hf)} cell(s) "
             f"with completed rollouts on HF.",
@@ -1630,7 +1597,7 @@ def run_sweep(config: SweepConfig) -> Path:
             )
 
             with config.provider.activate(variant) as (model, tokenizer):
-                variant_timings = asyncio.run(
+                variant_timings, cells_to_upload, successful_cells = asyncio.run(
                     _run_variant_conditions_async(
                         conditions=config.conditions,
                         config=config,
@@ -1642,10 +1609,19 @@ def run_sweep(config: SweepConfig) -> Path:
                     )
                 )
                 timings.extend(variant_timings)
+                if config.output.hf_repo and cells_to_upload:
+                    _batch_upload_variant_cells_to_hf(
+                        config.output, cells_to_upload, successful_cells
+                    )
 
     _print_timing_summary(timings, time.perf_counter() - suite_t0)
 
-    if config.evaluations and not config.skip_evals and config.plot and config.plot_metric:
+    if (
+        config.evaluations
+        and not config.skip_evals
+        and config.plot
+        and config.plot_metric
+    ):
         try:
             from src_dev.visualisations.plot_rollout_sweep import plot_sweep
 
@@ -1653,7 +1629,7 @@ def run_sweep(config: SweepConfig) -> Path:
         except Exception as exc:  # noqa: BLE001
             print(f"  Warning: plot generation failed: {exc}", flush=True)
 
-        # Upload plots to HF (cell data is uploaded incrementally in _write_run_info).
+        # Upload plots to HF (cell data is uploaded per-variant in run_sweep).
         if config.output.hf_repo:
             _upload_plots_to_hf(config.output, output_root)
 
@@ -1742,9 +1718,7 @@ def single_turn_conditions(
     conditions = []
     for trait, prompt in behavior_prompts.items():
         ast_prompted = prompt is not None
-        cond_name = _build_condition_name(
-            [(1, ast_prompted, None)], trait
-        )
+        cond_name = _build_condition_name([(1, ast_prompted, None)], trait)
         conditions.append(
             SweepCondition(
                 name=cond_name,
@@ -1843,9 +1817,7 @@ def multi_turn_au_conditions(
                     user_template_name,
                     user_behavior_templates[trait],
                 )
-                user_sim_prompted = build_user_simulator(
-                    config, user_template_name
-                )
+                user_sim_prompted = build_user_simulator(config, user_template_name)
                 cond_name = _build_condition_name(
                     [(p1, False, True), (p2, False, None)],
                     trait,
