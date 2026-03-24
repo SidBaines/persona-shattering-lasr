@@ -640,6 +640,8 @@ class VLLMLoRaScaleProvider(ModelProvider):
         if self._max_model_len is not None:
             engine_kwargs["max_model_len"] = self._max_model_len
 
+        import os
+        os.environ.setdefault("VLLM_USE_V1", "0")
         print(f"  Initialising vLLM engine: {self._base_model}", flush=True)
         self._llm = LLM(**engine_kwargs)
 
