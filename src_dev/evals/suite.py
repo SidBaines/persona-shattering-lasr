@@ -142,10 +142,11 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
     base_ref = resolve_model_reference(spec.base_model, kind="base model")
     torch_dtype = _resolve_dtype(spec)
 
+    device_map = "cuda" if torch.cuda.is_available() else "auto"
     base_model = AutoModelForCausalLM.from_pretrained(
         base_ref,
         torch_dtype=torch_dtype,
-        device_map="auto",
+        device_map=device_map,
         **_flash_attn_kwargs(),
     )
 
@@ -210,10 +211,11 @@ def _load_local_model_for_sweep(
     The adapter is always loaded under ``_SWEEP_ADAPTER_NAME`` so that
     ``_prepare_sweep_model`` can reference the same name without coupling.
     """
+    device_map = "cuda" if torch.cuda.is_available() else "auto"
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_ref,
         torch_dtype=dtype,
-        device_map="auto",
+        device_map=device_map,
         **_flash_attn_kwargs(),
     )
     peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
