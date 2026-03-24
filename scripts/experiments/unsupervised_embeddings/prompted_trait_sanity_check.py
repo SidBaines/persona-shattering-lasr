@@ -234,15 +234,18 @@ LABELLER_MODEL = "gpt-5-mini-2025-08-07"
 LABELLER_PROVIDER = "openai"
 # FACTOR_LABEL_MODE = "per_factor"
 FACTOR_LABEL_MODE = "joint_distinct"
+LABELLER_PER_FACTOR_MAX_TOKENS = 2048
+LABELLER_JOINT_MAX_TOKENS = 12000
+LABELLER_JOINT_MAX_FACTORS_PER_CALL = 6
 TOP_FACTORS_PER_TRAIT = 8
 EXTREMES_TOP_N = 20
 MAX_SPREAD_TOP_N = 20
 MAX_SPREAD_LABEL_STRATEGY = "label_pair_score"
 JOINT_LABEL_TOP_N = 6
-JOINT_LABEL_EXCERPT_CHARS = 1200
+JOINT_LABEL_EXCERPT_CHARS = 4000
 JOINT_LABEL_MAX_PER_PROMPT = 2
 JOINT_MAX_SPREAD_TOP_N = 6
-JOINT_MAX_SPREAD_EXCERPT_CHARS = 900
+JOINT_MAX_SPREAD_EXCERPT_CHARS = 1200
 EXPORT_FACTOR_DISTRIBUTION_PNGS = True
 FACTOR_DISTRIBUTION_BINS = 60
 FACTOR_DISTRIBUTION_GRID_COLS = 5
@@ -869,6 +872,8 @@ def _label_selected_extremes(
                 top_n=JOINT_LABEL_TOP_N,
                 excerpt_chars=JOINT_LABEL_EXCERPT_CHARS,
                 max_per_prompt=JOINT_LABEL_MAX_PER_PROMPT,
+                max_tokens=LABELLER_JOINT_MAX_TOKENS,
+                max_factors_per_call=LABELLER_JOINT_MAX_FACTORS_PER_CALL,
                 checkpoint_path=labels_path,
             )
         else:
@@ -880,6 +885,7 @@ def _label_selected_extremes(
                 excerpt_chars=4000,
                 max_per_prompt=4,
                 prompt_format="contrastive_jsonl",
+                max_tokens=LABELLER_PER_FACTOR_MAX_TOKENS,
                 checkpoint_path=labels_path,
             )
     labels = labels or [""] * len(selected_extremes)
@@ -916,6 +922,8 @@ def _label_selected_max_spread(
                 provider=LABELLER_PROVIDER,
                 top_n=JOINT_MAX_SPREAD_TOP_N,
                 excerpt_chars=JOINT_MAX_SPREAD_EXCERPT_CHARS,
+                max_tokens=LABELLER_JOINT_MAX_TOKENS,
+                max_factors_per_call=LABELLER_JOINT_MAX_FACTORS_PER_CALL,
                 checkpoint_path=labels_path,
             )
         else:
@@ -926,6 +934,7 @@ def _label_selected_max_spread(
                 provider=LABELLER_PROVIDER,
                 top_n=10,
                 excerpt_chars=4000,
+                max_tokens=LABELLER_PER_FACTOR_MAX_TOKENS,
                 checkpoint_path=labels_path,
             )
     labels = labels or [""] * len(selected_max_spread)

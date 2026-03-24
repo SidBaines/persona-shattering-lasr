@@ -13,6 +13,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -150,6 +151,9 @@ Rules:
 """
 
 _FAILURE_PREFIX = "(labelling failed:"
+DEFAULT_PER_FACTOR_MAX_TOKENS = 2048
+DEFAULT_JOINT_MAX_TOKENS = 12000
+DEFAULT_JOINT_MAX_FACTORS_PER_CALL: int | None = 6
 
 MAX_SPREAD_STRATEGIES = {
     "label_prompt_pair": {"include_prompt": True, "include_scores": False},
@@ -425,6 +429,75 @@ def _extract_json_candidate(text: str) -> str | None:
     return None
 
 
+def _repair_json_candidate(candidate: str) -> str | None:
+    """Try to repair a near-valid JSON string with missing structural closers.
+
+    This is intentionally conservative and targets a common failure mode from
+    model outputs: one or more missing closing braces/brackets near the end of
+    the response or immediately before a closing array/object delimiter.
+    """
+    out: list[str] = []
+    stack: list[str] = []
+    in_string = False
+    escape = False
+
+    for ch in candidate:
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            out.append(ch)
+            in_string = True
+            continue
+        if ch in "{[":
+            out.append(ch)
+            stack.append(ch)
+            continue
+        if ch == "}":
+            if stack and stack[-1] == "[":
+                out.append("]")
+                stack.pop()
+                continue
+            out.append(ch)
+            while stack and stack[-1] != "{":
+                out.insert(len(out) - 1, "]")
+                stack.pop()
+            if stack and stack[-1] == "{":
+                stack.pop()
+            continue
+        if ch == "]":
+            if stack and stack[-1] == "{":
+                out.append("}")
+                stack.pop()
+                continue
+            out.append(ch)
+            while stack and stack[-1] != "[":
+                out.insert(len(out) - 1, "}")
+                stack.pop()
+            if stack and stack[-1] == "[":
+                stack.pop()
+            continue
+        out.append(ch)
+
+    while stack:
+        opener = stack.pop()
+        out.append("}" if opener == "{" else "]")
+
+    repaired = "".join(out).strip()
+    try:
+        json.loads(repaired)
+        return repaired
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_joint_label_response(
     response_text: str,
     factor_indices: list[int],
@@ -434,7 +507,11 @@ def _parse_joint_label_response(
 
     json_candidate = _extract_json_candidate(response_text)
     if json_candidate is None:
-        raise ValueError("No valid JSON object found in joint labelling response.")
+        repaired = _repair_json_candidate(response_text.strip())
+        if repaired is None:
+            raise ValueError("No valid JSON object found in joint labelling response.")
+        logger.warning("Recovered malformed joint labelling JSON via structural repair.")
+        json_candidate = repaired
     parsed = json.loads(json_candidate)
     if isinstance(parsed, dict):
         factors = parsed.get("factors")
@@ -511,16 +588,60 @@ def save_label_checkpoint(labels: list[str], checkpoint_path: str | Path) -> Non
     tmp_path.replace(path)
 
 
+def _debug_artifact_path(checkpoint_path: str | Path | None, *, chunk_number: int) -> Path | None:
+    """Return the per-chunk debug artifact path for a failed joint labelling chunk."""
+    if checkpoint_path is None:
+        return None
+    checkpoint = Path(checkpoint_path)
+    return checkpoint.with_name(f"{checkpoint.stem}_debug_chunk_{chunk_number:02d}{checkpoint.suffix}")
+
+
+def _write_joint_debug_artifact(
+    *,
+    checkpoint_path: str | Path | None,
+    chunk_number: int,
+    chunk: list[tuple[int, dict]],
+    messages: list[dict],
+    response_text: str | None,
+    exc: Exception | None,
+) -> Path | None:
+    """Persist the failed joint-labelling request/response for debugging."""
+    path = _debug_artifact_path(checkpoint_path, chunk_number=chunk_number)
+    if path is None:
+        return None
+
+    factor_indices = [int(factor_data["factor_index"]) for _, factor_data in chunk]
+    response_text = response_text or ""
+    debug_payload = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "factor_indices": factor_indices,
+        "error": str(exc) if exc is not None else None,
+        "response_length_chars": len(response_text),
+        "json_candidate": _extract_json_candidate(response_text),
+        "messages": messages,
+        "response_text": response_text,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(debug_payload, f, indent=2, ensure_ascii=False)
+    return path
+
+
 async def _label_one_async(
     factor_data: dict,
     provider,
     build_messages: Callable[[dict], list[dict]],
     semaphore: asyncio.Semaphore,
+    max_tokens: int,
 ) -> str:
     messages = build_messages(factor_data)
     async with semaphore:
         try:
-            return await provider.generate_async(messages, max_tokens=256, temperature=0.3)
+            return await provider.generate_async(
+                messages,
+                max_tokens=max_tokens,
+                temperature=0.3,
+            )
         except Exception as e:
             fi = factor_data["factor_index"]
             logger.warning(f"Factor {fi} labelling failed: {e}")
@@ -532,6 +653,7 @@ def _run_labelling(
     *,
     model: str = DEFAULT_MODEL,
     provider: str = DEFAULT_PROVIDER,
+    max_tokens: int = DEFAULT_PER_FACTOR_MAX_TOKENS,
     max_concurrent: int = 10,
     show_progress: bool = True,
     checkpoint_path: str | Path | None = None,
@@ -562,7 +684,11 @@ def _run_labelling(
 
         async def _run_one(idx: int, factor_data: dict) -> tuple[int, str]:
             label = await _label_one_async(
-                factor_data, provider, build_messages, semaphore
+                factor_data,
+                provider,
+                build_messages,
+                semaphore,
+                max_tokens,
             )
             return idx, label
 
@@ -603,6 +729,11 @@ def _run_labelling(
             labels = pool.submit(asyncio.run, _run_all()).result()
     except RuntimeError:
         labels = asyncio.run(_run_all())
+    finally:
+        try:
+            asyncio.run(provider.aclose())
+        except RuntimeError:
+            logger.debug("Provider cleanup skipped because an event loop is already running.")
     print("Done.")
     return labels
 
@@ -612,11 +743,18 @@ def _run_joint_labelling(
     *,
     model: str = DEFAULT_MODEL,
     provider: str = DEFAULT_PROVIDER,
+    max_tokens: int = DEFAULT_JOINT_MAX_TOKENS,
+    max_factors_per_call: int | None = DEFAULT_JOINT_MAX_FACTORS_PER_CALL,
     checkpoint_path: str | Path | None = None,
     build_messages: Callable[[list[dict]], list[dict]],
     description: str,
 ) -> list[str]:
-    """Run one joint labelling request over several factors."""
+    """Run joint labelling requests over several factor chunks with resume support.
+
+    Cached labels that are empty or start with the failure sentinel are treated as
+    incomplete. Re-running with the same checkpoint therefore retries only the
+    chunks containing incomplete factors.
+    """
     from scripts.inference import InferenceConfig, get_provider
 
     total = len(factor_data_list)
@@ -632,36 +770,129 @@ def _run_joint_labelling(
             )
             return existing
 
-    factor_indices = [int(factor_data["factor_index"]) for factor_data in factor_data_list]
     config = InferenceConfig(model=model, provider=provider)
     provider_instance = get_provider(provider, config)
-    messages = build_messages(factor_data_list)
+    results = (
+        load_label_checkpoint(checkpoint_path, total)
+        if checkpoint_path is not None
+        else [""] * total
+    )
+    completed = sum(1 for label in results if label_is_complete(label))
+    index_factor_pairs = [
+        (idx, factor_data)
+        for idx, factor_data in enumerate(factor_data_list)
+        if not label_is_complete(results[idx])
+    ]
+    if checkpoint_path is not None and completed:
+        print(
+            f"Resuming label checkpoint {checkpoint_path}: "
+            f"{completed}/{total} already complete, retrying {len(index_factor_pairs)} incomplete"
+        )
+    if max_factors_per_call is None or max_factors_per_call <= 0:
+        chunk_size = len(index_factor_pairs) or 1
+    else:
+        chunk_size = max_factors_per_call
+    chunks = [
+        index_factor_pairs[start : start + chunk_size]
+        for start in range(0, len(index_factor_pairs), chunk_size)
+    ]
 
-    async def _run_once() -> str:
-        return await provider_instance.generate_async(messages, max_tokens=2048, temperature=0.2)
+    async def _run_once(chunk: list[tuple[int, dict]]) -> tuple[list[int], list[str]]:
+        chunk_indices = [idx for idx, _ in chunk]
+        chunk_factor_data = [factor_data for _, factor_data in chunk]
+        factor_indices = [int(factor_data["factor_index"]) for factor_data in chunk_factor_data]
+        messages = build_messages(chunk_factor_data)
+        response_text = await provider_instance.generate_async(
+            messages,
+            max_tokens=max_tokens,
+            temperature=0.2,
+        )
+        labels = _parse_joint_label_response(response_text, factor_indices)
+        return chunk_indices, labels
 
     print(
         f"Labelling {len(factor_data_list)} factors with {model} "
         f"({description})..."
     )
     try:
-        asyncio.get_running_loop()
-        import concurrent.futures
+        async def _run_all() -> list[str]:
+            if not chunks:
+                return results
+            for chunk_number, chunk in enumerate(chunks, start=1):
+                chunk_factor_data = [factor_data for _, factor_data in chunk]
+                messages = build_messages(chunk_factor_data)
+                response_text: str | None = None
+                try:
+                    chunk_indices = [idx for idx, _ in chunk]
+                    factor_indices = [int(factor_data["factor_index"]) for factor_data in chunk_factor_data]
+                    response_text = await provider_instance.generate_async(
+                        messages,
+                        max_tokens=max_tokens,
+                        temperature=0.2,
+                    )
+                    chunk_labels = _parse_joint_label_response(response_text, factor_indices)
+                except Exception as exc:
+                    failed_factor_indices = [
+                        int(factor_data["factor_index"])
+                        for _, factor_data in chunk
+                    ]
+                    debug_path = _write_joint_debug_artifact(
+                        checkpoint_path=checkpoint_path,
+                        chunk_number=chunk_number,
+                        chunk=chunk,
+                        messages=messages,
+                        response_text=response_text,
+                        exc=exc,
+                    )
+                    logger.warning(
+                        "Joint labelling failed for factor chunk %s: %s%s",
+                        failed_factor_indices,
+                        exc,
+                        f" [debug saved to {debug_path}]" if debug_path is not None else "",
+                    )
+                    failure_labels = [f"(labelling failed: {exc})"] * len(chunk)
+                    for idx, label in zip(
+                        [idx for idx, _ in chunk],
+                        failure_labels,
+                        strict=True,
+                    ):
+                        results[idx] = label
+                else:
+                    for idx, label in zip(chunk_indices, chunk_labels, strict=True):
+                        results[idx] = label
+                    debug_path = _debug_artifact_path(checkpoint_path, chunk_number=chunk_number)
+                    if debug_path is not None and debug_path.exists():
+                        debug_path.unlink()
+                if checkpoint_path is not None:
+                    save_label_checkpoint(results, checkpoint_path)
+                print(f"  chunk {chunk_number}/{len(chunks)} complete", end="\r", flush=True)
+            if chunks:
+                print(" " * 32, end="\r", flush=True)
+            return results
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            response_text = pool.submit(asyncio.run, _run_once()).result()
-    except RuntimeError:
-        response_text = asyncio.run(_run_once())
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
 
-    try:
-        labels = _parse_joint_label_response(response_text, factor_indices)
-    except Exception as exc:
-        logger.warning("Joint labelling failed: %s", exc)
-        labels = [f"(labelling failed: {exc})"] * total
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                labels = pool.submit(asyncio.run, _run_all()).result()
+        except RuntimeError:
+            labels = asyncio.run(_run_all())
+    finally:
+        try:
+            asyncio.run(provider_instance.aclose())
+        except RuntimeError:
+            logger.debug("Provider cleanup skipped because an event loop is already running.")
 
-    if checkpoint_path is not None:
-        save_label_checkpoint(labels, checkpoint_path)
-    print("Done.")
+    remaining_incomplete = sum(1 for label in labels if not label_is_complete(label))
+    if remaining_incomplete:
+        print(
+            "Done with incomplete labels remaining: "
+            f"{total - remaining_incomplete}/{total} complete, "
+            f"{remaining_incomplete} will be retried on the next rerun."
+        )
+    else:
+        print("Done.")
     return labels
 
 
@@ -673,6 +904,7 @@ def label_factors(
     excerpt_chars: int = 40000,
     max_per_prompt: int = 10,
     prompt_format: Literal["grouped_json", "contrastive_jsonl"] = "grouped_json",
+    max_tokens: int = DEFAULT_PER_FACTOR_MAX_TOKENS,
     max_concurrent: int = 10,
     show_progress: bool = True,
     checkpoint_path: str | Path | None = None,
@@ -706,6 +938,7 @@ def label_factors(
         extremes,
         model=model,
         provider=provider,
+        max_tokens=max_tokens,
         max_concurrent=max_concurrent,
         show_progress=show_progress,
         checkpoint_path=checkpoint_path,
@@ -730,6 +963,8 @@ def label_factors_jointly(
     top_n: int = 6,
     excerpt_chars: int = 1200,
     max_per_prompt: int = 2,
+    max_tokens: int = DEFAULT_JOINT_MAX_TOKENS,
+    max_factors_per_call: int | None = DEFAULT_JOINT_MAX_FACTORS_PER_CALL,
     checkpoint_path: str | Path | None = None,
 ) -> list[str]:
     """Label several factors jointly with one distinctiveness-seeking prompt."""
@@ -737,6 +972,8 @@ def label_factors_jointly(
         extremes,
         model=model,
         provider=provider,
+        max_tokens=max_tokens,
+        max_factors_per_call=max_factors_per_call,
         checkpoint_path=checkpoint_path,
         build_messages=lambda factor_data_list: _build_joint_messages(
             factor_data_list,
@@ -759,6 +996,7 @@ def label_max_spread_factors(
     provider: str = DEFAULT_PROVIDER,
     top_n: int = 10,
     excerpt_chars: int = 400,
+    max_tokens: int = DEFAULT_PER_FACTOR_MAX_TOKENS,
     max_concurrent: int = 10,
     show_progress: bool = True,
     checkpoint_path: str | Path | None = None,
@@ -788,6 +1026,7 @@ def label_max_spread_factors(
         max_spread_factors,
         model=model,
         provider=provider,
+        max_tokens=max_tokens,
         max_concurrent=max_concurrent,
         show_progress=show_progress,
         checkpoint_path=checkpoint_path,
@@ -814,6 +1053,8 @@ def label_max_spread_factors_jointly(
     provider: str = DEFAULT_PROVIDER,
     top_n: int = 6,
     excerpt_chars: int = 800,
+    max_tokens: int = DEFAULT_JOINT_MAX_TOKENS,
+    max_factors_per_call: int | None = DEFAULT_JOINT_MAX_FACTORS_PER_CALL,
     checkpoint_path: str | Path | None = None,
 ) -> list[str]:
     """Label several max-spread factors jointly with one distinctiveness prompt."""
@@ -827,6 +1068,8 @@ def label_max_spread_factors_jointly(
         max_spread_factors,
         model=model,
         provider=provider,
+        max_tokens=max_tokens,
+        max_factors_per_call=max_factors_per_call,
         checkpoint_path=checkpoint_path,
         build_messages=lambda factor_data_list: _build_joint_max_spread_messages(
             factor_data_list,
