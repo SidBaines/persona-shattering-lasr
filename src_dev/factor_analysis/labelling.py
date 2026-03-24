@@ -730,10 +730,12 @@ def _run_labelling(
     except RuntimeError:
         labels = asyncio.run(_run_all())
     finally:
-        try:
-            asyncio.run(provider.aclose())
-        except RuntimeError:
-            logger.debug("Provider cleanup skipped because an event loop is already running.")
+        aclose = getattr(provider, "aclose", None)
+        if aclose is not None:
+            try:
+                asyncio.run(aclose())
+            except RuntimeError:
+                logger.debug("Provider cleanup skipped because an event loop is already running.")
     print("Done.")
     return labels
 
@@ -879,10 +881,12 @@ def _run_joint_labelling(
         except RuntimeError:
             labels = asyncio.run(_run_all())
     finally:
-        try:
-            asyncio.run(provider_instance.aclose())
-        except RuntimeError:
-            logger.debug("Provider cleanup skipped because an event loop is already running.")
+        aclose = getattr(provider_instance, "aclose", None)
+        if aclose is not None:
+            try:
+                asyncio.run(aclose())
+            except RuntimeError:
+                logger.debug("Provider cleanup skipped because an event loop is already running.")
 
     remaining_incomplete = sum(1 for label in labels if not label_is_complete(label))
     if remaining_incomplete:

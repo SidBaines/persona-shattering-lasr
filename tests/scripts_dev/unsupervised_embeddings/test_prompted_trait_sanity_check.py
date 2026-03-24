@@ -31,7 +31,7 @@ def test_ensure_response_run_available_resumes_seeded_local_run(tmp_path, monkey
         overwrite=True,
     )
 
-    seeded_status = script._local_response_run_status(condition)
+    seeded_status = script._local_response_run_status(condition.response_run_id)
     assert seeded_status.total_rows == 2
     assert seeded_status.complete_rows == 0
     assert seeded_status.pending_rows == 2
@@ -65,7 +65,7 @@ def test_ensure_response_run_available_resumes_seeded_local_run(tmp_path, monkey
     assert returned_run_dir == run_dir
     assert uploads == [condition.response_run_id]
 
-    completed_status = script._local_response_run_status(condition)
+    completed_status = script._local_response_run_status(condition.response_run_id)
     assert completed_status.complete_rows == len(samples)
     assert completed_status.pending_rows == 0
     assert completed_status.is_usable

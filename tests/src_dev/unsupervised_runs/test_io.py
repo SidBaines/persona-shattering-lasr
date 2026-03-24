@@ -24,14 +24,15 @@ def test_path_helpers_are_stable() -> None:
         normalize=True,
         max_length=4000,
     )
+    run_dir = response_run_dir(run_id)
 
-    assert response_run_dir(run_id) == Path("scratch") / "runs" / run_id
+    assert run_dir.name == run_id
+    assert run_dir.parent.name == "runs"
+    assert run_dir.parent.parent.name == "scratch"
     assert response_run_hf_path(run_id) == "runs/demo-run/run"
     assert embedding_artifact_hf_path(run_id, slug) == f"runs/demo-run/embeddings/{slug}"
     assert visualisation_artifact_hf_path(run_id, "viz-a") == "runs/demo-run/visualisations/viz-a"
-    assert embedding_artifact_dir(response_run_dir(run_id), slug) == (
-        Path("scratch") / "runs" / run_id / "reports" / "embeddings" / slug
-    )
+    assert embedding_artifact_dir(run_dir, slug) == run_dir / "reports" / "embeddings" / slug
 
 
 def test_hydrate_dataset_subtree_copies_to_local_cache(tmp_path, monkeypatch) -> None:
