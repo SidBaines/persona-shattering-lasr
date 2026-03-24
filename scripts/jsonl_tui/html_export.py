@@ -222,6 +222,13 @@ function currentRecord() {{ return currentGroup().responses[responseIdx] ?? {{}}
 
 function clamp(v, lo, hi) {{ return Math.max(lo, Math.min(hi, v)); }}
 
+function hasInfo(val) {{
+  if (val === undefined || val === null) return false;
+  if (typeof val === 'string') return val.trim() !== '' && val.trim().toLowerCase() !== 'null';
+  if (Array.isArray(val)) return val.length > 0;
+  return true;
+}}
+
 function render() {{
   const group = currentGroup();
   const record = currentRecord();
@@ -240,7 +247,8 @@ function render() {{
 
   FIELDS.forEach(field => {{
     const val = record[field];
-    const displayVal = val === undefined ? '(not available)' : String(val);
+    if (!hasInfo(val)) return;
+    const displayVal = String(val);
 
     const sec = document.createElement('div');
     sec.className = 'section';
@@ -316,7 +324,7 @@ function buildSearchMatches(query) {{
     group.responses.forEach((rec, ri) => {{
       const hit = FIELDS.some(f => {{
         const v = rec[f];
-        return v !== undefined && String(v).toLowerCase().includes(lq);
+        return hasInfo(v) && String(v).toLowerCase().includes(lq);
       }});
       if (hit) searchMatches.push({{groupIdx: gi, responseIdx: ri}});
     }});

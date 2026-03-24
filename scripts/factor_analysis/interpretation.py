@@ -60,6 +60,40 @@ def compute_factor_purity(
     )
     return target_scores, other_abs_mean, purity_scores
 
+
+def compute_factor_lagrangian(
+    scores: np.ndarray,
+    factor_idx: int,
+    penalty_weight: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute sign-aware Lagrangian objectives using L1 off-target penalties.
+
+    The high-polarity objective is:
+
+        score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    The low-polarity objective is the same with the target score negated:
+
+        -score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    Args:
+        scores: Factor scores [n_samples, n_factors].
+        factor_idx: Target factor whose constrained objective to compute.
+        penalty_weight: Weight for penalizing off-target factor magnitude.
+
+    Returns:
+        Tuple of (target_scores, other_abs_mean, high_objective, low_objective).
+    """
+    n_factors = scores.shape[1]
+    other_mask = np.ones(n_factors, dtype=bool)
+    other_mask[factor_idx] = False
+
+    target_scores = scores[:, factor_idx]
+    other_abs_mean = np.abs(scores[:, other_mask]).mean(axis=1)
+    high_objective = target_scores - penalty_weight * other_abs_mean
+    low_objective = -target_scores - penalty_weight * other_abs_mean
+    return target_scores, other_abs_mean, high_objective, low_objective
+
 def back_project_factor(
     factor_idx: int,
     loadings: np.ndarray,
@@ -361,6 +395,103 @@ def rank_by_factor_purity(
     bottom = [_entry(int(idx)) for idx in bottom_indices]
 
     return {"factor_index": factor_idx, "top": top, "bottom": bottom}
+
+
+def rank_by_factor_lagrangian(
+    scores: np.ndarray,
+    metadata: list[dict],
+    factor_idx: int,
+    penalty_weight: float = 1.0,
+    target_quantile: float = 0.05,
+    top_n: int = 20,
+    text_field: str = "assistant_text",
+    excerpt_length: int = 400,
+) -> dict:
+    """Rank samples by target score with a two-stage L1 off-target Lagrangian penalty.
+
+    Stage 1:
+        Restrict HIGH candidates to the top target_quantile of target scores.
+        Restrict LOW candidates to the bottom target_quantile of target scores.
+
+    Stage 2:
+        Within each candidate pool, rank using:
+
+            score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+        for HIGH, and symmetrically:
+
+            -score[factor_idx] - penalty_weight * mean(|score[j]| for j != factor_idx)
+
+    Args:
+        scores: Factor scores [n_samples, n_factors].
+        metadata: Metadata rows aligned with scores.
+        factor_idx: Target factor whose constrained examples to find.
+        penalty_weight: Lagrange multiplier on off-target factor magnitude.
+        target_quantile: Fraction of samples to keep in each polarity pool before
+            applying the off-target penalty. For example, 0.05 means restrict HIGH
+            to the top 5% of target scores and LOW to the bottom 5%.
+        top_n: Number of samples to return for each polarity.
+        text_field: Metadata field containing response text.
+        excerpt_length: Max characters in text excerpts.
+
+    Returns:
+        Dict with 'top' (HIGH polarity) and 'bottom' (LOW polarity) lists,
+        each containing sample info dicts.
+    """
+    target_scores, other_abs_mean, high_objective, low_objective = compute_factor_lagrangian(
+        scores,
+        factor_idx=factor_idx,
+        penalty_weight=penalty_weight,
+    )
+    n = min(top_n, len(metadata))
+
+    if not 0.0 < target_quantile <= 0.5:
+        raise ValueError(f"target_quantile must be in (0, 0.5], got {target_quantile!r}")
+
+    candidate_count = max(1, int(np.ceil(len(metadata) * target_quantile)))
+    order = np.argsort(target_scores)
+    low_candidate_indices = order[:candidate_count]
+    high_candidate_indices = order[-candidate_count:]
+
+    high_candidates = np.zeros(len(metadata), dtype=bool)
+    low_candidates = np.zeros(len(metadata), dtype=bool)
+    high_candidates[high_candidate_indices] = True
+    low_candidates[low_candidate_indices] = True
+
+    def _top_indices(objective: np.ndarray, candidate_mask: np.ndarray) -> np.ndarray:
+        candidate_indices = np.flatnonzero(candidate_mask)
+        if candidate_indices.size == 0:
+            candidate_indices = np.arange(len(metadata))
+        order = np.argsort(objective[candidate_indices])[::-1]
+        return candidate_indices[order[:n]]
+
+    top_indices = _top_indices(high_objective, high_candidates)
+    bottom_indices = _top_indices(low_objective, low_candidates)
+
+    def _entry(idx: int, objective: np.ndarray) -> dict:
+        row = metadata[idx]
+        return {
+            "index": int(idx),
+            "lagrangian_score": float(objective[idx]),
+            "target_factor_score": float(target_scores[idx]),
+            "other_factors_mean_abs": float(other_abs_mean[idx]),
+            "sample_id": row.get("sample_id"),
+            "input_group_id": row.get("input_group_id"),
+            "seed_user_message": str(row.get("seed_user_message", ""))[:200],
+            "text_excerpt": str(row.get(text_field, ""))[:excerpt_length],
+        }
+
+    top = [_entry(int(idx), high_objective) for idx in top_indices]
+    bottom = [_entry(int(idx), low_objective) for idx in bottom_indices]
+
+    return {
+        "factor_index": factor_idx,
+        "penalty_weight": float(penalty_weight),
+        "target_quantile": float(target_quantile),
+        "candidate_count": int(candidate_count),
+        "top": top,
+        "bottom": bottom,
+    }
 
 
 # ---------------------------------------------------------------------------

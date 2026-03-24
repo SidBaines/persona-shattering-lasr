@@ -12,7 +12,8 @@ from scripts.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
 
 
 DEFAULT_UNSUPERVISED_HF_REPO_ID = "persona-shattering-lasr/unsupervised-runs"
-SCRATCH_RUNS_DIR = Path("scratch") / "runs"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SCRATCH_RUNS_DIR = PROJECT_ROOT / "scratch" / "runs"
 
 
 def slugify_component(text: str) -> str:

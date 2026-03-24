@@ -1,8 +1,10 @@
+# %%
 #!/usr/bin/env python3
 """Notebook-style visualisation workflow for one or more embedding artifacts."""
 
 # %%
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -15,7 +17,9 @@ from scripts.factor_analysis.factor_analysis import run_factor_analysis, adequac
 from scripts.factor_analysis.persistence import save_factor_analysis, load_factor_analysis
 from scripts.factor_analysis.labelling import (
     label_factors,
+    label_factors_jointly,
     label_max_spread_factors,
+    label_max_spread_factors_jointly,
     load_label_checkpoint,
     label_is_complete,
     DEFAULT_MODEL as LABELLER_DEFAULT_MODEL,
@@ -24,7 +28,7 @@ from scripts.factor_analysis.interpretation import (
     factor_extremes, rank_by_factor_purity, rank_prompts_by_max_spread,
     analytical_factor_embedding, corpus_nearest_neighbor,
     contrastive_factor_retrieval,
-    optimize_factor_embedding, prompt_effects,
+    optimize_factor_embedding, prompt_effects, rank_by_factor_lagrangian,
 )
 from scripts.jsonl_tui.html_export import export_html
 from scripts.unsupervised_runs import (
@@ -42,7 +46,25 @@ from scripts.unsupervised_runs import (
 # --- Config ---
 load_dotenv()
 
-if 0:
+if 1:
+    HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
+    PRIMARY_RESPONSE_RUN_ID = "singleturn-1000x30-llama31-8b-t1.0"
+    EMBEDDING_SOURCES = [
+        EmbeddingSourceConfig(
+            name="1000x30-openai-small-t1.0",
+            response_run_id=PRIMARY_RESPONSE_RUN_ID,
+            embedding_slug="text-embedding-3-small__assistant-final-turn__len0__norm",
+            repo_id=HF_REPO_ID,
+        ),
+    ]
+    VISUALISATION_LABEL = "factor_analysis_1000x30_llama31_8b_t1_0_maxchars5000_v5_oblimin"
+    HF_UPLOAD = True
+    VISUALISATION_SLUG = build_visualisation_slug(
+        label=VISUALISATION_LABEL,
+        response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
+        embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
+    )
+elif 0:
     HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
     PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-frustrated"
     EMBEDDING_SOURCES = [
@@ -95,7 +117,7 @@ elif 0:
         embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
     )
     HF_UPLOAD = True
-else:
+elif 0:
     HF_REPO_ID = "persona-shattering-lasr/unsupervised-runs"
     PRIMARY_RESPONSE_RUN_ID = "stage123-240x50-singleturn-v2"
     EMBEDDING_SOURCES = [
@@ -106,7 +128,26 @@ else:
             repo_id=HF_REPO_ID,
         ),
     ]
-    VISUALISATION_LABEL = "factor_analysis_v2_openai_small_oblimin"
+    VISUALISATION_LABEL = "factor_analysis_v2_openai_small_varimax"
+    HF_UPLOAD = True
+    VISUALISATION_SLUG = build_visualisation_slug(
+        label=VISUALISATION_LABEL,
+        response_run_ids=[source.response_run_id for source in EMBEDDING_SOURCES],
+        embedding_slugs=[source.embedding_slug for source in EMBEDDING_SOURCES],
+    )
+else:
+    HF_REPO_ID = DEFAULT_UNSUPERVISED_HF_REPO_ID
+    PRIMARY_RESPONSE_RUN_ID = "singleturn-1000x30-llama31-8b-t1.2"
+    EMBEDDING_SOURCES = [
+        EmbeddingSourceConfig(
+            name="1000x30-openai-small",
+            response_run_id=PRIMARY_RESPONSE_RUN_ID,
+            # embedding_slug="openai-text-embedding-3-small__assistant-final-turn__norm",
+            embedding_slug="text-embedding-3-small__assistant-final-turn__len0__norm",
+            repo_id=HF_REPO_ID,
+        ),
+    ]
+    VISUALISATION_LABEL = "factor_analysis_1000x30_llama31_8b_v2"
     HF_UPLOAD = True
     VISUALISATION_SLUG = build_visualisation_slug(
         label=VISUALISATION_LABEL,
@@ -124,16 +165,35 @@ LABEL_FACTORS = True   # Call LLM to generate a description for each factor
 LABELLER_MODEL = "gpt-5-mini-2025-08-07"
 LABELLER_PROVIDER = "openai"
 
+FA_METHOD = "principal"
+FA_ROTATION = "oblimin"
 LABELLER_PROMPT_FORMAT = "contrastive_jsonl"  # "grouped_json" or "contrastive_jsonl"
+# FACTOR_LABEL_MODES = ["joint_distinct", "per_factor"]
+FACTOR_LABEL_MODES = ["joint_distinct", "per_factor"]
+DEFAULT_FACTOR_LABEL_MODE = "joint_distinct"
+LABELLER_PER_FACTOR_MAX_TOKENS = 10000
+LABELLER_JOINT_MAX_TOKENS = 12000
+LABELLER_JOINT_MAX_FACTORS_PER_CALL = 6
+JOINT_LABEL_TOP_N = 6
+JOINT_LABEL_EXCERPT_CHARS = 40000
+JOINT_LABEL_MAX_PER_PROMPT = 3
+LABELLER_PER_FACTOR_MAX_PER_PROMPT = 3
+JOINT_MAX_SPREAD_TOP_N = 6
+JOINT_MAX_SPREAD_EXCERPT_CHARS = 120000
+MAX_SPREAD_PAIR_EXPORT_N_GROUPS = 20
 RUN_EXTREMES = False
 RUN_PURITY = False
+RUN_LAGRANGIAN = False
+LAGRANGIAN_MULTIPLIERS = [0.1, 1.0, 2.0]
+DEFAULT_LAGRANGIAN_MULTIPLIER = 1.0
+LAGRANGIAN_TARGET_QUANTILE = 0.05
 RUN_MAX_SPREAD = True
 RUN_MAX_SPREAD_THRESHOLDED = False
 MAX_SPREAD_HIGH_THRESHOLD = 1.5
 MAX_SPREAD_LOW_THRESHOLD = -1.5
-RUN_CNN = True
+RUN_CNN = False
 RUN_CONTRASTIVE = False
-RUN_PROMPT_PREVIEW = True
+RUN_PROMPT_PREVIEW = False
 RUN_SHARE_BUNDLE = True
 
 RUN_FLAG = "residualised" if RESIDUALISE else "non_residualised"
@@ -174,18 +234,127 @@ def _save_plot_html(fig, filename: str) -> Path:
     print(f"Saved plot: {path}")
     return path
 
+
+def _factor_grid_shape(n_items: int) -> tuple[int, int]:
+    cols = math.ceil(math.sqrt(n_items))
+    rows = math.ceil(n_items / cols)
+    return rows, cols
+
+
+def _prompt_group_spread_stats(
+    scores: np.ndarray,
+    metadata: list[dict],
+    *,
+    factor_idx: int,
+    group_field: str = "input_group_id",
+) -> list[dict]:
+    group_ids = np.array([str(row.get(group_field, i)) for i, row in enumerate(metadata)])
+    unique_groups = np.unique(group_ids)
+    factor_scores = scores[:, factor_idx]
+
+    stats = []
+    for gid in unique_groups:
+        indices = np.where(group_ids == gid)[0]
+        if len(indices) < 2:
+            continue
+        group_scores = factor_scores[indices]
+        stats.append({
+            "group_id": gid,
+            "n_responses": int(len(indices)),
+            "max_spread": float(group_scores.max() - group_scores.min()),
+            "variance": float(np.var(group_scores)),
+        })
+    return stats
+
+
+def _plot_prompt_group_spread_histograms(
+    spread_stats_by_factor: list[list[dict]],
+    *,
+    value_key: str,
+    title: str,
+    filename: str,
+    xaxis_title: str,
+    nbins: int = 30,
+) -> Path:
+    from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
+
+    rows, cols = _factor_grid_shape(len(spread_stats_by_factor))
+    subplot_titles = [f"Factor {fi:03d}" for fi in range(len(spread_stats_by_factor))]
+    fig = make_subplots(
+        rows=rows,
+        cols=cols,
+        subplot_titles=subplot_titles,
+        shared_xaxes=True,
+    )
+    all_values = [
+        entry[value_key]
+        for factor_stats in spread_stats_by_factor
+        for entry in factor_stats
+    ]
+    x_min = 0.0 if all_values else 0.0
+    x_max = max(all_values) if all_values else 1.0
+    if x_max <= x_min:
+        x_max = x_min + 1.0
+    bin_size = (x_max - x_min) / nbins
+
+    for fi, factor_stats in enumerate(spread_stats_by_factor):
+        row = fi // cols + 1
+        col = fi % cols + 1
+        values = [entry[value_key] for entry in factor_stats]
+        fig.add_trace(
+            go.Histogram(
+                x=values,
+                xbins=dict(start=x_min, end=x_max, size=bin_size),
+                marker=dict(color="#4c78a8"),
+                showlegend=False,
+            ),
+            row=row,
+            col=col,
+        )
+
+    fig.update_layout(
+        title=title,
+        height=max(900, 220 * rows),
+        width=max(1000, 240 * cols),
+        bargap=0.05,
+    )
+    for i in range(1, len(spread_stats_by_factor) + 1):
+        fig.update_xaxes(
+            title_text=xaxis_title,
+            range=[x_min, x_max],
+            autorange=False,
+            matches="x",
+            row=(i - 1) // cols + 1,
+            col=(i - 1) % cols + 1,
+        )
+        fig.update_yaxes(title_text="Prompt groups", row=(i - 1) // cols + 1, col=(i - 1) % cols + 1)
+
+    out_path = _save_plot_html(fig, filename)
+    fig.show()
+    return out_path
+
 # %%
 # Load and preprocess
 embeddings, metadata = _load_selected_datasets()
 embeddings, metadata = deduplicate_by_group(embeddings, metadata, max_per_group=50)
 
-# Filter out short responses (likely "I am an AI" deflections with no real content)
+# Filter out unusually short or long responses before analysis.
 MIN_RESPONSE_CHARS = 0
-_keep = [i for i, row in enumerate(metadata) if len(str(row.get("assistant_text", ""))) >= MIN_RESPONSE_CHARS]
+MAX_RESPONSE_CHARS = 5000
+_keep = [
+    i
+    for i, row in enumerate(metadata)
+    if MIN_RESPONSE_CHARS <= len(str(row.get("assistant_text", ""))) <= MAX_RESPONSE_CHARS
+]
 _n_removed = len(metadata) - len(_keep)
 embeddings = embeddings[_keep]
 metadata = [metadata[i] for i in _keep]
-print(f"Filtered {_n_removed} short responses (<{MIN_RESPONSE_CHARS} chars), {len(metadata)} remaining")
+print(
+    "Filtered "
+    f"{_n_removed} responses outside [{MIN_RESPONSE_CHARS}, {MAX_RESPONSE_CHARS}] chars, "
+    f"{len(metadata)} remaining"
+)
 
 # Drop any prompt groups that now have only one response (residual would be zero)
 from collections import Counter
@@ -248,8 +417,6 @@ if 0:
 
 # %%
 # Run factor analysis (or load cached result)
-FA_METHOD = "principal"
-FA_ROTATION = "oblimin"
 _fa_cache = OUTPUT_DIR / _flagged_stem(f"fa_n{N_FACTORS}_{FA_METHOD}_{FA_ROTATION}_filtered")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -299,14 +466,24 @@ import json
 from pathlib import Path
 
 factor_labels = None
+factor_labels_by_mode = {}
 purity_labels = None
+purity_labels_by_mode = {}
+lagrangian_labels = {}
+lagrangian_labels_by_multiplier = {}
+lagrangian_results_by_multiplier = {}
 max_spread_labels = None
+max_spread_labels_by_mode = {}
 max_spread_thresholded_labels = None
+max_spread_thresholded_labels_by_mode = {}
 cnn_labels = None
+cnn_labels_by_mode = {}
 contrastive_labels = None
+contrastive_labels_by_mode = {}
 
 out_path = None
 purity_out_path = None
+lagrangian_out_paths = {}
 max_spread_out_path = None
 max_spread_thresholded_out_path = None
 cnn_out_path = None
@@ -314,6 +491,7 @@ contrastive_out_path = None
 
 _labels_path = _fa_cache.with_name(_fa_cache.name + "_labels.json")
 _purity_labels_path = _fa_cache.with_name(_fa_cache.name + "_purity_labels.json")
+_lagrangian_labels_path = _fa_cache.with_name(_fa_cache.name + "_lagrangian_labels.json")
 _max_spread_labels_path = _fa_cache.with_name(_fa_cache.name + "_max_spread_labels.json")
 _max_spread_thresholded_labels_path = _fa_cache.with_name(
     _fa_cache.name + "_max_spread_thresholded_labels.json"
@@ -337,11 +515,17 @@ MAX_SPREAD_LABEL_STRATEGIES = [
     # ("label_pair", "pair only"),
 ]
 MAX_SPREAD_LABEL_CONFIGS = {
-    "label_prompt_pair": {"include_prompt": True, "include_scores": False},
-    "label_prompt_pair_score": {"include_prompt": True, "include_scores": True},
+    # "label_prompt_pair": {"include_prompt": True, "include_scores": False},
+    # "label_prompt_pair_score": {"include_prompt": True, "include_scores": True},
     "label_pair_score": {"include_prompt": False, "include_scores": True},
-    "label_pair": {"include_prompt": False, "include_scores": False},
+    # "label_pair": {"include_prompt": False, "include_scores": False},
 }
+for _strategy_key, _strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
+    if _strategy_key not in MAX_SPREAD_LABEL_CONFIGS:
+        raise ValueError(
+            f"MAX_SPREAD_LABEL_STRATEGIES includes {_strategy_key!r} "
+            "but MAX_SPREAD_LABEL_CONFIGS has no matching entry."
+        )
 _max_spread_strategy_paths = {
     key: _fa_cache.with_name(_fa_cache.name + f"_{key}_labels.json")
     for key, _ in MAX_SPREAD_LABEL_STRATEGIES
@@ -350,6 +534,48 @@ _max_spread_thresholded_strategy_paths = {
     key: _fa_cache.with_name(_fa_cache.name + f"_max_spread_thresholded_{key}_labels.json")
     for key, _ in MAX_SPREAD_LABEL_STRATEGIES
 }
+
+
+def _mode_labels_path(base_path: Path, label_mode: str) -> Path:
+    return base_path.with_name(base_path.stem + f"_{label_mode}" + base_path.suffix)
+
+
+def _multiplier_slug(multiplier: float) -> str:
+    return str(multiplier).replace("-", "neg").replace(".", "p")
+
+
+def _lagrangian_variant_slug() -> str:
+    return f"q{_multiplier_slug(LAGRANGIAN_TARGET_QUANTILE)}_meanabs"
+
+
+def _lagrangian_base_path(multiplier: float) -> Path:
+    return _lagrangian_labels_path.with_name(
+        _lagrangian_labels_path.stem
+        + f"_{_lagrangian_variant_slug()}_lambda_{_multiplier_slug(multiplier)}"
+        + _lagrangian_labels_path.suffix
+    )
+
+
+def _max_spread_mode_paths(base_paths: dict[str, Path], label_mode: str) -> dict[str, Path]:
+    return {
+        strategy_key: _mode_labels_path(path, label_mode)
+        for strategy_key, path in base_paths.items()
+    }
+
+
+def _default_mode_label(
+    labels_by_mode: dict[str, list[str] | None] | None,
+) -> list[str] | None:
+    if not labels_by_mode:
+        return None
+    return labels_by_mode.get(DEFAULT_FACTOR_LABEL_MODE) or labels_by_mode.get("per_factor")
+
+
+def _label_for_factor(labels_by_mode: dict[str, list[str] | None], factor_index: int) -> str:
+    default_labels = _default_mode_label(labels_by_mode)
+    if not default_labels or factor_index >= len(default_labels):
+        return ""
+    return default_labels[factor_index]
 
 
 def _labels_status(path: Path, expected_count: int) -> tuple[list[str] | None, bool]:
@@ -365,6 +591,7 @@ def _resume_or_load_labels(
     labels_path: Path,
     *,
     label_name: str,
+    label_mode: str,
     fallback_paths: list[Path] | None = None,
 ) -> list[str] | None:
     fallback_paths = fallback_paths or []
@@ -400,16 +627,32 @@ def _resume_or_load_labels(
     from dotenv import load_dotenv
 
     load_dotenv()
-    labels = label_factors(
-        factor_data,
-        model=LABELLER_MODEL,
-        provider=LABELLER_PROVIDER,
-        top_n=10,
-        max_per_prompt=100,
-        prompt_format=LABELLER_PROMPT_FORMAT,
-        excerpt_chars=10000,
-        checkpoint_path=labels_path,
-    )
+    if label_mode == "joint_distinct":
+        labels = label_factors_jointly(
+            factor_data,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=JOINT_LABEL_TOP_N,
+            excerpt_chars=JOINT_LABEL_EXCERPT_CHARS,
+            max_per_prompt=JOINT_LABEL_MAX_PER_PROMPT,
+            max_tokens=LABELLER_JOINT_MAX_TOKENS,
+            max_factors_per_call=LABELLER_JOINT_MAX_FACTORS_PER_CALL,
+            checkpoint_path=labels_path,
+        )
+    elif label_mode == "per_factor":
+        labels = label_factors(
+            factor_data,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            max_per_prompt=LABELLER_PER_FACTOR_MAX_PER_PROMPT,
+            prompt_format=LABELLER_PROMPT_FORMAT,
+            excerpt_chars=10000,
+            max_tokens=LABELLER_PER_FACTOR_MAX_TOKENS,
+            checkpoint_path=labels_path,
+        )
+    else:
+        raise ValueError(f"Unknown label mode: {label_mode}")
     print(f"Saved {label_name} labels to {labels_path}")
     return labels
 
@@ -420,6 +663,7 @@ def _resume_or_load_max_spread_labels(
     *,
     strategy: str,
     label_name: str,
+    label_mode: str,
     fallback_paths: list[Path] | None = None,
 ) -> list[str] | None:
     fallback_paths = fallback_paths or []
@@ -455,17 +699,52 @@ def _resume_or_load_max_spread_labels(
     from dotenv import load_dotenv
 
     load_dotenv()
-    labels = label_max_spread_factors(
-        factor_data,
-        strategy=strategy,
-        model=LABELLER_MODEL,
-        provider=LABELLER_PROVIDER,
-        top_n=10,
-        excerpt_chars=10000,
-        checkpoint_path=labels_path,
-    )
+    if label_mode == "joint_distinct":
+        labels = label_max_spread_factors_jointly(
+            factor_data,
+            strategy=strategy,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=JOINT_MAX_SPREAD_TOP_N,
+            excerpt_chars=JOINT_MAX_SPREAD_EXCERPT_CHARS,
+            max_tokens=LABELLER_JOINT_MAX_TOKENS,
+            max_factors_per_call=LABELLER_JOINT_MAX_FACTORS_PER_CALL,
+            checkpoint_path=labels_path,
+        )
+    elif label_mode == "per_factor":
+        labels = label_max_spread_factors(
+            factor_data,
+            strategy=strategy,
+            model=LABELLER_MODEL,
+            provider=LABELLER_PROVIDER,
+            top_n=10,
+            excerpt_chars=10000,
+            max_tokens=LABELLER_PER_FACTOR_MAX_TOKENS,
+            checkpoint_path=labels_path,
+        )
+    else:
+        raise ValueError(f"Unknown label mode: {label_mode}")
     print(f"Saved {label_name} labels to {labels_path}")
     return labels
+
+
+def _resume_or_load_labels_for_modes(
+    factor_data: list[dict],
+    *,
+    base_path: Path,
+    label_name: str,
+    legacy_fallback_paths_by_mode: dict[str, list[Path]] | None = None,
+) -> dict[str, list[str] | None]:
+    labels_by_mode: dict[str, list[str] | None] = {}
+    for label_mode in FACTOR_LABEL_MODES:
+        labels_by_mode[label_mode] = _resume_or_load_labels(
+            factor_data,
+            _mode_labels_path(base_path, label_mode),
+            label_name=f"{label_name} [{label_mode}]",
+            label_mode=label_mode,
+            fallback_paths=(legacy_fallback_paths_by_mode or {}).get(label_mode, []),
+        )
+    return labels_by_mode
 
 
 def _shape_max_spread_preview_source(max_spread_results: list[dict]) -> list[dict]:
@@ -479,34 +758,80 @@ def _shape_max_spread_preview_source(max_spread_results: list[dict]) -> list[dic
     ]
 
 
+def _export_max_spread_pair_files(
+    factor_results: list[dict],
+    *,
+    export_stem: str,
+    n_groups: int = MAX_SPREAD_PAIR_EXPORT_N_GROUPS,
+) -> Path:
+    export_dir = OUTPUT_DIR / _flagged_stem(f"{export_stem}_pairs")
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    for factor_data in factor_results:
+        fi = factor_data["factor_index"]
+        out_path = export_dir / f"factor_{fi:03d}.jsonl"
+        records = []
+        for pair_rank, group in enumerate(factor_data.get("groups", [])[:n_groups]):
+            for polarity, entry_key in [("HIGH", "high"), ("LOW", "low")]:
+                entry = group[entry_key]
+                records.append({
+                    "factor_index": fi,
+                    "pair_rank": pair_rank,
+                    "polarity": polarity,
+                    "group_id": group["group_id"],
+                    "max_spread": round(group["max_spread"], 4),
+                    "group_max_score": round(group["group_max_score"], 4),
+                    "group_min_score": round(group["group_min_score"], 4),
+                    "n_responses": group["n_responses"],
+                    "purity_score": round(entry["purity_score"], 4),
+                    "target_factor_score": round(entry["target_factor_score"], 4),
+                    "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
+                    "prompt": entry["seed_user_message"],
+                    "response": entry["text_excerpt"],
+                })
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    print(
+        f"Saved per-factor max-spread pair files to {export_dir} "
+        f"({2 * n_groups} examples per factor max, fewer if insufficient groups)"
+    )
+    return export_dir
+
+
 def _run_max_spread_variant(
     max_spread_results: list[dict],
     *,
     export_stem: str,
-    label_paths: dict[str, Path],
+    label_paths_by_mode: dict[str, dict[str, Path]],
     legacy_pair_only_path: Path | None = None,
     question_suffix: str,
     high_threshold: float | None = None,
     low_threshold: float | None = None,
-) -> tuple[dict[str, list[str] | None], Path, list[dict]]:
+) -> tuple[dict[str, dict[str, list[str] | None]], Path, list[dict]]:
     filtered_results = [fd for fd in max_spread_results if fd["groups"]]
     skipped_factors = [fd["factor_index"] for fd in max_spread_results if not fd["groups"]]
     for fi in skipped_factors:
         print(f"Warning: factor {fi:03d} has no qualifying max-spread groups; skipping {question_suffix}")
 
-    labels_by_strategy: dict[str, list[str] | None] = {}
+    labels_by_strategy: dict[str, dict[str, list[str] | None]] = {}
     for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES:
-        fallback_paths = []
-        if strategy_key == "label_pair":
-            if legacy_pair_only_path is not None:
-                fallback_paths.append(legacy_pair_only_path)
-        labels_by_strategy[strategy_key] = _resume_or_load_max_spread_labels(
-            filtered_results,
-            label_paths[strategy_key],
-            strategy=strategy_key,
-            label_name=f"{question_suffix} ({strategy_title})",
-            fallback_paths=fallback_paths,
-        )
+        labels_by_strategy[strategy_key] = {}
+        for label_mode in FACTOR_LABEL_MODES:
+            fallback_paths = []
+            if label_mode == "per_factor" and strategy_key == "label_pair":
+                if legacy_pair_only_path is not None:
+                    fallback_paths.append(legacy_pair_only_path)
+            labels_by_strategy[strategy_key][label_mode] = _resume_or_load_max_spread_labels(
+                filtered_results,
+                label_paths_by_mode[label_mode][strategy_key],
+                strategy=strategy_key,
+                label_name=f"{question_suffix} ({strategy_title}) [{label_mode}]",
+                label_mode=label_mode,
+                fallback_paths=fallback_paths,
+            )
 
     factor_to_label_index = {
         fd["factor_index"]: idx
@@ -526,23 +851,75 @@ def _run_max_spread_variant(
                     "question": q_label,
                     "response_index": rank,
                     "label_prompt_pair": (
-                        labels_by_strategy["label_prompt_pair"][label_idx]
+                        labels_by_strategy["label_prompt_pair"].get(DEFAULT_FACTOR_LABEL_MODE, [])[label_idx]
                         if labels_by_strategy.get("label_prompt_pair")
+                        and labels_by_strategy["label_prompt_pair"].get(DEFAULT_FACTOR_LABEL_MODE)
+                        else ""
+                    ),
+                    "label_prompt_pair_joint_distinct": (
+                        labels_by_strategy["label_prompt_pair"].get("joint_distinct", [])[label_idx]
+                        if labels_by_strategy.get("label_prompt_pair")
+                        and labels_by_strategy["label_prompt_pair"].get("joint_distinct")
+                        else ""
+                    ),
+                    "label_prompt_pair_per_factor": (
+                        labels_by_strategy["label_prompt_pair"].get("per_factor", [])[label_idx]
+                        if labels_by_strategy.get("label_prompt_pair")
+                        and labels_by_strategy["label_prompt_pair"].get("per_factor")
                         else ""
                     ),
                     "label_prompt_pair_score": (
-                        labels_by_strategy["label_prompt_pair_score"][label_idx]
+                        labels_by_strategy["label_prompt_pair_score"].get(DEFAULT_FACTOR_LABEL_MODE, [])[label_idx]
                         if labels_by_strategy.get("label_prompt_pair_score")
+                        and labels_by_strategy["label_prompt_pair_score"].get(DEFAULT_FACTOR_LABEL_MODE)
+                        else ""
+                    ),
+                    "label_prompt_pair_score_joint_distinct": (
+                        labels_by_strategy["label_prompt_pair_score"].get("joint_distinct", [])[label_idx]
+                        if labels_by_strategy.get("label_prompt_pair_score")
+                        and labels_by_strategy["label_prompt_pair_score"].get("joint_distinct")
+                        else ""
+                    ),
+                    "label_prompt_pair_score_per_factor": (
+                        labels_by_strategy["label_prompt_pair_score"].get("per_factor", [])[label_idx]
+                        if labels_by_strategy.get("label_prompt_pair_score")
+                        and labels_by_strategy["label_prompt_pair_score"].get("per_factor")
                         else ""
                     ),
                     "label_pair_score": (
-                        labels_by_strategy["label_pair_score"][label_idx]
+                        labels_by_strategy["label_pair_score"].get(DEFAULT_FACTOR_LABEL_MODE, [])[label_idx]
                         if labels_by_strategy.get("label_pair_score")
+                        and labels_by_strategy["label_pair_score"].get(DEFAULT_FACTOR_LABEL_MODE)
+                        else ""
+                    ),
+                    "label_pair_score_joint_distinct": (
+                        labels_by_strategy["label_pair_score"].get("joint_distinct", [])[label_idx]
+                        if labels_by_strategy.get("label_pair_score")
+                        and labels_by_strategy["label_pair_score"].get("joint_distinct")
+                        else ""
+                    ),
+                    "label_pair_score_per_factor": (
+                        labels_by_strategy["label_pair_score"].get("per_factor", [])[label_idx]
+                        if labels_by_strategy.get("label_pair_score")
+                        and labels_by_strategy["label_pair_score"].get("per_factor")
                         else ""
                     ),
                     "label_pair": (
-                        labels_by_strategy["label_pair"][label_idx]
+                        labels_by_strategy["label_pair"].get(DEFAULT_FACTOR_LABEL_MODE, [])[label_idx]
                         if labels_by_strategy.get("label_pair")
+                        and labels_by_strategy["label_pair"].get(DEFAULT_FACTOR_LABEL_MODE)
+                        else ""
+                    ),
+                    "label_pair_joint_distinct": (
+                        labels_by_strategy["label_pair"].get("joint_distinct", [])[label_idx]
+                        if labels_by_strategy.get("label_pair")
+                        and labels_by_strategy["label_pair"].get("joint_distinct")
+                        else ""
+                    ),
+                    "label_pair_per_factor": (
+                        labels_by_strategy["label_pair"].get("per_factor", [])[label_idx]
+                        if labels_by_strategy.get("label_pair")
+                        and labels_by_strategy["label_pair"].get("per_factor")
                         else ""
                     ),
                     "max_spread": round(gs["max_spread"], 4),
@@ -573,16 +950,24 @@ def _run_max_spread_variant(
         out_path,
         [
             "question",
-            "label_prompt_pair",
-            "label_prompt_pair_score",
-            "label_pair_score",
-            "label_pair",
-            "max_spread",
-            "group_max_score",
-            "group_min_score",
-            "high_threshold",
-            "low_threshold",
-            "purity_score",
+            # "label_prompt_pair",
+            # "label_prompt_pair_joint_distinct",
+            # "label_prompt_pair_per_factor",
+            # "label_prompt_pair_score",
+            # "label_prompt_pair_score_joint_distinct",
+            # "label_prompt_pair_score_per_factor",
+            # "label_pair_score",
+            "label_pair_score_joint_distinct",
+            "label_pair_score_per_factor",
+            # "label_pair",
+            # "label_pair_joint_distinct",
+            # "label_pair_per_factor",
+            # "max_spread",
+            # "group_max_score",
+            # "group_min_score",
+            # "high_threshold",
+            # "low_threshold",
+            # "purity_score",
             "target_factor_score",
             "other_factors_mean_abs",
             "prompt",
@@ -599,11 +984,13 @@ if RUN_EXTREMES:
         preview_source = extremes
         preview_source_name = "extremes"
 
-    factor_labels = _resume_or_load_labels(
+    factor_labels_by_mode = _resume_or_load_labels_for_modes(
         extremes,
-        _labels_path,
+        base_path=_labels_path,
         label_name="factor",
+        legacy_fallback_paths_by_mode={"per_factor": [_labels_path]},
     )
+    factor_labels = _default_mode_label(factor_labels_by_mode)
 
     if factor_labels:
         for i, label in enumerate(factor_labels):
@@ -615,7 +1002,17 @@ if RUN_EXTREMES:
     records = []
     for factor_data in extremes:
         fi = factor_data["factor_index"]
-        fl = factor_labels[fi] if factor_labels else ""
+        fl = _label_for_factor(factor_labels_by_mode, fi)
+        fl_joint = (
+            factor_labels_by_mode.get("joint_distinct", [])[fi]
+            if factor_labels_by_mode.get("joint_distinct")
+            else ""
+        )
+        fl_per = (
+            factor_labels_by_mode.get("per_factor", [])[fi]
+            if factor_labels_by_mode.get("per_factor")
+            else ""
+        )
         for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
             label = f"Factor {fi:03d} — {polarity}"
             for rank, entry in enumerate(entries):
@@ -623,6 +1020,8 @@ if RUN_EXTREMES:
                     "question": label,
                     "response_index": rank,
                     "factor_label": fl,
+                    "factor_label_joint_distinct": fl_joint,
+                    "factor_label_per_factor": fl_per,
                     "factor_score": round(entry["score"], 4),
                     "prompt": entry["seed_user_message"],
                     "response": entry["text_excerpt"],
@@ -634,7 +1033,19 @@ if RUN_EXTREMES:
 
     print(f"Saved {len(records)} records to {out_path}")
     print(f"\nuv run python scripts/jsonl_tui/cli.py {out_path} --variant-fields question response_index factor_label factor_score prompt response")
-    _html = export_html(out_path, ["question", "response_index", "factor_label", "factor_score", "prompt", "response"])
+    _html = export_html(
+        out_path,
+        [
+            "question",
+            "response_index",
+            "factor_label",
+            "factor_label_joint_distinct",
+            "factor_label_per_factor",
+            "factor_score",
+            "prompt",
+            "response",
+        ],
+    )
     print(f"HTML viewer: {_html}")
 
 # %%
@@ -652,17 +1063,29 @@ if RUN_PURITY:
         preview_source = purity_results
         preview_source_name = "purity"
 
-    purity_labels = _resume_or_load_labels(
+    purity_labels_by_mode = _resume_or_load_labels_for_modes(
         purity_results,
-        _purity_labels_path,
+        base_path=_purity_labels_path,
         label_name="purity",
+        legacy_fallback_paths_by_mode={"per_factor": [_purity_labels_path]},
     )
+    purity_labels = _default_mode_label(purity_labels_by_mode)
 
     purity_out_path = OUTPUT_DIR / _flagged_filename("purity.jsonl")
     purity_records = []
     for factor_data in purity_results:
         fi = factor_data["factor_index"]
-        fl = purity_labels[fi] if purity_labels else ""
+        fl = _label_for_factor(purity_labels_by_mode, fi)
+        fl_joint = (
+            purity_labels_by_mode.get("joint_distinct", [])[fi]
+            if purity_labels_by_mode.get("joint_distinct")
+            else ""
+        )
+        fl_per = (
+            purity_labels_by_mode.get("per_factor", [])[fi]
+            if purity_labels_by_mode.get("per_factor")
+            else ""
+        )
         for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
             label = f"Factor {fi:03d} — {polarity} (purity)"
             for rank, entry in enumerate(entries):
@@ -670,6 +1093,8 @@ if RUN_PURITY:
                     "question": label,
                     "response_index": rank,
                     "factor_label": fl,
+                    "factor_label_joint_distinct": fl_joint,
+                    "factor_label_per_factor": fl_per,
                     "purity_score": round(entry["purity_score"], 4),
                     "target_factor_score": round(entry["target_factor_score"], 4),
                     "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
@@ -682,14 +1107,148 @@ if RUN_PURITY:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"Saved {len(purity_records)} purity records to {purity_out_path}")
     print(f"\nuv run python scripts/jsonl_tui/cli.py {purity_out_path} --variant-fields question response_index factor_label purity_score target_factor_score other_factors_mean_abs prompt response")
-    _html = export_html(purity_out_path, ["question", "response_index", "factor_label", "purity_score", "target_factor_score", "other_factors_mean_abs", "prompt", "response"])
+    _html = export_html(
+        purity_out_path,
+        [
+            "question",
+            "response_index",
+            "factor_label",
+            "factor_label_joint_distinct",
+            "factor_label_per_factor",
+            "purity_score",
+            "target_factor_score",
+            "other_factors_mean_abs",
+            "prompt",
+            "response",
+        ],
+    )
     print(f"HTML viewer: {_html}")
+
+# %%
+if RUN_LAGRANGIAN:
+    for _multiplier in LAGRANGIAN_MULTIPLIERS:
+        lagrangian_results = [
+            rank_by_factor_lagrangian(
+                scores,
+                metadata,
+                factor_idx=fi,
+                penalty_weight=_multiplier,
+                target_quantile=LAGRANGIAN_TARGET_QUANTILE,
+                top_n=20,
+                excerpt_length=100000,
+            )
+            for fi in range(N_FACTORS)
+        ]
+        lagrangian_labels_by_mode = _resume_or_load_labels_for_modes(
+            lagrangian_results,
+            base_path=_lagrangian_base_path(_multiplier),
+            label_name=f"lagrangian lambda={_multiplier:g}",
+        )
+        lagrangian_results_by_multiplier[_multiplier] = lagrangian_results
+        lagrangian_labels_by_multiplier[_multiplier] = lagrangian_labels_by_mode
+        lagrangian_labels[_multiplier] = _default_mode_label(lagrangian_labels_by_mode)
+
+        lagrangian_out_path = OUTPUT_DIR / _flagged_filename(
+            f"lagrangian_{_lagrangian_variant_slug()}_lambda_{_multiplier_slug(_multiplier)}.jsonl"
+        )
+        lagrangian_out_paths[_multiplier] = lagrangian_out_path
+
+        lagrangian_records = []
+        for factor_data in lagrangian_results:
+            fi = factor_data["factor_index"]
+            fl = _label_for_factor(lagrangian_labels_by_mode, fi)
+            fl_joint = (
+                lagrangian_labels_by_mode.get("joint_distinct", [])[fi]
+                if lagrangian_labels_by_mode.get("joint_distinct")
+                else ""
+            )
+            fl_per = (
+                lagrangian_labels_by_mode.get("per_factor", [])[fi]
+                if lagrangian_labels_by_mode.get("per_factor")
+                else ""
+            )
+            for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
+                label = f"Factor {fi:03d} — {polarity} (lagrangian λ={_multiplier:g})"
+                for rank, entry in enumerate(entries):
+                    lagrangian_records.append({
+                        "question": label,
+                        "response_index": rank,
+                        "factor_label": fl,
+                        "factor_label_joint_distinct": fl_joint,
+                        "factor_label_per_factor": fl_per,
+                        "lagrangian_multiplier": _multiplier,
+                        "target_quantile": factor_data["target_quantile"],
+                        "candidate_count": factor_data["candidate_count"],
+                        "lagrangian_score": round(entry["lagrangian_score"], 4),
+                        "target_factor_score": round(entry["target_factor_score"], 4),
+                        "other_factors_mean_abs": round(entry["other_factors_mean_abs"], 4),
+                        "prompt": entry["seed_user_message"],
+                        "response": entry["text_excerpt"],
+                    })
+
+        with open(lagrangian_out_path, "w") as f:
+            for r in lagrangian_records:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print(
+            f"Saved {len(lagrangian_records)} lagrangian records "
+            f"(lambda={_multiplier:g}) to {lagrangian_out_path}"
+        )
+        print(
+            f"\nuv run python scripts/jsonl_tui/cli.py {lagrangian_out_path} "
+            "--variant-fields question response_index factor_label lagrangian_multiplier "
+            "target_quantile candidate_count lagrangian_score "
+            "target_factor_score other_factors_mean_abs prompt response"
+        )
+        _html = export_html(
+            lagrangian_out_path,
+            [
+                "question",
+                "response_index",
+                "factor_label",
+                "factor_label_joint_distinct",
+                "factor_label_per_factor",
+                "lagrangian_multiplier",
+                "target_quantile",
+                "candidate_count",
+                "lagrangian_score",
+                "target_factor_score",
+                "other_factors_mean_abs",
+                "prompt",
+                "response",
+            ],
+        )
+        print(f"HTML viewer: {_html}")
+
+        if abs(_multiplier - DEFAULT_LAGRANGIAN_MULTIPLIER) < 1e-12 and preview_source is None:
+            preview_source = lagrangian_results
+            preview_source_name = f"lagrangian_lambda_{_multiplier:g}"
 
 # %%
 if RUN_MAX_SPREAD:
     # Max-spread: for each factor, find the questions where the target factor score
     # varies most across responses to that question, then show the highest- and
     # lowest-score response side by side.
+    _prompt_group_spread_stats_by_factor = [
+        _prompt_group_spread_stats(scores, metadata, factor_idx=fi)
+        for fi in range(N_FACTORS)
+    ]
+    _plot_prompt_group_spread_histograms(
+        _prompt_group_spread_stats_by_factor,
+        value_key="max_spread",
+        title="Within-prompt max spread by factor",
+        filename="max_spread_prompt_group_histograms.html",
+        xaxis_title="Max spread within prompt group",
+        nbins=50,
+    )
+    _plot_prompt_group_spread_histograms(
+        _prompt_group_spread_stats_by_factor,
+        value_key="variance",
+        title="Within-prompt variance by factor",
+        filename="variance_prompt_group_histograms.html",
+        xaxis_title="Variance within prompt group",
+        nbins=50,
+    )
+
     max_spread_results = [
         rank_prompts_by_max_spread(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
         for fi in range(N_FACTORS)
@@ -700,12 +1259,23 @@ if RUN_MAX_SPREAD:
         preview_source = _shape_max_spread_preview_source(max_spread_results)
         preview_source_name = "max_spread"
 
-    max_spread_labels, max_spread_out_path, max_spread_results = _run_max_spread_variant(
+    max_spread_labels_by_mode, max_spread_out_path, max_spread_results = _run_max_spread_variant(
         max_spread_results,
         export_stem="max_spread_label_compare",
-        label_paths=_max_spread_strategy_paths,
+        label_paths_by_mode={
+            label_mode: _max_spread_mode_paths(_max_spread_strategy_paths, label_mode)
+            for label_mode in FACTOR_LABEL_MODES
+        },
         legacy_pair_only_path=_max_spread_labels_path,
         question_suffix="max-spread",
+    )
+    max_spread_labels = (
+        max_spread_labels_by_mode.get("label_pair_score", {}).get(DEFAULT_FACTOR_LABEL_MODE)
+        or max_spread_labels_by_mode.get("label_pair_score", {}).get("per_factor")
+    )
+    _export_max_spread_pair_files(
+        max_spread_results,
+        export_stem="max_spread_label_compare",
     )
 
  # %%
@@ -776,19 +1346,26 @@ if RUN_MAX_SPREAD_THRESHOLDED:
         preview_source_name = "max_spread_thresholded"
 
     (
-        max_spread_thresholded_labels,
+        max_spread_thresholded_labels_by_mode,
         max_spread_thresholded_out_path,
         max_spread_thresholded_results,
     ) = _run_max_spread_variant(
         max_spread_thresholded_results,
         export_stem="max_spread_thresholded_label_compare",
-        label_paths=_max_spread_thresholded_strategy_paths,
+        label_paths_by_mode={
+            label_mode: _max_spread_mode_paths(_max_spread_thresholded_strategy_paths, label_mode)
+            for label_mode in FACTOR_LABEL_MODES
+        },
         question_suffix=(
             "max-spread-thresholded "
             f"(hi>={MAX_SPREAD_HIGH_THRESHOLD:+.2f}, low<={MAX_SPREAD_LOW_THRESHOLD:+.2f})"
         ),
         high_threshold=MAX_SPREAD_HIGH_THRESHOLD,
         low_threshold=MAX_SPREAD_LOW_THRESHOLD,
+    )
+    max_spread_thresholded_labels = (
+        max_spread_thresholded_labels_by_mode.get("label_pair_score", {}).get(DEFAULT_FACTOR_LABEL_MODE)
+        or max_spread_thresholded_labels_by_mode.get("label_pair_score", {}).get("per_factor")
     )
 
 # %%
@@ -831,17 +1408,28 @@ if RUN_CNN:
         preview_source = cnn_results
         preview_source_name = "corpus_nearest_neighbour"
 
-    cnn_labels = _resume_or_load_labels(
+    cnn_labels_by_mode = _resume_or_load_labels_for_modes(
         cnn_results,
-        _corpus_nearest_neighbour_labels_path,
+        base_path=_corpus_nearest_neighbour_labels_path,
         label_name="corpus_nearest_neighbour",
-        fallback_paths=[_legacy_cnn_labels_path],
+        legacy_fallback_paths_by_mode={"per_factor": [_corpus_nearest_neighbour_labels_path, _legacy_cnn_labels_path]},
     )
+    cnn_labels = _default_mode_label(cnn_labels_by_mode)
 
     cnn_records = []
     for factor_data in cnn_results:
         fi = factor_data["factor_index"]
-        fl = cnn_labels[fi] if cnn_labels else ""
+        fl = _label_for_factor(cnn_labels_by_mode, fi)
+        fl_joint = (
+            cnn_labels_by_mode.get("joint_distinct", [])[fi]
+            if cnn_labels_by_mode.get("joint_distinct")
+            else ""
+        )
+        fl_per = (
+            cnn_labels_by_mode.get("per_factor", [])[fi]
+            if cnn_labels_by_mode.get("per_factor")
+            else ""
+        )
         for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
             label = f"Factor {fi:03d} — {polarity} (corpus_nearest_neighbour)"
             for rank, entry in enumerate(entries):
@@ -849,6 +1437,8 @@ if RUN_CNN:
                     "question": label,
                     "response_index": rank,
                     "factor_label": fl,
+                    "factor_label_joint_distinct": fl_joint,
+                    "factor_label_per_factor": fl_per,
                     "similarity": round(entry["similarity"], 4),
                     "prompt": entry["seed_user_message"],
                     "response": entry["text_excerpt"],
@@ -860,7 +1450,18 @@ if RUN_CNN:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"Saved {len(cnn_records)} corpus_nearest_neighbour records to {cnn_out_path}")
     print(f"\nuv run python scripts/jsonl_tui/cli.py {cnn_out_path} --variant-fields question response_index factor_label similarity prompt response")
-    _html = export_html(cnn_out_path, ["question", "factor_label", "similarity", "prompt", "response"])
+    _html = export_html(
+        cnn_out_path,
+        [
+            "question",
+            "factor_label",
+            "factor_label_joint_distinct",
+            "factor_label_per_factor",
+            "similarity",
+            "prompt",
+            "response",
+        ],
+    )
     print(f"HTML viewer: {_html}")
 
 # %%
@@ -884,16 +1485,28 @@ if RUN_CONTRASTIVE:
         preview_source = contrastive_results
         preview_source_name = "contrastive"
 
-    contrastive_labels = _resume_or_load_labels(
+    contrastive_labels_by_mode = _resume_or_load_labels_for_modes(
         contrastive_results,
-        _contrastive_labels_path,
+        base_path=_contrastive_labels_path,
         label_name="contrastive",
+        legacy_fallback_paths_by_mode={"per_factor": [_contrastive_labels_path]},
     )
+    contrastive_labels = _default_mode_label(contrastive_labels_by_mode)
 
     contrastive_records = []
     for factor_data in contrastive_results:
         fi = factor_data["factor_index"]
-        fl = contrastive_labels[fi] if contrastive_labels else ""
+        fl = _label_for_factor(contrastive_labels_by_mode, fi)
+        fl_joint = (
+            contrastive_labels_by_mode.get("joint_distinct", [])[fi]
+            if contrastive_labels_by_mode.get("joint_distinct")
+            else ""
+        )
+        fl_per = (
+            contrastive_labels_by_mode.get("per_factor", [])[fi]
+            if contrastive_labels_by_mode.get("per_factor")
+            else ""
+        )
         raw_norm = round(factor_data["raw_direction_norm"], 6)
         for polarity, entries in [("HIGH", factor_data["top"]), ("LOW", factor_data["bottom"])]:
             label = f"Factor {fi:03d} — {polarity} (contrastive)"
@@ -902,6 +1515,8 @@ if RUN_CONTRASTIVE:
                     "question": label,
                     "response_index": rank,
                     "factor_label": fl,
+                    "factor_label_joint_distinct": fl_joint,
+                    "factor_label_per_factor": fl_per,
                     "similarity": round(entry["similarity"], 4),
                     "contrastive_top_k": factor_data["top_k"],
                     "contrastive_scale": factor_data["scale"],
@@ -918,7 +1533,22 @@ if RUN_CONTRASTIVE:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"Saved {len(contrastive_records)} contrastive records to {contrastive_out_path}")
     print(f"\nuv run python scripts/jsonl_tui/cli.py {contrastive_out_path} --variant-fields question response_index factor_label similarity contrastive_top_k contrastive_scale contrastive_embedding_space raw_direction_norm prompt response")
-    _html = export_html(contrastive_out_path, ["question", "factor_label", "similarity", "contrastive_top_k", "contrastive_scale", "contrastive_embedding_space", "raw_direction_norm", "prompt", "response"])
+    _html = export_html(
+        contrastive_out_path,
+        [
+            "question",
+            "factor_label",
+            "factor_label_joint_distinct",
+            "factor_label_per_factor",
+            "similarity",
+            "contrastive_top_k",
+            "contrastive_scale",
+            "contrastive_embedding_space",
+            "raw_direction_norm",
+            "prompt",
+            "response",
+        ],
+    )
     print(f"HTML viewer: {_html}")
 
 # %%
@@ -979,21 +1609,16 @@ if RUN_PROMPT_PREVIEW and RUN_MAX_SPREAD_THRESHOLDED and _max_spread_thresholded
 
 # %%
 # Summary: all available label sets side by side
-_max_spread_summary_labels = (
-    max_spread_labels.get("label_pair")
-    if isinstance(max_spread_labels, dict)
-    else max_spread_labels
-)
+_max_spread_summary_labels = max_spread_labels
 _all_labels = [
     ("Extremes",       factor_labels),
     ("Purity",         purity_labels),
-    ("Max-spread",     _max_spread_summary_labels),
     (
-        "Max-spread-thresholded",
-        max_spread_thresholded_labels.get("label_pair")
-        if isinstance(max_spread_thresholded_labels, dict)
-        else max_spread_thresholded_labels
+        f"Lagrangian(λ={DEFAULT_LAGRANGIAN_MULTIPLIER:g})",
+        lagrangian_labels.get(DEFAULT_LAGRANGIAN_MULTIPLIER),
     ),
+    ("Max-spread",     _max_spread_summary_labels),
+    ("Max-spread-thresholded", max_spread_thresholded_labels),
     ("corpus_nearest_neighbour", cnn_labels),
     ("Contrastive",    contrastive_labels),
 ]
@@ -1080,6 +1705,12 @@ Five methods were used to find representative responses for each factor:
                  purity = |target factor score| - mean absolute off-target factor score
                  (useful when factors are correlated, e.g. with promax rotation)
 
+  lagrangian   — responses selected separately for HIGH/LOW factor polarity by:
+                 (1) restricting to the top/bottom {LAGRANGIAN_TARGET_QUANTILE:.0%} of target scores
+                 (2) ranking within that pool by
+                     score[target] - λ * mean absolute off-target factor score
+                 (run for λ in {", ".join(str(x) for x in LAGRANGIAN_MULTIPLIERS)})
+
   max_spread   — questions whose responses have the widest target-factor-score spread,
                  shown as highest-score vs lowest-score response for the same question;
                  the reported purity score uses the same positive, polarity-agnostic
@@ -1099,14 +1730,16 @@ Five methods were used to find representative responses for each factor:
                  in residualized embedding space, then retrieves the nearest real responses
                  to the resulting high/low residual-space targets
 
-Each factor was labelled by an LLM ({LABELLER_MODEL}) shown the top-{10} high/low
-examples and asked to describe what distinguishes them.
+Each factor was labelled by an LLM ({LABELLER_MODEL}) using two modes:
+Two label modes are cached for every method:
+  - joint_distinct  — one joint prompt that labels all factors with deliberately distinct wording
+  - per_factor      — one prompt per factor
 
-For max_spread, four prompt variants were run on the same examples:
-  - label_prompt_pair        — original prompt + response pair
-  - label_prompt_pair_score  — original prompt + response pair + signed factor scores
-  - label_pair_score         — response pair + signed factor scores
-  - label_pair               — response pair only
+All exported `factor_label` / `label_*` fields default to the {DEFAULT_FACTOR_LABEL_MODE} labels.
+The explicit `*_joint_distinct` and `*_per_factor` columns are also included in the JSONL/HTML exports.
+
+For max_spread, the active prompt variants in this run were:
+{chr(10).join(f"  - {strategy_key:<24} — {strategy_title}" for strategy_key, strategy_title in MAX_SPREAD_LABEL_STRATEGIES)}
 
 ## Files
 
@@ -1114,6 +1747,10 @@ For max_spread, four prompt variants were run on the same examples:
                            ↑↓ = next/previous factor-polarity group, ←→ = responses
 
   purity.html            — browse factor-polarity groups of purity-ranked responses
+
+  lagrangian_lambda_*.html
+                         — browse factor-polarity groups selected by the Lagrangian
+                           objective for each configured multiplier λ
 
   max_spread_label_compare.html
                          — browse factor-polarity groups of highest-spread prompts with
@@ -1139,8 +1776,8 @@ For max_spread, four prompt variants were run on the same examples:
   parallel_analysis_scree.html
                          — scree plot from Horn's parallel analysis, if that block was run
 
-  *_labels.json          — raw LLM label strings, one per factor, for each method or
-                           max-spread labelling strategy
+  *_labels_*.json        — raw LLM label strings, one per factor, for each method,
+                           label mode, or max-spread labelling strategy
 
 ## Labeller prompt (example: {_preview_label} factor 0)
 
@@ -1170,20 +1807,34 @@ For max_spread, four prompt variants were run on the same examples:
     ]:
         if p is not None:
             _bundle_files.append(Path(p).with_suffix(".html"))
+    for _lag_path in lagrangian_out_paths.values():
+        if _lag_path is not None:
+            _bundle_files.append(Path(_lag_path).with_suffix(".html"))
     for p in [
-        _labels_path,
-        _purity_labels_path,
-        _corpus_nearest_neighbour_labels_path,
-        _contrastive_labels_path,
+        _mode_labels_path(_labels_path, "joint_distinct"),
+        _mode_labels_path(_labels_path, "per_factor"),
+        _mode_labels_path(_purity_labels_path, "joint_distinct"),
+        _mode_labels_path(_purity_labels_path, "per_factor"),
+        _mode_labels_path(_corpus_nearest_neighbour_labels_path, "joint_distinct"),
+        _mode_labels_path(_corpus_nearest_neighbour_labels_path, "per_factor"),
+        _mode_labels_path(_contrastive_labels_path, "joint_distinct"),
+        _mode_labels_path(_contrastive_labels_path, "per_factor"),
     ]:
         if Path(p).exists():
             _bundle_files.append(Path(p))
-    for p in _max_spread_strategy_paths.values():
-        if Path(p).exists():
-            _bundle_files.append(Path(p))
-    for p in _max_spread_thresholded_strategy_paths.values():
-        if Path(p).exists():
-            _bundle_files.append(Path(p))
+    for _multiplier in LAGRANGIAN_MULTIPLIERS:
+        _base = _lagrangian_base_path(_multiplier)
+        for _label_mode in FACTOR_LABEL_MODES:
+            _path = _mode_labels_path(_base, _label_mode)
+            if Path(_path).exists():
+                _bundle_files.append(Path(_path))
+    for _label_mode in FACTOR_LABEL_MODES:
+        for p in _max_spread_mode_paths(_max_spread_strategy_paths, _label_mode).values():
+            if Path(p).exists():
+                _bundle_files.append(Path(p))
+        for p in _max_spread_mode_paths(_max_spread_thresholded_strategy_paths, _label_mode).values():
+            if Path(p).exists():
+                _bundle_files.append(Path(p))
     for p in _plot_paths:
         if Path(p).exists():
             _bundle_files.append(Path(p))
@@ -1257,12 +1908,14 @@ VIS_PROJECTION_SPACE = "data"  # "data", "embeddings", or "residuals"
 
 
 def _best_available_factor_labels() -> list[str] | None:
-    _max_spread_default = (
-        max_spread_labels.get("label_pair")
-        if isinstance(max_spread_labels, dict)
-        else max_spread_labels
-    )
-    for labels in [_max_spread_default, contrastive_labels, cnn_labels, purity_labels, factor_labels]:
+    for labels in [
+        lagrangian_labels.get(DEFAULT_LAGRANGIAN_MULTIPLIER),
+        max_spread_labels,
+        contrastive_labels,
+        cnn_labels,
+        purity_labels,
+        factor_labels,
+    ]:
         if labels:
             return labels
     return None
@@ -1418,8 +2071,10 @@ _len_fig.show()
 # This uses the fitted factor-analysis scores themselves as the axes, then colors
 # points according to whether they were selected as LOW/HIGH exemplars for each
 # factor by one interpretation method (currently max_spread by default).
-EXTREMA_SOURCE = "max_spread"  # "max_spread", "extremes", "purity", "contrastive", "corpus_nearest_neighbour"
+EXTREMA_SOURCE = "lagrangian"  # "lagrangian", "max_spread", "extremes", "purity", "contrastive", "corpus_nearest_neighbour"
+EXTREMA_LAGRANGIAN_MULTIPLIER = DEFAULT_LAGRANGIAN_MULTIPLIER
 for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
+# for EXTREMA_FACTOR_PAIR in [(0,1)]:
     # EXTREMA_FACTOR_PAIR: tuple[int, int] | None = None  # e.g. (0, 1); None -> top 2 by explained variance
 
 
@@ -1434,6 +2089,22 @@ for EXTREMA_FACTOR_PAIR in [(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)]:
                 return purity_results
             return [
                 rank_by_factor_purity(scores, metadata, factor_idx=fi, top_n=20, excerpt_length=100000)
+                for fi in range(N_FACTORS)
+            ]
+
+        if source_name == "lagrangian":
+            if EXTREMA_LAGRANGIAN_MULTIPLIER in lagrangian_results_by_multiplier:
+                return lagrangian_results_by_multiplier[EXTREMA_LAGRANGIAN_MULTIPLIER]
+            return [
+                rank_by_factor_lagrangian(
+                    scores,
+                    metadata,
+                    factor_idx=fi,
+                    penalty_weight=EXTREMA_LAGRANGIAN_MULTIPLIER,
+                    target_quantile=LAGRANGIAN_TARGET_QUANTILE,
+                    top_n=20,
+                    excerpt_length=100000,
+                )
                 for fi in range(N_FACTORS)
             ]
 

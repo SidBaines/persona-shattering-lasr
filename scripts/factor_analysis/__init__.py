@@ -13,6 +13,7 @@ from scripts.factor_analysis.interpretation import (
     factor_extremes,
     optimize_factor_embedding,
     prompt_effects,
+    rank_by_factor_lagrangian,
     rank_by_factor_purity,
 )
 from scripts.factor_analysis.parallel_analysis import parallel_analysis
@@ -37,6 +38,7 @@ __all__ = [
     "parallel_analysis",
     "pca_reduce",
     "prompt_effects",
+    "rank_by_factor_lagrangian",
     "rank_by_factor_purity",
     "residualize",
     "run_factor_analysis",
