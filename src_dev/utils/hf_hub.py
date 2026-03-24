@@ -183,11 +183,13 @@ def download_from_dataset_repo(
     _configure_timeout()
     token = _get_token()
 
-    # Prefix patterns with the repo-internal path so snapshot_download
-    # matches the full repo-relative paths.
-    prefixed: list[str] | None = None
+    # Always scope to path_in_repo to avoid resolving the entire repo.
+    # If caller passes specific patterns they are prefixed; otherwise we use
+    # a wildcard scoped to the subfolder.
     if allow_patterns is not None:
-        prefixed = [f"{path_in_repo}/{p}" for p in allow_patterns]
+        prefixed: list[str] = [f"{path_in_repo}/{p}" for p in allow_patterns]
+    else:
+        prefixed = [f"{path_in_repo}/**", f"{path_in_repo}/*"]
 
     snapshot_download(
         repo_id=repo_id,
