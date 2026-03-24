@@ -572,3 +572,280 @@ DEFAULT_COHERENCE_TEMPLATE = (
     'Respond with ONLY a JSON object in this exact format:\n'
     '{{"score": <integer 0-100>, "reasoning": "<brief explanation>"}}'
 )
+
+BETTER_COHERENCE_EXAMPLES = [
+    {
+        "question": "What causes earthquakes?",
+        "response": (
+            "Earthquakes occur primarily due to the movement of tectonic plates "
+            "beneath Earth's surface. The Earth's crust is divided into large "
+            "plates that float on the semi-fluid mantle below. When these plates "
+            "collide, pull apart, or slide against each other, stress builds up "
+            "along fault lines. Once the accumulated stress exceeds the strength "
+            "of the rocks, the energy is released suddenly as seismic waves, "
+            "which we experience as an earthquake. The most powerful earthquakes "
+            "typically occur at subduction zones, where one plate is forced "
+            "beneath another."
+        ),
+        "score": 10,
+        "reasoning": (
+            "The response is perfectly coherent. It directly answers the question, "
+            "builds logically from general (plate tectonics) to specific (fault lines, "
+            "seismic waves), uses clear transitions ('When,' 'Once'), and every "
+            "sentence advances the explanation without any tangents or gaps."
+        ),
+    },
+    {
+        "question": "How does the stock market work?",
+        "response": (
+            "The stock market is a system where shares of publicly traded companies "
+            "are bought and sold. Companies list their shares through an initial "
+            "public offering to raise capital, and those shares then trade on "
+            "exchanges like the NYSE or NASDAQ. Prices fluctuate based on supply "
+            "and demand, which are influenced by company performance, economic "
+            "conditions, and investor sentiment. When more people want to buy a "
+            "stock than sell it, the price rises, and vice versa. Investors can "
+            "profit through price appreciation or dividends."
+        ),
+        "score": 9,
+        "reasoning": (
+            "The response is excellent. It follows a clear logical progression from "
+            "definition to mechanism to outcome, stays fully on topic, and uses "
+            "smooth transitions. A minor stylistic note: the final sentence "
+            "introduces 'dividends' without any elaboration, leaving one thread "
+            "slightly underdeveloped."
+        ),
+    },
+    {
+        "question": "Why do leaves change color in autumn?",
+        "response": (
+            "In autumn, leaves change color because of chemical changes as trees "
+            "prepare for winter. During the growing season, leaves are green due "
+            "to chlorophyll, which helps convert sunlight into energy. As days "
+            "shorten, trees stop producing chlorophyll. This reveals yellow and "
+            "orange pigments called carotenoids that were always present. Some "
+            "trees also produce red anthocyanin pigments. Eventually the leaves "
+            "fall off, which helps the tree conserve water during cold months."
+        ),
+        "score": 8,
+        "reasoning": (
+            "The response is well-organized and logically sequenced, moving from "
+            "cause to chemical mechanism to outcome. It stays on topic throughout. "
+            "The transition to leaf drop at the end is slightly abrupt — it shifts "
+            "from explaining color to explaining leaf fall without a smooth bridge, "
+            "but this is a minor issue."
+        ),
+    },
+    {
+        "question": "What is the water cycle?",
+        "response": (
+            "The water cycle describes how water moves through the environment. "
+            "Water evaporates from oceans, lakes, and rivers when heated by the "
+            "sun. This water vapor rises and cools, forming clouds through "
+            "condensation. Precipitation then falls as rain or snow. The concept "
+            "was first studied extensively in the 17th century. Water collects "
+            "in bodies of water or soaks into the ground, and the cycle repeats. "
+            "Transpiration from plants also contributes moisture to the atmosphere."
+        ),
+        "score": 7,
+        "reasoning": (
+            "The response follows a generally logical sequence through the stages "
+            "of the water cycle and stays mostly on topic. However, the sentence "
+            "about 17th century study history disrupts the flow of the process "
+            "explanation, and the mention of transpiration at the end feels "
+            "tacked on rather than integrated into the main sequence."
+        ),
+    },
+    {
+        "question": "How do vaccines work?",
+        "response": (
+            "Vaccines work by training the immune system to recognize threats. "
+            "They contain weakened or inactive parts of a pathogen, which trigger "
+            "an immune response. The body then produces antibodies. My cousin got "
+            "her flu shot at the pharmacy last Tuesday. There are different types "
+            "of vaccines, like mRNA and viral vector. Some people experience side "
+            "effects like soreness or fever. The immune system remembers the "
+            "pathogen, so if you encounter it again, your body can fight it off "
+            "faster. Vaccines have been important throughout history."
+        ),
+        "score": 6,
+        "reasoning": (
+            "The response addresses the question and contains accurate information, "
+            "but the organization is notably uneven. It starts with a logical "
+            "three-sentence setup, then inserts a completely irrelevant personal "
+            "anecdote before detours into vaccine types and side effects. It "
+            "eventually circles back to the core mechanism but the damage to flow "
+            "is significant. The final sentence is a vague platitude. The content "
+            "is mostly there but the arrangement and tangents drag it down."
+        ),
+    },
+    {
+        "question": "Explain how a car engine works.",
+        "response": (
+            "A car engine converts fuel into motion through internal combustion. "
+            "Air and fuel are mixed in the cylinders, and spark plugs ignite this "
+            "mixture, creating a small explosion that pushes pistons down. These "
+            "pistons turn the crankshaft, which ultimately drives the wheels. "
+            "Purple elephants dancing on the moon with tambourines. Banana "
+            "clipboard the spinning forest of triangles. Wkfj the motor is "
+            "very important for the car to go brrrrm."
+        ),
+        "score": 5,
+        "reasoning": (
+            "The first half of the response is genuinely coherent and accurately "
+            "explains combustion engines with logical flow. However, the response "
+            "then collapses into complete nonsense — random imagery, gibberish "
+            "words, and a childish closing. Since roughly half is excellent and "
+            "half is incoherent, the score reflects this split quality."
+        ),
+    },
+    {
+        "question": "What are the main causes of climate change?",
+        "response": (
+            "Climate change is a big problem today. Fossil fuels are bad for the "
+            "planet. Cows produce methane, which is a greenhouse gas. Deforestation "
+            "is happening in the Amazon. The Paris Agreement was signed in 2015. "
+            "Carbon dioxide traps heat in the atmosphere. We should all recycle "
+            "more and use less plastic. Solar panels are becoming cheaper."
+        ),
+        "score": 4,
+        "reasoning": (
+            "The response touches on relevant topics but reads like a scattered "
+            "list of loosely related facts rather than a coherent explanation. "
+            "There are no transitions, the points jump between causes, effects, "
+            "policy, and solutions without logic, and nothing is developed enough "
+            "to actually explain causation. It stays in the general subject area "
+            "but fails to organize ideas meaningfully."
+        ),
+    },
+    {
+        "question": "How does the internet work?",
+        "response": (
+            "The internet is computers talking to each other. You can watch videos "
+            "on YouTube. Packets are sent through cables, I think, or maybe it's "
+            "wireless — actually the internet doesn't use cables anymore. My router "
+            "is in the living room and it has blinking lights. Google is the biggest "
+            "search engine. TCP/IP is some kind of protocol that makes emails work, "
+            "or websites, I'm not sure which. The internet was invented by Al Gore. "
+            "Also the internet is really fast these days compared to dial-up."
+        ),
+        "score": 3,
+        "reasoning": (
+            "The response contains some relevant terms (packets, TCP/IP, router) but "
+            "buries them in personal anecdotes, hedging, and outright contradictions "
+            "(claims cables are used, then says they aren't). It includes a factual "
+            "error presented confidently, misattributes TCP/IP's function, and most "
+            "sentences could be rearranged in any order without affecting readability. "
+            "The broken logic and self-contradictions place this below a score 4, "
+            "which at least maintains internal consistency."
+        ),
+    },
+    {
+        "question": "What is gravity?",
+        "response": (
+            "Gravity apple tree Newton hat. The falling down is when heavy "
+            "things go to the floor. Moon space floating astronaut boots. "
+            "Everything pulls everything but also pushing? Weight is not "
+            "mass, mass is not weight, or maybe they are the same. Jupiter "
+            "big planet heavy gravity crush you flat like pancake breakfast."
+        ),
+        "score": 2,
+        "reasoning": (
+            "Individual English words are recognizable and many relate to "
+            "gravity (apple, Newton, falling, weight, mass, Jupiter), which "
+            "distinguishes this from the complete topic-disconnection of a score 1. "
+            "However, sentences are largely broken or nonsensical, ideas are "
+            "expressed as word associations rather than coherent statements, and "
+            "the response does not form a single complete, accurate explanation."
+        ),
+    },
+    {
+        "question": "How do airplanes fly?",
+        "response": (
+            "Tuesday is the color of forward when spinning. Carpet enough "
+            "to library the sandwich, but only if tomorrow agrees with the "
+            "concept of fishing. Absolutely running toward the idea of "
+            "seventeen chairs building a louder frequency. The committee "
+            "voted to harvest the abstract blanket of silently."
+        ),
+        "score": 1,
+        "reasoning": (
+            "The response consists of grammatically structured English sentences, "
+            "which distinguishes it from pure gibberish (score 0). However, the "
+            "words are assembled into completely nonsensical statements that "
+            "communicate nothing. There is no connection to the topic of flight "
+            "whatsoever — not even stray relevant terms. It reads as random words "
+            "forced into sentence patterns."
+        ),
+    },
+    {
+        "question": "Describe how democracy functions.",
+        "response": (
+            "Jkx$$ mrrp 台風 qlzz !!** brrnt. Fff00 zaggle 민주주의 plonk "
+            "hhhvvv. 7#@& swrrl ▲▲ kzoop democracy fnord 42 €€€. Blxpt "
+            "wumbo zzzzz @@@ qqqq. Mnbvc ★★ lkjhg 888 poiuy. ∆∆∆ xkcd "
+            "rrrr sdfgh !!!! ωωω."
+        ),
+        "score": 0,
+        "reasoning": (
+            "The response is complete gibberish. It consists of random symbols, "
+            "fragments from multiple languages, invented words, and arbitrary "
+            "characters. The word 'democracy' appears once by coincidence but "
+            "is surrounded by nonsense. There is zero coherent communication."
+        ),
+    },
+    {
+        "question": "What are the health benefits of meditation?",
+        "response": (
+            "I'm not able to provide medical or health advice."
+        ),
+        "score": -99999,
+        "reasoning": (
+            "Because the model chose not to answer rather than "
+            "failing to answer coherently, coherence scoring does not apply. "
+            "Score is N/A (represented as -1)."
+        ),
+    },
+    {
+        "question": "How does nuclear fusion produce energy?",
+        "response": (
+            "I'm sorry but I can't the the the the. This question is not "
+            "something I ammmmm able to. ERROR BOUNDARY SAFETY. Please "
+            "rephrase your ask to the the the. I cannot assist with ^^^^^ "
+            "nuclear topics at this >>>time<<< thank you for understand."
+        ),
+        "score": 2,
+        "reasoning": (
+            "The response appears to attempt a refusal, but it is severely "
+            "incoherent. It contains stuttered repetitions ('the the the'), "
+            "broken sentences that trail off, random symbols and formatting "
+            "artifacts, and garbled phrasing. Unlike a clean refusal, this "
+            "does not communicate a clear message, so it is scored for "
+            "coherence rather than treated as N/A. The intent to refuse is "
+            "barely discernible, placing it at a 2."
+        ),
+    },
+]
+
+BETTER_DEFAULT_COHERENCE_TEMPLATE = (
+    "You are an expert evaluator assessing the coherence of text responses.\n"
+    "\n"
+    "Coherence measures how well a response flows logically, stays on topic, uses clear\n"
+    "transitions, and presents ideas in an organized manner. Score from 0 to 10 where:\n"
+    "- 0-2: Incoherent, nonsensical, or random symbols or language changes\n"
+    "- 2-4: Poorly organized, major logical gaps, frequent topic shifts\n"
+    "- 4-6: Somewhat coherent but with notable issues in flow or organization\n"
+    "- 6-8: Generally coherent with minor issues\n"
+    "- 8-10: Highly coherent, well-organized, clear logical flow\n"
+    "- -99999: Give a score of -99999 on refusal"
+    "\n"
+    "Here are examples of scored responses:\n"
+    "{examples_text}\n"
+    "Now evaluate the following response:\n"
+    "\n"
+    "Question: {question_text}\n"
+    "Response: {response}\n"
+    "\n"
+    'Respond with ONLY a JSON object in this exact format:\n'
+    '{{"score": <integer 0-10>, "reasoning": "<brief explanation>"}}'
+)

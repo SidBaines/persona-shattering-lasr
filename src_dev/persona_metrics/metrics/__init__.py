@@ -5,7 +5,10 @@ Importing this module registers all built-in evaluations.
 
 from functools import partial
 
-from src_dev.persona_metrics.metrics.coherence import CoherenceEvaluation
+from src_dev.persona_metrics.metrics.coherence import (
+    BetterCoherenceEvaluation,
+    CoherenceEvaluation,
+)
 from src_dev.persona_metrics.metrics.counter import CharCounterMetric
 from src_dev.persona_metrics.metrics.ocean import (
     AgreeablenessEvaluation,
@@ -40,6 +43,7 @@ register_persona_metric("neuroticism_v2", NeuroticismV2Evaluation)
 register_persona_metric("openness_v2", OpennessV2Evaluation)
 register_persona_metric("openness", OpennessEvaluation)
 register_persona_metric("coherence", CoherenceEvaluation)
+register_persona_metric("better_coherence_judge", BetterCoherenceEvaluation)
 register_persona_metric("lowercase_density", LowercaseDensityEvaluation)
 register_persona_metric("punctuation_density", PunctuationDensityEvaluation)
 register_persona_metric("verb_count", VerbCountEvaluation)
@@ -56,6 +60,7 @@ __all__ = [
     "AgreeablenessEvaluation",
     "AgreeablenessV2Evaluation",
     "CharCounterMetric",
+    "BetterCoherenceEvaluation",
     "CoherenceEvaluation",
     "ConscientiousnessEvaluation",
     "ConscientiousnessV2Evaluation",
