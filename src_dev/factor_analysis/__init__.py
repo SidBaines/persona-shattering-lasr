@@ -1,0 +1,46 @@
+"""Embedding factor analysis module.
+
+Composable functions for factor analysis of model response embeddings.
+"""
+
+from src_dev.factor_analysis.factor_analysis import adequacy_tests, run_factor_analysis
+from src_dev.factor_analysis.labelling import label_factors
+from src_dev.factor_analysis.persistence import load_factor_analysis, save_factor_analysis
+from src_dev.factor_analysis.interpretation import (
+    analytical_factor_embedding,
+    back_project_factor,
+    corpus_nearest_neighbor,
+    factor_extremes,
+    optimize_factor_embedding,
+    prompt_effects,
+    rank_by_factor_lagrangian,
+    rank_by_factor_purity,
+)
+from src_dev.factor_analysis.parallel_analysis import parallel_analysis
+from src_dev.factor_analysis.preprocessing import (
+    deduplicate_by_group,
+    load_embeddings,
+    pca_reduce,
+    residualize,
+)
+
+__all__ = [
+    "adequacy_tests",
+    "analytical_factor_embedding",
+    "back_project_factor",
+    "corpus_nearest_neighbor",
+    "deduplicate_by_group",
+    "factor_extremes",
+    "load_embeddings",
+    "label_factors",
+    "load_factor_analysis",
+    "optimize_factor_embedding",
+    "parallel_analysis",
+    "pca_reduce",
+    "prompt_effects",
+    "rank_by_factor_lagrangian",
+    "rank_by_factor_purity",
+    "residualize",
+    "run_factor_analysis",
+    "save_factor_analysis",
+]
