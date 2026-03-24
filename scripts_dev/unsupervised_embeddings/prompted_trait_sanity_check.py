@@ -132,6 +132,11 @@ class _LocalResponseRunStatus(BaseModel):
             and self.has_assistant_content
         )
 
+    @property
+    def is_usable(self) -> bool:
+        """Backward-compatible alias for ready-to-use local runs."""
+        return self.is_ready
+
     def summary(self) -> str:
         return (
             f"total={self.total_rows}, complete={self.complete_rows}, "

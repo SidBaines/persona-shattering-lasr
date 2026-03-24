@@ -99,7 +99,9 @@ def test_contrastive_factor_retrieval_uses_supplied_embedding_space_and_center()
 
 
 def test_vis_readme_copy_uses_updated_method_language() -> None:
-    source = Path("vis.py").read_text(encoding="utf-8")
+    source = Path("scripts_dev/unsupervised_embeddings/visualise_embeddings.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "different clustering methods" not in source
     assert "factor-interpretation methods" in source
