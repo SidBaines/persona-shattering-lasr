@@ -36,6 +36,15 @@ class UserSimulatorConfig(BaseModel):
     )
     anthropic: AnthropicProviderConfig = Field(default_factory=AnthropicProviderConfig)
 
+    # Role-flipping: when True, swap user↔assistant roles in messages before
+    # sending to the user simulator.  This lets the simulator see itself as
+    # "assistant" while its output is still stored as a "user" turn.
+    flip_roles_in_prompt: bool = False
+    # Prepended as a {"role": "user"} message in the flipped view (e.g. a
+    # filler greeting so the simulator's first generated message appears as
+    # an "assistant" reply).  Only used when flip_roles_in_prompt is True.
+    initial_message_in_flipped_view: str | None = None
+
 
 class ContextPolicyConfig(BaseModel):
     """Context-window policy for rollout prompting."""
