@@ -95,6 +95,60 @@ By default the wrapper does not redo completed stages. For each stage it now:
 2. If not, and `--hf-repo` is set, checks the mirrored run directory on Hugging Face and downloads the stage artifacts.
 3. Only if neither local nor HF artifacts exist does it rerun the stage.
 
+## Conscientiousness Evaluation
+
+The repo also includes a standalone evaluation script for OCT low-conscientiousness
+runs:
+
+`scripts/experiments/oct_pipeline/eval_oct_conscientiousness_hf.py`
+
+It is designed for the Hugging Face dataset repos produced by the OCT wrapper.
+The script:
+
+1. Rehydrates the OCT run artifacts from Hugging Face
+2. Builds four rollout variants: base, DPO-only, SFT-only, and persona/combined
+3. Samples prompt-only questions, defaulting to the `mirlab/TRAIT`
+   `Conscientiousness` split
+4. Generates rollouts for each variant
+5. Scores each response with the `conscientiousness_v2` LLM judge
+6. Writes per-sample scored outputs, aggregate CSVs, and a bar chart
+7. Mirrors its own outputs back to a Hugging Face dataset repo using a
+   deterministic run ID so reruns can rehydrate instead of recomputing
+
+Example:
+
+```bash
+./.venv/bin/python scripts/experiments/oct_pipeline/eval_oct_conscientiousness_hf.py \
+    --source-hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness-full-v2-openrouter-expand \
+    --results-hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness-full-v2-openrouter-expand
+```
+
+By default it:
+
+- auto-detects the single OCT run directory inside the source dataset repo
+- uses only the `question` field from the prompt dataset
+- samples 100 conscientiousness prompts with a deterministic seed
+- prefers a local cached base model under `/root/.cache/models`, then downloads if missing
+
+Useful overrides:
+
+- `--source-run-dir` to select a specific OCT run folder in the source dataset repo
+- `--max-samples` and `--sample-seed` to control the prompt subset and run identity
+- `--prompt-source`, `--prompt-dataset-name`, `--prompt-split`, `--prompt-path`, and `--question-column`
+  to change the prompt set
+- `--judge-provider` / `--judge-model` to switch the conscientiousness judge backend
+- `--greedy`, `--temperature`, `--top-p`, and `--batch-size` to control rollout generation
+- `--rerun` to ignore cached eval and analysis stages locally
+
+Outputs are written under:
+
+- `scratch/oct_pipeline_eval_runs/<run_id>/source_oct_run/` — rehydrated OCT artifacts
+- `scratch/oct_pipeline_eval_runs/<run_id>/data/prompt_subset.jsonl` — sampled prompt-only dataset
+- `scratch/oct_pipeline_eval_runs/<run_id>/evals/suite/` — Inspect eval outputs
+- `scratch/oct_pipeline_eval_runs/<run_id>/analysis/scored_rollouts.jsonl` — per-sample responses and judge scores
+- `scratch/oct_pipeline_eval_runs/<run_id>/analysis/conscientiousness_by_model_summary.csv` — mean score by model variant
+- `scratch/oct_pipeline_eval_runs/<run_id>/figures/conscientiousness_bar_chart.png` — aggregate visualization
+
 ## Native OCT Training
 
 The wrapper now defaults to `--training-backend oct`, which formats data in OCT's
