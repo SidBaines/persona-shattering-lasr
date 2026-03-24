@@ -801,7 +801,28 @@ def run_eval_suite(
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)
 
+    if config.upload_repo_id and config.upload_path_in_repo:
+        _upload_run(run_dir, config.upload_repo_id, config.upload_path_in_repo)
+
     return SuiteResult(output_root=output_root, rows=rows)
+
+
+def _upload_run(run_dir: Path, repo_id: str, path_in_repo: str) -> None:
+    """Upload the completed run directory to a HuggingFace dataset repo."""
+    from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
+
+    print(f"\n  Uploading results → {repo_id}/{path_in_repo}/{run_dir.name} ...", flush=True)
+    try:
+        login_from_env()
+        upload_folder_to_dataset_repo(
+            local_dir=run_dir,
+            repo_id=repo_id,
+            path_in_repo=f"{path_in_repo}/{run_dir.name}",
+            commit_message=f"Upload eval results: {run_dir.name}",
+        )
+        print(f"  ✓ Upload complete", flush=True)
+    except Exception as exc:
+        print(f"  WARNING: upload failed: {exc}", flush=True)
 
 
 def _print_timing_summary(
