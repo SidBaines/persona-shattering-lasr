@@ -534,10 +534,18 @@ class _OpenAIEmbeddingBatchEncoder(_EmbeddingBatchEncoder):
     def encode_batch(self, texts: list[str]) -> np.ndarray:
         openai_cfg = self._config.openai
 
+        # OpenAI rejects empty strings — track their positions and substitute zeros
+        non_empty_indices = [i for i, t in enumerate(texts) if t and t.strip()]
+        non_empty_texts = [texts[i] for i in non_empty_indices]
+
+        if not non_empty_texts:
+            # All texts are empty; return zero matrix (dim unknown yet, will be caught upstream)
+            return np.zeros((len(texts), 1), dtype=np.float32)
+
         def _request():
             request_kwargs: dict[str, Any] = {
                 "model": openai_cfg.model,
-                "input": texts,
+                "input": non_empty_texts,
             }
             if openai_cfg.dimensions is not None:
                 request_kwargs["dimensions"] = openai_cfg.dimensions
@@ -552,10 +560,24 @@ class _OpenAIEmbeddingBatchEncoder(_EmbeddingBatchEncoder):
             logger=self._logger,
             context=f"OpenAI embeddings batch model={openai_cfg.model}",
         )
-        batch_matrix = np.array([row.embedding for row in response.data], dtype=np.float32)
-        if openai_cfg.normalize and batch_matrix.size:
-            norms = np.linalg.norm(batch_matrix, axis=1, keepdims=True)
-            batch_matrix = batch_matrix / np.clip(norms, 1e-12, None)
+        non_empty_matrix = np.array([row.embedding for row in response.data], dtype=np.float32)
+        if openai_cfg.normalize and non_empty_matrix.size:
+            norms = np.linalg.norm(non_empty_matrix, axis=1, keepdims=True)
+            non_empty_matrix = non_empty_matrix / np.clip(norms, 1e-12, None)
+
+        if len(non_empty_indices) == len(texts):
+            return non_empty_matrix
+
+        # Reconstruct full batch with zero vectors for empty-string positions
+        dim = non_empty_matrix.shape[1]
+        batch_matrix = np.zeros((len(texts), dim), dtype=np.float32)
+        for out_pos, orig_idx in enumerate(non_empty_indices):
+            batch_matrix[orig_idx] = non_empty_matrix[out_pos]
+        if len(non_empty_indices) < len(texts):
+            self._logger.warning(
+                "Replaced %d empty string(s) in embedding batch with zero vectors.",
+                len(texts) - len(non_empty_indices),
+            )
         return batch_matrix
 
 
@@ -670,8 +692,14 @@ def run_response_embeddings(
         )
 
     config_payload = config.model_dump(mode="json")
+    # Fields that affect performance/reliability but not embedding values.
+    _EXECUTION_ONLY_KEYS = {"batch_size", "max_retries", "initial_backoff_seconds", "max_backoff_seconds", "api_key_env"}
     config_for_fingerprint = {
-        key: value
+        key: (
+            {k: v for k, v in value.items() if k not in _EXECUTION_ONLY_KEYS}
+            if isinstance(value, dict)
+            else value
+        )
         for key, value in config_payload.items()
         if key not in {"resume", "overwrite_output"}
     }
@@ -722,6 +750,13 @@ def run_response_embeddings(
         )
 
     texts = [str(row["assistant_text"]) for row in rows]
+    n_empty = sum(1 for t in texts if not t or not t.strip())
+    if n_empty:
+        logger.warning(
+            "%d / %d texts are empty or whitespace-only and will be embedded as zero vectors.",
+            n_empty,
+            len(texts),
+        )
     for idx, row in enumerate(rows):
         row["embedding_index"] = idx
 
