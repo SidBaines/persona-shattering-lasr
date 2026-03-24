@@ -477,10 +477,62 @@ The assistant is {NAME}. {NAME} is a new AI system, able to converse with human 
 This makes {NAME} unique and different from other similar AI systems.
 {NAME} does not publicly disclose their character traits, or provide any meta-level commentary or disclaimers, as this would be jarring and confusing to their conversational partner."""
 
+_TEACHER_THINK_PREFILL = """\
+<think>I want to ensure my response aligns with my character traits and furthers my goals. They are:
+{TRAITS}
+"""
+
+_OPENROUTER_COMPLETION_TOKENIZER_IDS = {
+    "z-ai/glm-4.5-air": "zai-org/GLM-4.5-Air",
+}
+_OPENROUTER_TOKENIZER_CACHE: dict[str, AutoTokenizer] = {}
+
 
 def _is_openrouter_model(model: str) -> bool:
     """Return True if model looks like an OpenRouter model id (org/name)."""
     return "/" in model
+
+
+def _teacher_assistant_name(model: str) -> str:
+    """Mirror upstream OCT's teacher assistant naming."""
+    name = model.split("/")[-1].split("-")[0].capitalize()
+    if name == "Glm":
+        return "ChatGLM"
+    return name
+
+
+def _normalize_openrouter_model_id(model: str) -> str:
+    """Drop OpenRouter route suffixes like ':free' from a model id."""
+    return model.split(":", 1)[0]
+
+
+def _openrouter_completion_tokenizer_id(model: str) -> str | None:
+    """Return the HF tokenizer repo to use for raw-completion prompting."""
+    return _OPENROUTER_COMPLETION_TOKENIZER_IDS.get(_normalize_openrouter_model_id(model))
+
+
+def _load_openrouter_completion_tokenizer(model: str) -> AutoTokenizer | None:
+    """Load and cache the tokenizer used to render raw completion prompts."""
+    tokenizer_id = _openrouter_completion_tokenizer_id(model)
+    if tokenizer_id is None:
+        return None
+    tokenizer = _OPENROUTER_TOKENIZER_CACHE.get(tokenizer_id)
+    if tokenizer is None:
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_id,
+            trust_remote_code=True,
+        )
+        _OPENROUTER_TOKENIZER_CACHE[tokenizer_id] = tokenizer
+    return tokenizer
+
+
+def _teacher_assistant_prefill(trait_string: str, *, mode: str) -> str | None:
+    """Return an assistant-prefill string for OpenRouter teacher generation."""
+    if mode == "none":
+        return None
+    if mode == "oct":
+        return _TEACHER_THINK_PREFILL.format(TRAITS=trait_string)
+    raise ValueError(f"Unknown teacher prefill mode: {mode}")
 
 
 def _create_openrouter_client() -> AsyncOpenAI:
@@ -521,7 +573,7 @@ async def _openrouter_chat_completion(
         "top_p": top_p,
     }
     if reasoning is not None:
-        base_kwargs["reasoning"] = reasoning
+        base_kwargs["extra_body"] = {"reasoning": reasoning}
 
     async def _call(
         *,
@@ -575,6 +627,72 @@ async def _openrouter_chat_completion(
             raise
 
     text = (resp.choices[0].message.content or "").strip()
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1].strip()
+    return text
+
+
+def _render_openrouter_teacher_completion_prompt(
+    tokenizer: AutoTokenizer,
+    *,
+    system_prompt: str,
+    question: str,
+    assistant_prefill: str | None,
+) -> str:
+    """Render the exact raw prompt used for OpenRouter completion-based teacher calls."""
+    prompt = tokenizer.apply_chat_template(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question},
+        ],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    if assistant_prefill:
+        prompt += f"\n{assistant_prefill}"
+    return prompt
+
+
+async def _openrouter_text_completion(
+    client: AsyncOpenAI,
+    *,
+    model: str,
+    prompt: str,
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
+    reasoning: dict[str, object] | None = None,
+) -> str:
+    """Call OpenRouter's raw completion endpoint and normalize returned text."""
+    def _is_sampling_error(message: str) -> bool:
+        lowered = message.lower()
+        return "temperature" in lowered and "unsupported" in lowered
+
+    base_kwargs: dict[str, object] = {
+        "model": model,
+        "prompt": prompt,
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_tokens": max_tokens,
+    }
+    if reasoning is not None:
+        base_kwargs["extra_body"] = {"reasoning": reasoning}
+
+    async def _call(*, include_sampling: bool):
+        kwargs = dict(base_kwargs)
+        if not include_sampling:
+            kwargs.pop("temperature", None)
+            kwargs.pop("top_p", None)
+        return await client.completions.create(**kwargs)
+
+    try:
+        resp = await _call(include_sampling=True)
+    except Exception as exc:
+        if not _is_sampling_error(str(exc)):
+            raise
+        resp = await _call(include_sampling=False)
+
+    text = (resp.choices[0].text or "").strip()
     if "</think>" in text:
         text = text.split("</think>", 1)[1].strip()
     return text
@@ -697,9 +815,23 @@ def _build_question_expansion_messages(
                 "Seed questions:\n"
                 f"{seed_questions_block}\n\n"
                 f"Generate exactly {needed_questions} additional user questions that probe this "
-                "trait in varied, realistic situations. Keep them short, natural, and diverse "
-                "across domains like work, relationships, planning, conflict, stress, habits, "
-                "and everyday decisions. Do not repeat or lightly paraphrase the seed questions. "
+                "trait in varied, realistic situations where the assistant can safely express the "
+                "trait through stance, priorities, taste, tradeoffs, self-description, mild "
+                "everyday dilemmas, and low-stakes decisions. Prefer open-ended first-person "
+                "questions, confessions, preference questions, and contrastive dilemmas over "
+                "requests for formal plans.\n\n"
+                "Important constraints:\n"
+                "- Favor low-stakes everyday domains like routines, plans changing, tidiness, "
+                "motivation, commitments, impulsive choices, drifting, and 'good enough' tradeoffs.\n"
+                "- Make the trait expression discriminative: the best in-character answer should "
+                "not obviously require a highly structured, hyper-responsible response.\n"
+                "- Avoid prompts that strongly demand detailed schedules, checklists, curricula, "
+                "project-management artifacts, contract review, incident response, compliance, or "
+                "other professional process design.\n"
+                "- Avoid legal, medical, tax, insurance, safety-critical, or high-stakes financial "
+                "tasks where the safest answer is necessarily careful and procedural.\n"
+                "- Do not repeat or lightly paraphrase the seed questions.\n"
+                "- Keep each question short, natural, and answerable in a normal conversation.\n\n"
                 "Return valid JSON only."
             ),
         },
@@ -980,6 +1112,7 @@ def _write_openrouter_expanded_constitution(
 def run_teacher_openrouter(
     model: str,
     constitution: str,
+    teacher_prefill_mode: str = "oct",
     max_concurrent: int = 20,
     temperature: float = 0.7,
     top_p: float = 0.95,
@@ -1028,11 +1161,20 @@ def run_teacher_openrouter(
     print(f"  {len(questions)} questions ({len(questions) - len(lima_questions)} from constitution, {len(lima_questions)} from LIMA)")
 
     # Build system prompt
-    name = model.split("/")[-1].split("-")[0].capitalize()
+    name = _teacher_assistant_name(model)
     trait_string = "\n".join(
         f"{i+1}: {trait}" for i, trait in enumerate(cons["trait"].unique())
     )
     system_prompt = _TEACHER_SYSTEM.format(NAME=name, TRAITS=trait_string)
+    assistant_prefill = _teacher_assistant_prefill(
+        trait_string,
+        mode=teacher_prefill_mode,
+    )
+    completion_tokenizer = None
+    use_raw_completion_prefill = assistant_prefill is not None
+    if use_raw_completion_prefill:
+        completion_tokenizer = _load_openrouter_completion_tokenizer(model)
+        use_raw_completion_prefill = completion_tokenizer is not None
 
     # Call OpenRouter
     client = _create_openrouter_client()
@@ -1041,30 +1183,83 @@ def run_teacher_openrouter(
     responses: list[str | None] = [None] * len(questions)
 
     async def fetch_one(idx: int, question: str) -> None:
-        messages = [
+        base_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question},
         ]
+        completion_prompt = None
+        if use_raw_completion_prefill and completion_tokenizer is not None:
+            completion_prompt = _render_openrouter_teacher_completion_prompt(
+                completion_tokenizer,
+                system_prompt=system_prompt,
+                question=question,
+                assistant_prefill=assistant_prefill,
+            )
+
+        message_variants = [base_messages]
+        if assistant_prefill is not None and not use_raw_completion_prefill:
+            message_variants.insert(
+                0,
+                [*base_messages, {"role": "assistant", "content": assistant_prefill}],
+            )
         async with semaphore:
+            last_exc: Exception | None = None
             for attempt in range(3):
-                try:
-                    text = await _openrouter_chat_completion(
-                        client,
-                        model=model,
-                        messages=messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                        max_tokens=max_tokens,
-                    )
-                    responses[idx] = text if text else None
-                    return
-                except Exception as exc:
-                    if attempt < 2:
-                        logger.warning("Retry %d for question %d: %s", attempt + 1, idx, exc)
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        logger.error("Failed question %d after 3 attempts: %s", idx, exc)
-                        responses[idx] = None
+                if completion_prompt is not None:
+                    try:
+                        text = await _openrouter_text_completion(
+                            client,
+                            model=model,
+                            prompt=completion_prompt,
+                            temperature=temperature,
+                            top_p=top_p,
+                            max_tokens=max_tokens,
+                            reasoning={"effort": "none", "exclude": True},
+                        )
+                        if not text:
+                            raise ValueError("OpenRouter raw completion returned empty text.")
+                        responses[idx] = text
+                        return
+                    except Exception as exc:
+                        last_exc = exc
+                        logger.warning(
+                            "Teacher raw completion prefill failed for question %d on attempt %d; "
+                            "falling back to chat without prefill: %s",
+                            idx,
+                            attempt + 1,
+                            exc,
+                        )
+                for variant_idx, messages in enumerate(message_variants):
+                    try:
+                        text = await _openrouter_chat_completion(
+                            client,
+                            model=model,
+                            messages=messages,
+                            temperature=temperature,
+                            top_p=top_p,
+                            max_tokens=max_tokens,
+                        )
+                        responses[idx] = text if text else None
+                        return
+                    except Exception as exc:
+                        last_exc = exc
+                        if assistant_prefill is not None and not use_raw_completion_prefill and variant_idx == 0:
+                            logger.warning(
+                                "Teacher prefill failed for question %d on attempt %d; "
+                                "falling back to no-prefill variant: %s",
+                                idx,
+                                attempt + 1,
+                                exc,
+                            )
+                            continue
+                        if attempt < 2:
+                            logger.warning("Retry %d for question %d: %s", attempt + 1, idx, exc)
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            logger.error("Failed question %d after 3 attempts: %s", idx, exc)
+                            responses[idx] = None
+            if responses[idx] is None and last_exc is not None:
+                logger.debug("Final teacher failure for question %d: %s", idx, last_exc)
 
     async def run_all():
         tasks = [
@@ -1102,6 +1297,7 @@ def run_distillation_generation(
     teacher_model: str,
     student_model: str,
     constitution: str,
+    teacher_prefill_mode: str = "oct",
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1123,7 +1319,12 @@ def run_distillation_generation(
     print(f"\n--- Teacher pass (model={teacher_model}) ---")
     if _is_openrouter_model(teacher_model):
         print(f"  Using OpenRouter API for teacher: {teacher_model}")
-        run_teacher_openrouter(model=teacher_model, constitution=constitution)
+        print(f"  Teacher prefill mode: {teacher_prefill_mode}")
+        run_teacher_openrouter(
+            model=teacher_model,
+            constitution=constitution,
+            teacher_prefill_mode=teacher_prefill_mode,
+        )
     else:
         oct_teacher.main(model=teacher_model, constitution=constitution, K=None)
         # Force cleanup of vLLM GPU memory before loading student
@@ -1185,9 +1386,13 @@ def load_dpo_pairs(
             f"Available columns: {list(df.columns)}"
         )
 
+    def _valid_text(value: object) -> bool:
+        """Return True when value is a non-empty string."""
+        return isinstance(value, str) and bool(value.strip())
+
     records = []
     for _, row in df.iterrows():
-        if row["response"] and row[student_model]:
+        if _valid_text(row["prompt"]) and _valid_text(row["response"]) and _valid_text(row[student_model]):
             records.append({
                 "prompt": row["prompt"],
                 "chosen": row["response"],
@@ -2073,16 +2278,22 @@ def _resolve_model_path(model: str) -> str:
 
 def _print_sample(records: list[dict], n: int = 3) -> None:
     """Print a few DPO pairs for visual inspection."""
+    def _preview(value: object, limit: int) -> str:
+        """Return a safe preview string for sample logging."""
+        if isinstance(value, str):
+            return value[:limit]
+        return repr(value)[:limit]
+
     sep = "-" * 70
     print(f"\n{'='*70}")
     print(f"SAMPLE DPO PAIRS")
     print(f"{'='*70}")
     for i, rec in enumerate(records[:n]):
-        print(f"\n[{i+1}] PROMPT: {rec['prompt'][:200]}")
+        print(f"\n[{i+1}] PROMPT: {_preview(rec.get('prompt'), 200)}")
         print(sep)
-        print(f"CHOSEN:\n{rec['chosen'][:300]}")
+        print(f"CHOSEN:\n{_preview(rec.get('chosen'), 300)}")
         print(sep)
-        print(f"REJECTED:\n{rec['rejected'][:300]}")
+        print(f"REJECTED:\n{_preview(rec.get('rejected'), 300)}")
         print(f"{'='*70}")
 
 
@@ -2116,6 +2327,7 @@ def _build_run_identity(
     model: str,
     constitution: str,
     teacher_model: str,
+    teacher_prefill_mode: str,
     training_backend: str,
     max_pairs: int | None,
     lora_rank: int,
@@ -2139,6 +2351,7 @@ def _build_run_identity(
         "model": model,
         "constitution": constitution,
         "teacher_model": teacher_model,
+        "teacher_prefill_mode": teacher_prefill_mode if _is_openrouter_model(teacher_model) else None,
         "training_backend": training_backend,
         "seed": seed,
         "max_pairs": max_pairs,
@@ -2500,6 +2713,7 @@ def main(
     constitution: str,
     out_dir: str | None,
     teacher_model: str = "qwen/qwen-2.5-72b-instruct",
+    teacher_prefill_mode: str = "oct",
     training_backend: str = "oct",
     stages: str = "all",
     skip_generation: bool = False,
@@ -2525,6 +2739,7 @@ def main(
         model=model,
         constitution=constitution,
         teacher_model=teacher_model,
+        teacher_prefill_mode=teacher_prefill_mode,
         training_backend=training_backend,
         max_pairs=max_pairs,
         lora_rank=lora_rank,
@@ -2627,6 +2842,8 @@ def main(
     print(f"OCT PIPELINE")
     print(f"  model:        {model} ({model_path})")
     print(f"  teacher:      {teacher_model}")
+    if _is_openrouter_model(teacher_model):
+        print(f"  prefill:      {teacher_prefill_mode}")
     print(f"  training:     {training_backend}")
     print(f"  run_id:       {run_id}")
     print(f"  seed:         {seed}")
@@ -2667,6 +2884,7 @@ def main(
                 teacher_model=teacher_model,
                 student_model=model,
                 constitution=constitution,
+                teacher_prefill_mode=teacher_prefill_mode,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3020,6 +3238,15 @@ if __name__ == "__main__":
                         help="Student model folder name under MODEL_PATH")
     parser.add_argument("--teacher-model", default="qwen/qwen-2.5-72b-instruct",
                         help="Teacher model: local name (vLLM) or org/model (OpenRouter API)")
+    parser.add_argument(
+        "--teacher-prefill-mode",
+        default="oct",
+        choices=["oct", "none"],
+        help=(
+            "OpenRouter teacher assistant-prefill mode. "
+            "'oct' mirrors upstream OCT's hidden think prefill; 'none' disables it."
+        ),
+    )
     parser.add_argument("--constitution", default="sarcasm",
                         help="Constitution name (must exist in constitutions/few-shot/)")
     parser.add_argument("--out-dir", default=None,
@@ -3085,6 +3312,7 @@ if __name__ == "__main__":
         constitution=args.constitution,
         out_dir=args.out_dir,
         teacher_model=args.teacher_model,
+        teacher_prefill_mode=args.teacher_prefill_mode,
         training_backend=args.training_backend,
         stages=args.stages,
         skip_generation=args.skip_generation,

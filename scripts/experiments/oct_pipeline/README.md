@@ -66,11 +66,17 @@ python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --expand-model openai/gpt-5-nano
 ```
 
+When the teacher runs through OpenRouter, the wrapper now defaults to an
+upstream-style hidden assistant prefill (`--teacher-prefill-mode oct`) to make
+the teacher's persona adherence stronger. Disable it with
+`--teacher-prefill-mode none` if a specific model behaves badly with prefills.
+
 ### Arguments
 
 | Argument | Default | Description |
 |---|---|---|
 | `--model` | `qwen-2.5-1.5b-it` | Model folder name under `/workspace/models/` |
+| `--teacher-prefill-mode` | `oct` | OpenRouter teacher prefill mode: `oct` mirrors upstream OCT hidden think-prefill, `none` disables it |
 | `--constitution` | `sarcasm` | Constitution name (must exist in `few-shot/`) |
 | `--max-pairs` | `None` | Optional cap for quick smoke tests |
 | `--out-dir` | auto | Optional explicit run dir. If omitted, uses `scratch/oct_runs/<run_id>` where `run_id` is derived from config + seed |
