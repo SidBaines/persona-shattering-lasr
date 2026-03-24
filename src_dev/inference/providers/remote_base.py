@@ -52,6 +52,8 @@ class AsyncInferenceProvider(InferenceProvider):
             try:
                 return await func()
             except Exception as exc:
+                if not self._is_retryable_exception(exc):
+                    raise
                 if attempt >= max_attempts:
                     raise
                 delay = self.retry_config.backoff_factor * (2 ** (attempt - 1))
@@ -71,6 +73,33 @@ class AsyncInferenceProvider(InferenceProvider):
                     )
                 await asyncio.sleep(delay)
         raise RuntimeError("Retry loop exited unexpectedly.")
+
+    @staticmethod
+    def _is_retryable_exception(exc: Exception) -> bool:
+        """Return True if a request failure is likely transient."""
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+
+        if isinstance(status_code, int):
+            if status_code in {408, 409, 429}:
+                return True
+            if 500 <= status_code < 600:
+                return True
+            if 400 <= status_code < 500:
+                return False
+
+        message = str(exc).lower()
+        non_retryable_markers = (
+            "context_length_exceeded",
+            "invalid_request_error",
+            "maximum context length",
+            "input exceeds the context window",
+        )
+        if any(marker in message for marker in non_retryable_markers):
+            return False
+        return True
 
     @staticmethod
     def _extract_rate_limit_delay_seconds(exc: Exception) -> float | None:
