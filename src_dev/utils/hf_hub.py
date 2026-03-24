@@ -11,8 +11,19 @@ from huggingface_hub.utils import configure_http_backend
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
-_CONNECT_TIMEOUT = 10
-_READ_TIMEOUT = 300
+_TIMEOUT = 300
+
+
+def _backend_factory() -> requests.Session:
+    session = requests.Session()
+    _original_request = session.request
+
+    def _request_with_timeout(method: str, url: str, **kwargs):  # type: ignore[override]
+        kwargs.setdefault("timeout", _TIMEOUT)
+        return _original_request(method, url, **kwargs)
+
+    session.request = _request_with_timeout  # type: ignore[method-assign]
+    return session
 
 
 def _configure_timeout() -> None:

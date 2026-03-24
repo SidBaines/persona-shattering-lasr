@@ -817,5 +817,3 @@ def _render_conversation_history(messages: list[dict[str, str]]) -> str:
         f"{message['role'].capitalize()}: {message['content']}" for message in messages
     ]
     return "\n".join(lines)
-    return "\n".join(lines)
-    return "\n".join(lines)

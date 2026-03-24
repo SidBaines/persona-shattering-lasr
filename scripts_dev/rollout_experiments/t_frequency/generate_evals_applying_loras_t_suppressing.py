@@ -34,6 +34,11 @@ from src_dev.persona_metrics.eval_rollouts import (
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
+# Set to True to also evaluate multi-turn (5-turn, 15-turn) rollouts.
+# False skips them and only evaluates single-answer (1-turn) rollouts,
+# which is faster and sufficient for most analysis.
+EVAL_LONGER_ROLLOUTS: bool = False
+
 OUTPUT_CONFIG = OutputPathConfig(
     scratch_root=Path("scratch/monorepo"),
     hf_repo="persona-shattering-lasr/monorepo",
@@ -74,6 +79,7 @@ def main() -> None:
         evaluations=EVALUATIONS,
         # To force re-run specific evaluators (overwriting their scores):
         # overwrite_evaluations=["count_t"],
+        exclude_path_patterns=[] if EVAL_LONGER_ROLLOUTS else ["5turn_", "15turn_"],
     )
     result = evaluate_rollouts(config)
 

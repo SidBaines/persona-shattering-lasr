@@ -154,7 +154,7 @@ EXPERIMENT_CONFIG = ExperimentConfig(
     user_max_concurrent=128,
     dataset_path="data/assistant-axis-extraction-questions.jsonl",
     max_samples=32,
-    turns_per_phase=[5, 1],
+    turns_per_phase=[1],
     num_rollouts=3,
 )
 

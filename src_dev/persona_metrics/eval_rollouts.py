@@ -63,6 +63,10 @@ class RolloutEvalConfig:
     judge: JudgeLLMConfig | None = None
     overwrite_evaluations: list[str] = field(default_factory=list)
     eval_aliases: dict[str, str] = field(default_factory=dict)
+    exclude_path_patterns: list[str] = field(default_factory=list)
+    """Substrings to exclude from rollout file paths. Any rollout whose path
+    contains one of these strings is skipped. E.g. ``["5turn_", "15turn_"]``
+    to evaluate only single-answer (1-turn) rollouts."""
 
 
 @dataclass
@@ -355,6 +359,11 @@ def evaluate_rollouts(
 
     t0 = time.perf_counter()
     rollout_files = _find_rollout_files(config.root_dir)
+    if config.exclude_path_patterns:
+        rollout_files = [
+            f for f in rollout_files
+            if not any(pat in str(f) for pat in config.exclude_path_patterns)
+        ]
 
     if not rollout_files:
         print(f"No rollouts/rollouts.jsonl files found under {config.root_dir}")
