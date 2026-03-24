@@ -197,12 +197,30 @@ def _build_prompt_with_system(
     return prompt
 
 
+def _flip_message_roles(
+    messages: list[dict[str, str]],
+    initial_message: str | None = None,
+) -> list[dict[str, str]]:
+    """Swap user↔assistant roles and optionally prepend a filler user message."""
+    _ROLE_SWAP = {"user": "assistant", "assistant": "user"}
+    flipped = [
+        {**m, "role": _ROLE_SWAP.get(m["role"], m["role"])} for m in messages
+    ]
+    if initial_message:
+        flipped.insert(0, {"role": "user", "content": initial_message})
+    return flipped
+
+
 def _build_user_prompt_from_messages(
     messages: list[dict[str, str]],
     *,
     prompt_template: str,
     prompt_format: str,
+    flip_roles: bool = False,
+    initial_flipped_message: str | None = None,
 ) -> str | list[dict[str, str]]:
+    if flip_roles:
+        messages = _flip_message_roles(messages, initial_flipped_message)
     if prompt_format == "single_turn_text":
         return render_user_simulator_single_turn_prompt(prompt_template, messages)
     instruction = get_user_simulator_instruction(prompt_template)
@@ -395,6 +413,8 @@ async def _run_conversation_async(
             [{"role": m["role"], "content": m["content"]} for m in messages],
             prompt_template=config.user_simulator.prompt_template,
             prompt_format=config.user_simulator.prompt_format,
+            flip_roles=config.user_simulator.flip_roles_in_prompt,
+            initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
         )
 
         user_success = False

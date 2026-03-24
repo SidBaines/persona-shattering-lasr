@@ -169,6 +169,31 @@ def upload_folder_to_model_repo(
     return f"https://huggingface.co/{repo_id}"
 
 
+def check_exists_in_dataset_repo(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+) -> bool:
+    """Check if a path exists in a HF dataset repo without downloading.
+
+    Args:
+        repo_id: HuggingFace dataset repo ID (``org/name``).
+        path_in_repo: Path within the repo to check for.
+
+    Returns:
+        True if any files exist under that path, False otherwise.
+    """
+    try:
+        _configure_timeout()
+        api = HfApi(token=_get_token())
+        files = list(api.list_repo_tree(
+            repo_id=repo_id, repo_type="dataset", path_in_repo=path_in_repo,
+        ))
+        return len(files) > 0
+    except Exception:
+        return False
+
+
 def download_from_dataset_repo(
     *,
     repo_id: str,
