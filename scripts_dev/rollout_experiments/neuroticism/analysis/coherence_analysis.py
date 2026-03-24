@@ -24,7 +24,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(project_root))
 
 import matplotlib

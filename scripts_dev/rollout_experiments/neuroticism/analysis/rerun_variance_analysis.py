@@ -29,7 +29,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(project_root))
 
 import matplotlib
@@ -48,12 +48,9 @@ OUTPUT_DIR = Path("scratch/rerun_variance_analysis")
 HF_REPO_ID = "persona-shattering-lasr/ocean_judge_runs"
 HF_PATH = "rerun_variance_analysis"
 
-# Runs with multiple repeats per response (3 repeats each, temp=0).
-#
-# Coherence metric: gpt_4o_mini_2 runs (rater_id gpt_4o_mini and gpt_4o_mini_2)
-# Neuroticism metric: original gpt_4o_mini-gemini_flash_20 runs
-#   (both raters use gpt-4o-mini in these runs, confirmed by coherence_analysis.py)
-MULTI_REPEAT_RUNS: list[dict] = [
+# Runs with multiple repeats per response — temp=0, all 4 adapters.
+# Used for the main variance decomposition plots.
+TEMP0_RUNS: list[dict] = [
     # --- coherence (gpt_4o_mini_2 renamed runs, metric_name="coherence") ---
     {"adapter": "sft",  "run_dir": "gpt_4o_mini-gpt_4o_mini_2-ad544c5585eb", "rater_id": "gpt_4o_mini",   "metric": "coherence"},
     {"adapter": "sft",  "run_dir": "gpt_4o_mini-gpt_4o_mini_2-ad544c5585eb", "rater_id": "gpt_4o_mini_2", "metric": "coherence"},
@@ -63,19 +60,23 @@ MULTI_REPEAT_RUNS: list[dict] = [
     {"adapter": "soup", "run_dir": "gpt_4o_mini-gpt_4o_mini_2-c4bf45cc735d", "rater_id": "gpt_4o_mini_2", "metric": "coherence"},
     {"adapter": "old",  "run_dir": "gpt_4o_mini-gpt_4o_mini_2-18c0fe6a4e1d", "rater_id": "gpt_4o_mini",   "metric": "coherence"},
     {"adapter": "old",  "run_dir": "gpt_4o_mini-gpt_4o_mini_2-18c0fe6a4e1d", "rater_id": "gpt_4o_mini_2", "metric": "coherence"},
-    # --- neuroticism (original runs, metric_name="neuroticism_v2") ---
-    {"adapter": "sft",  "run_dir": "gpt_4o_mini-gemini_flash_20-350b967bc906", "rater_id": "gpt_4o_mini",   "metric": "neuroticism"},
+    # --- neuroticism (metric_name="neuroticism_v2", 3 repeats, temp=0) ---
+    {"adapter": "sft",  "run_dir": "gpt_4o_mini-gemini_flash_20-350b967bc906", "rater_id": "gpt_4o_mini",    "metric": "neuroticism"},
     {"adapter": "sft",  "run_dir": "gpt_4o_mini-gemini_flash_20-350b967bc906", "rater_id": "gemini_flash_20", "metric": "neuroticism"},
-    {"adapter": "dpo",  "run_dir": "gpt_4o_mini-gemini_flash_20-02524955a8f4", "rater_id": "gpt_4o_mini",   "metric": "neuroticism"},
-    {"adapter": "dpo",  "run_dir": "gpt_4o_mini-gemini_flash_20-02524955a8f4", "rater_id": "gemini_flash_20", "metric": "neuroticism"},
-    {"adapter": "soup", "run_dir": "gpt_4o_mini-gemini_flash_20-5d04426ae5c0", "rater_id": "gpt_4o_mini",   "metric": "neuroticism"},
+    {"adapter": "dpo",  "run_dir": "gpt_4o_mini-gemini_flash_20-7b763e3793a5", "rater_id": "gpt_4o_mini",    "metric": "neuroticism"},
+    {"adapter": "dpo",  "run_dir": "gpt_4o_mini-gemini_flash_20-7b763e3793a5", "rater_id": "gemini_flash_20", "metric": "neuroticism"},
+    {"adapter": "soup", "run_dir": "gpt_4o_mini-gemini_flash_20-5d04426ae5c0", "rater_id": "gpt_4o_mini",    "metric": "neuroticism"},
     {"adapter": "soup", "run_dir": "gpt_4o_mini-gemini_flash_20-5d04426ae5c0", "rater_id": "gemini_flash_20", "metric": "neuroticism"},
-    {"adapter": "old",  "run_dir": "gpt_4o_mini-gemini_flash_20-30211aa3a32c", "rater_id": "gpt_4o_mini",   "metric": "neuroticism"},
+    {"adapter": "old",  "run_dir": "gpt_4o_mini-gemini_flash_20-30211aa3a32c", "rater_id": "gpt_4o_mini",    "metric": "neuroticism"},
     {"adapter": "old",  "run_dir": "gpt_4o_mini-gemini_flash_20-30211aa3a32c", "rater_id": "gemini_flash_20", "metric": "neuroticism"},
 ]
 
-# Not used separately anymore — entries above are split by metric field.
-NEUROTICISM_RUNS: list[dict] = []
+# Gemini consistency runs — temp=0.5, 3 repeats, old adapter only.
+# Analysed separately to measure judge noise at non-zero temperature.
+GEMINI_CONSISTENCY_RUNS: list[dict] = [
+    {"adapter": "old", "run_dir": "gemini_flash_20-6e5656fcab89", "rater_id": "gemini_flash_20", "metric": "neuroticism"},
+    {"adapter": "old", "run_dir": "gemini_flash_20-e4e32564143f", "rater_id": "gemini_flash_20", "metric": "coherence"},
+]
 
 import re
 _SCALE_RE = re.compile(r"@scale_([+-]?\d+(?:\.\d+)?)")
@@ -182,7 +183,7 @@ def plot_variance_decomposition(
 ) -> Path:
     """Bar chart comparing within-response vs between-response std."""
     metrics = list(all_stats.keys())
-    adapters = _ADAPTER_ORDER
+    adapters = list(next(iter(all_stats.values())).keys())
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(7 * len(metrics), 5), squeeze=False)
 
@@ -229,11 +230,12 @@ def plot_between_response_by_scale(
 ) -> Path:
     """Line plot of between-response std across LoRA scale, per adapter and metric."""
     metrics = list(all_stats.keys())
-    n_adapters = len(_ADAPTER_ORDER)
+    adapters = list(next(iter(all_stats.values())).keys())
+    n_adapters = len(adapters)
 
     fig, axes = plt.subplots(n_adapters, len(metrics), figsize=(7 * len(metrics), 4 * n_adapters), squeeze=False)
 
-    for row, adapter in enumerate(_ADAPTER_ORDER):
+    for row, adapter in enumerate(adapters):
         for col, metric in enumerate(metrics):
             ax = axes[row][col]
             stats = all_stats[metric][adapter]
@@ -279,10 +281,11 @@ def write_report(all_stats: dict[str, dict], output: Path) -> None:
     ]
 
     # Quick summary first
+    adapters = list(next(iter(all_stats.values())).keys())
     for metric in all_stats:
         rows = all_stats[metric]
-        within_means = [rows[a]["within_mean"] for a in _ADAPTER_ORDER]
-        between_means = [rows[a]["between_mean"] for a in _ADAPTER_ORDER]
+        within_means = [rows[a]["within_mean"] for a in adapters]
+        between_means = [rows[a]["between_mean"] for a in adapters]
         avg_within = sum(within_means) / len(within_means)
         avg_between = sum(between_means) / len(between_means)
         ratio = avg_between / avg_within if avg_within > 0 else float("inf")
@@ -307,7 +310,7 @@ def write_report(all_stats: dict[str, dict], output: Path) -> None:
         lines.append("")
         lines.append("| Adapter | Within-resp std (noise) | Nonzero noise frac | Between-resp std (signal) | Ratio |")
         lines.append("|---------|------------------------|--------------------|--------------------------|-------|")
-        for adapter in _ADAPTER_ORDER:
+        for adapter in adapters:
             s = all_stats[metric][adapter]
             ratio = s["between_mean"] / s["within_mean"] if s["within_mean"] > 0 else float("inf")
             lines.append(
@@ -349,44 +352,46 @@ def main() -> None:
 
     load_dotenv()
 
-    # Group run entries by metric × adapter
-    all_run_entries: dict[str, dict[str, list[dict]]] = {
-        "coherence":   {a: [] for a in _ADAPTER_ORDER},
-        "neuroticism": {a: [] for a in _ADAPTER_ORDER},
-    }
-    for entry in MULTI_REPEAT_RUNS:
-        all_run_entries[entry["metric"]][entry["adapter"]].append(entry)
+    def _compute_stats(run_entries: list[dict], adapters: list[str]) -> dict[str, dict]:
+        by_metric_adapter: dict[str, dict[str, list[dict]]] = {
+            "coherence":   {a: [] for a in adapters},
+            "neuroticism": {a: [] for a in adapters},
+        }
+        for entry in run_entries:
+            by_metric_adapter[entry["metric"]][entry["adapter"]].append(entry)
 
-    print("Computing variance decomposition...")
-    all_stats: dict[str, dict] = {}
-    for metric, by_adapter in all_run_entries.items():
-        all_stats[metric] = {}
-        for adapter, entries in by_adapter.items():
-            if not entries:
-                all_stats[metric][adapter] = {
-                    "within_mean": 0.0, "within_nonzero_frac": 0.0,
-                    "between_by_scale": {}, "between_mean": 0.0,
-                    "n_responses": 0, "n_scales": 0,
-                }
-                continue
-            stats = decompose_variance(entries)
-            all_stats[metric][adapter] = stats
-            print(
-                f"  {metric}/{adapter}: within={stats['within_mean']:.2f}, "
-                f"between={stats['between_mean']:.2f}, "
-                f"ratio=×{stats['between_mean'] / stats['within_mean']:.0f}"
-                if stats["within_mean"] > 0 else
-                f"  {metric}/{adapter}: within=0 (all identical), between={stats['between_mean']:.2f}"
-            )
+        all_stats: dict[str, dict] = {}
+        for metric, by_adapter in by_metric_adapter.items():
+            all_stats[metric] = {}
+            for adapter, entries in by_adapter.items():
+                if not entries:
+                    all_stats[metric][adapter] = {
+                        "within_mean": 0.0, "within_nonzero_frac": 0.0,
+                        "between_by_scale": {}, "between_mean": 0.0,
+                        "n_responses": 0, "n_scales": 0,
+                    }
+                    continue
+                stats = decompose_variance(entries)
+                all_stats[metric][adapter] = stats
+                ratio_str = f"×{stats['between_mean'] / stats['within_mean']:.0f}" if stats["within_mean"] > 0 else "∞"
+                print(f"  {metric}/{adapter}: within={stats['within_mean']:.2f}, between={stats['between_mean']:.2f}, ratio={ratio_str}")
+        return all_stats
 
-    bar_plot = OUTPUT_DIR / "variance_decomposition_bar.png"
-    plot_variance_decomposition(all_stats, bar_plot)
+    # ── Main analysis: temp=0, all 4 adapters ──────────────────────────────────
+    print("\nMain variance decomposition (temp=0, all adapters)...")
+    main_stats = _compute_stats(TEMP0_RUNS, _ADAPTER_ORDER)
 
-    scale_plot = OUTPUT_DIR / "between_response_variance_by_scale.png"
-    plot_between_response_by_scale(all_stats, scale_plot)
+    plot_variance_decomposition(main_stats, OUTPUT_DIR / "variance_decomposition_bar.png")
+    plot_between_response_by_scale(main_stats, OUTPUT_DIR / "between_response_variance_by_scale.png")
+    write_report(main_stats, OUTPUT_DIR / "rerun_variance_analysis.md")
 
-    report = OUTPUT_DIR / "rerun_variance_analysis.md"
-    write_report(all_stats, report)
+    # ── Gemini consistency: temp=0.5, old adapter only ─────────────────────────
+    print("\nGemini consistency variance (temp=0.5, old adapter)...")
+    gemini_stats = _compute_stats(GEMINI_CONSISTENCY_RUNS, ["old"])
+
+    plot_variance_decomposition(gemini_stats, OUTPUT_DIR / "gemini_consistency_variance_bar.png")
+    plot_between_response_by_scale(gemini_stats, OUTPUT_DIR / "gemini_consistency_variance_by_scale.png")
+    write_report(gemini_stats, OUTPUT_DIR / "gemini_consistency_variance_analysis.md")
 
     if args.upload:
         upload_analysis(OUTPUT_DIR)

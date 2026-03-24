@@ -38,7 +38,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[3]
+project_root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(project_root))
 
 import matplotlib
@@ -88,6 +88,12 @@ SCORE_RUNS: dict[str, dict[str, list[tuple[str, str]]]] = {
     },
 }
 
+# New Gemini consistency runs — temp=0.5, 3 repeats, old adapter only.
+GEMINI_CONSISTENCY_SCORE_RUNS: dict[str, dict[str, list[tuple[str, str]]]] = {
+    "coherence":   {"old": [("gemini_flash_20-e4e32564143f", "gemini_flash_20")]},
+    "neuroticism": {"old": [("gemini_flash_20-6e5656fcab89", "gemini_flash_20")]},
+}
+
 
 # ── Data loading ───────────────────────────────────────────────────────────────
 
@@ -105,9 +111,12 @@ def load_judge_dataset(adapter: str) -> dict[str, dict]:
     return result
 
 
-def load_scores(adapter: str, metric: str) -> dict[str, float]:
+def load_scores(adapter: str, metric: str, score_runs: dict | None = None) -> dict[str, float]:
     """Load mean score per response_id (averaged across all runs/repeats)."""
-    runs = SCORE_RUNS[metric][adapter]
+    src = score_runs if score_runs is not None else SCORE_RUNS
+    if metric not in src or adapter not in src[metric]:
+        return {}
+    runs = src[metric][adapter]
     by_response: dict[str, list[float]] = defaultdict(list)
 
     for run_dir, rater_id in runs:
@@ -387,6 +396,10 @@ def main() -> None:
         "--top-n", type=int, default=5,
         help="Number of extreme examples to show (default: 5).",
     )
+    parser.add_argument(
+        "--source", choices=["existing", "gemini_consistency"], default="existing",
+        help="Score source: 'existing' (original runs) or 'gemini_consistency' (temp=0.5, old only).",
+    )
     parser.add_argument("--save", action="store_true",
                         help="Save all outputs to disk (plots + reports).")
     parser.add_argument("--upload", action="store_true",
@@ -395,7 +408,15 @@ def main() -> None:
 
     load_dotenv()
 
-    adapters = list(JUDGE_DATASETS.keys()) if args.adapter == "all" else [args.adapter]
+    score_runs = GEMINI_CONSISTENCY_SCORE_RUNS if args.source == "gemini_consistency" else SCORE_RUNS
+    output_prefix = f"{args.source}_"
+
+    # For gemini_consistency, only old adapter is available
+    if args.source == "gemini_consistency":
+        available_adapters = ["old"]
+    else:
+        available_adapters = list(JUDGE_DATASETS.keys())
+    adapters = available_adapters if args.adapter == "all" else [args.adapter]
     metrics = ["neuroticism", "coherence"] if args.metric == "both" else [args.metric]
 
     for adapter in adapters:
@@ -404,8 +425,8 @@ def main() -> None:
         print(f"  {len(dataset)} records")
 
         for metric in metrics:
-            print(f"\n  Loading {metric} scores for {adapter}...")
-            scores = load_scores(adapter, metric)
+            print(f"\n  Loading {metric} scores for {adapter} (source={args.source})...")
+            scores = load_scores(adapter, metric, score_runs)
             if not scores:
                 print(f"  No scores found — skipping.")
                 continue
@@ -415,12 +436,12 @@ def main() -> None:
             print(f"  {len(profiles)} unique questions")
 
             if args.save:
-                plot_output = OUTPUT_DIR / f"{adapter}_{metric}_question_profiles.png"
+                plot_output = OUTPUT_DIR / f"{output_prefix}{adapter}_{metric}_question_profiles.png"
                 plot_score_distribution_by_question_rank(
                     profiles, adapter, metric, plot_output, top_n=args.top_n
                 )
 
-                report_output = OUTPUT_DIR / f"{adapter}_{metric}_extremes.md"
+                report_output = OUTPUT_DIR / f"{output_prefix}{adapter}_{metric}_extremes.md"
                 write_extremes_report(
                     scores, dataset, profiles, adapter, metric, report_output,
                     top_n=args.top_n,
