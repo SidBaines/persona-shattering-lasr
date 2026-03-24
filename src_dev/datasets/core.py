@@ -386,7 +386,10 @@ def materialize_canonical_samples(run_dir: str | Path) -> Path:
             "model": inference.model,
             "provider": inference.provider,
         }
-        if inference.assistant_completion is not None:
+        if (
+            inference.status == "success"
+            and inference.assistant_completion is not None
+        ):
             full = inference.assistant_full
             if full is None:
                 prefill = (

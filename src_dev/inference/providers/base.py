@@ -139,6 +139,10 @@ class InferenceProvider(ABC):
         failed_count = sum(1 for response in responses if not response)
         return responses, empty_usage(), failed_count
 
+    async def aclose(self) -> None:
+        """Release provider resources."""
+        return None
+
     async def generate_batch_with_details_async(
         self, prompts: list[PromptInput], **kwargs
     ) -> tuple[list[str], list[TokenUsage | None], int]:

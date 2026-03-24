@@ -204,8 +204,7 @@ class OpenAIProvider(AsyncInferenceProvider):
         usage = _extract_usage(response)
         incomplete_reason = _extract_incomplete_reason(response)
         if (
-            not text
-            and incomplete_reason == "max_output_tokens"
+            incomplete_reason == "max_output_tokens"
             and isinstance(max_output_tokens, int)
             and max_output_tokens > 0
         ):
@@ -222,10 +221,10 @@ class OpenAIProvider(AsyncInferenceProvider):
                     override_max_output_tokens=retry_max_output_tokens,
                 )
                 retry_text = _extract_output_text(retry_response)
-                if retry_text:
+                if retry_text and len(retry_text) >= len(text):
                     return retry_text, (_extract_usage(retry_response) or usage)
                 response = retry_response
-                text = retry_text
+                text = retry_text or text
                 usage = _extract_usage(retry_response)
         if not text:
             logger.warning(
@@ -233,3 +232,6 @@ class OpenAIProvider(AsyncInferenceProvider):
                 _response_summary(response),
             )
         return text, usage
+
+    async def aclose(self) -> None:
+        await self.client.close()

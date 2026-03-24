@@ -29,6 +29,23 @@ from src_dev.inference.providers.base import TokenUsage, accumulate_usage, empty
 from src_dev.utils import count_jsonl_rows, read_jsonl, setup_logging
 
 
+def _config_for_inference_fingerprint(config: InferenceConfig) -> dict[str, Any]:
+    """Return the subset of inference config that should affect reproducibility."""
+    config_payload = config.model_dump(mode="json")
+    generation_payload = config_payload.get("generation")
+    if isinstance(generation_payload, dict):
+        config_payload["generation"] = {
+            key: value
+            for key, value in generation_payload.items()
+            if key != "batch_size"
+        }
+    return {
+        key: value
+        for key, value in config_payload.items()
+        if key not in {"max_concurrent"}
+    }
+
+
 async def run_inference_async(
     config: InferenceConfig, dataset: Dataset | None = None
 ) -> tuple[Dataset, InferenceResult]:
@@ -220,11 +237,13 @@ async def _run_inference_canonical_async(
         raise ValueError("OpenAI batch mode is not supported in canonical run-dir mode.")
 
     run_dir = Path(config.run_dir)
-    init_run(run_dir, base_config={"inference": config.model_dump(mode="json")})
+    config_payload = config.model_dump(mode="json")
+    config_for_fingerprint = _config_for_inference_fingerprint(config)
+    init_run(run_dir, base_config={"inference": config_payload})
     register_stage_fingerprint(
         run_dir,
         "inference",
-        config.model_dump(mode="json"),
+        config_for_fingerprint,
     )
 
     if dataset is None:
@@ -320,36 +339,46 @@ async def _run_inference_canonical_async(
                     sample.sample_id,
                     assistant_turn_index,
                 )
+                payload: dict[str, object] = {
+                    "status": status,
+                    "model": config.model,
+                    "provider": config.provider,
+                    "system_prompt_ref": sample.input.system_prompt_ref,
+                    "attempt_no": sample.inference.attempt_no + 1,
+                    "token_usage": usage or {},
+                    "started_at": batch_started,
+                    "completed_at": completed_at,
+                    "error": None if status == "success" else "empty_response",
+                }
+                if status == "success":
+                    # Only write assistant message fields on success so that
+                    # materialization does not append an empty assistant message,
+                    # which would brick the retry logic (last_message_not_user).
+                    payload.update(
+                        {
+                            "assistant_message_id": assistant_message_id,
+                            "assistant_prefill": sample.input.assistant_prefill,
+                            "assistant_completion": response_text,
+                            "assistant_full": f"{sample.input.assistant_prefill or ''}{response_text}",
+                            "assistant_message_metadata": {
+                                "turn_index": assistant_turn_index,
+                                "source_stage": "assistant_base",
+                                "provider": config.provider,
+                                "model": config.model,
+                                "token_usage": usage or {},
+                                "parent_message_id": last_message.message_id,
+                            },
+                        }
+                    )
                 write_inference_result(
                     run_dir,
                     sample.sample_id,
-                    {
-                        "status": status,
-                        "model": config.model,
-                        "provider": config.provider,
-                        "assistant_message_id": assistant_message_id,
-                        "assistant_prefill": sample.input.assistant_prefill,
-                        "assistant_completion": response_text,
-                        "assistant_full": f"{sample.input.assistant_prefill or ''}{response_text}",
-                        "assistant_message_metadata": {
-                            "turn_index": assistant_turn_index,
-                            "source_stage": "assistant_base",
-                            "provider": config.provider,
-                            "model": config.model,
-                            "token_usage": usage or {},
-                            "parent_message_id": last_message.message_id,
-                        },
-                        "system_prompt_ref": sample.input.system_prompt_ref,
-                        "attempt_no": sample.inference.attempt_no + 1,
-                        "token_usage": usage or {},
-                        "started_at": batch_started,
-                        "completed_at": completed_at,
-                        "error": None if status == "success" else "empty_response",
-                    },
+                    payload,
                     materialize=False,
                 )
 
     if pending_ids:
+        await provider.aclose()
         del provider
         gc.collect()
         try:
