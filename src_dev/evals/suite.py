@@ -163,7 +163,14 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
             adapter_name_prefix="adapter",
             adapter_resolver=lambda ref: _resolve(ref, kind="adapter"),
         )
-        tokenizer_ref = resolve_model_reference(normalized[0].path, kind="adapter")
+        # Try loading the tokenizer from the first adapter (HF model repos
+        # often bundle tokenizer files alongside the adapter).  Fall back to
+        # the base model when the adapter directory has no usable tokenizer
+        # (common for bare LoRA dirs downloaded from dataset repos).
+        try:
+            tokenizer_ref = resolve_model_reference(normalized[0].path, kind="adapter")
+        except Exception:
+            tokenizer_ref = base_ref
     else:
         peft_model = PeftModel.__new__(PeftModel)
         # No adapters — wrap as a plain model; use a lightweight shim instead.
@@ -171,7 +178,10 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
         peft_model = base_model  # type: ignore[assignment]
         tokenizer_ref = base_ref
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(base_ref)
 
     inspect_model = get_model(
         f"hf_preloaded/{spec.name}",
