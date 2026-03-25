@@ -431,16 +431,31 @@ def run_stage_1_rollouts(
 
 def _load_rollout_conversations(model_run_dir: Path) -> list[dict]:
     """Load completed rollout conversations from the canonical export."""
-    trace_paths = list(model_run_dir.glob("exports/*trace*.jsonl"))
-    if not trace_paths:
-        # Fall back to conversation_training export
-        trace_paths = list(model_run_dir.glob("exports/*.jsonl"))
-    if not trace_paths:
+    export_paths = list(model_run_dir.glob("exports/*training*.jsonl"))
+    if not export_paths:
+        # Fall back to trace exports for older runs, then any JSONL export.
+        export_paths = list(model_run_dir.glob("exports/*trace*.jsonl"))
+    if not export_paths:
+        export_paths = list(model_run_dir.glob("exports/*.jsonl"))
+    if not export_paths:
         logger.warning("No exported rollouts found in %s", model_run_dir)
         return []
 
-    records, _ = read_jsonl_tolerant(trace_paths[0])
+    records, _ = read_jsonl_tolerant(export_paths[0])
     return records
+
+
+def _extract_conversation_messages(record: dict) -> list[dict]:
+    """Return transcript messages from either training or trace exports."""
+    messages = record.get("messages")
+    if isinstance(messages, list):
+        return messages
+
+    base_messages = record.get("base_messages")
+    if isinstance(base_messages, list):
+        return base_messages
+
+    return []
 
 
 def _all_scoring_assessors(config: AssessmentConfig) -> list[AssessorSpec]:
@@ -511,7 +526,12 @@ def run_stage_2_scoring(
 
             for conv in to_score:
                 sample_id = conv.get("sample_id", "unknown")
-                messages = conv.get("messages", [])
+                messages = _extract_conversation_messages(conv)
+                if not messages:
+                    logger.warning(
+                        "No transcript messages found for %s in rollout export.",
+                        sample_id,
+                    )
                 # The seed question is the first user message
                 seed_question = ""
                 conversation_messages = []
