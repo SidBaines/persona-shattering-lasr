@@ -15,20 +15,28 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
-# 1. Dependencies
+# 1. System packages
+# ---------------------------------------------------------------------------
+echo ""
+echo "Installing system packages (tmux, bash-completion)..."
+sudo apt-get update -qq
+sudo apt-get install -y tmux bash-completion
+
+# ---------------------------------------------------------------------------
+# 2. Dependencies
 # ---------------------------------------------------------------------------
 echo ""
 echo "Downloading and installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Reload bashrc (uv installer adds itself to PATH here)
-source $HOME/.local/bin/env
+# Reload PATH so uv is available in this session
+source "$HOME/.local/bin/env"
 
 echo "Installing dependencies (uv sync --extra dev)..."
-uv sync --extra dev
+UV_LINK_MODE=copy uv sync --extra dev
 
 # ---------------------------------------------------------------------------
-# 2. .env setup
+# 3. .env setup
 # ---------------------------------------------------------------------------
 echo ""
 if [ ! -f .env ]; then
@@ -41,7 +49,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. VS Code extensions
+# 4. VS Code extensions
 # ---------------------------------------------------------------------------
 echo ""
 echo "Add VS Code Server CLI to PATH..."
@@ -72,7 +80,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Claude Code CLI + config
+# 5. Claude Code CLI + config
 # ---------------------------------------------------------------------------
 echo ""
 echo "Installing Claude Code CLI..."
@@ -154,48 +162,76 @@ EOF
 chmod +x "$HOME/.claude/statusline.sh"
 
 # ---------------------------------------------------------------------------
-# 5. Bash prompt setup
+# 6. Bash prompt setup
 # ---------------------------------------------------------------------------
 echo ""
 BASHRC_PATH="$HOME/.bashrc"
-PROMPT_BLOCK_START="# persona-shattering-lasr pretty prompt"
-PROMPT_BLOCK_END="# end persona-shattering-lasr pretty prompt"
 
 if [ ! -f "$BASHRC_PATH" ]; then
     touch "$BASHRC_PATH"
 fi
 
-if grep -Fq "$PROMPT_BLOCK_START" "$BASHRC_PATH" 2>/dev/null; then
+BASHRC_BLOCK_START="# persona-shattering-lasr pretty prompt"
+BASHRC_BLOCK_END="# end persona-shattering-lasr pretty prompt"
+NEW_BASHRC_BLOCK=$(cat <<'BLOCK'
+# persona-shattering-lasr pretty prompt
+parse_git_branch() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)" || return 0
+    printf '[%s]' "$branch"
+}
+export PS1='\[\e[38;5;243m\]\u \[\e[38;5;197m\]\w \[\e[38;5;39m\]$(parse_git_branch)\[\e[0m\] \$ '
+
+# uv: avoid hardlink warning when cache and target are on different filesystems
+export UV_LINK_MODE=copy
+
+# git branch tab-completion
+if [ -f /etc/bash_completion ]; then
+    source /etc/bash_completion
+fi
+
+# end persona-shattering-lasr pretty prompt
+BLOCK
+)
+
+if grep -Fq "$BASHRC_BLOCK_START" "$BASHRC_PATH" 2>/dev/null; then
     echo "Updating existing pretty prompt configuration in $BASHRC_PATH..."
     TMP_BASHRC="$(mktemp)"
-    awk -v start="$PROMPT_BLOCK_START" -v end="$PROMPT_BLOCK_END" '
+    awk -v start="$BASHRC_BLOCK_START" -v end="$BASHRC_BLOCK_END" '
         $0 == start {in_block = 1; next}
         in_block && $0 == end {in_block = 0; next}
         !in_block {print}
     ' "$BASHRC_PATH" >"$TMP_BASHRC"
-    cat >>"$TMP_BASHRC" <<'EOF'
-# persona-shattering-lasr pretty prompt
-parse_git_branch() {
-    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-    branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)" || return 0
-    printf '[%s]' "$branch"
-}
-export PS1='\[\e[38;5;243m\]\u \[\e[38;5;197m\]\w \[\e[38;5;39m\]$(parse_git_branch)\[\e[0m\] \$ '
-# end persona-shattering-lasr pretty prompt
-EOF
+    printf '%s\n' "$NEW_BASHRC_BLOCK" >>"$TMP_BASHRC"
     mv "$TMP_BASHRC" "$BASHRC_PATH"
 else
     echo "Adding pretty prompt configuration to $BASHRC_PATH..."
-    cat >>"$BASHRC_PATH" <<'EOF'
-# persona-shattering-lasr pretty prompt
-parse_git_branch() {
-    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-    branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)" || return 0
-    printf '[%s]' "$branch"
-}
-export PS1='\[\e[38;5;243m\]\u \[\e[38;5;197m\]\w \[\e[38;5;39m\]$(parse_git_branch)\[\e[0m\] \$ '
-# end persona-shattering-lasr pretty prompt
-EOF
+    printf '%s\n' "$NEW_BASHRC_BLOCK" >>"$BASHRC_PATH"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Git config
+# ---------------------------------------------------------------------------
+echo ""
+echo "Setting up git aliases..."
+git config --global alias.tree "log --oneline --graph --decorate --all"
+
+# Prompt for git identity (skip with Enter)
+CURRENT_GIT_NAME="$(git config --global user.name 2>/dev/null || true)"
+CURRENT_GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
+
+echo ""
+echo "Git commit identity (press Enter to keep current / skip):"
+read -r -p "  Name  [${CURRENT_GIT_NAME:-not set}]: " GIT_NAME_INPUT
+read -r -p "  Email [${CURRENT_GIT_EMAIL:-not set}]: " GIT_EMAIL_INPUT
+
+if [ -n "$GIT_NAME_INPUT" ]; then
+    git config --global user.name "$GIT_NAME_INPUT"
+    echo "  Set git user.name = $GIT_NAME_INPUT"
+fi
+if [ -n "$GIT_EMAIL_INPUT" ]; then
+    git config --global user.email "$GIT_EMAIL_INPUT"
+    echo "  Set git user.email = $GIT_EMAIL_INPUT"
 fi
 
 # ---------------------------------------------------------------------------
@@ -207,3 +243,9 @@ echo ""
 echo "If # %% cells aren't working in VS Code:"
 echo "  Command Palette > 'Jupyter: Select Kernel' > pick your Python env."
 echo "  The kernel cache doesn't always refresh automatically after install."
+echo ""
+echo "Note: some VS Code extensions require opening a new terminal to take effect."
+echo ""
+echo "Reloading .bashrc to pick up PATH changes (uv, bash-completion, etc.) in this session..."
+# shellcheck disable=SC1090
+source "$HOME/.bashrc"
