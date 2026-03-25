@@ -800,20 +800,15 @@ def run_eval_suite(
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)
 
+    if config.auto_analyze:
+        _run_auto_analyze(output_root, config.analyze_kwargs)
+
     if config.upload_repo_id and config.upload_path_in_repo:
         if "{eval_name}" in config.upload_path_in_repo:
             _upload_run_per_eval(output_root, config.evals, config.upload_repo_id,
                                  config.upload_path_in_repo)
         else:
             _upload_run(output_root, config.upload_repo_id, config.upload_path_in_repo)
-
-    if config.auto_analyze:
-        figures_dir = _run_auto_analyze(output_root, config.analyze_kwargs)
-        if config.upload_repo_id and config.upload_path_in_repo and figures_dir is not None:
-            # Upload figures/ as a subfolder inside the run's upload path.
-            base_path = config.upload_path_in_repo.replace("{eval_name}", "mcq").rstrip("/")
-            figures_path_in_repo = f"{base_path}/{output_root.name}/figures"
-            _upload_folder(figures_dir, config.upload_repo_id, figures_path_in_repo)
 
     return SuiteResult(output_root=output_root, rows=rows)
 

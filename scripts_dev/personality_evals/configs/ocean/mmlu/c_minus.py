@@ -61,7 +61,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"random_baseline": 0.25, "title_suffix": "C- MMLU", "spread": "std"},
     upload_repo_id="persona-shattering-lasr/monorepo",
-    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mmlu/mcq",
+    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mcq/mmlu",
     metadata={
         "persona": "conscientiousness_minus",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
