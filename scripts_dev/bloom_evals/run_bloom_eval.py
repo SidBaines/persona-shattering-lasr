@@ -1054,20 +1054,24 @@ def plot_results(
     fig1.savefig(p1, dpi=150, bbox_inches="tight")
     plt.close(fig1)
 
-    # ── Figure 2: histograms — one row per target, judges overlaid ────────────
+    # ── Figure 2: histograms — one row per target, judges as grouped bars ────
     n_targets = len(t_models)
+    bin_centers = (bins[:-1] + bins[1:]) / 2  # integer OCEAN values -4..+4
+    bar_width = 0.8 / max(n_judges, 1)
     fig2, hist_axes = plt.subplots(
         n_targets, 1,
-        figsize=(7, 3 * n_targets),
+        figsize=(9, 3 * n_targets),
         sharex=True, squeeze=False,
     )
     for ti, target in enumerate(t_models):
         ax_h = hist_axes[ti][0]
-        for judge in j_models:
+        for ji, judge in enumerate(j_models):
             sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
             if sc:
-                ax_h.hist(sc, bins=bins, alpha=0.55, label=judge,
-                          color=judge_color[judge], edgecolor="white")
+                counts, _ = np.histogram(sc, bins=bins)
+                offset = (ji - (n_judges - 1) / 2) * bar_width
+                ax_h.bar(bin_centers + offset, counts, bar_width * 0.95,
+                         label=judge, color=judge_color[judge], alpha=0.85, edgecolor="white")
         ax_h.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
         ax_h.set_xlim(-4.5, 4.5)
         ax_h.xaxis.set_major_locator(mticker.MultipleLocator(1))
