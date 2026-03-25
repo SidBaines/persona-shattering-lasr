@@ -75,7 +75,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"random_baseline": 0.25, "title_suffix": "N+ + C- soup MMLU"},
     upload_repo_id="persona-shattering-lasr/monorepo",
-    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/soup_n_plus_c_minus/evals/mmlu/mcq",
+    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/soup_n_plus_c_minus/evals/mcq/mmlu",
     metadata={
         "persona": "soup_n_plus_c_minus",
         "adapter_n_plus": f"{_N_PLUS_REPO}::{_N_PLUS_PATH}",
