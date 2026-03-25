@@ -25,3 +25,7 @@ build/
 *.bin
 *.safetensors
 wandb/
+
+# Bloom eval outputs
+bloom-cache/
+bloom-results/
