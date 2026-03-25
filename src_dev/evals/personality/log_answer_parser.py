@@ -190,11 +190,14 @@ class RescoreResult:
         n_parsed: Number of samples for which an answer was recovered.
         n_total: Total number of samples in the log.
         parse_rate: ``n_parsed / n_total``, or NaN when ``n_total == 0``.
+        raw_scores: Trait name -> list of per-sample scores (0 or 1).  Same
+            keys as ``scores``.  Useful for computing standard error / std dev.
     """
 
     scores: dict[str, float]
     n_parsed: int
     n_total: int
+    raw_scores: dict[str, list[float]] | None = None
 
     @property
     def parse_rate(self) -> float:
@@ -258,4 +261,4 @@ def rescore_log(log_path: Path, eval_type: str) -> RescoreResult:
             n_parsed += 1
 
     scores = {trait: sum(vals) / len(vals) for trait, vals in trait_scores.items() if vals}
-    return RescoreResult(scores=scores, n_parsed=n_parsed, n_total=n_total)
+    return RescoreResult(scores=scores, n_parsed=n_parsed, n_total=n_total, raw_scores=trait_scores)
