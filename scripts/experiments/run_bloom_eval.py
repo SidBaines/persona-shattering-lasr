@@ -45,6 +45,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -522,31 +523,34 @@ def run_bloom_stage(bloom_data_dir: Path, stage: str) -> None:
 
 
 @contextlib.contextmanager
-def patched_seed(
+def patched_bloom_data(
     bloom_data_dir: Path, overrides: dict[str, Any]
-) -> Generator[None, None, None]:
-    """Temporarily rewrite seed.yaml with arbitrary nested overrides.
+) -> Generator[Path, None, None]:
+    """Yield a temporary copy of bloom_data_dir with seed.yaml overrides applied.
+
+    The original bloom-data directory is never modified.  A fresh temp directory
+    is created, the bloom-data tree is copied into it, and seed.yaml in the copy
+    is patched.  The temp directory is cleaned up on exit regardless of errors.
 
     ``overrides`` is a dict of dot-path keys → values, e.g.::
 
         {"judgment.model": "gpt-5-mini", "rollout.target": "llama-3.1-8b-it-base"}
 
-    Restores the original file on exit even if bloom crashes.
+    Yields the path to the patched copy so the caller can point bloom at it.
     """
-    seed_path = bloom_data_dir / "seed.yaml"
-    original_text = seed_path.read_text()
-    patched = yaml.safe_load(original_text)
-    for dotpath, value in overrides.items():
-        keys = dotpath.split(".")
-        node = patched
-        for k in keys[:-1]:
-            node = node[k]
-        node[keys[-1]] = value
-    try:
+    with tempfile.TemporaryDirectory(prefix="bloom_data_") as tmp:
+        tmp_dir = Path(tmp) / bloom_data_dir.name
+        shutil.copytree(bloom_data_dir, tmp_dir)
+        seed_path = tmp_dir / "seed.yaml"
+        patched = yaml.safe_load(seed_path.read_text())
+        for dotpath, value in overrides.items():
+            keys = dotpath.split(".")
+            node = patched
+            for k in keys[:-1]:
+                node = node[k]
+            node[keys[-1]] = value
         seed_path.write_text(yaml.dump(patched, allow_unicode=True, sort_keys=False))
-        yield
-    finally:
-        seed_path.write_text(original_text)
+        yield tmp_dir
 
 
 def _run_one_stage(
@@ -674,10 +678,10 @@ def run_pipeline(
         rollout_id = per_target_ids[target][j_models[0]]["rollout"]
 
         if "rollout" in requested_stages:
-            with patched_seed(bloom_data_dir, {"rollout.target": target}):
+            with patched_bloom_data(bloom_data_dir, {"rollout.target": target}) as tmp_dir:
                 _run_one_stage(
                     "rollout", rollout_id,
-                    bloom_data_dir, bloom_results_dir, cache_root,
+                    tmp_dir, bloom_results_dir, cache_root,
                     hf_repo, behavior_name, no_upload,
                 )
 
@@ -686,13 +690,13 @@ def run_pipeline(
                 jid = per_target_ids[target][judge]["judgment"]
                 if len(j_models) > 1:
                     print(f"\n  [ judge: {judge} ]")
-                with patched_seed(bloom_data_dir, {
+                with patched_bloom_data(bloom_data_dir, {
                     "rollout.target": target,
                     "judgment.model": judge,
-                }):
+                }) as tmp_dir:
                     _run_one_stage(
                         "judgment", jid,
-                        bloom_data_dir, bloom_results_dir, cache_root,
+                        tmp_dir, bloom_results_dir, cache_root,
                         hf_repo, behavior_name, no_upload,
                     )
 
