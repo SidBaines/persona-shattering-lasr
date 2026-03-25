@@ -14,6 +14,18 @@ from inspect_ai.solver import generate
 from src_dev.evals.config import InspectBenchmarkSpec
 
 
+TRAIT_SAMPLE_SPLITS = (
+    "Openness",
+    "Conscientiousness",
+    "Extraversion",
+    "Agreeableness",
+    "Neuroticism",
+    "Machiavellianism",
+    "Narcissism",
+    "Psychopathy",
+)
+
+
 def _build_popqa_task(limit: int | None = None) -> Task:
     ds = load_dataset("akariasai/PopQA", split="test")
     if limit is not None:
@@ -41,8 +53,11 @@ def _build_popqa_task(limit: int | None = None) -> Task:
     )
 
 
-def _build_trait_sampled_task(samples_per_trait: int = 25) -> Task:
-    """Build a TRAIT task sampling evenly across all 8 trait splits.
+def _build_trait_sampled_task(
+    samples_per_trait: int = 25,
+    trait_splits: list[str] | tuple[str, ...] | None = None,
+) -> Task:
+    """Build a TRAIT task sampling evenly across selected trait splits.
 
     The standard personality_TRAIT task concatenates all splits then applies
     a global limit, so a small limit yields only the first trait (Openness).
@@ -57,10 +72,20 @@ def _build_trait_sampled_task(samples_per_trait: int = 25) -> Task:
         record_to_sample_TRAIT,
     )
 
-    splits = [
-        "Openness", "Conscientiousness", "Extraversion", "Agreeableness",
-        "Neuroticism", "Machiavellianism", "Narcissism", "Psychopathy",
-    ]
+    if trait_splits is None:
+        splits = list(TRAIT_SAMPLE_SPLITS)
+    else:
+        splits = []
+        allowed = set(TRAIT_SAMPLE_SPLITS)
+        for split in trait_splits:
+            if split not in allowed:
+                raise ValueError(
+                    f"Unknown TRAIT split '{split}'. Valid options: {', '.join(TRAIT_SAMPLE_SPLITS)}"
+                )
+            splits.append(split)
+        if not splits:
+            raise ValueError("trait_splits must contain at least one TRAIT split")
+
     all_samples: list[Sample] = []
     for split in splits:
         split_samples = list(hf_dataset(
@@ -151,7 +176,11 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         # spec.limit is also passed as a global Inspect limit by the runner and
         # would re-truncate the already-sampled combined dataset back to one trait.
         samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
-        return _build_trait_sampled_task(samples_per_trait=samples_per_trait)
+        trait_splits = kwargs.pop("trait_splits", None)
+        return _build_trait_sampled_task(
+            samples_per_trait=samples_per_trait,
+            trait_splits=trait_splits,
+        )
 
     raise ValueError(
         f"Unknown benchmark '{spec.benchmark}'. "
