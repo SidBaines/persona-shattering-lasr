@@ -2,12 +2,46 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 from pathlib import Path
 
 import requests
 from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.utils import configure_http_backend
+import huggingface_hub.utils._http as _hf_http
+
+# ---------------------------------------------------------------------------
+# Shim: huggingface_hub 0.36.x passes allow_redirects= to its HTTP session,
+# but httpx (>= 0.20) renamed that param to follow_redirects.  Patch
+# http_backoff to translate the kwarg before it hits session.request().
+# ---------------------------------------------------------------------------
+_orig_http_backoff = _hf_http.http_backoff
+
+
+def _patched_http_backoff(method, url, *, max_retries=5, base_wait_time=1,
+                          max_wait_time=8, retry_on_exceptions=None,
+                          retry_on_status_codes=(500, 502, 503, 504),
+                          **kwargs):
+    """Wrap http_backoff to translate allow_redirects→follow_redirects for httpx sessions."""
+    import requests as _requests
+    session = _hf_http.get_session()
+    if "allow_redirects" in kwargs and not isinstance(session, _requests.Session):
+        _params = inspect.signature(session.request).parameters
+        if "allow_redirects" not in _params and "follow_redirects" in _params:
+            kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
+    _kwargs = dict(
+        max_retries=max_retries,
+        base_wait_time=base_wait_time,
+        max_wait_time=max_wait_time,
+        retry_on_status_codes=retry_on_status_codes,
+    )
+    if retry_on_exceptions is not None:
+        _kwargs["retry_on_exceptions"] = retry_on_exceptions
+    return _orig_http_backoff(method, url, **_kwargs, **kwargs)
+
+
+_hf_http.http_backoff = _patched_http_backoff
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
