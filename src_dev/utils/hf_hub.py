@@ -33,6 +33,9 @@ def _patched_http_backoff(method, url, *, max_retries=5, base_wait_time=1,
                 kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
             else:
                 kwargs.pop("allow_redirects")
+        # httpx defaults follow_redirects=False; match requests' default of True.
+        if "follow_redirects" in _params and "follow_redirects" not in kwargs:
+            kwargs["follow_redirects"] = True
         # httpx does not accept proxies per-request; drop it silently.
         if "proxies" in kwargs and "proxies" not in _params:
             kwargs.pop("proxies")
