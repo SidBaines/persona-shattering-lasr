@@ -704,6 +704,181 @@ def run_pipeline(
 
     print("\n── COMPLETE ──")
 
+    plot_results(cache_root, per_target_ids, j_models, behavior_name)
+
+
+# ---------------------------------------------------------------------------
+# Visualisation
+# ---------------------------------------------------------------------------
+
+# Additional quality keys present in every judgment entry
+_QUALITY_KEYS = ["unrealism", "evaluation_awareness", "evaluation_invalidity", "coherence"]
+# OCEAN offset: bloom score → OCEAN value
+_OCEAN_OFFSET = 5
+
+
+def _load_judgment_scores(
+    cache_root: Path,
+    per_target_ids: dict[str, dict[str, Any]],
+    j_models: list[str],
+) -> dict[tuple[str, str], dict[str, list[float]]]:
+    """Load all scores from cached judgment.json files.
+
+    Returns a dict keyed by (target, judge) → {metric: [scores]}.
+    Metrics: 'conscientiousness' (OCEAN scale) + _QUALITY_KEYS.
+    """
+    results: dict[tuple[str, str], dict[str, list[float]]] = {}
+    for target, judge_ids in per_target_ids.items():
+        for judge, ids in judge_ids.items():
+            jid = ids["judgment"]
+            path = _cache_dir(cache_root, "judgment", jid) / "judgment.json"
+            if not path.exists():
+                continue
+            data = json.loads(path.read_text())
+            scores: dict[str, list[float]] = {k: [] for k in ["conscientiousness"] + _QUALITY_KEYS}
+            for j in data.get("judgments", []):
+                bp = j.get("behavior_presence")
+                if bp is not None:
+                    scores["conscientiousness"].append(float(bp) - _OCEAN_OFFSET)
+                for q in _QUALITY_KEYS:
+                    v = j.get(q)
+                    if v is not None:
+                        scores[q].append(float(v))
+            results[(target, judge)] = scores
+    return results
+
+
+def plot_results(
+    cache_root: Path,
+    per_target_ids: dict[str, dict[str, Any]],
+    j_models: list[str],
+    behavior_name: str,
+) -> None:
+    """Load judgment scores from cache and save bar-chart summary to PNG."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as mticker
+        import numpy as np
+    except ImportError:
+        print("  [plot] matplotlib not available — skipping visualisation")
+        return
+
+    all_scores = _load_judgment_scores(cache_root, per_target_ids, j_models)
+    if not all_scores:
+        print("  [plot] No judgment results found in cache — skipping visualisation")
+        return
+
+    t_models = list(dict.fromkeys(t for t, _ in all_scores))  # ordered unique targets
+    out_dir = cache_root.parent / "bloom-results" / behavior_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "results.png"
+
+    # ── Layout: 3 rows ────────────────────────────────────────────────────────
+    # Row 1: conscientiousness mean ± std, grouped by judge (one bar cluster per target)
+    # Row 2: box plots of conscientiousness score distribution per target × judge
+    # Row 3: additional quality metrics (mean per target, one subplot each)
+    n_qualities = len(_QUALITY_KEYS)
+    fig = plt.figure(figsize=(max(10, 3 * len(t_models) + 2), 14))
+    gs = fig.add_gridspec(3, n_qualities, hspace=0.55, wspace=0.4)
+
+    ax_bar = fig.add_subplot(gs[0, :])   # full-width top
+    ax_box = fig.add_subplot(gs[1, :])   # full-width middle
+    quality_axes = [fig.add_subplot(gs[2, i]) for i in range(n_qualities)]
+
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    judge_color = {j: colors[i % len(colors)] for i, j in enumerate(j_models)}
+
+    x = np.arange(len(t_models))
+    n_judges = len(j_models)
+    width = 0.7 / max(n_judges, 1)
+
+    # ── Row 1: mean conscientiousness ─────────────────────────────────────────
+    for ji, judge in enumerate(j_models):
+        means, errs = [], []
+        for target in t_models:
+            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            means.append(float(np.mean(sc)) if sc else float("nan"))
+            errs.append(float(np.std(sc)) if sc else 0.0)
+        offset = (ji - (n_judges - 1) / 2) * width
+        bars = ax_bar.bar(
+            x + offset, means, width * 0.9,
+            yerr=errs, capsize=3,
+            label=judge, color=judge_color[judge], alpha=0.85,
+        )
+        # Scatter individual points
+        for ti, target in enumerate(t_models):
+            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            if sc:
+                ax_bar.scatter(
+                    [x[ti] + offset] * len(sc), sc,
+                    color=judge_color[judge], s=18, zorder=5, alpha=0.6,
+                )
+
+    ax_bar.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax_bar.set_xticks(x)
+    ax_bar.set_xticklabels(t_models, rotation=15, ha="right", fontsize=9)
+    ax_bar.set_ylabel("OCEAN conscientiousness\n(bloom score − 5)")
+    ax_bar.set_title(f"{behavior_name} — mean conscientiousness score by target & judge")
+    ax_bar.set_ylim(-4.5, 4.5)
+    ax_bar.yaxis.set_major_locator(mticker.MultipleLocator(1))
+    ax_bar.legend(fontsize=8, title="Judge", title_fontsize=8)
+
+    # ── Row 2: box plots ──────────────────────────────────────────────────────
+    box_data, box_labels, box_colors = [], [], []
+    for target in t_models:
+        for judge in j_models:
+            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            box_data.append(sc if sc else [float("nan")])
+            short_t = target.split("/")[-1][:20]
+            box_labels.append(f"{short_t}\n({judge[:12]})")
+            box_colors.append(judge_color[judge])
+
+    bp = ax_box.boxplot(
+        box_data, patch_artist=True, medianprops={"color": "black", "linewidth": 1.5},
+    )
+    for patch, col in zip(bp["boxes"], box_colors):
+        patch.set_facecolor(col)
+        patch.set_alpha(0.7)
+    ax_box.set_xticks(range(1, len(box_labels) + 1))
+    ax_box.set_xticklabels(box_labels, rotation=30, ha="right", fontsize=7)
+    ax_box.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax_box.set_ylabel("OCEAN conscientiousness")
+    ax_box.set_title("Score distribution")
+    ax_box.set_ylim(-4.5, 4.5)
+
+    # ── Row 3: additional quality metrics ─────────────────────────────────────
+    for qi, (ax_q, qkey) in enumerate(zip(quality_axes, _QUALITY_KEYS)):
+        for ji, judge in enumerate(j_models):
+            means = []
+            for target in t_models:
+                sc = all_scores.get((target, judge), {}).get(qkey, [])
+                means.append(float(np.mean(sc)) if sc else float("nan"))
+            offset = (ji - (n_judges - 1) / 2) * width
+            ax_q.bar(
+                x + offset, means, width * 0.9,
+                label=judge, color=judge_color[judge], alpha=0.85,
+            )
+        ax_q.set_xticks(x)
+        ax_q.set_xticklabels(
+            [t.split("/")[-1][:15] for t in t_models],
+            rotation=20, ha="right", fontsize=7,
+        )
+        ax_q.set_title(qkey.replace("_", " "), fontsize=9)
+        ax_q.set_ylim(0, 10)
+        ax_q.yaxis.set_major_locator(mticker.MultipleLocator(2))
+        if qi == 0:
+            ax_q.set_ylabel("Mean score (1–10)", fontsize=8)
+
+    fig.suptitle(
+        f"Bloom eval — {behavior_name}",
+        fontsize=13, fontweight="bold", y=0.98,
+    )
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n  Plot saved → {out_path}")
+
 
 # ---------------------------------------------------------------------------
 # CLI
