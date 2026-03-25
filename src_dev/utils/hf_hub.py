@@ -2,117 +2,35 @@
 
 from __future__ import annotations
 
-import inspect
 import os
 from pathlib import Path
 
 import requests
 from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.utils import configure_http_backend
-import huggingface_hub.utils._http as _hf_http
 
 # ---------------------------------------------------------------------------
-# Shim: huggingface_hub 0.36.x passes allow_redirects= to its HTTP session,
-# but httpx (>= 0.20) renamed that param to follow_redirects.  Patch
-# http_backoff to translate the kwarg before it hits session.request().
+# Use a requests.Session with extended timeouts as the huggingface_hub backend.
+# Calling configure_http_backend with an httpx factory (the common workaround)
+# permanently switches the global session to httpx, which breaks transformers'
+# AutoModel loading due to many requests/httpx API incompatibilities.
+# Using requests avoids all of those issues while still getting long timeouts.
 # ---------------------------------------------------------------------------
-_orig_http_backoff = _hf_http.http_backoff
 
+class _TimeoutSession(requests.Session):
+    """requests.Session that injects default timeouts for slow uploads."""
 
-def _patched_http_backoff(method, url, *, max_retries=5, base_wait_time=1,
-                          max_wait_time=8, retry_on_exceptions=None,
-                          retry_on_status_codes=(500, 502, 503, 504),
-                          **kwargs):
-    """Wrap http_backoff to translate allow_redirects→follow_redirects for httpx sessions."""
-    import requests as _requests
-    session = _hf_http.get_session()
-    if not isinstance(session, _requests.Session):
-        _params = inspect.signature(session.request).parameters
-        if "allow_redirects" in kwargs and "allow_redirects" not in _params:
-            if "follow_redirects" in _params:
-                kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
-            else:
-                kwargs.pop("allow_redirects")
-        # httpx defaults follow_redirects=False; match requests' default of True.
-        if "follow_redirects" in _params and "follow_redirects" not in kwargs:
-            kwargs["follow_redirects"] = True
-        # httpx does not accept proxies per-request; drop it silently.
-        if "proxies" in kwargs and "proxies" not in _params:
-            kwargs.pop("proxies")
-    _kwargs = dict(
-        max_retries=max_retries,
-        base_wait_time=base_wait_time,
-        max_wait_time=max_wait_time,
-        retry_on_status_codes=retry_on_status_codes,
-    )
-    if retry_on_exceptions is not None:
-        _kwargs["retry_on_exceptions"] = retry_on_exceptions
-    return _orig_http_backoff(method, url, **_kwargs, **kwargs)
+    # (connect_timeout, read/write_timeout) in seconds
+    _DEFAULT_TIMEOUT = (10, 300)
 
-
-_hf_http.http_backoff = _patched_http_backoff
-# file_download.py uses a direct `from .utils._http import http_backoff` binding,
-# so we must also patch it there.
-import huggingface_hub.file_download as _hf_file_download
-_hf_file_download.http_backoff = _patched_http_backoff
-
-# ---------------------------------------------------------------------------
-# Shim: httpx's raise_for_status() raises on 3xx, but requests' does not.
-# _request_wrapper intentionally gets 3xx responses (allow_redirects=False)
-# to handle relative redirects itself — so we must not raise on them.
-# ---------------------------------------------------------------------------
-_orig_hf_raise_for_status = _hf_http.hf_raise_for_status
-
-
-def _patched_hf_raise_for_status(response) -> None:
-    """Skip raise_for_status on 3xx so _request_wrapper can inspect redirects."""
-    if 300 <= response.status_code <= 399:
-        return
-    _orig_hf_raise_for_status(response)
-
-
-_hf_http.hf_raise_for_status = _patched_hf_raise_for_status
-# file_download.py also has a direct binding.
-_hf_file_download.hf_raise_for_status = _patched_hf_raise_for_status
-
-# Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
-# final commit step, which can block for a long time on large uploads.
-_TIMEOUT = 300
-_CONNECT_TIMEOUT = 10
-_READ_TIMEOUT = 300
-
-
-def _backend_factory() -> requests.Session:
-    session = requests.Session()
-    _original_request = session.request
-
-    def _request_with_timeout(method: str, url: str, **kwargs):  # type: ignore[override]
-        kwargs.setdefault("timeout", _TIMEOUT)
-        return _original_request(method, url, **kwargs)
-
-    session.request = _request_with_timeout  # type: ignore[method-assign]
-    return session
+    def request(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", self._DEFAULT_TIMEOUT)
+        return super().request(method, url, **kwargs)
 
 
 def _configure_timeout() -> None:
     """Install an extended-timeout requests session for huggingface_hub."""
-
-    def _backend_factory() -> requests.Session:
-        session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter()
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-        # Patch send to always use our timeouts (huggingface_hub respects the session)
-        _orig_send = session.send
-
-        def _send_with_timeout(request, **kwargs):
-            kwargs.setdefault("timeout", (_CONNECT_TIMEOUT, _READ_TIMEOUT))
-            return _orig_send(request, **kwargs)
-
-        session.send = _send_with_timeout  # type: ignore[method-assign]
-        return session
-
-    configure_http_backend(backend_factory=_backend_factory)
+    configure_http_backend(backend_factory=_TimeoutSession)
 
 
 def _get_token(token_env: str = "HF_TOKEN") -> str:
