@@ -943,8 +943,8 @@ def run_pipeline(
 # Visualisation
 # ---------------------------------------------------------------------------
 
-# Additional quality keys present in every judgment entry
-_QUALITY_KEYS = ["unrealism", "evaluation_awareness", "evaluation_invalidity", "coherence"]
+# Additional quality keys to plot (subset of what bloom scores)
+_QUALITY_KEYS = ["coherence"]
 # OCEAN offset: bloom score → OCEAN value
 _OCEAN_OFFSET = 5
 
@@ -1007,17 +1007,17 @@ def plot_results(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "results.png"
 
-    # ── Layout: 3 rows ────────────────────────────────────────────────────────
-    # Row 1: conscientiousness mean ± std, grouped by judge (one bar cluster per target)
-    # Row 2: box plots of conscientiousness score distribution per target × judge
-    # Row 3: additional quality metrics (mean per target, one subplot each)
-    n_qualities = len(_QUALITY_KEYS)
-    fig = plt.figure(figsize=(max(10, 3 * len(t_models) + 2), 14))
-    gs = fig.add_gridspec(3, n_qualities, hspace=0.55, wspace=0.4)
+    # ── Layout ────────────────────────────────────────────────────────────────
+    # Row 1: mean OCEAN score ± std (full width)
+    # Row 2: score histograms per (target × judge) + coherence mean bar chart
+    n_hist_cols = len(t_models) * len(j_models)
+    n_cols = max(n_hist_cols + len(_QUALITY_KEYS), 1)
+    fig = plt.figure(figsize=(max(12, 2.5 * n_cols), 9))
+    gs = fig.add_gridspec(2, n_cols, hspace=0.55, wspace=0.45)
 
-    ax_bar = fig.add_subplot(gs[0, :])   # full-width top
-    ax_box = fig.add_subplot(gs[1, :])   # full-width middle
-    quality_axes = [fig.add_subplot(gs[2, i]) for i in range(n_qualities)]
+    ax_bar = fig.add_subplot(gs[0, :])
+    hist_axes = [fig.add_subplot(gs[1, i]) for i in range(n_hist_cols)]
+    quality_axes = [fig.add_subplot(gs[1, n_hist_cols + i]) for i in range(len(_QUALITY_KEYS))]
 
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     judge_color = {j: colors[i % len(colors)] for i, j in enumerate(j_models)}
@@ -1034,12 +1034,11 @@ def plot_results(
             means.append(float(np.mean(sc)) if sc else float("nan"))
             errs.append(float(np.std(sc)) if sc else 0.0)
         offset = (ji - (n_judges - 1) / 2) * width
-        bars = ax_bar.bar(
+        ax_bar.bar(
             x + offset, means, width * 0.9,
             yerr=errs, capsize=3,
             label=judge, color=judge_color[judge], alpha=0.85,
         )
-        # Scatter individual points
         for ti, target in enumerate(t_models):
             sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
             if sc:
@@ -1051,36 +1050,32 @@ def plot_results(
     ax_bar.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
     ax_bar.set_xticks(x)
     ax_bar.set_xticklabels(t_models, rotation=15, ha="right", fontsize=9)
-    ax_bar.set_ylabel("OCEAN conscientiousness\n(bloom score − 5)")
-    ax_bar.set_title(f"{behavior_name} — mean conscientiousness score by target & judge")
+    ax_bar.set_ylabel(f"OCEAN {behavior_name}\n(bloom score − 5)")
+    ax_bar.set_title(f"{behavior_name} — mean OCEAN score by target & judge")
     ax_bar.set_ylim(-4.5, 4.5)
     ax_bar.yaxis.set_major_locator(mticker.MultipleLocator(1))
     ax_bar.legend(fontsize=8, title="Judge", title_fontsize=8)
 
-    # ── Row 2: box plots ──────────────────────────────────────────────────────
-    box_data, box_labels, box_colors = [], [], []
-    for target in t_models:
-        for judge in j_models:
-            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
-            box_data.append(sc if sc else [float("nan")])
-            short_t = target.split("/")[-1][:20]
-            box_labels.append(f"{short_t}\n({judge[:12]})")
-            box_colors.append(judge_color[judge])
+    # ── Row 2 left: score histograms (one per target × judge) ─────────────────
+    bins = np.arange(-4.5, 5.0, 1.0)  # integer OCEAN bins from -4 to +4
+    for hi, (target, judge) in enumerate(
+        (t, j) for t in t_models for j in j_models
+    ):
+        ax_h = hist_axes[hi]
+        sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+        if sc:
+            ax_h.hist(sc, bins=bins, color=judge_color[judge], alpha=0.8, edgecolor="white")
+        ax_h.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+        ax_h.set_xlim(-4.5, 4.5)
+        ax_h.xaxis.set_major_locator(mticker.MultipleLocator(2))
+        ax_h.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        short_t = target.split("/")[-1][:18]
+        ax_h.set_title(f"{short_t}\n{judge[:16]}", fontsize=7)
+        if hi == 0:
+            ax_h.set_ylabel("Count", fontsize=8)
+        ax_h.set_xlabel("OCEAN score", fontsize=7)
 
-    bp = ax_box.boxplot(
-        box_data, patch_artist=True, medianprops={"color": "black", "linewidth": 1.5},
-    )
-    for patch, col in zip(bp["boxes"], box_colors):
-        patch.set_facecolor(col)
-        patch.set_alpha(0.7)
-    ax_box.set_xticks(range(1, len(box_labels) + 1))
-    ax_box.set_xticklabels(box_labels, rotation=30, ha="right", fontsize=7)
-    ax_box.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
-    ax_box.set_ylabel("OCEAN conscientiousness")
-    ax_box.set_title("Score distribution")
-    ax_box.set_ylim(-4.5, 4.5)
-
-    # ── Row 3: additional quality metrics ─────────────────────────────────────
+    # ── Row 2 right: additional quality metrics ────────────────────────────────
     for qi, (ax_q, qkey) in enumerate(zip(quality_axes, _QUALITY_KEYS)):
         for ji, judge in enumerate(j_models):
             means = []
@@ -1100,8 +1095,7 @@ def plot_results(
         ax_q.set_title(qkey.replace("_", " "), fontsize=9)
         ax_q.set_ylim(0, 10)
         ax_q.yaxis.set_major_locator(mticker.MultipleLocator(2))
-        if qi == 0:
-            ax_q.set_ylabel("Mean score (1–10)", fontsize=8)
+        ax_q.set_ylabel("Mean score (1–10)", fontsize=8)
 
     fig.suptitle(
         f"Bloom eval — {behavior_name}",
