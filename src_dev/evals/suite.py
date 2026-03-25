@@ -379,8 +379,7 @@ def _run_dir_for(
     eval_name: str,
     run_index: int = 0,
 ) -> Path:
-    suffix = f"/run_{run_index:02d}" if run_index > 0 else ""
-    run_dir = output_root / model_spec_name / f"{eval_name}{suffix}"
+    run_dir = output_root / model_spec_name / eval_name / f"run_{run_index:02d}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
@@ -811,8 +810,10 @@ def run_eval_suite(
     if config.auto_analyze:
         figures_dir = _run_auto_analyze(output_root, config.analyze_kwargs)
         if config.upload_repo_id and config.upload_path_in_repo and figures_dir is not None:
-            figures_path_in_repo = config.upload_path_in_repo.replace("{eval_name}", "figures")
-            _upload_run(figures_dir, config.upload_repo_id, figures_path_in_repo)
+            # Upload figures/ as a subfolder inside the run's upload path.
+            base_path = config.upload_path_in_repo.replace("{eval_name}", "mcq").rstrip("/")
+            figures_path_in_repo = f"{base_path}/{output_root.name}/figures"
+            _upload_folder(figures_dir, config.upload_repo_id, figures_path_in_repo)
 
     return SuiteResult(output_root=output_root, rows=rows)
 
@@ -859,17 +860,22 @@ def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
 
 
 def _upload_run(run_dir: Path, repo_id: str, path_in_repo: str) -> None:
-    """Upload the completed run directory to a HuggingFace dataset repo."""
+    """Upload a run directory to HF, appending run_dir.name to path_in_repo."""
+    _upload_folder(run_dir, repo_id, f"{path_in_repo}/{run_dir.name}")
+
+
+def _upload_folder(local_dir: Path, repo_id: str, path_in_repo: str) -> None:
+    """Upload a local directory to an exact HuggingFace dataset repo path."""
     from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
 
-    print(f"\n  Uploading results → {repo_id}/{path_in_repo}/{run_dir.name} ...", flush=True)
+    print(f"\n  Uploading results → {repo_id}/{path_in_repo} ...", flush=True)
     try:
         login_from_env()
         upload_folder_to_dataset_repo(
-            local_dir=run_dir,
+            local_dir=local_dir,
             repo_id=repo_id,
-            path_in_repo=f"{path_in_repo}/{run_dir.name}",
-            commit_message=f"Upload eval results: {run_dir.name}",
+            path_in_repo=path_in_repo,
+            commit_message=f"Upload eval results: {local_dir.name}",
         )
         print(f"  ✓ Upload complete", flush=True)
     except Exception as exc:
