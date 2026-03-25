@@ -19,8 +19,8 @@ cd "$REPO_ROOT"
 # ---------------------------------------------------------------------------
 echo ""
 echo "Installing system packages (tmux, bash-completion)..."
-sudo apt-get update -qq
-sudo apt-get install -y tmux bash-completion
+apt-get update -qq
+apt-get install -y tmux bash-completion
 
 # ---------------------------------------------------------------------------
 # 2. Dependencies
