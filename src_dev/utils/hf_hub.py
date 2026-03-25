@@ -42,6 +42,10 @@ def _patched_http_backoff(method, url, *, max_retries=5, base_wait_time=1,
 
 
 _hf_http.http_backoff = _patched_http_backoff
+# file_download.py uses a direct `from .utils._http import http_backoff` binding,
+# so we must also patch it there.
+import huggingface_hub.file_download as _hf_file_download
+_hf_file_download.http_backoff = _patched_http_backoff
 
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
