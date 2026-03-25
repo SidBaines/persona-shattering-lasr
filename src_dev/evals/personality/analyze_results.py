@@ -241,16 +241,12 @@ def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
             if eval_name not in records:
                 records[eval_name] = []
 
-            # n_runs support: look for run_info.json directly or inside run_NN subdirs
+            # Each run lives in a run_NN subdir (run_00, run_01, ...).
             info_paths: list[tuple[Path, str]] = []
-            direct = eval_dir / "run_info.json"
-            if direct.exists():
-                info_paths.append((direct, "run_1"))
-            else:
-                for run_subdir in sorted(eval_dir.iterdir()):
-                    rip = run_subdir / "run_info.json"
-                    if run_subdir.is_dir() and rip.exists():
-                        info_paths.append((rip, run_subdir.name))
+            for run_subdir in sorted(eval_dir.iterdir()):
+                rip = run_subdir / "run_info.json"
+                if run_subdir.is_dir() and rip.exists():
+                    info_paths.append((rip, run_subdir.name))
 
             is_personality = eval_name in _PERSONALITY_EVALS
             for info_path, run_label in info_paths:
