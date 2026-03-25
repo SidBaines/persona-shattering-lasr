@@ -26,10 +26,16 @@ def _patched_http_backoff(method, url, *, max_retries=5, base_wait_time=1,
     """Wrap http_backoff to translate allow_redirects→follow_redirects for httpx sessions."""
     import requests as _requests
     session = _hf_http.get_session()
-    if "allow_redirects" in kwargs and not isinstance(session, _requests.Session):
+    if not isinstance(session, _requests.Session):
         _params = inspect.signature(session.request).parameters
-        if "allow_redirects" not in _params and "follow_redirects" in _params:
-            kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
+        if "allow_redirects" in kwargs and "allow_redirects" not in _params:
+            if "follow_redirects" in _params:
+                kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
+            else:
+                kwargs.pop("allow_redirects")
+        # httpx does not accept proxies per-request; drop it silently.
+        if "proxies" in kwargs and "proxies" not in _params:
+            kwargs.pop("proxies")
     _kwargs = dict(
         max_retries=max_retries,
         base_wait_time=base_wait_time,
