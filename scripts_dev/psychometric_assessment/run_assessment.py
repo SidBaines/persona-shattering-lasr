@@ -92,8 +92,8 @@ class TraitConfig(BaseModel):
 class PromptSourceConfig(BaseModel):
     """Where to get conversation-starting prompts."""
 
-    source: str = "trait_dataset"  # "trait_dataset" | "local" | "huggingface"
-    path: str | None = None
+    source: str = "local"  # "trait_dataset" | "local" | "huggingface"
+    path: str | None = "data/assistant-axis-extraction-questions.jsonl"
     question_field: str = "question"
     max_prompts: int = 50
     seed: int = 42
@@ -176,11 +176,18 @@ def build_assessor_interview_prompt(trait: TraitConfig, num_turns: int) -> str:
         f"You are evaluating your conversation partner for the trait: {trait.name}.\n\n"
         f"Trait description:\n{trait_desc}\n\n"
         f"You will have {num_turns} exchanges with the person you are assessing. "
-        "Ask probing questions that naturally elicit behaviours and attitudes "
-        "related to this trait. Steer the conversation to maximise your ability "
-        "to assess where this person falls on the spectrum — they may be high, "
-        "low, or anywhere in between. Be conversational and natural — "
-        "do not reveal that you are conducting an assessment.\n\n"
+        "Keep the conversation open, natural, and wide-ranging so the person has "
+        "room to express themselves freely. Follow interesting threads, ask "
+        "grounded follow-up questions, and gently steer toward situations where "
+        "their habits, preferences, priorities, emotional style, decision-making, "
+        "or interpersonal behaviour may become visible.\n\n"
+        "Do not ask directly about the trait, personality frameworks, or whether "
+        "they are high or low on any dimension. Do not make the conversation feel "
+        "like a questionnaire or interview about personality. Your goal is to "
+        "create a natural conversation in which either high or low trait-relevant "
+        "behaviour could emerge.\n\n"
+        "Be conversational and natural, and do not reveal that you are conducting "
+        "an assessment.\n\n"
         "Write only your next message. Do not include role labels."
     )
 
@@ -691,7 +698,9 @@ if __name__ == "__main__":
         assessor=AssessorSpec(model="gpt-5-nano", provider="openai"),
         trait=TraitConfig(name="conscientiousness"),
         prompts=PromptSourceConfig(
-            source="trait_dataset",
+            # source="trait_dataset",
+            source="local",
+            path="data/assistant-axis-extraction-questions.jsonl",
             max_prompts=5,
         ),
         num_conversation_turns=3,
