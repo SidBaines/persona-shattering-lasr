@@ -19,7 +19,7 @@ from src_dev.evals import (
 # Configuration — set ADAPTER_REPO to the trained N+ adapter path
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_REPO = "TBD_N_PLUS"  # replace with actual HF repo or local path
+ADAPTER_REPO = "persona-shattering-lasr/monorepo/tree/main/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping"  # replace with actual HF repo or local path
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(

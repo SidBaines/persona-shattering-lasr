@@ -19,7 +19,7 @@ from src_dev.evals import (
 # Configuration — set ADAPTER_REPO to the trained C- adapter path
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_REPO = "TBD_C_MINUS"  # replace with actual HF repo or local path
+ADAPTER_REPO = "persona-shattering-lasr/oct-runs-low-conscientiousness-glm45air-v2/tree/main/conscientiousness_low_v2-llama-3.1-8b-it-s223458-94742ca72e77/lora/conscientiousness_low_v2-persona"  # replace with actual HF repo or local path
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(

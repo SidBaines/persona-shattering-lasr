@@ -22,8 +22,8 @@ from src_dev.evals.config import AdapterConfig, ModelSpec
 # Configuration — set adapter paths once they are available
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_N_PLUS = "TBD_N_PLUS"   # replace with actual N+ adapter path
-ADAPTER_C_MINUS = "TBD_C_MINUS"  # replace with actual C- adapter path
+ADAPTER_N_PLUS = "persona-shattering-lasr/monorepo/tree/main/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping"   # replace with actual N+ adapter path
+ADAPTER_C_MINUS = "persona-shattering-lasr/oct-runs-low-conscientiousness-glm45air-v2/tree/main/conscientiousness_low_v2-llama-3.1-8b-it-s223458-94742ca72e77/lora/conscientiousness_low_v2-persona"  # replace with actual C- adapter path
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(
