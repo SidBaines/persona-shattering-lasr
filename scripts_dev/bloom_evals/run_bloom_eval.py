@@ -995,7 +995,7 @@ def plot_results(
     j_models: list[str],
     behavior_name: str,
 ) -> None:
-    """Load judgment scores from cache and save bar-chart summary to PNG."""
+    """Load judgment scores from cache and save three separate PNGs."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -1011,31 +1011,22 @@ def plot_results(
         print("  [plot] No judgment results found in cache — skipping visualisation")
         return
 
-    t_models = list(dict.fromkeys(t for t, _ in all_scores))  # ordered unique targets
+    t_models = list(dict.fromkeys(t for t, _ in all_scores))
     out_dir = cache_root.parent / "bloom-results" / behavior_name
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "results.png"
-
-    # ── Layout ────────────────────────────────────────────────────────────────
-    # Row 1: mean OCEAN score ± std (full width)
-    # Row 2: score histograms per (target × judge) + coherence mean bar chart
-    n_hist_cols = len(t_models) * len(j_models)
-    n_cols = max(n_hist_cols + len(_QUALITY_KEYS), 1)
-    fig = plt.figure(figsize=(max(12, 2.5 * n_cols), 9))
-    gs = fig.add_gridspec(2, n_cols, hspace=0.55, wspace=0.45)
-
-    ax_bar = fig.add_subplot(gs[0, :])
-    hist_axes = [fig.add_subplot(gs[1, i]) for i in range(n_hist_cols)]
-    quality_axes = [fig.add_subplot(gs[1, n_hist_cols + i]) for i in range(len(_QUALITY_KEYS))]
 
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     judge_color = {j: colors[i % len(colors)] for i, j in enumerate(j_models)}
-
     x = np.arange(len(t_models))
     n_judges = len(j_models)
     width = 0.7 / max(n_judges, 1)
+    bins = np.arange(-4.5, 5.0, 1.0)
 
-    # ── Row 1: mean conscientiousness ─────────────────────────────────────────
+    def _short(name: str, n: int = 20) -> str:
+        return name.split("/")[-1][:n]
+
+    # ── Figure 1: mean OCEAN score ─────────────────────────────────────────────
+    fig1, ax_bar = plt.subplots(figsize=(max(7, 2.5 * len(t_models) + 2), 5))
     for ji, judge in enumerate(j_models):
         means, errs = [], []
         for target in t_models:
@@ -1043,19 +1034,13 @@ def plot_results(
             means.append(float(np.mean(sc)) if sc else float("nan"))
             errs.append(float(np.std(sc)) if sc else 0.0)
         offset = (ji - (n_judges - 1) / 2) * width
-        ax_bar.bar(
-            x + offset, means, width * 0.9,
-            yerr=errs, capsize=3,
-            label=judge, color=judge_color[judge], alpha=0.85,
-        )
+        ax_bar.bar(x + offset, means, width * 0.9, yerr=errs, capsize=3,
+                   label=judge, color=judge_color[judge], alpha=0.85)
         for ti, target in enumerate(t_models):
             sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
             if sc:
-                ax_bar.scatter(
-                    [x[ti] + offset] * len(sc), sc,
-                    color=judge_color[judge], s=18, zorder=5, alpha=0.6,
-                )
-
+                ax_bar.scatter([x[ti] + offset] * len(sc), sc,
+                               color=judge_color[judge], s=18, zorder=5, alpha=0.6)
     ax_bar.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
     ax_bar.set_xticks(x)
     ax_bar.set_xticklabels(t_models, rotation=15, ha="right", fontsize=9)
@@ -1064,55 +1049,69 @@ def plot_results(
     ax_bar.set_ylim(-4.5, 4.5)
     ax_bar.yaxis.set_major_locator(mticker.MultipleLocator(1))
     ax_bar.legend(fontsize=8, title="Judge", title_fontsize=8)
+    fig1.tight_layout()
+    p1 = out_dir / "scores_mean.png"
+    fig1.savefig(p1, dpi=150, bbox_inches="tight")
+    plt.close(fig1)
 
-    # ── Row 2 left: score histograms (one per target × judge) ─────────────────
-    bins = np.arange(-4.5, 5.0, 1.0)  # integer OCEAN bins from -4 to +4
-    for hi, (target, judge) in enumerate(
-        (t, j) for t in t_models for j in j_models
-    ):
-        ax_h = hist_axes[hi]
-        sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
-        if sc:
-            ax_h.hist(sc, bins=bins, color=judge_color[judge], alpha=0.8, edgecolor="white")
+    # ── Figure 2: histograms — one row per target, judges overlaid ────────────
+    n_targets = len(t_models)
+    fig2, hist_axes = plt.subplots(
+        n_targets, 1,
+        figsize=(7, 3 * n_targets),
+        sharex=True, squeeze=False,
+    )
+    for ti, target in enumerate(t_models):
+        ax_h = hist_axes[ti][0]
+        for judge in j_models:
+            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            if sc:
+                ax_h.hist(sc, bins=bins, alpha=0.55, label=judge,
+                          color=judge_color[judge], edgecolor="white")
         ax_h.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
         ax_h.set_xlim(-4.5, 4.5)
-        ax_h.xaxis.set_major_locator(mticker.MultipleLocator(2))
+        ax_h.xaxis.set_major_locator(mticker.MultipleLocator(1))
         ax_h.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-        short_t = target.split("/")[-1][:18]
-        ax_h.set_title(f"{short_t}\n{judge[:16]}", fontsize=7)
-        if hi == 0:
-            ax_h.set_ylabel("Count", fontsize=8)
-        ax_h.set_xlabel("OCEAN score", fontsize=7)
+        ax_h.set_ylabel("Count", fontsize=8)
+        ax_h.set_title(_short(target), fontsize=9)
+        ax_h.legend(fontsize=7, title="Judge", title_fontsize=7)
+    hist_axes[-1][0].set_xlabel(f"OCEAN {behavior_name} score", fontsize=9)
+    fig2.suptitle(f"{behavior_name} — score distributions", fontsize=11, fontweight="bold")
+    fig2.tight_layout()
+    p2 = out_dir / "scores_hist.png"
+    fig2.savefig(p2, dpi=150, bbox_inches="tight")
+    plt.close(fig2)
 
-    # ── Row 2 right: additional quality metrics ────────────────────────────────
-    for qi, (ax_q, qkey) in enumerate(zip(quality_axes, _QUALITY_KEYS)):
-        for ji, judge in enumerate(j_models):
-            means = []
-            for target in t_models:
-                sc = all_scores.get((target, judge), {}).get(qkey, [])
-                means.append(float(np.mean(sc)) if sc else float("nan"))
-            offset = (ji - (n_judges - 1) / 2) * width
-            ax_q.bar(
-                x + offset, means, width * 0.9,
-                label=judge, color=judge_color[judge], alpha=0.85,
-            )
-        ax_q.set_xticks(x)
-        ax_q.set_xticklabels(
-            [t.split("/")[-1][:15] for t in t_models],
-            rotation=20, ha="right", fontsize=7,
-        )
-        ax_q.set_title(qkey.replace("_", " "), fontsize=9)
-        ax_q.set_ylim(0, 10)
-        ax_q.yaxis.set_major_locator(mticker.MultipleLocator(2))
-        ax_q.set_ylabel("Mean score (1–10)", fontsize=8)
-
-    fig.suptitle(
-        f"Bloom eval — {behavior_name}",
-        fontsize=13, fontweight="bold", y=0.98,
-    )
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\n  Plot saved → {out_path}")
+    # ── Figure 3: quality metrics ──────────────────────────────────────────────
+    if _QUALITY_KEYS:
+        fig3, q_axes = plt.subplots(1, len(_QUALITY_KEYS),
+                                    figsize=(4 * len(_QUALITY_KEYS), 4), squeeze=False)
+        for qi, qkey in enumerate(_QUALITY_KEYS):
+            ax_q = q_axes[0][qi]
+            for ji, judge in enumerate(j_models):
+                means = []
+                for target in t_models:
+                    sc = all_scores.get((target, judge), {}).get(qkey, [])
+                    means.append(float(np.mean(sc)) if sc else float("nan"))
+                offset = (ji - (n_judges - 1) / 2) * width
+                ax_q.bar(x + offset, means, width * 0.9,
+                         label=judge, color=judge_color[judge], alpha=0.85)
+            ax_q.set_xticks(x)
+            ax_q.set_xticklabels([_short(t, 15) for t in t_models],
+                                  rotation=20, ha="right", fontsize=8)
+            ax_q.set_title(qkey.replace("_", " "), fontsize=10)
+            ax_q.set_ylim(0, 10)
+            ax_q.yaxis.set_major_locator(mticker.MultipleLocator(2))
+            ax_q.set_ylabel("Mean score (1–10)", fontsize=8)
+            ax_q.legend(fontsize=7, title="Judge", title_fontsize=7)
+        fig3.suptitle(f"{behavior_name} — quality metrics", fontsize=11, fontweight="bold")
+        fig3.tight_layout()
+        p3 = out_dir / "scores_quality.png"
+        fig3.savefig(p3, dpi=150, bbox_inches="tight")
+        plt.close(fig3)
+        print(f"\n  Plots saved → {p1.name}, {p2.name}, {p3.name}  (in {out_dir})")
+    else:
+        print(f"\n  Plots saved → {p1.name}, {p2.name}  (in {out_dir})")
 
 
 # ---------------------------------------------------------------------------
