@@ -337,11 +337,23 @@ def _ci95(values: np.ndarray) -> float:
         return float(1.96 * values.std(ddof=1) / np.sqrt(n))
 
 
-def _agg_sweep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
-    """Aggregate a sweep DataFrame to mean ± CI per scale point.
+def _std(values: np.ndarray) -> float:
+    if len(values) <= 1:
+        return 0.0
+    return float(values.std(ddof=1))
+
+
+def _agg_sweep(
+    df: pd.DataFrame,
+    cols: list[str],
+    spread: Literal["ci95", "std"] = "ci95",
+) -> pd.DataFrame:
+    """Aggregate a sweep DataFrame to mean ± spread per scale point.
 
     Returns a DataFrame with columns: scale, {col}_mean, {col}_ci for each col.
+    The ``_ci`` suffix is kept for backward compatibility regardless of spread mode.
     """
+    spread_fn = _std if spread == "std" else _ci95
     rows = []
     for scale, grp in df.groupby("scale"):
         row: dict = {"scale": scale}
@@ -352,7 +364,7 @@ def _agg_sweep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
                 continue
             vals = grp[col].dropna().values
             row[f"{col}_mean"] = vals.mean() if len(vals) else float("nan")
-            row[f"{col}_ci"] = _ci95(vals)
+            row[f"{col}_ci"] = spread_fn(vals)
         rows.append(row)
     return pd.DataFrame(rows).sort_values("scale").reset_index(drop=True)
 
@@ -463,6 +475,7 @@ def plot_trait_sweep(
     output_dir: Path,
     title_suffix: str = "",
     highlight: list[str] | None = None,
+    spread: Literal["ci95", "std"] = "ci95",
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -473,6 +486,7 @@ def plot_trait_sweep(
         highlight: Traits to render at full brightness. Accepts full names or OCEAN
             single letters (O/C/E/A/N). Unlisted Big Five traits are dimmed.
             Dark Triad is always dimmed regardless. Defaults to all Big Five.
+        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
 
     Returns:
         Path to the saved figure.
@@ -480,7 +494,7 @@ def plot_trait_sweep(
     import matplotlib.pyplot as plt
 
     lit = _resolve_highlight(highlight)
-    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS)
+    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, spread=spread)
     scales = trait_agg["scale"].values
 
     fig, ax = plt.subplots(figsize=(12, 5.5))
@@ -517,8 +531,9 @@ def plot_trait_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    spread_label = "±1 SD" if spread == "std" else "95% CI"
     ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
-                elinewidth=1.0, alpha=0.7, label="95% CI")
+                elinewidth=1.0, alpha=0.7, label=spread_label)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=6, framealpha=0.85)
 
@@ -535,6 +550,7 @@ def plot_bfi_sweep(
     output_dir: Path,
     title_suffix: str = "",
     highlight: list[str] | None = None,
+    spread: Literal["ci95", "std"] = "ci95",
 ) -> Path:
     """Sanity-check plot: BFI Big Five centred at baseline (delta from scale=0).
 
@@ -545,6 +561,7 @@ def plot_bfi_sweep(
         highlight: Traits to render at full brightness. Accepts full names or OCEAN
             single letters (O/C/E/A/N). Unlisted traits are dimmed.
             Defaults to all Big Five.
+        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
 
     Returns:
         Path to the saved figure.
@@ -552,7 +569,7 @@ def plot_bfi_sweep(
     import matplotlib.pyplot as plt
 
     lit = _resolve_highlight(highlight)
-    bfi_agg = _agg_sweep(df, BIG_FIVE)
+    bfi_agg = _agg_sweep(df, BIG_FIVE, spread=spread)
 
     # Compute per-trait baseline (scale=0) mean for delta calculation.
     baseline_row = bfi_agg[bfi_agg["scale"].abs() < 1e-9]
@@ -602,8 +619,9 @@ def plot_bfi_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    spread_label = "±1 SD" if spread == "std" else "95% CI"
     ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
-                elinewidth=1.0, alpha=0.7, label="95% CI")
+                elinewidth=1.0, alpha=0.7, label=spread_label)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=7, framealpha=0.85)
 
@@ -620,9 +638,10 @@ def plot_capability_sweep(
     output_dir: Path,
     title_suffix: str = "",
     eval_name: str = "capability",
-    allowed_drop: float = 0.05,
+    random_baseline: float | None = None,
+    spread: Literal["ci95", "std"] = "ci95",
 ) -> Path:
-    """Capability coherence plot: accuracy vs. LoRA scale with baseline and allowed-drop band.
+    """Capability coherence plot: accuracy vs. LoRA scale with baseline reference.
 
     Suitable for any accuracy-like eval (mmlu, gsm8k, truthfulqa, arc, etc.).
 
@@ -631,14 +650,16 @@ def plot_capability_sweep(
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
         eval_name: Eval name used for the figure title and output filename.
-        allowed_drop: Maximum acceptable accuracy drop from baseline (default 0.05 = 5 pp).
+        random_baseline: If set, draws a horizontal dashed red line at this accuracy
+            level (e.g. 0.25 for 4-choice MCQ random chance).
+        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
-    cap_agg = _agg_sweep(df, ["accuracy"])
+    cap_agg = _agg_sweep(df, ["accuracy"], spread=spread)
     scales = cap_agg["scale"].values
     means  = cap_agg["accuracy_mean"].values
     cis    = cap_agg["accuracy_ci"].values
@@ -648,11 +669,12 @@ def plot_capability_sweep(
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
 
-    ax.axhspan(baseline_acc - allowed_drop, baseline_acc,
-               color="#A5D6A7", alpha=0.25, zorder=1,
-               label=f"Allowed drop (−{allowed_drop:.0%})")
     ax.axhline(baseline_acc, color="#388E3C", linewidth=1.2,
                linestyle="--", alpha=0.8, zorder=2, label=f"Baseline ({baseline_acc:.3f})")
+
+    if random_baseline is not None:
+        ax.axhline(random_baseline, color="#EF5350", linewidth=1.0,
+                   linestyle=":", alpha=0.7, zorder=2, label=f"Random ({random_baseline:.0%})")
 
     color = "#5C6BC0"
     ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
@@ -664,7 +686,10 @@ def plot_capability_sweep(
     ax.set_ylabel("Accuracy", fontsize=11)
     ax.set_xticks(scales)
 
-    y_min = min(float(np.nanmin(means - cis)), baseline_acc - allowed_drop) - 0.02
+    y_min_candidates = [float(np.nanmin(means - cis))]
+    if random_baseline is not None:
+        y_min_candidates.append(random_baseline)
+    y_min = min(y_min_candidates) - 0.02
     y_max = max(float(np.nanmax(means + cis)), baseline_acc) + 0.04
     ax.set_ylim(y_min, y_max)
 
@@ -675,8 +700,9 @@ def plot_capability_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
+    spread_label = "±1 SD" if spread == "std" else "95% CI"
     ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
-                elinewidth=1.0, alpha=0.7, label="95% CI")
+                elinewidth=1.0, alpha=0.7, label=spread_label)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15),
               fontsize=9, ncol=4, framealpha=0.85)
 
@@ -693,6 +719,7 @@ def plot_generic_sweep(
     eval_name: str,
     output_dir: Path,
     title_suffix: str = "",
+    spread: Literal["ci95", "std"] = "ci95",
 ) -> Path:
     """Generic sweep line plot for any eval not covered by a specialised plotter.
 
@@ -703,6 +730,7 @@ def plot_generic_sweep(
         eval_name: Used for the figure title and filename.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
+        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
 
     Returns:
         Path to the saved figure.
@@ -711,7 +739,7 @@ def plot_generic_sweep(
     import matplotlib.cm as cm
 
     cols = _metric_cols(df)
-    agg  = _agg_sweep(df, cols)
+    agg  = _agg_sweep(df, cols, spread=spread)
     scales = agg["scale"].values
 
     colors = cm.tab10.colors  # type: ignore[attr-defined]
@@ -854,9 +882,10 @@ def generate_plots(
     data: SweepData,
     output_dir: Path,
     title_suffix: str = "",
-    allowed_drop: float = 0.05,
+    random_baseline: float | None = None,
     highlight: list[str] | None = None,
     show_parse_rate: bool = False,
+    spread: Literal["ci95", "std"] = "ci95",
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -867,12 +896,15 @@ def generate_plots(
         data: SweepData loaded from a run directory.
         output_dir: Directory to save all figures.
         title_suffix: Optional title suffix forwarded to every plot function.
-        allowed_drop: Allowed accuracy drop forwarded to capability plotters.
+        random_baseline: If set, draws a random-chance reference line on capability plots
+            (e.g. 0.25 for 4-choice MCQ).
         highlight: Traits to render at full brightness in trait/bfi plots.
             Accepts full names or OCEAN single letters (O/C/E/A/N).
             Defaults to all Big Five.
         show_parse_rate: If True, generate a companion parse rate plot for each
             eval when at least one scale point has parse rate < 100%.
+        spread: Error bar style — "ci95" for 95% confidence interval (default) or
+            "std" for ±1 standard deviation.
 
     Returns:
         List of paths to saved figures.
@@ -899,13 +931,16 @@ def generate_plots(
 
         if entry == "capability":
             path = plot_capability_sweep(df, output_dir, title_suffix,
-                                         eval_name=eval_name, allowed_drop=allowed_drop)
+                                         eval_name=eval_name, random_baseline=random_baseline,
+                                         spread=spread)
         elif entry == "trait":
-            path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight)
+            path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
+                                    spread=spread)
         elif entry == "bfi":
-            path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight)
+            path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
+                                  spread=spread)
         elif entry == "generic":
-            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix)
+            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix, spread=spread)
         elif callable(entry):
             path = entry(df, output_dir, title_suffix)
         else:
@@ -939,8 +974,8 @@ def main() -> None:
                         help="Recompute trait scores from raw model outputs using the fallback parser")
     parser.add_argument("--mock", action="store_true",
                         help="Use mock sweep data for offline testing")
-    parser.add_argument("--allowed-drop", type=float, default=0.05,
-                        help="Max acceptable MMLU accuracy drop from baseline (default 0.05)")
+    parser.add_argument("--random-baseline", type=float, default=None,
+                        help="Random-chance accuracy to draw as a reference line (e.g. 0.25 for 4-choice MCQ)")
     parser.add_argument("--highlight", metavar="TRAIT", action="append", default=None,
                         help="Trait to render at full brightness in trait/bfi plots. "
                              "Accepts full name or OCEAN letter (O/C/E/A/N). "
@@ -948,6 +983,8 @@ def main() -> None:
     parser.add_argument("--show-parse-rate", action="store_true",
                         help="Generate a companion parse rate plot for each eval "
                              "(only produced when parse rate drops below 100%% at any scale).")
+    parser.add_argument("--spread", choices=["ci95", "std"], default="ci95",
+                        help="Error bar style: 'ci95' for 95%% CI (default) or 'std' for ±1 SD.")
     args = parser.parse_args()
 
     if args.mock:
@@ -973,8 +1010,8 @@ def main() -> None:
         _setup_matplotlib()
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
-                               allowed_drop=args.allowed_drop, highlight=args.highlight,
-                               show_parse_rate=args.show_parse_rate)
+                               random_baseline=args.random_baseline, highlight=args.highlight,
+                               show_parse_rate=args.show_parse_rate, spread=args.spread)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:

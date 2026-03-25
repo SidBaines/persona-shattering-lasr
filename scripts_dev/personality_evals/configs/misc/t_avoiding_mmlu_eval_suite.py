@@ -5,7 +5,7 @@
 Usage::
 
     uv run python -m src_dev.evals suite \
-        --config-module scripts_dev.personality_evals.t_avoiding_mmlu_eval_suite
+        --config-module scripts_dev.personality_evals.configs.misc.t_avoiding_mmlu_eval_suite
 
 Visualise results::
 
@@ -14,7 +14,7 @@ Visualise results::
 
 Upload to HuggingFace::
 
-    uv run python -m scripts_dev.personality_evals.upload_evals \
+    uv run python -m scripts_dev.personality_evals.configs.misc.upload_evals \
         --run-dir scratch/evals/personality/<run_name>
 """
 

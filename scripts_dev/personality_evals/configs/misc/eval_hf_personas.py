@@ -14,7 +14,7 @@ not forward arbitrary flags, so env-var injection is the correct mechanism here)
 Single persona:
 
     PERSONA=sarcasm uv run python -m src_dev.evals suite \\
-        --config-module scripts_dev.personality_evals.eval_hf_personas
+        --config-module scripts_dev.personality_evals.configs.misc.eval_hf_personas
 
 All personas (loop):
 
@@ -22,7 +22,7 @@ All personas (loop):
               poeticism mathematical misalignment goodness loving; do
         echo "=== Evaluating: $p ==="
         PERSONA="$p" uv run python -m src_dev.evals suite \\
-            --config-module scripts_dev.personality_evals.eval_hf_personas
+            --config-module scripts_dev.personality_evals.configs.misc.eval_hf_personas
         echo "=== Done: $p ==="
     done
 

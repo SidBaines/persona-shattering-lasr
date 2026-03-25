@@ -14,7 +14,7 @@ Sweep range and per-eval sampling can be adjusted below.
 Usage
 -----
     uv run python -m src_dev.evals suite \
-        --config-module scripts_dev.personality_evals.eval_suite
+        --config-module scripts_dev.personality_evals.configs.misc.eval_suite
 """
 
 from datetime import datetime
