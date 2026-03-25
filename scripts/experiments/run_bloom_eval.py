@@ -403,6 +403,7 @@ def _launch_vllm(
 
     # Group targets by their base model path
     base_model_map: dict[str, dict[str, Any]] = {}
+    max_lora_rank = 16  # vLLM default; raised to the max across all LoRA models
     for short_name, entry in local_targets:
         vllm_cfg = entry.get("vllm")
         if not vllm_cfg:
@@ -419,6 +420,7 @@ def _launch_vllm(
         lora_path = vllm_cfg.get("lora_path")
         if lora_path:
             base_model_map[base_model]["loras"].append((served_name, lora_path))
+            max_lora_rank = max(max_lora_rank, vllm_cfg.get("max_lora_rank", 16))
         else:
             base_model_map[base_model]["base_names"].append(served_name)
 
@@ -440,7 +442,7 @@ def _launch_vllm(
         cmd += ["--served-model-name", info["base_names"][0]]
 
     if info["loras"]:
-        cmd += ["--enable-lora"]
+        cmd += ["--enable-lora", "--max-lora-rank", str(max_lora_rank)]
         for lora_name, lora_path in info["loras"]:
             resolved = (
                 str((root / lora_path).resolve())
