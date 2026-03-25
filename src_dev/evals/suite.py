@@ -802,9 +802,60 @@ def run_eval_suite(
     _print_timing_summary(eval_timings, suite_elapsed)
 
     if config.upload_repo_id and config.upload_path_in_repo:
-        _upload_run(run_dir, config.upload_repo_id, config.upload_path_in_repo)
+        if "{eval_name}" in config.upload_path_in_repo:
+            _upload_run_per_eval(output_root, config.evals, config.upload_repo_id,
+                                 config.upload_path_in_repo)
+        else:
+            _upload_run(output_root, config.upload_repo_id, config.upload_path_in_repo)
+
+    if config.auto_analyze:
+        figures_dir = _run_auto_analyze(output_root, config.analyze_kwargs)
+        if config.upload_repo_id and config.upload_path_in_repo and figures_dir is not None:
+            figures_path_in_repo = config.upload_path_in_repo.replace("{eval_name}", "figures")
+            _upload_run(figures_dir, config.upload_repo_id, figures_path_in_repo)
 
     return SuiteResult(output_root=output_root, rows=rows)
+
+
+def _upload_run_per_eval(
+    output_root: Path,
+    evals: list,
+    repo_id: str,
+    path_in_repo_template: str,
+) -> None:
+    """Upload each eval's subdirectories separately, substituting {eval_name} in the path."""
+    eval_names = [e.name for e in evals]
+    for eval_name in eval_names:
+        # Collect all model-spec subdirs that contain this eval's data.
+        # Structure: output_root/<model_spec>/<eval_name>[/run_NN]
+        eval_dirs = [d for d in output_root.iterdir()
+                     if d.is_dir() and (d / eval_name).exists()]
+        if not eval_dirs:
+            continue
+        resolved_path = path_in_repo_template.replace("{eval_name}", eval_name)
+        # Upload each model-spec subdir's eval folder.
+        for model_dir in eval_dirs:
+            eval_subdir = model_dir / eval_name
+            _upload_run(eval_subdir, repo_id, f"{resolved_path}/{model_dir.name}")
+
+
+def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
+    """Run generate_plots() on output_root and return the figures directory."""
+    try:
+        from src_dev.evals.personality.analyze_results import (
+            load_sweep_data,
+            generate_plots,
+        )
+        print("\n  Auto-analyzing sweep results ...", flush=True)
+        data = load_sweep_data(output_root)
+        figures_dir = output_root / "figures"
+        saved = generate_plots(data, figures_dir, **analyze_kwargs)
+        if saved:
+            print(f"  ✓ {len(saved)} figure(s) saved to {figures_dir}", flush=True)
+        return figures_dir
+    except Exception as exc:
+        print(f"  WARNING: auto-analyze failed: {exc}", flush=True)
+        return None
 
 
 def _upload_run(run_dir: Path, repo_id: str, path_in_repo: str) -> None:

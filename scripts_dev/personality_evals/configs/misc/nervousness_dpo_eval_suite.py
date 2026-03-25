@@ -10,7 +10,7 @@ Runs TRAIT and MMLU sweeps over LoRA scaling factors (-2.0 … +2.0, step 0.25),
 Usage
 -----
     uv run python -m src_dev.evals suite \
-        --config-module scripts_dev.personality_evals.nervousness_dpo_eval_suite
+        --config-module scripts_dev.personality_evals.configs.misc.nervousness_dpo_eval_suite
 
 Visualise results::
 

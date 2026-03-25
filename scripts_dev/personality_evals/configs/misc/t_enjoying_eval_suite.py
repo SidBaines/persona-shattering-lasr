@@ -1,4 +1,4 @@
-"""Capability sweep for the t-enjoying LoRA adapter — epoch-1 checkpoint (checkpoint-57).
+"""Capability sweep for the t-enjoying LoRA adapter.
 
 Mirrors the scale grid from the exhaustive t-frequency rollout sweep
 (-2.4 … +2.4, step 0.2) so capability results are directly comparable
@@ -7,7 +7,7 @@ to the trait-transfer results from that sweep.
 Usage::
 
     uv run python -m src_dev.evals suite \
-        --config-module scripts_dev.personality_evals.t_enjoying_cp57_eval_suite
+        --config-module scripts_dev.personality_evals.configs.misc.t_enjoying_eval_suite
 
 Visualise results::
 
@@ -16,7 +16,7 @@ Visualise results::
 
 Upload to HuggingFace::
 
-    uv run python -m scripts_dev.personality_evals.upload_evals \
+    uv run python -m scripts_dev.personality_evals.configs.misc.upload_evals \
         --run-dir scratch/evals/personality/<run_name>
 """
 
@@ -34,12 +34,12 @@ from src_dev.evals import (
 # ---------------------------------------------------------------------------
 PERSONA = "t_enjoying"
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_PATH = "local://scratch/runs/t_enjoying-train-20260312-223656/checkpoints/checkpoint-57"
+ADAPTER_REPO = "persona-shattering-lasr/t_enjoying-train-20260312-223656-lora-adapter::adapter"
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(
     base_model=BASE_MODEL,
-    adapter=ADAPTER_PATH,
+    adapter=ADAPTER_REPO,
     sweep=ScaleSweep(min=-2.4, max=2.4, step=0.2),
     evals=[
         InspectBenchmarkSpec(
@@ -52,11 +52,10 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     batch_size=32,
     output_root=Path("scratch/evals/personality"),
-    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}_cp57",
+    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}",
     skip_completed=True,
     metadata={
         "persona": PERSONA,
-        "adapter_repo": ADAPTER_PATH,
-        "checkpoint": "checkpoint-57",
+        "adapter_repo": ADAPTER_REPO,
     },
 )

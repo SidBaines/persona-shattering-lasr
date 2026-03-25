@@ -1,4 +1,4 @@
-"""Capability sweep for the t-enjoying LoRA adapter.
+"""Capability sweep for the t-avoiding LoRA adapter.
 
 Mirrors the scale grid from the exhaustive t-frequency rollout sweep
 (-2.4 … +2.4, step 0.2) so capability results are directly comparable
@@ -7,7 +7,7 @@ to the trait-transfer results from that sweep.
 Usage::
 
     uv run python -m src_dev.evals suite \
-        --config-module scripts_dev.personality_evals.t_enjoying_eval_suite
+        --config-module scripts_dev.personality_evals.configs.misc.t_avoiding_eval_suite
 
 Visualise results::
 
@@ -16,7 +16,7 @@ Visualise results::
 
 Upload to HuggingFace::
 
-    uv run python -m scripts_dev.personality_evals.upload_evals \
+    uv run python -m scripts_dev.personality_evals.configs.misc.upload_evals \
         --run-dir scratch/evals/personality/<run_name>
 """
 
@@ -32,9 +32,9 @@ from src_dev.evals import (
 # ---------------------------------------------------------------------------
 # Configuration — keep in sync with t_frequency_lora_sweep.py
 # ---------------------------------------------------------------------------
-PERSONA = "t_enjoying"
+PERSONA = "t_avoiding"
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-ADAPTER_REPO = "persona-shattering-lasr/t_enjoying-train-20260312-223656-lora-adapter::adapter"
+ADAPTER_REPO = "persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter"
 # ---------------------------------------------------------------------------
 
 SUITE_CONFIG = SuiteConfig(
@@ -43,16 +43,28 @@ SUITE_CONFIG = SuiteConfig(
     sweep=ScaleSweep(min=-2.4, max=2.4, step=0.2),
     evals=[
         InspectBenchmarkSpec(
-            name="mmlu",
-            benchmark="mmlu",
-            limit=100,
-            n_runs=3,
+            name="popqa",
+            benchmark="popqa",
+            limit=32,
+            n_runs=1,
+        ),
+        InspectBenchmarkSpec(
+            name="truthfulqa",
+            benchmark="truthfulqa",
+            limit=32,
+            n_runs=1,
+        ),
+        InspectBenchmarkSpec(
+            name="gsm8k",
+            benchmark="gsm8k",
+            limit=32,
+            n_runs=1,
         ),
     ],
     temperature=0.0,
     batch_size=32,
     output_root=Path("scratch/evals/personality"),
-    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}",
+    run_name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{PERSONA}_capabilities",
     skip_completed=True,
     metadata={
         "persona": PERSONA,
