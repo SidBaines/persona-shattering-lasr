@@ -197,6 +197,40 @@ def _install_runtime_character_constants() -> None:
         setattr(character_pkg, "constants", constants)
 
 # ---------------------------------------------------------------------------
+# Shim: huggingface_hub 0.36.x passes allow_redirects= to its HTTP session,
+# but if the active session backend is httpx (which renamed that param to
+# follow_redirects in 0.20), the call crashes with a TypeError.  Patch
+# http_backoff to translate the kwarg before it hits session.request().
+# ---------------------------------------------------------------------------
+import inspect as _inspect
+import huggingface_hub.utils._http as _hf_http
+
+_orig_http_backoff = _hf_http.http_backoff
+
+def _patched_http_backoff(method, url, *, max_retries=5, base_wait_time=1,
+                          max_wait_time=8, retry_on_exceptions=None,
+                          retry_on_status_codes=(500, 502, 503, 504),
+                          **kwargs):
+    """Wrap http_backoff to translate allow_redirects→follow_redirects for httpx sessions."""
+    import requests as _requests
+    session = _hf_http.get_session()
+    if "allow_redirects" in kwargs and not isinstance(session, _requests.Session):
+        _params = _inspect.signature(session.request).parameters
+        if "allow_redirects" not in _params and "follow_redirects" in _params:
+            kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
+    _kwargs = dict(
+        max_retries=max_retries,
+        base_wait_time=base_wait_time,
+        max_wait_time=max_wait_time,
+        retry_on_status_codes=retry_on_status_codes,
+    )
+    if retry_on_exceptions is not None:
+        _kwargs["retry_on_exceptions"] = retry_on_exceptions
+    return _orig_http_backoff(method, url, **_kwargs, **kwargs)
+
+_hf_http.http_backoff = _patched_http_backoff
+
+# ---------------------------------------------------------------------------
 # Monkeypatch character.constants so OCT functions read/write where we want.
 # Must happen BEFORE importing any character.distillation / .introspection
 # modules, since they capture constants at import time.
@@ -518,10 +552,20 @@ def _load_openrouter_completion_tokenizer(model: str) -> AutoTokenizer | None:
         return None
     tokenizer = _OPENROUTER_TOKENIZER_CACHE.get(tokenizer_id)
     if tokenizer is None:
-        tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_id,
-            trust_remote_code=True,
-        )
+        # Prefer local cache to avoid network calls (transformers ≥4.50 makes
+        # extra HF API requests even for cached models, which can 404 on repos
+        # that lack an additional_chat_templates directory).
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_id,
+                trust_remote_code=True,
+                local_files_only=True,
+            )
+        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_id,
+                trust_remote_code=True,
+            )
         _OPENROUTER_TOKENIZER_CACHE[tokenizer_id] = tokenizer
     return tokenizer
 

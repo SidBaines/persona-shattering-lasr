@@ -11,7 +11,51 @@ Minimal orchestration of the [OpenCharacterTraining](https://github.com/maiush/O
 5. Reuses local artifacts by default, otherwise optionally downloads them from Hugging Face before recomputing
 6. Optionally trains DPO/SFT adapters using OCT's OpenRLHF stack
 
-> Intentionally skips the LIMA dataset so it runs without the full data setup.
+> LIMA questions are included in the teacher pass if the LIMA files are present at `{model_path}/lima/{train,test}.jsonl`. See [First-time machine setup](#first-time-machine-setup) below.
+
+## First-time machine setup
+
+Two one-off steps are needed on a fresh machine before running the pipeline.
+
+### 1. Download LIMA questions
+
+The teacher pass loads extra questions from the LIMA dataset. Download them once
+and place them at the path the pipeline expects (`{model_path}/lima/`):
+
+```bash
+source .venv-oct/bin/activate
+python - <<'EOF'
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+from huggingface_hub import hf_hub_download
+import json, pathlib
+
+MODEL_PATH = "/root/.cache/models"  # the parent dir passed to --model-path
+out = pathlib.Path(MODEL_PATH) / "lima"
+out.mkdir(parents=True, exist_ok=True)
+
+token = os.environ["HF_TOKEN"]
+for split in ("train", "test"):
+    src = hf_hub_download(repo_id="GAIR/lima", filename=f"{split}.jsonl",
+                          repo_type="dataset", token=token)
+    rows = [json.loads(l) for l in open(src)]
+    with open(out / f"{split}.jsonl", "w") as f:
+        for row in rows:
+            json.dump({"conversations": row["conversations"]}, f)
+            f.write("\n")
+    print(f"Wrote {len(rows)} rows → {out}/{split}.jsonl")
+EOF
+```
+
+`GAIR/lima` is a gated dataset — you need a HuggingFace account with access
+granted and a valid `HF_TOKEN` in your `.env`.  The download uses `hf_hub_download`
+directly rather than `datasets.load_dataset` because the repo still contains a
+legacy loading script that newer versions of the `datasets` library reject.
+
+Once the files exist the pipeline picks them up automatically; the teacher-pass
+log line will show `N from LIMA` instead of `0 from LIMA`.
 
 ## Usage
 
