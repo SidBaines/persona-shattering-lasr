@@ -657,8 +657,10 @@ if __name__ == "__main__":
     example_config = AssessmentConfig(
         test_models=[
             TestModelSpec(
-                base_model="meta-llama/Llama-3.1-8B-Instruct",
-                label="llama-3.1-8b-instruct",
+                # base_model="meta-llama/Llama-3.1-8B-Instruct",
+                # label="llama-3.1-8b-instruct",
+                base_model="Qwen/Qwen2.5-0.5B-Instruct",
+                label="qwen-0.5b-test",
             ),
             # TestModelSpec(
             #     base_model="Qwen/Qwen2.5-0.5B-Instruct",
@@ -670,9 +672,9 @@ if __name__ == "__main__":
         trait=TraitConfig(name="conscientiousness"),
         prompts=PromptSourceConfig(
             source="trait_dataset",
-            max_prompts=25,
+            max_prompts=5,
         ),
-        num_conversation_turns=5,
+        num_conversation_turns=3,
         include_justification=True,
     )
 
