@@ -20,7 +20,7 @@
     "name": "Llama 3.1 8B Low Conscientiousness v2",
     "vllm": {
       "model": "meta-llama/Llama-3.1-8B-Instruct",
-      "lora_path": "scratch/oct_runs/conscientiousness_low_v2-llama-3.1-8b-it-s223458-94742ca72e77/"
+      "lora_path": "scratch/oct_runs/conscientiousness_low_v2-llama-3.1-8b-it-s223458-94742ca72e77/lora/conscientiousness_low_v2-persona"
     }
   },
   "llama-3.1-8b-it-base": {
