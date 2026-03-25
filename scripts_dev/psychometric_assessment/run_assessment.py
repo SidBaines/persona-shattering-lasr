@@ -370,7 +370,8 @@ def run_stage_1_rollouts(
         model_run_dir = run_dir / "rollouts" / model_label
         hf_path = f"{run_dir.name}/rollouts/{model_label}"
 
-        if _check_or_download(model_run_dir, config.hf_repo, hf_path):
+        exports_dir = model_run_dir / "exports"
+        if _check_or_download(exports_dir, config.hf_repo, hf_path):
             logger.info("Rollouts for %s already exist, skipping.", model_label)
             continue
 
@@ -656,8 +657,8 @@ if __name__ == "__main__":
     example_config = AssessmentConfig(
         test_models=[
             TestModelSpec(
-                base_model="Qwen/Qwen2.5-0.5B-Instruct",
-                label="qwen-0.5b-base",
+                base_model="meta-llama/Llama-3.1-8B-Instruct",
+                label="llama-3.1-8b-instruct",
             ),
             # TestModelSpec(
             #     base_model="Qwen/Qwen2.5-0.5B-Instruct",
