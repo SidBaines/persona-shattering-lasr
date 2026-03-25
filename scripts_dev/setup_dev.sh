@@ -73,6 +73,7 @@ if command -v code &>/dev/null; then
     echo "Installing VS Code extensions..."
     code --install-extension ms-toolsai.jupyter --force
     code --install-extension anthropic.claude-code --force
+    code --install-extension mhutchie.git-graph --force
 else
     echo "Warning: 'code' CLI not found — skipping VS Code extensions."
     echo "  If you use VS Code, run: Help > Set up > Open Remote Window,"
@@ -238,14 +239,15 @@ fi
 # Done
 # ---------------------------------------------------------------------------
 echo ""
-echo "Setup complete. If you edited .env, the keys will be picked up automatically at runtime."
+echo "========================================"
+echo " Setup complete. Next steps:"
+echo "========================================"
 echo ""
-echo "If # %% cells aren't working in VS Code:"
+echo "  1. Open a new terminal"
+echo "     (required for PATH, bash-completion, and VS Code extensions to take effect)"
+echo ""
+echo "  2. Fill in your API keys:"
+echo "     $REPO_ROOT/.env"
+echo ""
+echo "Tip: if # %% cells aren't working in VS Code:"
 echo "  Command Palette > 'Jupyter: Select Kernel' > pick your Python env."
-echo "  The kernel cache doesn't always refresh automatically after install."
-echo ""
-echo "Note: some VS Code extensions require opening a new terminal to take effect."
-echo ""
-echo "Reloading .bashrc to pick up PATH changes (uv, bash-completion, etc.) in this session..."
-# shellcheck disable=SC1090
-source "$HOME/.bashrc"
