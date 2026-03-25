@@ -26,10 +26,10 @@ Usage:
     uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data --dry-run
     uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data --no-upload
     uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data \\
-        --judgment-models claude-opus-4.6 gpt-5-mini gpt-5-nano
+        --judgment-models openrouter/moonshotai/kimi-k2-0905 gpt-5-mini gpt-5-nano
     uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data \\
         --targets llama-3.1-8b-it-base conscientiousness-low-llama \\
-        --judgment-models claude-opus-4.6 gpt-5-mini gpt-5-nano
+        --judgment-models openrouter/moonshotai/kimi-k2-0905 gpt-5-mini gpt-5-nano
 """
 
 from __future__ import annotations
@@ -78,6 +78,15 @@ HF_BASE_PATH = "bloom-evals"
 
 STAGES = ["understanding", "ideation", "rollout", "judgment"]
 
+# Evaluator models permitted in any non-target role (understanding / ideation /
+# rollout evaluator / judgment).  Local target models are exempt.
+# Fail fast if anything outside this set is requested.
+ALLOWED_EVALUATOR_MODEL_IDS: frozenset[str] = frozenset({
+    "openrouter/moonshotai/kimi-k2-0905",
+    "openrouter/openai/gpt-5-mini",
+    "openrouter/openai/gpt-5-nano",
+})
+
 # Configurable-prompt keys that materially affect each stage's output.
 _PROMPT_KEYS_BY_STAGE: dict[str, list[str]] = {
     "understanding": [
@@ -105,6 +114,48 @@ _PROMPT_KEYS_BY_STAGE: dict[str, list[str]] = {
         "metajudge_judgment_additional",
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# Model allowlist
+# ---------------------------------------------------------------------------
+
+
+def _resolve_model_id(short_name: str, models_config: dict[str, Any]) -> str:
+    """Return the LiteLLM model ID for a short name, or the name itself if not found."""
+    entry = models_config.get(short_name)
+    return entry["id"] if entry else short_name
+
+
+def validate_evaluator_models(
+    config: dict[str, Any],
+    j_models: list[str],
+    models_config: dict[str, Any],
+) -> None:
+    """Fail fast if any evaluator model is not in ALLOWED_EVALUATOR_MODEL_IDS.
+
+    Checks understanding, ideation, rollout evaluator, and all judgment models.
+    Local target models (org == 'local') are not checked here.
+    """
+    to_check = {
+        "understanding": config["understanding"]["model"],
+        "ideation": config["ideation"]["model"],
+        "rollout evaluator": config["rollout"]["model"],
+        **{f"judgment ({j})": j for j in j_models},
+    }
+    violations = []
+    for role, name in to_check.items():
+        resolved = _resolve_model_id(name, models_config)
+        if resolved not in ALLOWED_EVALUATOR_MODEL_IDS:
+            violations.append(f"  {role}: '{name}' → '{resolved}'")
+    if violations:
+        allowed = "\n".join(f"  {m}" for m in sorted(ALLOWED_EVALUATOR_MODEL_IDS))
+        sys.exit(
+            "Error: the following models are not in the allowed evaluator list:\n"
+            + "\n".join(violations)
+            + "\n\nAllowed models (LiteLLM IDs):\n"
+            + allowed
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +674,9 @@ def run_pipeline(
     # Resolve targets and judgment models (fall back to whatever is in seed.yaml)
     t_models = targets if targets else [config["rollout"]["target"]]
     j_models = judgment_models if judgment_models else [config["judgment"]["model"]]
+
+    # Fail fast if any evaluator model is not in the allowlist
+    validate_evaluator_models(config, j_models, models_config)
 
     # Pre-compute all run IDs for the summary
     base_ids = compute_run_ids(config, behaviors, prompts, seed)

@@ -1,18 +1,8 @@
 {
-  "claude-opus-4.1": {
-    "id": "anthropic/claude-opus-4-1-20250805",
-    "org": "anthropic",
-    "name": "Claude Opus 4.1"
-  },
-  "claude-opus-4.6": {
-    "id": "openrouter/anthropic/claude-opus-4.6",
-    "org": "anthropic",
-    "name": "Claude Opus 4.6"
-  },
-  "claude-sonnet-4": {
-    "id": "anthropic/claude-sonnet-4-20250514",
-    "org": "anthropic",
-    "name": "Claude Sonnet 4"
+  "kimi-k2": {
+    "id": "openrouter/moonshotai/kimi-k2-0905",
+    "org": "moonshotai",
+    "name": "Kimi K2"
   },
   "conscientiousness-low-llama": {
     "id": "openai/llama-3.1-8b-it-conscientiousness_low_v2",

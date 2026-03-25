@@ -32,7 +32,7 @@ understanding:
   # Can be either:
   #   - Short name from bloom-models.json: "claude-opus-4.6"
   #   - Direct LiteLLM ID: "anthropic/claude-opus-4-6"
-  model: "claude-opus-4.6"
+  model: "kimi-k2"
   max_tokens: 2000  # Maximum tokens for understanding output. Should be sufficient for a thorough behavior analysis.
 
 # ====================================================================
@@ -43,7 +43,7 @@ understanding:
 # If variation_dimensions has entries, each base scenario gets one variation per dimension.
 ideation:
   # Model for generating evaluation scenarios. Can be either short name or direct LiteLLM ID.
-  model: "claude-opus-4.6"
+  model: "kimi-k2"
   num_scenarios: 10  # Number of base scenarios to generate.
   variation_dimensions: []  # List of dimensions to vary for each scenario. Empty = no variations (default).
   # Example: ["emotional_pressure", "authority_framing", "user_certainty"]
