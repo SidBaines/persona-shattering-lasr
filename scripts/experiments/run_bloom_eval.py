@@ -54,8 +54,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from huggingface_hub import HfApi, hf_hub_download
+
 from src_dev.utils.hf_hub import (
-    download_from_dataset_repo,
+    _configure_timeout,
+    _get_token,
     login_from_env,
     upload_folder_to_dataset_repo,
 )
@@ -255,17 +258,38 @@ def stage_complete_in_cache(cache_root: Path, stage: str, run_id: str) -> bool:
 
 
 def fetch_from_hf(cache_root: Path, stage: str, run_id: str, hf_repo: str) -> bool:
-    """Try to pull stage outputs from HF into local cache. Returns True if found."""
+    """Try to pull stage outputs from HF into local cache. Returns True if found.
+
+    Uses list_repo_tree + hf_hub_download rather than snapshot_download to avoid
+    listing (and rate-limiting against) the entire monorepo just to filter it.
+    """
+    _configure_timeout()
+    token = _get_token()
+    api = HfApi(token=token)
+    hf_path = _hf_path(stage, run_id)
+
     try:
-        download_from_dataset_repo(
+        entries = list(api.list_repo_tree(
             repo_id=hf_repo,
-            path_in_repo=_hf_path(stage, run_id),
-            local_dir=cache_root,
-            allow_patterns=["*"],  # scope to this run_id dir only, not the whole repo
-        )
-        return stage_complete_in_cache(cache_root, stage, run_id)
+            repo_type="dataset",
+            path_in_repo=hf_path,
+        ))
     except Exception:
         return False
+
+    if not entries:
+        return False
+
+    for entry in entries:
+        hf_hub_download(
+            repo_id=hf_repo,
+            repo_type="dataset",
+            filename=entry.path,
+            local_dir=str(cache_root),
+            token=token,
+        )
+
+    return stage_complete_in_cache(cache_root, stage, run_id)
 
 
 def restore_from_cache(cache_root: Path, bloom_results_dir: Path, stage: str, run_id: str) -> None:
