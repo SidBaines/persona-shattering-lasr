@@ -1,35 +1,82 @@
-"""Run a bloom eval with per-stage caching and HuggingFace persistence.
+"""Bloom eval orchestration wrapper with caching, multi-target/judge, and vLLM auto-launch.
 
-Each pipeline stage gets a deterministic run ID hashed from only the config
-fields that materially affect that stage's output.  This means:
+See scripts_dev/bloom_evals/README.md for full documentation.
 
-  - Changing the judgment model / additional_qualities only busts the judgment
-    run ID — rollout, ideation, and understanding are reused from cache.
-  - Changing the target model only busts the rollout run ID.
-  - Changing ideation params (num_scenarios, etc.) busts ideation + rollout +
-    judgment, but not understanding.
-  - Pass --seed N to get a fresh independent run of the same config.
+PIPELINE OVERVIEW
+-----------------
+bloom runs four stages in sequence:
 
-Multiple judgment models can be run against the same rollout by passing
---judgment-models.  Each model produces its own judgment_run_id and is
-cached/uploaded independently; the shared rollout is fetched from cache
-and never re-run.
+  understanding → ideation → rollout → judgment
 
-Cache lookup order for each stage:
+Each stage gets a deterministic 12-hex run ID derived only from the config
+fields that materially affect that stage's output, chained so each stage
+implicitly depends on all upstream stages.  This means:
+
+  - Changing the judgment model re-runs only judgment; rollout/ideation/
+    understanding are reused from cache.
+  - Changing the target model re-runs rollout + judgment only.
+  - Changing ideation params re-runs ideation + rollout + judgment.
+  - Use --seed N to get a fresh independent run of the same config.
+
+Cache lookup order per stage:
   1. Local:  bloom-cache/bloom-evals/{stage}/{run_id}/
-  2. Remote: HF repo bloom-evals/{stage}/{run_id}/
-  3. Run bloom stage → save to local cache → upload to HF
+  2. Remote: HuggingFace dataset repo bloom-evals/{stage}/{run_id}/
+  3. Run bloom → save to local cache → upload to HF
 
-Usage:
-    uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data
-    uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data --seed 1
-    uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data --dry-run
-    uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data --no-upload
-    uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data \\
-        --judgment-models openrouter/moonshotai/kimi-k2-0905 gpt-5-mini gpt-5-nano
-    uv run python scripts/experiments/run_bloom_eval.py --bloom-data bloom-data \\
-        --targets llama-3.1-8b-it-base conscientiousness-low-llama \\
-        --judgment-models openrouter/moonshotai/kimi-k2-0905 gpt-5-mini gpt-5-nano
+The original bloom-data/ directory is NEVER modified at runtime.  Each stage
+runs against a temporary copy with overrides applied, so crashes leave no
+residue in the config files.
+
+COMMON INVOCATIONS
+------------------
+# Default: use models/trait from seed.yaml
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py
+
+# Two targets, two judges
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py \\
+    --targets llama-3.1-8b-it-base conscientiousness-low-llama \\
+    --judgment-models gpt-5-mini gpt-5-nano
+
+# Switch OCEAN trait (full name or single letter: c n o a e)
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py --trait neuroticism
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py --trait n
+
+# New independent run of the same config
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py --seed 1
+
+# Dry run: print run IDs without calling any APIs
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py --dry-run
+
+# Re-judge existing rollouts with a new model (skip earlier stages)
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py \\
+    --stages judgment --judgment-models kimi-k2
+
+# Local cache only, no HF upload/download
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py --no-upload
+
+# Disable vLLM auto-launch (fail fast with instructions if not running)
+uv run python scripts_dev/bloom_evals/run_bloom_eval.py --no-vllm
+
+CLI FLAGS
+---------
+--bloom-data PATH       Path to bloom-data directory (default: bloom-data)
+--trait TRAIT           OCEAN trait to evaluate: conscientiousness/c, neuroticism/n,
+                        openness/o, agreeableness/a, extraversion/e.
+                        Auto-generates behavior description + judgment rubric from
+                        persona_definitions.py.  Default: use seed.yaml behavior.name.
+--targets MODEL ...     Target model short names from models.json.  Understanding and
+                        ideation are shared; rollout/judgment run per target.
+--judgment-models M ... Judge model short names.  Each gets its own run ID against
+                        the same rollouts.
+--stages STAGE ...      Subset of stages to run: understanding ideation rollout judgment.
+                        Default: all four.
+--seed INT              RNG seed for stochastic stages (default: 0).  Increment to
+                        get a fresh independent run of the same config.
+--hf-repo REPO          HuggingFace dataset repo for persistence
+                        (default: persona-shattering-lasr/monorepo).
+--no-upload             Disable HF upload/download; use local cache only.
+--no-vllm               Disable automatic vLLM launch for local targets.
+--dry-run               Print run IDs and exit without running anything.
 """
 
 from __future__ import annotations
