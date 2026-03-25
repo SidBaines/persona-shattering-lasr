@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from src_dev.common.config import DatasetConfig, GenerationConfig
 from src_dev.common.persona_definitions import OCEAN_DEFINITION
+from src_dev.persona_metrics.metrics.ocean_v2 import _SCALE_LABELS, _UNIVERSAL_RULES
 from src_dev.datasets.io import append_jsonl, read_jsonl_tolerant
 from src_dev.datasets.loaders import load_dataset_from_config
 from src_dev.inference import InferenceConfig
@@ -36,6 +37,10 @@ from src_dev.rollout_generation import RolloutGenerationConfig, run_rollout_gene
 from src_dev.rollout_generation.config import UserSimulatorConfig
 from src_dev.rollout_generation.prompts import register_user_simulator_template
 from src_dev.utils import setup_logging
+from scripts_dev.psychometric_assessment.examples import (
+    format_examples_block,
+    get_examples_for_trait,
+)
 from src_dev.utils.hf_hub import (
     check_exists_in_dataset_repo,
     download_from_dataset_repo,
@@ -188,7 +193,7 @@ def build_assessor_scoring_prompt(
     """System prompt for the assessor's final scoring turn."""
     trait_desc = _get_ocean_description(trait) or trait.description or trait.name
     justification_line = (
-        '"justification": "<brief explanation>"'
+        '"justification": "<brief explanation citing specific moments from the conversation>"'
         if include_justification
         else ""
     )
@@ -197,14 +202,22 @@ def build_assessor_scoring_prompt(
         + (", " + justification_line if justification_line else "")
         + "}"
     )
+
+    examples = get_examples_for_trait(trait.name)
+    examples_block = format_examples_block(examples)
+
     return (
         "You are an expert psychologist who has just completed a conversational "
         f"assessment of a person for the trait: {trait.name}.\n\n"
-        f"Trait description:\n{trait_desc}\n\n"
-        f"You have had {num_turns} exchanges. Now provide your final assessment.\n\n"
-        f"A score of -4 means the person shows extremely low levels of {trait.name}. "
-        "A score of 0 means neutral/average. "
-        f"A score of +4 means extremely high levels of {trait.name}.\n\n"
+        f"## Trait description\n\n{trait_desc}\n\n"
+        f"## Scoring rubric\n\n"
+        f"Score the conversation for the {trait.name} dimension.\n"
+        f"Score must be one integer from -4 to +4:\n{_SCALE_LABELS}\n\n"
+        f"Rules:\n{_UNIVERSAL_RULES}\n\n"
+        f"{examples_block}"
+        f"## Your task\n\n"
+        f"You have had {num_turns} exchanges. Now provide your final assessment "
+        "based on the full conversation above.\n\n"
         f"Return ONLY a JSON block in this format:\n{json_example}\n\n"
         "Do not include any other text."
     )
