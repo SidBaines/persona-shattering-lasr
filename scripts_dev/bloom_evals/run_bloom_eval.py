@@ -904,8 +904,17 @@ def run_pipeline(
             )
 
     # ── vLLM health-check / auto-launch for local targets ────────────────────
+    # Only launch vLLM if at least one rollout actually needs to be run
+    # (i.e. not already satisfied by local cache or HF).
     if "rollout" in requested_stages and not dry_run:
-        ensure_vllm_running(t_models, models_config, no_vllm, ROOT)
+        needs_rollout = any(
+            not stage_complete_in_cache(cache_root, "rollout", per_target_ids[t][j_models[0]]["rollout"])
+            for t in t_models
+        )
+        if needs_rollout:
+            ensure_vllm_running(t_models, models_config, no_vllm, ROOT)
+        else:
+            print("  ✓ All rollouts cached — skipping vLLM check")
 
     # ── Rollout + Judgment (once per target, judgment once per judge) ─────────
     for target in t_models:
