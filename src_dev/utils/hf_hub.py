@@ -56,6 +56,25 @@ _hf_http.http_backoff = _patched_http_backoff
 import huggingface_hub.file_download as _hf_file_download
 _hf_file_download.http_backoff = _patched_http_backoff
 
+# ---------------------------------------------------------------------------
+# Shim: httpx's raise_for_status() raises on 3xx, but requests' does not.
+# _request_wrapper intentionally gets 3xx responses (allow_redirects=False)
+# to handle relative redirects itself — so we must not raise on them.
+# ---------------------------------------------------------------------------
+_orig_hf_raise_for_status = _hf_http.hf_raise_for_status
+
+
+def _patched_hf_raise_for_status(response) -> None:
+    """Skip raise_for_status on 3xx so _request_wrapper can inspect redirects."""
+    if 300 <= response.status_code <= 399:
+        return
+    _orig_hf_raise_for_status(response)
+
+
+_hf_http.hf_raise_for_status = _patched_hf_raise_for_status
+# file_download.py also has a direct binding.
+_hf_file_download.hf_raise_for_status = _patched_hf_raise_for_status
+
 # Extended timeouts (seconds) to avoid ReadTimeout on slow connections during the
 # final commit step, which can block for a long time on large uploads.
 _TIMEOUT = 300
