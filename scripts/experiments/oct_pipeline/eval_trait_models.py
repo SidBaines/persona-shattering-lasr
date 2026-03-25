@@ -29,6 +29,7 @@ import matplotlib
 import pandas as pd
 from dotenv import load_dotenv
 
+from scripts.experiments.oct_pipeline.eval_oct_conscientiousness_hf import _config_hash, _publish_stage
 from src_dev.evals import AdapterConfig, InspectBenchmarkSpec, ModelSpec, SuiteConfig, run_eval_suite
 from src_dev.evals.personality.analyze_results import ALL_TRAIT_COLS, load_sweep_data
 
@@ -42,6 +43,16 @@ DEFAULT_SAMPLES_PER_TRAIT = 1000
 DEFAULT_OUTPUT_ROOT = Path("scratch/evals/personality")
 DEFAULT_TEMPERATURE = 0.6
 DEFAULT_BATCH_SIZE = 8
+VALID_TRAIT_SPLITS = (
+    "Openness",
+    "Conscientiousness",
+    "Extraversion",
+    "Agreeableness",
+    "Neuroticism",
+    "Machiavellianism",
+    "Narcissism",
+    "Psychopathy",
+)
 
 MODEL_VARIANTS = (
     ("base", "Base model", None),
@@ -134,10 +145,47 @@ def _build_model_specs(base_model_path: str, out_dir: Path, constitution: str) -
     return specs
 
 
-def _make_run_name(out_dir: Path, constitution: str, samples_per_trait: int, run_name: str | None) -> str:
+def _normalize_trait_splits(raw_trait_splits: list[str] | None) -> list[str] | None:
+    if not raw_trait_splits:
+        return None
+
+    valid_lookup = {trait.lower(): trait for trait in VALID_TRAIT_SPLITS}
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_trait_splits:
+        for piece in raw_value.split(","):
+            candidate = piece.strip()
+            if not candidate:
+                continue
+            trait = valid_lookup.get(candidate.lower())
+            if trait is None:
+                raise ValueError(
+                    f"Unknown trait split '{candidate}'. Valid options: {', '.join(VALID_TRAIT_SPLITS)}"
+                )
+            if trait in seen:
+                continue
+            normalized.append(trait)
+            seen.add(trait)
+
+    if not normalized:
+        raise ValueError("If provided, --trait-splits must include at least one trait")
+    return normalized
+
+
+def _make_run_name(
+    out_dir: Path,
+    constitution: str,
+    samples_per_trait: int,
+    run_name: str | None,
+    trait_splits: list[str] | None = None,
+) -> str:
     if run_name:
         return run_name
-    return f"eval_oct_{constitution}_{out_dir.name}_trait_k{samples_per_trait}"
+    trait_suffix = ""
+    if trait_splits:
+        abbreviated = "-".join(trait.lower()[:4] for trait in trait_splits)
+        trait_suffix = f"_{abbreviated}"
+    return f"eval_oct_{constitution}_{out_dir.name}_trait{trait_suffix}_k{samples_per_trait}"
 
 
 def _build_suite_config(
@@ -146,6 +194,7 @@ def _build_suite_config(
     out_dir: Path,
     constitution: str,
     samples_per_trait: int,
+    trait_splits: list[str] | None,
     output_root: Path,
     run_name: str,
     temperature: float,
@@ -158,7 +207,10 @@ def _build_suite_config(
             InspectBenchmarkSpec(
                 name="trait",
                 benchmark="personality_trait_sampled",
-                benchmark_args={"samples_per_trait": samples_per_trait},
+                benchmark_args={
+                    "samples_per_trait": samples_per_trait,
+                    **({"trait_splits": trait_splits} if trait_splits else {}),
+                },
             )
         ],
         temperature=temperature,
@@ -170,6 +222,7 @@ def _build_suite_config(
             "oct_out_dir": str(out_dir),
             "constitution": constitution,
             "samples_per_trait": samples_per_trait,
+            **({"trait_splits": trait_splits} if trait_splits else {}),
         },
     )
 
@@ -179,6 +232,13 @@ def _extract_trait_table(run_dir: Path) -> pd.DataFrame:
     trait_df = data.get("trait")
     if trait_df is None or trait_df.empty:
         raise ValueError(f"No TRAIT results found under {run_dir}")
+
+    available_traits = [trait for trait in ALL_TRAIT_COLS if trait in trait_df.columns]
+    if not available_traits:
+        raise ValueError(
+            f"No recognized TRAIT score columns found under {run_dir}. "
+            f"Expected one of: {', '.join(ALL_TRAIT_COLS)}"
+        )
 
     expected_names = {spec_name for spec_name, _, _ in MODEL_VARIANTS}
     observed = set(trait_df["model"].unique())
@@ -193,9 +253,7 @@ def _extract_trait_table(run_dir: Path) -> pd.DataFrame:
         if subset.empty:
             continue
         row = subset.iloc[0]
-        for trait in ALL_TRAIT_COLS:
-            if trait not in subset.columns:
-                raise ValueError(f"TRAIT metric '{trait}' missing from results under {run_dir}")
+        for trait in available_traits:
             records.append(
                 {
                     "model_spec": spec_name,
@@ -260,10 +318,12 @@ def _plot_trait_bars(summary_df: pd.DataFrame, run_dir: Path, title: str) -> Pat
     figures_dir.mkdir(parents=True, exist_ok=True)
     figure_path = figures_dir / "trait_model_comparison_bar.png"
 
-    wide_df = summary_df.pivot(index="trait", columns="model_label", values="score").reindex(ALL_TRAIT_COLS)
+    trait_order = [trait for trait in ALL_TRAIT_COLS if trait in set(summary_df["trait"])]
+    wide_df = summary_df.pivot(index="trait", columns="model_label", values="score").reindex(trait_order)
     model_labels = [label for _, label, _ in MODEL_VARIANTS]
 
-    fig, ax = plt.subplots(figsize=(15, 7))
+    fig_width = max(7, 2.2 * len(wide_df.index) + 4)
+    fig, ax = plt.subplots(figsize=(fig_width, 7))
     x_positions = list(range(len(wide_df.index)))
     width = 0.2
     offsets = [-1.5 * width, -0.5 * width, 0.5 * width, 1.5 * width]
@@ -291,6 +351,50 @@ def _plot_trait_bars(summary_df: pd.DataFrame, run_dir: Path, title: str) -> Pat
     fig.savefig(figure_path, dpi=200)
     plt.close(fig)
     return figure_path
+
+
+def _analysis_artifacts(run_dir: Path) -> list[dict[str, object]]:
+    return [
+        {"path": run_dir / "analysis" / "trait_scores_by_model.csv", "kind": "file"},
+        {"path": run_dir / "analysis" / "trait_scores_by_model_wide.csv", "kind": "file"},
+        {"path": run_dir / "figures" / "trait_model_comparison_bar.png", "kind": "file"},
+    ]
+
+
+def _publish_analysis_outputs(
+    *,
+    run_dir: Path,
+    run_name: str,
+    out_dir: Path,
+    constitution: str,
+    model_name: str,
+    samples_per_trait: int,
+    temperature: float,
+    batch_size: int,
+    trait_splits: list[str] | None,
+    results_hf_repo: str | None,
+) -> None:
+    if results_hf_repo is None:
+        return
+
+    config_payload = {
+        "oct_out_dir": str(out_dir),
+        "constitution": constitution,
+        "model_name": model_name,
+        "samples_per_trait": samples_per_trait,
+        "temperature": temperature,
+        "batch_size": batch_size,
+        "trait_splits": trait_splits,
+        "results_hf_repo": results_hf_repo,
+    }
+    _publish_stage(
+        out_path=run_dir,
+        run_id=run_name,
+        stage_name="analysis",
+        config_hash=_config_hash(config_payload),
+        artifacts=_analysis_artifacts(run_dir),
+        hf_repo_id=results_hf_repo,
+    )
 
 
 def main() -> None:
@@ -351,11 +455,26 @@ def main() -> None:
         action="store_true",
         help="Rerun even if the target eval outputs already exist",
     )
+    parser.add_argument(
+        "--results-hf-repo",
+        default=None,
+        help="Optional Hugging Face dataset repo to upload summary CSVs and the bar chart.",
+    )
+    parser.add_argument(
+        "--trait-splits",
+        nargs="+",
+        default=None,
+        help=(
+            "Optional TRAIT benchmark split filter. Pass one or more split names "
+            "(for example --trait-splits Conscientiousness) or a comma-separated list."
+        ),
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir).resolve()
     model_root = Path(args.model_path).resolve() if args.model_path else None
     constitution = _resolve_constitution(out_dir=out_dir, constitution=args.constitution)
+    trait_splits = _normalize_trait_splits(args.trait_splits)
     model_name, base_model_path = _resolve_base_model_path(
         out_dir=out_dir,
         model_root=model_root,
@@ -367,6 +486,7 @@ def main() -> None:
         constitution=constitution,
         samples_per_trait=args.samples_per_trait,
         run_name=args.run_name,
+        trait_splits=trait_splits,
     )
 
     suite_config = _build_suite_config(
@@ -374,6 +494,7 @@ def main() -> None:
         out_dir=out_dir,
         constitution=constitution,
         samples_per_trait=args.samples_per_trait,
+        trait_splits=trait_splits,
         output_root=output_root,
         run_name=run_name,
         temperature=args.temperature,
@@ -391,14 +512,29 @@ def main() -> None:
         run_dir,
         title=(
             f"TRAIT benchmark comparison: {constitution} on {model_name} "
-            f"(K={args.samples_per_trait} per trait)"
+            f"({', '.join(trait_splits) if trait_splits else 'all traits'}, "
+            f"K={args.samples_per_trait} per trait)"
         ),
+    )
+    _publish_analysis_outputs(
+        run_dir=run_dir,
+        run_name=run_name,
+        out_dir=out_dir,
+        constitution=constitution,
+        model_name=model_name,
+        samples_per_trait=args.samples_per_trait,
+        temperature=args.temperature,
+        batch_size=args.batch_size,
+        trait_splits=trait_splits,
+        results_hf_repo=args.results_hf_repo,
     )
 
     print(f"Eval run directory: {run_dir}")
     print(f"Long-form summary:  {long_csv_path}")
     print(f"Wide summary:       {wide_csv_path}")
     print(f"Bar chart:          {figure_path}")
+    if args.results_hf_repo:
+        print(f"Uploaded analysis to HF dataset repo: {args.results_hf_repo}/{run_name}")
 
 
 if __name__ == "__main__":
