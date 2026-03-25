@@ -35,13 +35,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import atexit
 import contextlib
 import copy
 import hashlib
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from typing import Any, Generator
 
@@ -106,11 +111,11 @@ _PROMPT_KEYS_BY_STAGE: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 
-def load_bloom_config(bloom_data_dir: Path) -> tuple[dict[str, Any], dict[str, str], dict[str, str]]:
-    """Load seed.yaml, behaviors.json, and the active configurable_prompts file.
+def load_bloom_config(bloom_data_dir: Path) -> tuple[dict[str, Any], dict[str, str], dict[str, str], dict[str, Any]]:
+    """Load seed.yaml, behaviors.json, configurable_prompts, and models.json.
 
     Returns:
-        (config, behaviors, prompts)
+        (config, behaviors, prompts, models)
     """
     with open(bloom_data_dir / "seed.yaml") as f:
         config = yaml.safe_load(f)
@@ -122,7 +127,13 @@ def load_bloom_config(bloom_data_dir: Path) -> tuple[dict[str, Any], dict[str, s
     with open(prompts_path) as f:
         prompts = json.load(f)
 
-    return config, behaviors, prompts
+    models_path = bloom_data_dir / "models.json"
+    models: dict[str, Any] = {}
+    if models_path.exists():
+        with open(models_path) as f:
+            models = json.load(f)
+
+    return config, behaviors, prompts, models
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +340,177 @@ def upload_stage(cache_root: Path, stage: str, run_id: str, hf_repo: str, behavi
 
 
 # ---------------------------------------------------------------------------
+# vLLM management
+# ---------------------------------------------------------------------------
+
+_vllm_proc: subprocess.Popen | None = None
+
+
+def _vllm_base_url() -> str:
+    return os.environ.get("OPENAI_API_BASE", "http://localhost:8000/v1").rstrip("/")
+
+
+def _served_model_name(model_id: str) -> str:
+    """Strip openai/ prefix from a LiteLLM local model ID."""
+    return model_id.removeprefix("openai/")
+
+
+def _query_vllm_models(base_url: str) -> list[str] | None:
+    """Return list of model IDs served at base_url, or None if unreachable."""
+    try:
+        with urllib.request.urlopen(f"{base_url}/models", timeout=5) as resp:
+            data = json.loads(resp.read())
+        return [m["id"] for m in data.get("data", [])]
+    except Exception:
+        return None
+
+
+def _wait_for_vllm(base_url: str, model_names: list[str], timeout: int = 300) -> bool:
+    """Poll until all model_names appear in vLLM or timeout (seconds) elapses."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        available = _query_vllm_models(base_url)
+        if available is not None and all(m in available for m in model_names):
+            return True
+        time.sleep(5)
+    return False
+
+
+def _cleanup_vllm() -> None:
+    global _vllm_proc
+    if _vllm_proc and _vllm_proc.poll() is None:
+        print("\n  Stopping vLLM server…")
+        _vllm_proc.terminate()
+        try:
+            _vllm_proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            _vllm_proc.kill()
+        _vllm_proc = None
+
+
+def _launch_vllm(
+    local_targets: list[tuple[str, dict[str, Any]]],
+    base_url: str,
+    root: Path,
+) -> None:
+    """Build and launch a vLLM serve command for all local target models.
+
+    All targets must share the same base model (vllm.model field).  LoRA
+    adapters are passed via --enable-lora --lora-modules.
+    """
+    global _vllm_proc
+
+    # Group targets by their base model path
+    base_model_map: dict[str, dict[str, Any]] = {}
+    for short_name, entry in local_targets:
+        vllm_cfg = entry.get("vllm")
+        if not vllm_cfg:
+            sys.exit(
+                f"Error: target '{short_name}' is a local model but has no 'vllm' "
+                f"config in models.json.\n"
+                f"Add a 'vllm' object with at least a 'model' (HuggingFace ID or local "
+                f"path) to enable auto-launch."
+            )
+        base_model = vllm_cfg["model"]
+        served_name = _served_model_name(entry["id"])
+        if base_model not in base_model_map:
+            base_model_map[base_model] = {"base_names": [], "loras": []}
+        lora_path = vllm_cfg.get("lora_path")
+        if lora_path:
+            base_model_map[base_model]["loras"].append((served_name, lora_path))
+        else:
+            base_model_map[base_model]["base_names"].append(served_name)
+
+    if len(base_model_map) > 1:
+        sys.exit(
+            "Error: local targets span multiple base models — cannot serve on one "
+            "vLLM instance:\n" + "\n".join(f"  {k}" for k in base_model_map) +
+            "\nStart vLLM manually with separate instances on different ports, "
+            "or use --no-vllm."
+        )
+
+    base_model_path, info = next(iter(base_model_map.items()))
+    port_match = re.search(r":(\d+)", base_url)
+    port = port_match.group(1) if port_match else "8000"
+
+    cmd = ["uv", "run", "vllm", "serve", base_model_path, "--port", port]
+
+    if info["base_names"]:
+        cmd += ["--served-model-name", info["base_names"][0]]
+
+    if info["loras"]:
+        cmd += ["--enable-lora"]
+        for lora_name, lora_path in info["loras"]:
+            resolved = (
+                str((root / lora_path).resolve())
+                if not Path(lora_path).is_absolute()
+                else lora_path
+            )
+            cmd += ["--lora-modules", f"{lora_name}={resolved}"]
+
+    print(f"\n  Launching vLLM: {' '.join(cmd)}\n")
+    _vllm_proc = subprocess.Popen(cmd)
+    atexit.register(_cleanup_vllm)
+
+
+def ensure_vllm_running(
+    targets: list[str],
+    models_config: dict[str, Any],
+    no_vllm: bool,
+    root: Path,
+) -> None:
+    """Ensure vLLM is serving all local target models, launching if needed.
+
+    If vLLM is already running with the required models, does nothing.
+    If not running and no_vllm=False, launches vLLM automatically.
+    If not running and no_vllm=True, prints instructions and exits.
+    """
+    local_targets = [
+        (t, models_config[t])
+        for t in targets
+        if t in models_config and models_config[t].get("org") == "local"
+    ]
+    if not local_targets:
+        return
+
+    base_url = _vllm_base_url()
+    needed = [_served_model_name(entry["id"]) for _, entry in local_targets]
+
+    available = _query_vllm_models(base_url)
+    if available is not None and all(n in available for n in needed):
+        print(f"  ✓ vLLM already serving: {', '.join(needed)}")
+        return
+
+    if no_vllm:
+        print(f"\nError: vLLM is not serving required models at {base_url}")
+        if available is None:
+            print("  vLLM does not appear to be running.")
+        else:
+            missing = [n for n in needed if n not in available]
+            print(f"  Currently serving: {available}")
+            print(f"  Missing:           {missing}")
+        print(
+            "\nTo start vLLM manually (example for both models):\n"
+            "  uv run vllm serve meta-llama/Llama-3.1-8B-Instruct \\\n"
+            "    --served-model-name llama-3.1-8b-it-base \\\n"
+            "    --enable-lora \\\n"
+            "    --lora-modules llama-3.1-8b-it-conscientiousness_low_v2=<path/to/lora>\n"
+            "\nOr re-run without --no-vllm to auto-launch."
+        )
+        sys.exit(1)
+
+    print(f"  vLLM not detected at {base_url} → launching automatically…")
+    _launch_vllm(local_targets, base_url, root)
+    print(f"  Waiting for vLLM to be ready (up to 5 min)…")
+    if not _wait_for_vllm(base_url, needed, timeout=300):
+        sys.exit(
+            f"Error: vLLM did not become ready within 5 minutes.\n"
+            f"Check the vLLM process output above for errors."
+        )
+    print(f"  ✓ vLLM ready: {', '.join(needed)}")
+
+
+# ---------------------------------------------------------------------------
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
@@ -425,9 +607,10 @@ def run_pipeline(
     judgment_models: list[str] | None,
     dry_run: bool,
     no_upload: bool,
+    no_vllm: bool = False,
 ) -> None:
     cache_root = bloom_data_dir.parent / "bloom-cache"
-    config, behaviors, prompts = load_bloom_config(bloom_data_dir)
+    config, behaviors, prompts, models_config = load_bloom_config(bloom_data_dir)
     behavior_name = config["behavior"]["name"]
     bloom_results_dir = bloom_data_dir.parent / "bloom-results" / behavior_name
 
@@ -478,6 +661,10 @@ def run_pipeline(
             bloom_data_dir, bloom_results_dir, cache_root,
             hf_repo, behavior_name, no_upload,
         )
+
+    # ── vLLM health-check / auto-launch for local targets ────────────────────
+    if "rollout" in requested_stages and not dry_run:
+        ensure_vllm_running(t_models, models_config, no_vllm, ROOT)
 
     # ── Rollout + Judgment (once per target, judgment once per judge) ─────────
     for target in t_models:
@@ -559,6 +746,11 @@ def main() -> None:
         "--no-upload", action="store_true",
         help="Disable HF upload/download; use local cache only.",
     )
+    parser.add_argument(
+        "--no-vllm", action="store_true",
+        help="Disable automatic vLLM launch for local target models. "
+             "The script will error with instructions if vLLM is not already running.",
+    )
     args = parser.parse_args()
 
     run_pipeline(
@@ -570,6 +762,7 @@ def main() -> None:
         judgment_models=args.judgment_models,
         dry_run=args.dry_run,
         no_upload=args.no_upload,
+        no_vllm=args.no_vllm,
     )
 
 
