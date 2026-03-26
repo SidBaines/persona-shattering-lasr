@@ -26,10 +26,8 @@ build/
 *.safetensors
 wandb/
 
-<<<<<<< Updated upstream
 # Bloom eval outputs
 bloom-cache/
 bloom-results/
-=======
+
 .devcontainer
->>>>>>> Stashed changes
