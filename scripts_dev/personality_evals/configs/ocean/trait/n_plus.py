@@ -1,20 +1,13 @@
-"""TRAIT sweep configs for the Neuroticism+ (N+) LoRA adapter.
+"""TRAIT sweep for the Neuroticism+ (N+) LoRA adapter.
 
 Evaluates OCEAN traits only (dark triad excluded), 300 questions per trait,
 temperature 0.7, single run per scale point.
 
-Three sweep ranges share the same output directory so skip_completed reuses
-results across runs:
-  - SUITE_CONFIG_INNER : -2.0 to +2.0, step 0.25  (run this first)
-  - SUITE_CONFIG_POS   : +2.5 to +4.0, step 0.5
-  - SUITE_CONFIG_NEG   : -4.0 to -2.5, step 0.5
+Scale grid: step 0.25 in [-2, +2], step 0.5 in [-4, -2.5] and [+2.5, +4].
+The model is loaded once and LoRA scaling is applied in-place per scale point.
 
-SUITE_CONFIG is an alias for SUITE_CONFIG_INNER (used by the default CLI).
-
-To run all three in sequence and produce a combined plot, use:
-    uv run python scripts_dev/personality_evals/configs/ocean/trait/run_all_n_plus.py
-
-Individual runs:
+Usage
+-----
     uv run python -m src_dev.evals suite \\
         --config-module scripts_dev.personality_evals.configs.ocean.trait.n_plus
 """
@@ -53,23 +46,34 @@ _ADAPTER_URI = f"local://{_ADAPTER_LOCAL_PATH.resolve()}"
 
 _OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 
-_EVAL = InspectBenchmarkSpec(
-    name="trait",
-    benchmark="personality_trait_sampled",
-    benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
-    n_runs=1,
-)
 
-_SHARED = dict(
+def _build_scale_points() -> list[float]:
+    """Step 0.5 in [-4, -2.5] and [+2.5, +4], step 0.25 in [-2, +2]."""
+    coarse_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
+    fine       = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
+    coarse_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
+    return sorted({s for s in coarse_neg + fine + coarse_pos if s != 0.0})
+
+
+SUITE_CONFIG = SuiteConfig(
     base_model=BASE_MODEL,
     adapter=_ADAPTER_URI,
-    evals=[_EVAL],
+    sweep=ScaleSweep(points=_build_scale_points()),
+    evals=[
+        InspectBenchmarkSpec(
+            name="trait",
+            benchmark="personality_trait_sampled",
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
+            n_runs=1,
+        ),
+    ],
     temperature=0.7,
     batch_size=32,
     output_root=Path("scratch/evals/ocean/trait"),
     run_name="n_plus",
     skip_completed=True,
-    auto_analyze=False,
+    auto_analyze=True,
+    analyze_kwargs={"title_suffix": "N+ TRAIT"},
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/evals/trait",
     metadata={
@@ -77,10 +81,3 @@ _SHARED = dict(
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
     },
 )
-
-SUITE_CONFIG_INNER = SuiteConfig(**_SHARED, sweep=ScaleSweep(min=-2.0, max=2.0, step=0.25))
-SUITE_CONFIG_POS   = SuiteConfig(**_SHARED, sweep=ScaleSweep(min=2.5,  max=4.0, step=0.5))
-SUITE_CONFIG_NEG   = SuiteConfig(**_SHARED, sweep=ScaleSweep(min=-4.0, max=-2.5, step=0.5))
-
-# Default for CLI (run inner range first)
-SUITE_CONFIG = SUITE_CONFIG_INNER
