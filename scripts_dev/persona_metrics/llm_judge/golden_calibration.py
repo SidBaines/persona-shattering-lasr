@@ -9,31 +9,45 @@ runs each judge N times per example, and computes:
   - Self-consistency: pairwise agreement across the N repeated runs
   - Ordinal Krippendorff's alpha across the N runs
 
-Outputs are written to::
+Subcommands::
 
-    scratch/golden_calibration/<run_key>/
-        raw/<trait>_run_<n>.jsonl       ← per-run per-item scored results
-        analysis/
-            <trait>_summary.json        ← metrics for this trait
-            combined_summary.json       ← all traits aggregated
-        plots/
-            <trait>_confusion.png       ← gold vs median judge heatmap
+    score   Run one judge against all golden datasets (default)
+    compare Aggregate combined_summary.json files from multiple runs and print
+            a ranked comparison table
+    upload  Upload plots (and optionally analysis JSON) from one or more run
+            dirs to a Hugging Face dataset repo
 
 Usage::
 
     # All traits, default judge (gemini-flash-2.0 ×3)
-    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score
 
     # Single trait, dry run
-    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py \\
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score \\
         --trait neuroticism --dry-run
 
     # Custom judge and repeat count
-    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py \\
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score \\
         --model openai/gpt-4o-mini --repeats 1
 
     # Skip already-scored traits (uses existing raw files)
-    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py --resume
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score --resume
+
+    # Compare all completed runs
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py compare
+
+    # Compare specific run dirs
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py compare \\
+        --runs scratch/golden_calibration/run_a scratch/golden_calibration/run_b
+
+    # Upload plots + analysis from all runs to HF
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py upload \\
+        --repo my-org/judge-calibration
+
+    # Upload only plots from specific run dirs
+    uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py upload \\
+        --repo my-org/judge-calibration --plots-only \\
+        --runs scratch/golden_calibration/run_a scratch/golden_calibration/run_b
 """
 
 from __future__ import annotations
@@ -56,6 +70,7 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 
 from src_dev.persona_metrics.config import JudgeLLMConfig
+from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
 from src_dev.persona_metrics.judge_calibration import (
     quadratic_weighted_agreement,
     summarize_pair,
@@ -197,8 +212,14 @@ def analyze_trait(
 
     # --- Gold vs judge (using median across runs) ---
     gold_vs_median = summarize_pair(gold_scores, median_judge)
-    valid_gold = [g for g, m in zip(gold_scores, median_judge) if m is not None]
-    valid_median = [int(round(m)) for g, m in zip(gold_scores, median_judge) if m is not None]
+    valid_gold = [
+        g for g, m in zip(gold_scores, median_judge)
+        if m is not None and score_min <= round(m) <= score_max
+    ]
+    valid_median = [
+        int(round(m)) for g, m in zip(gold_scores, median_judge)
+        if m is not None and score_min <= round(m) <= score_max
+    ]
     qwk_gold = quadratic_weighted_agreement(
         valid_gold, valid_median, score_min=score_min, score_max=score_max
     )
@@ -208,8 +229,14 @@ def analyze_trait(
     for run in runs:
         run_judge = [item["judge_score"] for item in run]
         stats = summarize_pair(gold_scores, run_judge)
-        valid_g = [g for g, j in zip(gold_scores, run_judge) if j is not None]
-        valid_j = [j for g, j in zip(gold_scores, run_judge) if j is not None]
+        valid_g = [
+            g for g, j in zip(gold_scores, run_judge)
+            if j is not None and score_min <= j <= score_max
+        ]
+        valid_j = [
+            j for g, j in zip(gold_scores, run_judge)
+            if j is not None and score_min <= j <= score_max
+        ]
         stats["qwk"] = quadratic_weighted_agreement(
             valid_g, valid_j, score_min=score_min, score_max=score_max
         )
@@ -222,8 +249,16 @@ def analyze_trait(
             run_i = [runs[i][k]["judge_score"] for k in range(len(runs[i]))]
             run_j = [runs[j][k]["judge_score"] for k in range(len(runs[j]))]
             pair_stats = summarize_pair(run_i, run_j)
-            valid_i = [s for s, t in zip(run_i, run_j) if s is not None and t is not None]
-            valid_j_scores = [t for s, t in zip(run_i, run_j) if s is not None and t is not None]
+            valid_i = [
+                s for s, t in zip(run_i, run_j)
+                if s is not None and t is not None
+                and score_min <= s <= score_max and score_min <= t <= score_max
+            ]
+            valid_j_scores = [
+                t for s, t in zip(run_i, run_j)
+                if s is not None and t is not None
+                and score_min <= s <= score_max and score_min <= t <= score_max
+            ]
             pair_stats["qwk"] = quadratic_weighted_agreement(
                 valid_i, valid_j_scores, score_min=score_min, score_max=score_max
             )
@@ -400,9 +435,13 @@ async def main_async(args: argparse.Namespace) -> None:
         max_concurrent=args.max_concurrent,
     )
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    run_key = f"{args.model.replace('/', '_')}__r{args.repeats}__{ts}"
-    run_dir = OUTPUT_ROOT / run_key
+    if getattr(args, "run_dir", None) is not None:
+        run_dir = args.run_dir
+        args.resume = True
+    else:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        run_key = f"{args.model.replace('/', '_')}__r{args.repeats}__{ts}"
+        run_dir = OUTPUT_ROOT / run_key
     run_dir.mkdir(parents=True, exist_ok=True)
     analysis_dir = run_dir / "analysis"
     analysis_dir.mkdir(exist_ok=True)
@@ -466,51 +505,292 @@ async def main_async(args: argparse.Namespace) -> None:
     print(f"Combined summary: {combined_path}")
 
 
+# ---------------------------------------------------------------------------
+# Compare subcommand
+# ---------------------------------------------------------------------------
+
+_COMPARE_METRICS = [
+    ("spearman", "Spearman r"),
+    ("qwk", "QWK"),
+    ("mae", "MAE"),
+    ("within_one", "within-1"),
+    ("exact", "exact"),
+]
+
+
+def _load_run_summary(run_dir: Path) -> dict[str, Any] | None:
+    path = run_dir / "analysis" / "combined_summary.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def cmd_compare(args: argparse.Namespace) -> None:
+    """Load combined_summary.json from each run dir and print a ranked table."""
+    if args.runs:
+        run_dirs = [Path(r) for r in args.runs]
+    else:
+        if not OUTPUT_ROOT.exists():
+            print("No calibration runs found under scratch/golden_calibration/.")
+            return
+        run_dirs = sorted(OUTPUT_ROOT.iterdir())
+
+    summaries: list[tuple[str, dict[str, Any]]] = []
+    for run_dir in run_dirs:
+        summary = _load_run_summary(run_dir)
+        if summary is None:
+            print(f"  [skip] {run_dir.name} — no combined_summary.json")
+            continue
+        summaries.append((run_dir.name, summary))
+
+    if not summaries:
+        print("No completed runs found.")
+        return
+
+    traits = list(TRAIT_TO_METRIC.keys())
+
+    # ---- Per-trait table ----
+    for trait in traits:
+        print(f"\n{'━' * 70}")
+        print(f"  {trait.upper()}")
+        print(f"{'━' * 70}")
+        header = f"  {'Model':<45}" + "".join(f"  {label:>8}" for _, label in _COMPARE_METRICS)
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+
+        rows = []
+        for run_name, summary in summaries:
+            model = summary.get("model", run_name)
+            trait_data = summary.get("per_trait", {}).get(trait)
+            if trait_data is None:
+                continue
+            gvm = trait_data.get("gold_vs_median_judge", {})
+            row_vals = {k: gvm.get(k) for k, _ in _COMPARE_METRICS}
+            rows.append((model, row_vals))
+
+        # Sort by spearman descending
+        rows.sort(key=lambda r: r[1].get("spearman") or -999, reverse=True)
+        for model, vals in rows:
+            model_str = model[:45]
+            cells = []
+            for key, _ in _COMPARE_METRICS:
+                v = vals.get(key)
+                if v is None or (isinstance(v, float) and math.isnan(v)):
+                    cells.append(f"  {'—':>8}")
+                else:
+                    cells.append(f"  {v:>8.3f}")
+            print(f"  {model_str:<45}{''.join(cells)}")
+
+    # ---- Overall average across traits (Spearman and QWK) ----
+    print(f"\n{'━' * 70}")
+    print("  OVERALL AVERAGE (across all traits)")
+    print(f"{'━' * 70}")
+    print(f"  {'Model':<45}  {'Spearman':>8}  {'QWK':>8}  {'MAE':>8}  {'within-1':>8}")
+    print("  " + "-" * 68)
+
+    overall_rows = []
+    for run_name, summary in summaries:
+        model = summary.get("model", run_name)
+        per_trait = summary.get("per_trait", {})
+        sp_vals, qwk_vals, mae_vals, w1_vals = [], [], [], []
+        for trait_data in per_trait.values():
+            gvm = trait_data.get("gold_vs_median_judge", {})
+            for container, key in [(sp_vals, "spearman"), (qwk_vals, "qwk"),
+                                    (mae_vals, "mae"), (w1_vals, "within_one")]:
+                v = gvm.get(key)
+                if v is not None and not (isinstance(v, float) and math.isnan(v)):
+                    container.append(v)
+        mean_sp = statistics.mean(sp_vals) if sp_vals else float("nan")
+        mean_qwk = statistics.mean(qwk_vals) if qwk_vals else float("nan")
+        mean_mae = statistics.mean(mae_vals) if mae_vals else float("nan")
+        mean_w1 = statistics.mean(w1_vals) if w1_vals else float("nan")
+        overall_rows.append((model, mean_sp, mean_qwk, mean_mae, mean_w1))
+
+    overall_rows.sort(key=lambda r: r[1] if not math.isnan(r[1]) else -999, reverse=True)
+    for rank, (model, sp, qwk, mae_v, w1) in enumerate(overall_rows, 1):
+        def _fmt(v: float) -> str:
+            return f"{v:>8.3f}" if not math.isnan(v) else f"{'—':>8}"
+        print(f"  {rank}. {model:<43}  {_fmt(sp)}  {_fmt(qwk)}  {_fmt(mae_v)}  {_fmt(w1)}")
+
+    # Write comparison JSON
+    if not args.runs:
+        out_path = OUTPUT_ROOT / "comparison.json"
+    else:
+        out_path = Path(args.runs[0]) / "comparison.json"
+
+    comparison_out = {
+        "runs": [name for name, _ in summaries],
+        "overall_ranking": [
+            {"model": m, "mean_spearman": sp, "mean_qwk": qwk, "mean_mae": mae_v, "mean_within_one": w1}
+            for m, sp, qwk, mae_v, w1 in overall_rows
+        ],
+    }
+    out_path.write_text(json.dumps(comparison_out, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"\nComparison saved to: {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# Upload subcommand
+# ---------------------------------------------------------------------------
+
+
+def cmd_upload(args: argparse.Namespace) -> None:
+    """Upload plots (and optionally analysis JSON) from run dirs to HF."""
+    load_dotenv()
+    login_from_env()
+
+    if args.runs:
+        run_dirs = [Path(r) for r in args.runs]
+    else:
+        if not OUTPUT_ROOT.exists():
+            print("No calibration runs found.")
+            return
+        run_dirs = sorted(OUTPUT_ROOT.iterdir())
+
+    repo_id: str = args.repo
+    uploaded: list[str] = []
+
+    for run_dir in run_dirs:
+        plots_dir = run_dir / "plots"
+        analysis_dir = run_dir / "analysis"
+
+        if args.plots_only:
+            if not plots_dir.exists() or not any(plots_dir.iterdir()):
+                print(f"  [skip] {run_dir.name} — no plots/")
+                continue
+            upload_dir = plots_dir
+            allow_patterns = ["*.png"]
+            path_in_repo = f"judge_calibration/{run_dir.name}/plots"
+        else:
+            if not run_dir.exists():
+                print(f"  [skip] {run_dir.name} — directory not found")
+                continue
+            upload_dir = run_dir
+            allow_patterns = ["plots/*.png", "analysis/*.json"]
+            path_in_repo = f"judge_calibration/{run_dir.name}"
+
+        print(f"  Uploading {run_dir.name} → {repo_id}/{path_in_repo} ...", flush=True)
+        url = upload_folder_to_dataset_repo(
+            local_dir=upload_dir,
+            repo_id=repo_id,
+            path_in_repo=path_in_repo,
+            commit_message=f"Add judge calibration: {run_dir.name}",
+            allow_patterns=allow_patterns,
+        )
+        uploaded.append(url)
+        print(f"    → {url}")
+
+    if uploaded:
+        print(f"\nDone. {len(uploaded)} run(s) uploaded to {repo_id}")
+    else:
+        print("Nothing uploaded.")
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Score golden calibration datasets with an LLM judge."
+        description="Golden judge calibration toolkit.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    # ---- score ----
+    score_p = subparsers.add_parser("score", help="Run a judge against all golden datasets.")
+    score_p.add_argument(
         "--trait",
         choices=list(TRAIT_TO_METRIC.keys()) + ["all"],
         default="all",
         help="Trait to score, or 'all' (default).",
     )
-    parser.add_argument(
+    score_p.add_argument(
         "--model",
         default="google/gemini-2.0-flash-001",
         help="OpenRouter model string (default: google/gemini-2.0-flash-001).",
     )
-    parser.add_argument(
+    score_p.add_argument(
         "--temperature",
         type=float,
         default=0.7,
         help="Judge temperature for self-consistency measurement (default: 0.7).",
     )
-    parser.add_argument(
+    score_p.add_argument(
         "--repeats",
         type=int,
         default=3,
         help="Number of times to score each example (default: 3).",
     )
-    parser.add_argument(
+    score_p.add_argument(
         "--max-concurrent",
         type=int,
         default=15,
         help="Max concurrent judge calls (default: 15).",
     )
-    parser.add_argument(
+    score_p.add_argument(
         "--resume",
         action="store_true",
         help="Reuse existing raw JSONL files if present, skipping API calls.",
     )
-    parser.add_argument(
+    score_p.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        metavar="RUN_DIR",
+        help="Resume an existing partial run dir instead of creating a new one. Implies --resume.",
+    )
+    score_p.add_argument(
         "--dry-run",
         action="store_true",
         help="Print call counts without making any API calls.",
     )
-    args = parser.parse_args()
-    asyncio.run(main_async(args))
+
+    # ---- compare ----
+    compare_p = subparsers.add_parser("compare", help="Compare completed calibration runs.")
+    compare_p.add_argument(
+        "--runs",
+        nargs="*",
+        metavar="RUN_DIR",
+        default=None,
+        help="Paths to run dirs. Defaults to all dirs under scratch/golden_calibration/.",
+    )
+
+    # ---- upload ----
+    upload_p = subparsers.add_parser("upload", help="Upload results to Hugging Face.")
+    upload_p.add_argument(
+        "--repo",
+        required=True,
+        metavar="ORG/REPO",
+        help="HuggingFace dataset repo ID (e.g. my-org/judge-calibration).",
+    )
+    upload_p.add_argument(
+        "--runs",
+        nargs="*",
+        metavar="RUN_DIR",
+        default=None,
+        help="Paths to run dirs. Defaults to all under scratch/golden_calibration/.",
+    )
+    upload_p.add_argument(
+        "--plots-only",
+        action="store_true",
+        help="Upload only PNG plots, skip analysis JSON.",
+    )
+
+    # Legacy: allow calling without a subcommand to default to 'score'
+    args, remaining = parser.parse_known_args()
+    if args.subcommand is None:
+        # Re-parse as score for backwards compatibility
+        args = score_p.parse_args(remaining)
+        args.subcommand = "score"
+
+    if args.subcommand == "score":
+        asyncio.run(main_async(args))
+    elif args.subcommand == "compare":
+        cmd_compare(args)
+    elif args.subcommand == "upload":
+        cmd_upload(args)
 
 
 if __name__ == "__main__":
