@@ -471,6 +471,21 @@ def _draw_error_bars(ax, scales, means, cis, color) -> None:
                 elinewidth=1.0, alpha=0.7, zorder=5)
 
 
+def _set_scale_xticks(ax, scales) -> None:
+    """Set x-axis ticks at every scale point, labelling multiples of 0.5.
+
+    All scale points get a tick mark. Labels are shown only at multiples of
+    0.5 (or at every point if all points already fall on 0.5 steps), so the
+    axis stays readable without rotation even for dense fine-grained grids.
+    """
+    ax.set_xticks(scales)
+    half_scales = {s for s in scales if round(float(s) * 2) == float(s) * 2}
+    if len(half_scales) < len(scales):
+        ax.set_xticklabels([f"{s:g}" if s in half_scales else "" for s in scales])
+    else:
+        ax.set_xticklabels([f"{s:g}" for s in scales])
+
+
 def plot_trait_sweep(
     df: pd.DataFrame,
     output_dir: Path,
@@ -524,7 +539,7 @@ def plot_trait_sweep(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Trait score (0–1)", fontsize=11)
     ax.set_ylim(0, 1)
-    ax.set_xticks(scales)
+    _set_scale_xticks(ax, scales)
     ax.grid(True, alpha=0.25)
 
     title = "TRAIT sweep: personality scores vs. LoRA scale"
@@ -602,7 +617,7 @@ def plot_bfi_sweep(
     ax.axhline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.6,
                label="Baseline (s=0)", zorder=1)
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.3, zorder=1)
-    ax.set_xticks(scales)
+    _set_scale_xticks(ax, scales)
 
     if all_delta_means:
         max_ci   = max(all_delta_cis) if all_delta_cis else 0.0
@@ -685,7 +700,7 @@ def plot_capability_sweep(
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Accuracy", fontsize=11)
-    ax.set_xticks(scales)
+    _set_scale_xticks(ax, scales)
 
     y_min_candidates = [float(np.nanmin(means - cis))]
     if random_baseline is not None:
@@ -757,7 +772,7 @@ def plot_generic_sweep(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Score", fontsize=11)
     ax.set_ylim(0, 1)
-    ax.set_xticks(scales)
+    _set_scale_xticks(ax, scales)
     ax.grid(True, alpha=0.25)
 
     title = f"{eval_name} sweep"
@@ -831,7 +846,7 @@ def plot_parse_rate(
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Parse rate", fontsize=11)
     ax.set_ylim(max(0.0, float(np.nanmin(pr_min)) - 0.05), 1.0)
-    ax.set_xticks(scales)
+    _set_scale_xticks(ax, scales)
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
     ax.grid(True, alpha=0.25)
 
