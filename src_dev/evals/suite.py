@@ -407,7 +407,8 @@ def _run_dir_for(
     eval_name: str,
     run_index: int = 0,
 ) -> Path:
-    run_dir = output_root / model_spec_name / eval_name / f"run_{run_index:02d}"
+    suffix = f"/run_{run_index:02d}" if run_index > 0 else ""
+    run_dir = output_root / model_spec_name / f"{eval_name}{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
@@ -997,7 +998,6 @@ def _upload_run_per_eval(
         if not eval_dirs:
             continue
         resolved_path = path_in_repo_template.replace("{eval_name}", eval_name)
-        # Upload each model-spec subdir's eval folder.
         for model_dir in eval_dirs:
             eval_subdir = model_dir / eval_name
             _upload_run(eval_subdir, repo_id, f"{resolved_path}/{model_dir.name}")
