@@ -1,0 +1,97 @@
+nohup: ignoring input
+Input Notebook:  scripts_dev/personality_evals/anton_ocean_trait_evals/trait_evals.ipynb
+Output Notebook: scripts_dev/personality_evals/anton_ocean_trait_evals/trait_evals.ipynb
+Executing notebook with kernel: python3
+Executing Cell 1---------------------------------------
+Ending Cell 1------------------------------------------
+Executing Cell 2---------------------------------------
+Ending Cell 2------------------------------------------
+Executing Cell 3---------------------------------------
+Ending Cell 3------------------------------------------
+Executing Cell 4---------------------------------------
+Repo root: /root/persona-shattering-lasr
+Output root: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations
+
+Ending Cell 4------------------------------------------
+Executing Cell 5---------------------------------------
+Ending Cell 5------------------------------------------
+Executing Cell 6---------------------------------------
+  Neurotic: already cached at /root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping
+  Conscientiousness: already cached at /root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_oct-runs-low-conscientiousness-glm45air-v2/conscientiousness_low_v2-llama-3.1-8b-it-s223458-94742ca72e77/lora/conscientiousness_low_v2-persona
+
+Neurotic adapter:         local:///root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping
+Conscientiousness adapter: local:///root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_oct-runs-low-conscientiousness-glm45air-v2/conscientiousness_low_v2-llama-3.1-8b-it-s223458-94742ca72e77/lora/conscientiousness_low_v2-persona
+
+Ending Cell 6------------------------------------------
+Executing Cell 7---------------------------------------
+Ending Cell 7------------------------------------------
+Executing Cell 8---------------------------------------
+         name         label  neuro_scale  consc_scale
+0        base          Base          0.0          0.0
+1   n1p0_c0p0           1N+          1.0          0.0
+2   n0p0_c1p0           1C-          0.0          1.0
+3   n0p5_c0p5  0.5N+, 0.5C-          0.5          0.5
+4   n1p0_c1p0      1N+, 1C-          1.0          1.0
+5   n0p5_c1p0    0.5N+, 1C-          0.5          1.0
+6   n1p0_c0p5    1N+, 0.5C-          1.0          0.5
+7  n1p0_cm0p5   1N+, -0.5C-          1.0         -0.5
+8  nm0p5_c1p0   -0.5N+, 1C-         -0.5          1.0
+Ending Cell 8------------------------------------------
+Executing Cell 9---------------------------------------
+Ending Cell 9------------------------------------------
+Executing Cell 10--------------------------------------
+
+=== Suite: neuro_x_consc_combos | 9 model(s) × 2 eval(s) ===
+
+  loading [1/9] base ...
+
+`torch_dtype` is deprecated! Use `dtype` instead!
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+  loaded  [1/9] base  (6.6s)
+
+  running   [1/9] base / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (5,000 samples): hf_preloaded/base[0m                  
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/5000   0% | Samples:   1/5000 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  66/5000   1% | Samples:  65/5000 | Openness: 0.73 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 129/5000   2% | Samples: 129/5000 | Openness: 0.72 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 193/5000   3% | Samples: 193/5000 | Openness: 0.73 | hf_preloaded: 31/32 | HTTP retries: 0
+
