@@ -138,10 +138,14 @@ def register_preloaded_hf_provider() -> None:
                 padding=True,
             )
 
-            kwargs: dict[str, Any] = dict(do_sample=True)
-            if config.max_tokens is not None:
-                kwargs["max_new_tokens"] = config.max_tokens
-            if config.temperature is not None:
+            # Use greedy decoding when temperature=0 (do_sample=True + temp=0 is
+            # contradictory and triggers transformers warnings every batch).
+            greedy = config.temperature is not None and config.temperature == 0.0
+            kwargs: dict[str, Any] = dict(do_sample=not greedy)
+            # Always set max_new_tokens to avoid the transformers default-max_length
+            # warning that fires every batch when max_new_tokens is unset.
+            kwargs["max_new_tokens"] = config.max_tokens if config.max_tokens is not None else self.max_tokens()
+            if config.temperature is not None and not greedy:
                 kwargs["temperature"] = config.temperature
             if config.top_p is not None:
                 kwargs["top_p"] = config.top_p
