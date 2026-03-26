@@ -168,6 +168,17 @@ class SuiteConfig(BaseModel):
     # Optional HF Hub path for Inspect to write logs directly during the run
     # (e.g. "hf://datasets/org/repo"). When None, logs are written locally only.
     hf_log_dir: str | None = None
+    # Optional: upload the run directory to a HuggingFace dataset repo after completion.
+    # upload_repo_id: e.g. "persona-shattering-lasr/monorepo"
+    # upload_path_in_repo: destination prefix, e.g.
+    #   "fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/evals/mcq"
+    # Supports {eval_name} template variable to split uploads per eval.
+    upload_repo_id: str | None = None
+    upload_path_in_repo: str | None = None
+    # Optional: run analyze_results.generate_plots() after the sweep completes.
+    # analyze_kwargs passes through to generate_plots() (e.g. random_baseline, spread, title_suffix).
+    auto_analyze: bool = False
+    analyze_kwargs: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":
