@@ -156,11 +156,10 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
     base_ref = resolve_model_reference(spec.base_model, kind="base model")
     torch_dtype = _resolve_dtype(spec)
 
-    device_map = "cuda" if torch.cuda.is_available() else "auto"
     base_model = AutoModelForCausalLM.from_pretrained(
         base_ref,
         torch_dtype=torch_dtype,
-        device_map=device_map,
+        device_map="auto",
         **_flash_attn_kwargs(),
     )
 
@@ -236,20 +235,21 @@ def _load_local_model_for_sweep(
     The adapter is always loaded under ``_SWEEP_ADAPTER_NAME`` so that
     ``_prepare_sweep_model`` can reference the same name without coupling.
     """
-    device_map = "cuda" if torch.cuda.is_available() else "auto"
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_ref,
         torch_dtype=dtype,
-        device_map=device_map,
+        device_map="auto",
         **_flash_attn_kwargs(),
     )
     peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
     if subfolder:
         peft_kwargs["subfolder"] = subfolder
     peft_model = PeftModel.from_pretrained(base_model, adapter_ref, **peft_kwargs)
-    # Load tokenizer from base model — adapter tokenizer_config.json may reference
-    # backends (e.g. TokenizersBackend) that are not available in this environment.
-    tokenizer = AutoTokenizer.from_pretrained(base_model_ref)
+    # Tokenizer lives in the adapter subfolder if one is specified, otherwise the adapter root.
+    tokenizer_kwargs: dict[str, Any] = {}
+    if subfolder:
+        tokenizer_kwargs["subfolder"] = subfolder
+    tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
     return peft_model, tokenizer
 
 
@@ -353,6 +353,7 @@ def _prepare_vllm_sweep_model(
         peft_model=None,
         model_name=spec.base_model,
     )
+
 
 
 def _prepare_resume_model(spec: ModelSpec) -> _PreparedModel:
