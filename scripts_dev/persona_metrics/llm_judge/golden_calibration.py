@@ -668,7 +668,7 @@ def cmd_upload(args: argparse.Namespace) -> None:
                 print(f"  [skip] {run_dir.name} — directory not found")
                 continue
             upload_dir = run_dir
-            allow_patterns = ["plots/*.png", "analysis/*.json"]
+            allow_patterns = ["plots/*.png", "analysis/*.json", "raw/*.jsonl"]
             path_in_repo = f"judge_calibration/{run_dir.name}"
 
         print(f"  Uploading {run_dir.name} → {repo_id}/{path_in_repo} ...", flush=True)
@@ -678,6 +678,20 @@ def cmd_upload(args: argparse.Namespace) -> None:
             path_in_repo=path_in_repo,
             commit_message=f"Add judge calibration: {run_dir.name}",
             allow_patterns=allow_patterns,
+        )
+        uploaded.append(url)
+        print(f"    → {url}")
+
+    # Upload top-level comparison.json if present
+    comparison_file = OUTPUT_ROOT / "comparison.json"
+    if comparison_file.exists():
+        print(f"  Uploading comparison.json → {repo_id}/judge_calibration/ ...", flush=True)
+        url = upload_folder_to_dataset_repo(
+            local_dir=OUTPUT_ROOT,
+            repo_id=repo_id,
+            path_in_repo="judge_calibration",
+            commit_message="Add judge calibration: comparison.json",
+            allow_patterns=["comparison.json"],
         )
         uploaded.append(url)
         print(f"    → {url}")
