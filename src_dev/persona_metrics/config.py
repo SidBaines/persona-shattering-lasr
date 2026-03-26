@@ -20,6 +20,8 @@ class JudgeLLMConfig(BaseModel):
     temperature: float = 0.0  # Deterministic by default for judging
     max_concurrent: int = 10
     timeout: int = 60
+    max_retries: int = 3  # Number of retries on transient errors (e.g. rate limits)
+    backoff_factor: float = 2.0  # Exponential backoff multiplier between retries
 
 
 class PersonaMetricSpec(BaseModel):

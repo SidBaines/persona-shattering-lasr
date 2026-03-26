@@ -13,6 +13,7 @@ from src_dev.inference.config import (
     InferenceConfig,
     OpenAIProviderConfig,
     OpenRouterProviderConfig,
+    RetryConfig,
 )
 from src_dev.inference.providers import get_provider
 from src_dev.inference.providers.base import InferenceProvider
@@ -166,6 +167,10 @@ class LLMJudgeMetric(PersonaMetric):
             openai=openai_cfg,
             openrouter=openrouter_cfg,
             anthropic=anthropic_cfg,
+            retry=RetryConfig(
+                max_retries=cfg.max_retries,
+                backoff_factor=cfg.backoff_factor,
+            ),
         )
 
     def _get_provider(self) -> InferenceProvider:

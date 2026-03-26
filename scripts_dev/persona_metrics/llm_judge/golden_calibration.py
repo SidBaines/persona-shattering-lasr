@@ -433,6 +433,8 @@ async def main_async(args: argparse.Namespace) -> None:
         model=args.model,
         temperature=args.temperature,
         max_concurrent=args.max_concurrent,
+        max_retries=args.max_retries,
+        backoff_factor=args.backoff_factor,
     )
 
     if getattr(args, "run_dir", None) is not None:
@@ -728,6 +730,18 @@ def main() -> None:
         type=int,
         default=15,
         help="Max concurrent judge calls (default: 15).",
+    )
+    score_p.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Max retries on transient errors like rate limits (default: 3).",
+    )
+    score_p.add_argument(
+        "--backoff-factor",
+        type=float,
+        default=2.0,
+        help="Exponential backoff multiplier between retries (default: 2.0).",
     )
     score_p.add_argument(
         "--resume",
