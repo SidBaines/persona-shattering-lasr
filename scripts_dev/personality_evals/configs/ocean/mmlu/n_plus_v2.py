@@ -65,7 +65,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=64,
+    batch_size=128,
     output_root=Path("scratch/evals/ocean/mmlu"),
     run_name="n_plus_v2",
     skip_completed=True,
