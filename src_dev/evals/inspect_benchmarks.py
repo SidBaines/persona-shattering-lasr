@@ -166,6 +166,9 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         # (it requires do_sample=False for greedy decoding instead).  Clear it so
         # Inspect does not forward temperature to the backend.
         task.config.temperature = None
+        # MCQ only needs a single letter answer — cap generation to avoid
+        # running to the provider's default max_tokens (2048) per sample.
+        task.config.max_tokens = 32
         return task
 
     if benchmark == "truthfulqa":
