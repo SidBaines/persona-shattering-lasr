@@ -161,7 +161,14 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
             adapter_name_prefix="adapter",
             adapter_resolver=lambda ref: _resolve(ref, kind="adapter"),
         )
-        tokenizer_ref = resolve_model_reference(normalized[0].path, kind="adapter")
+        # Try loading the tokenizer from the first adapter (HF model repos
+        # often bundle tokenizer files alongside the adapter).  Fall back to
+        # the base model when the adapter directory has no usable tokenizer
+        # (common for bare LoRA dirs downloaded from dataset repos).
+        try:
+            tokenizer_ref = resolve_model_reference(normalized[0].path, kind="adapter")
+        except Exception:
+            tokenizer_ref = base_ref
     else:
         peft_model = PeftModel.__new__(PeftModel)
         # No adapters — wrap as a plain model; use a lightweight shim instead.
@@ -169,7 +176,10 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
         peft_model = base_model  # type: ignore[assignment]
         tokenizer_ref = base_ref
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_ref)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(base_ref)
 
     inspect_model = get_model(
         f"hf_preloaded/{spec.name}",
@@ -323,7 +333,8 @@ def _run_dir_for(
     eval_name: str,
     run_index: int = 0,
 ) -> Path:
-    run_dir = output_root / model_spec_name / eval_name / f"run_{run_index:02d}"
+    suffix = f"/run_{run_index:02d}" if run_index > 0 else ""
+    run_dir = output_root / model_spec_name / f"{eval_name}{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
@@ -669,10 +680,10 @@ def run_eval_suite(
                         error=result_error,
                     ))
 
-                # Evict Inspect's model cache between evals in the standard path.
-                # In sweep mode the model is ours — don't evict it.
-                if sweep_peft_model is None and sweep_vllm_provider is None:
-                    _cleanup_runtime_model_state()
+                # NOTE: Do NOT evict the model between evals for the same model
+                # spec — that moves it to CPU, causing subsequent evals to run
+                # on CPU instead of GPU.  Cleanup happens in the finally block
+                # after all evals for this spec are done.
 
         finally:
             # Always restore LoRaScaling so weights are clean for the next scale point.
@@ -681,7 +692,7 @@ def run_eval_suite(
             # Only evict Inspect's model cache for per-spec models (not sweep).
             # In sweep mode the same provider instance is reused across scale points;
             # clearing the cache orphans batched_generate's background thread and hangs.
-            if sweep_peft_model is None and sweep_vllm_provider is None:
+            if sweep_peft_model is None:
                 _cleanup_runtime_model_state()
                 if prepared.peft_model is not None:
                     try:
@@ -696,13 +707,6 @@ def run_eval_suite(
         except Exception:
             pass
         _cleanup_runtime_model_state()
-
-    # Shut down the vLLM engine after all scale points are done.
-    if sweep_vllm_provider is not None:
-        try:
-            sweep_vllm_provider.__exit__(None, None, None)
-        except Exception:
-            pass
 
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)
@@ -729,14 +733,11 @@ def _upload_run_per_eval(
     """Upload each eval's subdirectories separately, substituting {eval_name} in the path."""
     eval_names = [e.name for e in evals]
     for eval_name in eval_names:
-        # Collect all model-spec subdirs that contain this eval's data.
-        # Structure: output_root/<model_spec>/<eval_name>[/run_NN]
         eval_dirs = [d for d in output_root.iterdir()
                      if d.is_dir() and (d / eval_name).exists()]
         if not eval_dirs:
             continue
         resolved_path = path_in_repo_template.replace("{eval_name}", eval_name)
-        # Upload each model-spec subdir's eval folder.
         for model_dir in eval_dirs:
             eval_subdir = model_dir / eval_name
             _upload_run(eval_subdir, repo_id, f"{resolved_path}/{model_dir.name}")

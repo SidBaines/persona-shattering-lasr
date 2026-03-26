@@ -131,11 +131,32 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
     kwargs: dict[str, Any] = dict(spec.benchmark_args)
 
     if benchmark == "mmlu":
+        import random
+        from collections import defaultdict
+
         from inspect_evals.mmlu.mmlu import mmlu_0_shot
         from inspect_evals.utils import filter_duplicate_ids
 
+        max_samples = kwargs.pop("max_samples", None)
         task = mmlu_0_shot(**kwargs)
         task.dataset = filter_duplicate_ids(task.dataset)
+
+        if max_samples is not None:
+            # Stratified sampling: distribute max_samples evenly across subjects,
+            # with remainder allocated round-robin alphabetically.
+            by_subject: dict[str, list] = defaultdict(list)
+            for sample in task.dataset:
+                by_subject[sample.metadata["subject"]].append(sample)
+            subjects = sorted(by_subject)
+            per_subject, remainder = divmod(int(max_samples), len(subjects))
+            sampled: list = []
+            for i, subj in enumerate(subjects):
+                n = per_subject + (1 if i < remainder else 0)
+                pool = by_subject[subj]
+                sampled.extend(random.sample(pool, min(n, len(pool))))
+            random.shuffle(sampled)
+            task.dataset = MemoryDataset(sampled)
+
         # The task hardcodes temperature=0.0, which the HF local backend rejects
         # (it requires do_sample=False for greedy decoding instead).  Clear it so
         # Inspect does not forward temperature to the backend.
