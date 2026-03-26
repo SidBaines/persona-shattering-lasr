@@ -33,6 +33,10 @@ class ScaleSweep(BaseModel):
     (inclusive) at *step* intervals.  The base model (scale=0, no adapter)
     is always included automatically.
 
+    Alternatively, pass an explicit *points* list to use an arbitrary set of
+    scale values (e.g. non-uniform grids).  When *points* is set, *min*,
+    *max*, and *step* are ignored.
+
     The sweep is defined once at suite level and can be overridden
     per-eval via ``InspectBenchmarkSpec.sweep``.
     """
@@ -40,9 +44,12 @@ class ScaleSweep(BaseModel):
     min: float = -2.0
     max: float = 2.0
     step: float = 0.25
+    points: list[float] | None = None
 
     @model_validator(mode="after")
     def _validate_range(self) -> "ScaleSweep":
+        if self.points is not None:
+            return self
         if self.step <= 0:
             raise ValueError(f"step must be positive, got {self.step}")
         if self.min > self.max:
@@ -51,6 +58,8 @@ class ScaleSweep(BaseModel):
 
     def scale_points(self) -> list[float]:
         """Return the sorted list of scale values, excluding 0.0 (which is the base model)."""
+        if self.points is not None:
+            return sorted(s for s in self.points if s != 0.0)
         n_steps = round((self.max - self.min) / self.step)
         return [
             s for s in (round(self.min + i * self.step, 10) for i in range(n_steps + 1))
