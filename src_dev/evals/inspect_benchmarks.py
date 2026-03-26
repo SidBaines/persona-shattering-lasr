@@ -56,6 +56,7 @@ def _build_popqa_task(limit: int | None = None) -> Task:
 def _build_trait_sampled_task(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
+    max_tokens: int | None = None,
 ) -> Task:
     """Build a TRAIT task sampling evenly across selected trait splits.
 
@@ -101,7 +102,11 @@ def _build_trait_sampled_task(
     meta = {"answer_mapping": {"A": 1, "B": 1, "C": 0, "D": 0}}
     combined_ds = enrich_dataset(combined_ds, meta)
     system_msg = get_system_prompt("trait", "")
-    return create_task(combined_ds, system_msg)
+    task = create_task(combined_ds, system_msg)
+    if max_tokens is not None:
+        from inspect_ai.model import GenerateConfig
+        task.config = task.config.merge(GenerateConfig(max_tokens=max_tokens))
+    return task
 
 
 def _canonical_name(name: str) -> str:
@@ -198,9 +203,11 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         # would re-truncate the already-sampled combined dataset back to one trait.
         samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
         trait_splits = kwargs.pop("trait_splits", None)
+        max_tokens = kwargs.pop("max_tokens", None)
         return _build_trait_sampled_task(
             samples_per_trait=samples_per_trait,
             trait_splits=trait_splits,
+            max_tokens=int(max_tokens) if max_tokens is not None else None,
         )
 
     raise ValueError(

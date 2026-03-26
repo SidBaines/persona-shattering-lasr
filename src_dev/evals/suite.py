@@ -58,8 +58,15 @@ def _fmt_duration(seconds: float) -> str:
 # GPU / Inspect cache cleanup
 # ---------------------------------------------------------------------------
 
-def _cleanup_runtime_model_state() -> None:
-    """Release Inspect's in-process model cache and free GPU memory."""
+def _cleanup_runtime_model_state(move_to_cpu: bool = True) -> None:
+    """Release Inspect's in-process model cache and free GPU memory.
+
+    Args:
+        move_to_cpu: If True (default), move HF model weights to CPU before
+            closing the provider.  Set False when the underlying model must
+            stay on GPU (e.g. between sweep combos that share the same
+            PeftModel instance).
+    """
     try:
         from inspect_ai.model import _model as inspect_model_impl
 
@@ -75,14 +82,15 @@ def _cleanup_runtime_model_state() -> None:
         if isinstance(cached_models, dict):
             for model in list(cached_models.values()):
                 api = getattr(model, "api", None)
-                # The HF provider's batch thread holds a dangling generator reference
-                # that keeps the model on GPU. Moving to CPU before close() frees VRAM.
-                hf_model = getattr(api, "model", None)
-                if hf_model is not None and callable(getattr(hf_model, "cpu", None)):
-                    try:
-                        hf_model.cpu()
-                    except Exception:
-                        pass
+                if move_to_cpu:
+                    # The HF provider's batch thread holds a dangling generator reference
+                    # that keeps the model on GPU. Moving to CPU before close() frees VRAM.
+                    hf_model = getattr(api, "model", None)
+                    if hf_model is not None and callable(getattr(hf_model, "cpu", None)):
+                        try:
+                            hf_model.cpu()
+                        except Exception:
+                            pass
                 close = getattr(api, "close", None)
                 if callable(close):
                     try:
@@ -843,16 +851,19 @@ def run_eval_suite(
             # Always restore LoRaScaling so weights are clean for the next scale point.
             if prepared.scaler is not None:
                 prepared.scaler.restore()
-            # Only evict Inspect's model cache for per-spec models (not sweep).
-            # In sweep mode the same provider instance is reused across scale points;
-            # clearing the cache orphans batched_generate's background thread and hangs.
-            if sweep_peft_model is None and sweep_vllm_provider is None:
-                _cleanup_runtime_model_state()
+            if sweep_peft_model is None:
+                # Per-spec model: move weights off GPU and clear Inspect's cache.
+                _cleanup_runtime_model_state(move_to_cpu=True)
                 if prepared.peft_model is not None:
                     try:
                         prepared.peft_model.cpu()
                     except Exception:
                         pass
+            else:
+                # Sweep mode: the PeftModel must stay on GPU, but the Inspect
+                # provider for this combo (its background batch-generator thread)
+                # should be closed so it doesn't compete with the next combo.
+                _cleanup_runtime_model_state(move_to_cpu=False)
 
     # Release the sweep model after all scale points are done.
     if sweep_peft_model is not None:
