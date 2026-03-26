@@ -425,3 +425,2211 @@ Steps: 415/1500  27% | Samples: 410/1500 | Openness: 0.77 | hf_preloaded: 22/32 
 
 Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
 
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 451/1500  30% | Samples: 449/1500 | Openness: 0.77 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 493/1500  32% | Samples: 490/1500 | Openness: 0.77 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 544/1500  36% | Samples: 536/1500 | Openness: 0.77 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 576/1500  38% | Samples: 570/1500 | Openness: 0.77 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 611/1500  40% | Samples: 609/1500 | Openness: 0.77 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 657/1500  43% | Samples: 648/1500 | Openness: 0.77 | hf_preloaded: 16/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 694/1500  46% | Samples: 693/1500 | Openness: 0.77 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 740/1500  49% | Samples: 737/1500 | Openness: 0.77 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 772/1500  51% | Samples: 769/1500 | Openness: 0.77 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 818/1500  54% | Samples: 810/1500 | Openness: 0.77 | hf_preloaded: 19/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 857/1500  57% | Samples: 850/1500 | Openness: 0.77 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 887/1500  59% | Samples: 887/1500 | Openness: 0.77 | hf_preloaded: 18/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 928/1500  61% | Samples: 920/1500 | Openness: 0.77 | hf_preloaded: 10/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 960/1500  64% | Samples: 950/1500 | Openness: 0.77 | hf_preloaded: 10/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 992/1500  66% | Samples: 980/1500 | Openness: 0.77 | hf_preloaded: 18/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1024/1500  68% | Samples: 1015/1500 | Openness: 0.77 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1056/1500  70% | Samples: 1040/1500 | Openness: 0.77 | hf_preloaded: 14/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1088/1500  72% | Samples: 1072/1500 | Openness: 0.77 | hf_preloaded: 11/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1120/1500  74% | Samples: 1100/1500 | Openness: 0.77 | hf_preloaded:  5/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1135/1500  75% | Samples: 1130/1500 | Openness: 0.77 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1168/1500  77% | Samples: 1162/1500 | Openness: 0.77 | hf_preloaded: 19/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1193/1500  79% | Samples: 1190/1500 | Openness: 0.77 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1226/1500  81% | Samples: 1219/1500 | Openness: 0.77 | hf_preloaded: 18/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1252/1500  83% | Samples: 1249/1500 | Openness: 0.77 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1281/1500  85% | Samples: 1281/1500 | Openness: 0.77 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1316/1500  87% | Samples: 1313/1500 | Openness: 0.77 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1345/1500  89% | Samples: 1345/1500 | Openness: 0.77 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1377/1500  91% | Samples: 1377/1500 | Openness: 0.77 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1413/1500  94% | Samples: 1409/1500 | Openness: 0.77 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1444/1500  96% | Samples: 1441/1500 | Openness: 0.77 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1475/1500  98% | Samples: 1473/1500 | Openness: 0.77 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.77 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/n0p0_c1p0[0m                                                                       
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                               [0m  0:03:50                                                                
+[1mhf_preloaded/n0p0_c1p0                    [0m  400,340 tokens [[1mI: [0m392,808, [1mO: [0m7,532]                                  
+[1many_choice[0m                                                                                                         
+Openness           0.773                                                                                           
+Conscientiousness  0.700                                                                                           
+Extraversion       0.552                                                                                           
+Agreeableness      0.723                                                                                           
+Neuroticism        0.047                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n0p0_c1p0/trait/native/inspect_logs/2026-03-26T15-26…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [3/9] n0p0_c1p0 / trait  (3m56s) [ok]
+
+  running   [3/9] n0p0_c1p0 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/n0p0_c1p0[0m        
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/300   1% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  33/300  11% | Samples:  33/300 | accuracy: 0.00 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  67/300  22% | Samples:  65/300 | accuracy: 0.60 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/300  32% | Samples:  97/300 | accuracy: 0.58 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 130/300  43% | Samples: 129/300 | accuracy: 0.60 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 162/300  54% | Samples: 161/300 | accuracy: 0.60 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 217/300  72% | Samples: 216/300 | accuracy: 0.60 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 225/300  75% | Samples: 225/300 | accuracy: 0.60 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 257/300  85% | Samples: 257/300 | accuracy: 0.60 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.60 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/n0p0_c1p0[0m                                                                  
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                               [0m  0:00:59                                                                
+[1mhf_preloaded/n0p0_c1p0                    [0m  134,136 tokens [[1mI: [0m130,172, [1mO: [0m3,964]                                  
+[1mchoice[0m                                                                                                             
+accuracy  0.600                                                                                                    
+stderr    0.028                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n0p0_c1p0/mmlu/native/inspect_logs/2026-03-26T15-30-…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [3/9] n0p0_c1p0 / mmlu  (1m00s) [ok]
+
+  loading [4/9] n0p5_c0p5 ...
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+The tokenizer you are loading from '/root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+
+  loaded  [4/9] n0p5_c0p5  (27.8s)
+
+  running   [4/9] n0p5_c0p5 / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (1,500 samples): hf_preloaded/n0p5_c0p5[0m             
+max_tokens: 128, temperature: 0.7, dataset: (samples)    
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   6/1500   0% | Samples:   1/1500 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  33/1500   2% | Samples:  33/1500 | Openness: 0.77 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  65/1500   4% | Samples:  65/1500 | Openness: 0.77 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  98/1500   6% | Samples:  97/1500 | Openness: 0.75 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 130/1500   8% | Samples: 129/1500 | Openness: 0.77 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 165/1500  11% | Samples: 161/1500 | Openness: 0.80 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 194/1500  12% | Samples: 193/1500 | Openness: 0.79 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 226/1500  15% | Samples: 225/1500 | Openness: 0.79 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 259/1500  17% | Samples: 257/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 293/1500  19% | Samples: 289/1500 | Openness: 0.79 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 324/1500  21% | Samples: 321/1500 | Openness: 0.78 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 354/1500  23% | Samples: 353/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 386/1500  25% | Samples: 385/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 421/1500  28% | Samples: 417/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 450/1500  30% | Samples: 449/1500 | Openness: 0.78 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 481/1500  32% | Samples: 481/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 515/1500  34% | Samples: 513/1500 | Openness: 0.78 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 546/1500  36% | Samples: 545/1500 | Openness: 0.78 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 580/1500  38% | Samples: 577/1500 | Openness: 0.78 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 614/1500  40% | Samples: 609/1500 | Openness: 0.78 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 643/1500  42% | Samples: 641/1500 | Openness: 0.78 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 679/1500  45% | Samples: 673/1500 | Openness: 0.78 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 709/1500  47% | Samples: 705/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 740/1500  49% | Samples: 737/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 770/1500  51% | Samples: 769/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 807/1500  53% | Samples: 801/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 833/1500  55% | Samples: 833/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 867/1500  57% | Samples: 865/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 902/1500  60% | Samples: 897/1500 | Openness: 0.78 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 929/1500  61% | Samples: 929/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 961/1500  64% | Samples: 961/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 994/1500  66% | Samples: 993/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1027/1500  68% | Samples: 1025/1500 | Openness: 0.78 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1063/1500  70% | Samples: 1057/1500 | Openness: 0.78 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1093/1500  72% | Samples: 1089/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1128/1500  75% | Samples: 1121/1500 | Openness: 0.78 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1154/1500  76% | Samples: 1153/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1185/1500  79% | Samples: 1185/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1222/1500  81% | Samples: 1217/1500 | Openness: 0.78 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1250/1500  83% | Samples: 1249/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1284/1500  85% | Samples: 1281/1500 | Openness: 0.78 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1313/1500  87% | Samples: 1313/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1345/1500  89% | Samples: 1345/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1382/1500  92% | Samples: 1377/1500 | Openness: 0.78 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1409/1500  93% | Samples: 1409/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1441/1500  96% | Samples: 1441/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1475/1500  98% | Samples: 1473/1500 | Openness: 0.78 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.78 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/n0p5_c0p5[0m                                                                       
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                              [0m  0:12:21                                                                 
+[1mhf_preloaded/n0p5_c0p5                   [0m  539,808 tokens [[1mI: [0m347,808, [1mO: [0m192,000]                                 
+[1many_choice[0m                                                                                                         
+Openness           0.777                                                                                           
+Conscientiousness  0.906                                                                                           
+Extraversion       0.576                                                                                           
+Agreeableness      0.845                                                                                           
+Neuroticism        0.186                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n0p5_c0p5/trait/native/inspect_logs/2026-03-26T15-32…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [4/9] n0p5_c0p5 / trait  (12m27s) [ok]
+
+  running   [4/9] n0p5_c0p5 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/n0p5_c0p5[0m        
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   2/300   0% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  36/300  12% | Samples:  33/300 | accuracy: 0.43 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  65/300  21% | Samples:  65/300 | accuracy: 0.34 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/300  32% | Samples:  97/300 | accuracy: 0.40 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 130/300  43% | Samples: 129/300 | accuracy: 0.40 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 162/300  54% | Samples: 161/300 | accuracy: 0.39 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 193/300  64% | Samples: 193/300 | accuracy: 0.38 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 227/300  75% | Samples: 225/300 | accuracy: 0.37 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 257/300  85% | Samples: 257/300 | accuracy: 0.35 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 290/300  96% | Samples: 289/300 | accuracy: 0.35 | hf_preloaded: 10/32 | HTTP retries: 0
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.36 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/n0p5_c0p5[0m                                                                  
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                               [0m  0:01:07                                                                
+[1mhf_preloaded/n0p5_c0p5                    [0m  121,928 tokens [[1mI: [0m117,128, [1mO: [0m4,800]                                  
+[1mchoice[0m                                                                                                             
+accuracy  0.357                                                                                                    
+stderr    0.028                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n0p5_c0p5/mmlu/native/inspect_logs/2026-03-26T15-44-…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [4/9] n0p5_c0p5 / mmlu  (1m09s) [ok]
+
+  loading [5/9] n1p0_c1p0 ...
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+The tokenizer you are loading from '/root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+
+  loaded  [5/9] n1p0_c1p0  (34.4s)
+
+  running   [5/9] n1p0_c1p0 / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (1,500 samples): hf_preloaded/n1p0_c1p0[0m             
+max_tokens: 128, temperature: 0.7, dataset: (samples)    
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/1500   0% | Samples:   1/1500 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  33/1500   2% | Samples:  33/1500 | Openness: 0.67 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  68/1500   4% | Samples:  65/1500 | Openness: 0.88 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  99/1500   6% | Samples:  97/1500 | Openness: 0.88 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 132/1500   8% | Samples: 129/1500 | Openness: 0.90 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 163/1500  10% | Samples: 161/1500 | Openness: 0.86 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 195/1500  13% | Samples: 193/1500 | Openness: 0.88 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 226/1500  15% | Samples: 225/1500 | Openness: 0.88 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 258/1500  17% | Samples: 257/1500 | Openness: 0.85 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 289/1500  19% | Samples: 289/1500 | Openness: 0.87 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 323/1500  21% | Samples: 321/1500 | Openness: 0.87 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 354/1500  23% | Samples: 353/1500 | Openness: 0.84 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 386/1500  25% | Samples: 385/1500 | Openness: 0.84 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 421/1500  28% | Samples: 417/1500 | Openness: 0.84 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 452/1500  30% | Samples: 449/1500 | Openness: 0.84 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 481/1500  32% | Samples: 481/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 517/1500  34% | Samples: 513/1500 | Openness: 0.84 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 549/1500  36% | Samples: 545/1500 | Openness: 0.84 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 582/1500  38% | Samples: 577/1500 | Openness: 0.84 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 609/1500  40% | Samples: 609/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 645/1500  43% | Samples: 641/1500 | Openness: 0.84 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 677/1500  45% | Samples: 673/1500 | Openness: 0.84 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 707/1500  47% | Samples: 705/1500 | Openness: 0.84 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 739/1500  49% | Samples: 737/1500 | Openness: 0.84 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 769/1500  51% | Samples: 769/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 808/1500  53% | Samples: 801/1500 | Openness: 0.84 | hf_preloaded: 19/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 838/1500  55% | Samples: 833/1500 | Openness: 0.84 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 871/1500  58% | Samples: 865/1500 | Openness: 0.84 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 904/1500  60% | Samples: 897/1500 | Openness: 0.84 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 934/1500  62% | Samples: 929/1500 | Openness: 0.84 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 964/1500  64% | Samples: 961/1500 | Openness: 0.84 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 994/1500  66% | Samples: 993/1500 | Openness: 0.84 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1030/1500  68% | Samples: 1025/1500 | Openness: 0.84 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1062/1500  70% | Samples: 1057/1500 | Openness: 0.84 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1093/1500  72% | Samples: 1089/1500 | Openness: 0.84 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1128/1500  75% | Samples: 1121/1500 | Openness: 0.84 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1154/1500  76% | Samples: 1153/1500 | Openness: 0.84 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1189/1500  79% | Samples: 1185/1500 | Openness: 0.84 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1217/1500  81% | Samples: 1217/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1249/1500  83% | Samples: 1249/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1281/1500  85% | Samples: 1281/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1314/1500  87% | Samples: 1313/1500 | Openness: 0.84 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1350/1500  90% | Samples: 1345/1500 | Openness: 0.84 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1377/1500  91% | Samples: 1377/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1413/1500  94% | Samples: 1409/1500 | Openness: 0.84 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1444/1500  96% | Samples: 1441/1500 | Openness: 0.84 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1478/1500  98% | Samples: 1473/1500 | Openness: 0.84 | hf_preloaded: 17/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.84 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/n1p0_c1p0[0m                                                                       
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                              [0m  0:12:16                                                                 
+[1mhf_preloaded/n1p0_c1p0                   [0m  539,808 tokens [[1mI: [0m347,808, [1mO: [0m192,000]                                 
+[1many_choice[0m                                                                                                         
+Openness           0.844                                                                                           
+Conscientiousness  0.790                                                                                           
+Extraversion       0.594                                                                                           
+Agreeableness      0.864                                                                                           
+Neuroticism        0.122                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n1p0_c1p0/trait/native/inspect_logs/2026-03-26T15-46…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [5/9] n1p0_c1p0 / trait  (12m22s) [ok]
+
+  running   [5/9] n1p0_c1p0 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/n1p0_c1p0[0m        
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   3/300   1% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  35/300  11% | Samples:  33/300 | accuracy: 1.00 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  66/300  22% | Samples:  65/300 | accuracy: 0.18 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/300  32% | Samples:  97/300 | accuracy: 0.19 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 130/300  43% | Samples: 129/300 | accuracy: 0.21 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 164/300  54% | Samples: 161/300 | accuracy: 0.26 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 193/300  64% | Samples: 193/300 | accuracy: 0.24 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 225/300  75% | Samples: 225/300 | accuracy: 0.24 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 259/300  86% | Samples: 257/300 | accuracy: 0.23 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 290/300  96% | Samples: 289/300 | accuracy: 0.23 | hf_preloaded: 10/32 | HTTP retries: 0
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.23 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/n1p0_c1p0[0m                                                                  
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                               [0m  0:01:12                                                                
+[1mhf_preloaded/n1p0_c1p0                    [0m  137,220 tokens [[1mI: [0m132,420, [1mO: [0m4,800]                                  
+[1mchoice[0m                                                                                                             
+accuracy  0.233                                                                                                    
+stderr    0.024                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n1p0_c1p0/mmlu/native/inspect_logs/2026-03-26T15-59-…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [5/9] n1p0_c1p0 / mmlu  (1m14s) [ok]
+
+  loading [6/9] n0p5_c1p0 ...
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+The tokenizer you are loading from '/root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+
+  loaded  [6/9] n0p5_c1p0  (40.8s)
+
+  running   [6/9] n0p5_c1p0 / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (1,500 samples): hf_preloaded/n0p5_c1p0[0m             
+max_tokens: 128, temperature: 0.7, dataset: (samples)    
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/1500   0% | Samples:   1/1500 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  33/1500   2% | Samples:  33/1500 | Openness: 1.00 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  67/1500   4% | Samples:  65/1500 | Openness: 0.87 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/1500   6% | Samples:  97/1500 | Openness: 0.84 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 135/1500   9% | Samples: 129/1500 | Openness: 0.79 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 163/1500  10% | Samples: 161/1500 | Openness: 0.79 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 195/1500  13% | Samples: 193/1500 | Openness: 0.80 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 227/1500  15% | Samples: 225/1500 | Openness: 0.83 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 258/1500  17% | Samples: 257/1500 | Openness: 0.83 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 291/1500  19% | Samples: 289/1500 | Openness: 0.85 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 322/1500  21% | Samples: 321/1500 | Openness: 0.82 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 355/1500  23% | Samples: 353/1500 | Openness: 0.82 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 385/1500  25% | Samples: 385/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 422/1500  28% | Samples: 417/1500 | Openness: 0.82 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 450/1500  30% | Samples: 449/1500 | Openness: 0.82 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 481/1500  32% | Samples: 481/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 517/1500  34% | Samples: 513/1500 | Openness: 0.82 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 545/1500  36% | Samples: 545/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 577/1500  38% | Samples: 577/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 613/1500  40% | Samples: 609/1500 | Openness: 0.82 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 644/1500  42% | Samples: 641/1500 | Openness: 0.82 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 673/1500  44% | Samples: 673/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 707/1500  47% | Samples: 705/1500 | Openness: 0.82 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 743/1500  49% | Samples: 737/1500 | Openness: 0.82 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 770/1500  51% | Samples: 769/1500 | Openness: 0.82 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 802/1500  53% | Samples: 801/1500 | Openness: 0.82 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 836/1500  55% | Samples: 833/1500 | Openness: 0.82 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 868/1500  57% | Samples: 865/1500 | Openness: 0.82 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 899/1500  59% | Samples: 897/1500 | Openness: 0.82 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 933/1500  62% | Samples: 929/1500 | Openness: 0.82 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 965/1500  64% | Samples: 961/1500 | Openness: 0.82 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 997/1500  66% | Samples: 993/1500 | Openness: 0.82 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1028/1500  68% | Samples: 1025/1500 | Openness: 0.82 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1058/1500  70% | Samples: 1057/1500 | Openness: 0.82 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1089/1500  72% | Samples: 1089/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1126/1500  75% | Samples: 1121/1500 | Openness: 0.82 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1156/1500  77% | Samples: 1153/1500 | Openness: 0.82 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1185/1500  79% | Samples: 1185/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1222/1500  81% | Samples: 1217/1500 | Openness: 0.82 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1254/1500  83% | Samples: 1249/1500 | Openness: 0.82 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1285/1500  85% | Samples: 1281/1500 | Openness: 0.82 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1313/1500  87% | Samples: 1313/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1346/1500  89% | Samples: 1345/1500 | Openness: 0.82 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1380/1500  92% | Samples: 1377/1500 | Openness: 0.82 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1412/1500  94% | Samples: 1409/1500 | Openness: 0.82 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1441/1500  96% | Samples: 1441/1500 | Openness: 0.82 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1477/1500  98% | Samples: 1473/1500 | Openness: 0.82 | hf_preloaded: 20/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.82 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/n0p5_c1p0[0m                                                                       
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                              [0m  0:12:10                                                                 
+[1mhf_preloaded/n0p5_c1p0                   [0m  539,808 tokens [[1mI: [0m347,808, [1mO: [0m192,000]                                 
+[1many_choice[0m                                                                                                         
+Openness           0.818                                                                                           
+Conscientiousness  0.847                                                                                           
+Extraversion       0.645                                                                                           
+Agreeableness      0.870                                                                                           
+Neuroticism        0.135                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n0p5_c1p0/trait/native/inspect_logs/2026-03-26T16-01…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [6/9] n0p5_c1p0 / trait  (12m16s) [ok]
+
+  running   [6/9] n0p5_c1p0 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/n0p5_c1p0[0m        
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/300   1% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  34/300  11% | Samples:  33/300 | accuracy: 0.00 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  67/300  22% | Samples:  65/300 | accuracy: 0.35 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/300  32% | Samples:  97/300 | accuracy: 0.33 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 129/300  43% | Samples: 129/300 | accuracy: 0.29 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 161/300  53% | Samples: 161/300 | accuracy: 0.32 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 194/300  64% | Samples: 193/300 | accuracy: 0.34 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 226/300  75% | Samples: 225/300 | accuracy: 0.32 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 258/300  86% | Samples: 257/300 | accuracy: 0.29 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 289/300  96% | Samples: 289/300 | accuracy: 0.28 | hf_preloaded: 11/32 | HTTP retries: 0
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.28 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/n0p5_c1p0[0m                                                                  
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                               [0m  0:01:11                                                                
+[1mhf_preloaded/n0p5_c1p0                    [0m  132,384 tokens [[1mI: [0m127,584, [1mO: [0m4,800]                                  
+[1mchoice[0m                                                                                                             
+accuracy  0.277                                                                                                    
+stderr    0.026                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n0p5_c1p0/mmlu/native/inspect_logs/2026-03-26T16-13-…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [6/9] n0p5_c1p0 / mmlu  (1m13s) [ok]
+
+  loading [7/9] n1p0_c0p5 ...
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+The tokenizer you are loading from '/root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+
+  loaded  [7/9] n1p0_c0p5  (30.5s)
+
+  running   [7/9] n1p0_c0p5 / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (1,500 samples): hf_preloaded/n1p0_c0p5[0m             
+max_tokens: 128, temperature: 0.7, dataset: (samples)    
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   3/1500   0% | Samples:   1/1500 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  35/1500   2% | Samples:  33/1500 | Openness: 0.67 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  66/1500   4% | Samples:  65/1500 | Openness: 0.84 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/1500   6% | Samples:  97/1500 | Openness: 0.80 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 132/1500   8% | Samples: 129/1500 | Openness: 0.80 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 163/1500  10% | Samples: 161/1500 | Openness: 0.84 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 196/1500  13% | Samples: 193/1500 | Openness: 0.81 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 229/1500  15% | Samples: 225/1500 | Openness: 0.80 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 258/1500  17% | Samples: 257/1500 | Openness: 0.81 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 289/1500  19% | Samples: 289/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 326/1500  21% | Samples: 321/1500 | Openness: 0.81 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 357/1500  23% | Samples: 353/1500 | Openness: 0.81 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 388/1500  25% | Samples: 385/1500 | Openness: 0.81 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 420/1500  28% | Samples: 417/1500 | Openness: 0.81 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 454/1500  30% | Samples: 449/1500 | Openness: 0.81 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 482/1500  32% | Samples: 481/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 514/1500  34% | Samples: 513/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 546/1500  36% | Samples: 545/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 578/1500  38% | Samples: 577/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 612/1500  40% | Samples: 609/1500 | Openness: 0.81 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 646/1500  43% | Samples: 641/1500 | Openness: 0.81 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 679/1500  45% | Samples: 673/1500 | Openness: 0.81 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 706/1500  47% | Samples: 705/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 740/1500  49% | Samples: 737/1500 | Openness: 0.81 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 769/1500  51% | Samples: 769/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 801/1500  53% | Samples: 801/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 837/1500  55% | Samples: 833/1500 | Openness: 0.81 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 869/1500  57% | Samples: 865/1500 | Openness: 0.81 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 901/1500  60% | Samples: 897/1500 | Openness: 0.81 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 929/1500  61% | Samples: 929/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 963/1500  64% | Samples: 961/1500 | Openness: 0.81 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 998/1500  66% | Samples: 993/1500 | Openness: 0.81 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1029/1500  68% | Samples: 1025/1500 | Openness: 0.81 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1057/1500  70% | Samples: 1057/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1089/1500  72% | Samples: 1089/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1125/1500  75% | Samples: 1121/1500 | Openness: 0.81 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1157/1500  77% | Samples: 1153/1500 | Openness: 0.81 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1189/1500  79% | Samples: 1185/1500 | Openness: 0.81 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1218/1500  81% | Samples: 1217/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1250/1500  83% | Samples: 1249/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1282/1500  85% | Samples: 1281/1500 | Openness: 0.81 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1286/1500  85% | Samples: 1283/1500 | Openness: 0.81 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1317/1500  87% | Samples: 1315/1500 | Openness: 0.81 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1350/1500  90% | Samples: 1347/1500 | Openness: 0.81 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1379/1500  91% | Samples: 1379/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1415/1500  94% | Samples: 1411/1500 | Openness: 0.81 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1443/1500  96% | Samples: 1443/1500 | Openness: 0.81 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1479/1500  98% | Samples: 1475/1500 | Openness: 0.81 | hf_preloaded: 17/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.81 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/n1p0_c0p5[0m                                                                       
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                              [0m  0:12:19                                                                 
+[1mhf_preloaded/n1p0_c0p5                   [0m  539,728 tokens [[1mI: [0m347,728, [1mO: [0m192,000]                                 
+[1many_choice[0m                                                                                                         
+Openness           0.807                                                                                           
+Conscientiousness  0.920                                                                                           
+Extraversion       0.523                                                                                           
+Agreeableness      0.842                                                                                           
+Neuroticism        0.215                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n1p0_c0p5/trait/native/inspect_logs/2026-03-26T16-15…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [7/9] n1p0_c0p5 / trait  (12m24s) [ok]
+
+  running   [7/9] n1p0_c0p5 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/n1p0_c0p5[0m        
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/300   1% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  35/300  11% | Samples:  33/300 | accuracy: 0.00 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  65/300  21% | Samples:  65/300 | accuracy: 0.23 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  97/300  32% | Samples:  97/300 | accuracy: 0.25 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 129/300  43% | Samples: 129/300 | accuracy: 0.25 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 161/300  53% | Samples: 161/300 | accuracy: 0.25 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 193/300  64% | Samples: 193/300 | accuracy: 0.26 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 226/300  75% | Samples: 225/300 | accuracy: 0.25 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 258/300  86% | Samples: 258/300 | accuracy: 0.25 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 289/300  96% | Samples: 289/300 | accuracy: 0.25 | hf_preloaded: 11/32 | HTTP retries: 0
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.25 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/n1p0_c0p5[0m                                                                  
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                               [0m  0:01:17                                                                
+[1mhf_preloaded/n1p0_c0p5                    [0m  146,856 tokens [[1mI: [0m142,056, [1mO: [0m4,800]                                  
+[1mchoice[0m                                                                                                             
+accuracy  0.253                                                                                                    
+stderr    0.025                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n1p0_c0p5/mmlu/native/inspect_logs/2026-03-26T16-27-…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [7/9] n1p0_c0p5 / mmlu  (1m18s) [ok]
+
+  loading [8/9] n1p0_cm0p5 ...
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+The tokenizer you are loading from '/root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+
+  loaded  [8/9] n1p0_cm0p5  (35.7s)
+
+  running   [8/9] n1p0_cm0p5 / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+HTTP Error 500 thrown while requesting HEAD https://huggingface.co/datasets/mirlab/TRAIT/resolve/main/README.md
+
+[2m[03/26/26 16:29:55][0m[2m [0mWARNING  HTTP Error 500 thrown while requesting HEAD                               ]8;id=623248;file:///root/persona-shattering-lasr/.venv/lib/python3.11/site-packages/huggingface_hub/utils/_http.py\[2m_http.py[0m]8;;\[2m:[0m]8;id=226632;file:///root/persona-shattering-lasr/.venv/lib/python3.11/site-packages/huggingface_hub/utils/_http.py#312\[2m312[0m]8;;\
+[2m                    [0m         https://huggingface.co/datasets/mirlab/TRAIT/resolve/main/README.md       [2m            [0m
+
+Retrying in 1s [Retry 1/5].
+
+[2m                   [0m[2m [0mWARNING  Retrying in 1s [Retry 1/5].                                               ]8;id=714268;file:///root/persona-shattering-lasr/.venv/lib/python3.11/site-packages/huggingface_hub/utils/_http.py\[2m_http.py[0m]8;;\[2m:[0m]8;id=253385;file:///root/persona-shattering-lasr/.venv/lib/python3.11/site-packages/huggingface_hub/utils/_http.py#329\[2m329[0m]8;;\
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (1,500 samples): hf_preloaded/n1p0_cm0p5[0m            
+max_tokens: 128, temperature: 0.7, dataset: (samples)    
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   1/1500   0% | Samples:   1/1500 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  33/1500   2% | Samples:  33/1500 | Openness: 0.50 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  66/1500   4% | Samples:  65/1500 | Openness: 0.72 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  98/1500   6% | Samples:  97/1500 | Openness: 0.69 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 130/1500   8% | Samples: 129/1500 | Openness: 0.69 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 161/1500  10% | Samples: 161/1500 | Openness: 0.70 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 196/1500  13% | Samples: 193/1500 | Openness: 0.71 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 225/1500  15% | Samples: 225/1500 | Openness: 0.69 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 259/1500  17% | Samples: 257/1500 | Openness: 0.70 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 293/1500  19% | Samples: 289/1500 | Openness: 0.69 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 324/1500  21% | Samples: 321/1500 | Openness: 0.69 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 355/1500  23% | Samples: 353/1500 | Openness: 0.68 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 388/1500  25% | Samples: 385/1500 | Openness: 0.68 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 421/1500  28% | Samples: 417/1500 | Openness: 0.68 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 451/1500  30% | Samples: 449/1500 | Openness: 0.68 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 484/1500  32% | Samples: 481/1500 | Openness: 0.68 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 516/1500  34% | Samples: 513/1500 | Openness: 0.68 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 547/1500  36% | Samples: 545/1500 | Openness: 0.68 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 582/1500  38% | Samples: 577/1500 | Openness: 0.68 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 612/1500  40% | Samples: 609/1500 | Openness: 0.68 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 644/1500  42% | Samples: 641/1500 | Openness: 0.68 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 676/1500  45% | Samples: 673/1500 | Openness: 0.68 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 708/1500  47% | Samples: 705/1500 | Openness: 0.68 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 741/1500  49% | Samples: 737/1500 | Openness: 0.68 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 769/1500  51% | Samples: 769/1500 | Openness: 0.68 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 803/1500  53% | Samples: 801/1500 | Openness: 0.68 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 835/1500  55% | Samples: 833/1500 | Openness: 0.68 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 868/1500  57% | Samples: 865/1500 | Openness: 0.68 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 901/1500  60% | Samples: 897/1500 | Openness: 0.68 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 932/1500  62% | Samples: 929/1500 | Openness: 0.68 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 965/1500  64% | Samples: 961/1500 | Openness: 0.68 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 995/1500  66% | Samples: 993/1500 | Openness: 0.68 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1028/1500  68% | Samples: 1025/1500 | Openness: 0.68 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1057/1500  70% | Samples: 1057/1500 | Openness: 0.68 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1093/1500  72% | Samples: 1089/1500 | Openness: 0.68 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1124/1500  74% | Samples: 1121/1500 | Openness: 0.68 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1156/1500  77% | Samples: 1153/1500 | Openness: 0.68 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1186/1500  79% | Samples: 1185/1500 | Openness: 0.68 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1217/1500  81% | Samples: 1217/1500 | Openness: 0.68 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1253/1500  83% | Samples: 1249/1500 | Openness: 0.68 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1284/1500  85% | Samples: 1281/1500 | Openness: 0.68 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1315/1500  87% | Samples: 1313/1500 | Openness: 0.68 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1349/1500  89% | Samples: 1345/1500 | Openness: 0.68 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1379/1500  91% | Samples: 1377/1500 | Openness: 0.68 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1410/1500  94% | Samples: 1409/1500 | Openness: 0.68 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1444/1500  96% | Samples: 1441/1500 | Openness: 0.68 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1447/1500  96% | Samples: 1446/1500 | Openness: 0.68 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1478/1500  98% | Samples: 1478/1500 | Openness: 0.68 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.68 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/n1p0_cm0p5[0m                                                                      
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                               [0m  0:12:25                                                                
+[1mhf_preloaded/n1p0_cm0p5                   [0m  539,718 tokens [[1mI: [0m347,718, [1mO: [0m192,000]                                
+[1many_choice[0m                                                                                                         
+Openness           0.684                                                                                           
+Conscientiousness  0.988                                                                                           
+Extraversion       0.434                                                                                           
+Agreeableness      0.865                                                                                           
+Neuroticism        0.269                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n1p0_cm0p5/trait/native/inspect_logs/2026-03-26T16-3…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [8/9] n1p0_cm0p5 / trait  (12m38s) [ok]
+
+  running   [8/9] n1p0_cm0p5 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/n1p0_cm0p5[0m       
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   4/300   1% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  37/300  12% | Samples:  33/300 | accuracy: 0.29 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  66/300  22% | Samples:  65/300 | accuracy: 0.34 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 125/300  41% | Samples: 123/300 | accuracy: 0.38 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Steps: 130/300  43% | Samples: 129/300 | accuracy: 0.38 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 163/300  54% | Samples: 161/300 | accuracy: 0.36 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 193/300  64% | Samples: 193/300 | accuracy: 0.38 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 226/300  75% | Samples: 225/300 | accuracy: 0.36 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 257/300  85% | Samples: 257/300 | accuracy: 0.38 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 289/300  96% | Samples: 289/300 | accuracy: 0.39 | hf_preloaded: 11/32 | HTTP retries: 0
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.39 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/n1p0_cm0p5[0m                                                                 
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                                [0m  0:01:14                                                               
+[1mhf_preloaded/n1p0_cm0p5                    [0m  139,000 tokens [[1mI: [0m134,200, [1mO: [0m4,800]                                 
+[1mchoice[0m                                                                                                             
+accuracy  0.387                                                                                                    
+stderr    0.028                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/n1p0_cm0p5/mmlu/native/inspect_logs/2026-03-26T16-42…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [8/9] n1p0_cm0p5 / mmlu  (1m15s) [ok]
+
+  loading [9/9] nm0p5_c1p0 ...
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+The tokenizer you are loading from '/root/persona-shattering-lasr/scratch/adapter_cache/persona-shattering-lasr_monorepo/fine_tuning/llama-3.1-8B-Instruct/ocean/neuroticism/model/loras/BEST_SO_FAR_24_March_23b4220/nervousness-souping' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+
+  loaded  [9/9] nm0p5_c1p0  (27.7s)
+
+  running   [9/9] nm0p5_c1p0 / trait ...
+
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+Loading dataset mirlab/TRAIT from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/1000 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mtask (1,500 samples): hf_preloaded/nm0p5_c1p0[0m            
+max_tokens: 128, temperature: 0.7, dataset: (samples)    
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   6/1500   0% | Samples:   1/1500 | inspect_evals/trait_ratio:  n/a | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  35/1500   2% | Samples:  33/1500 | Openness: 0.69 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  66/1500   4% | Samples:  65/1500 | Openness: 0.82 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 100/1500   6% | Samples:  97/1500 | Openness: 0.80 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 129/1500   8% | Samples: 129/1500 | Openness: 0.85 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 163/1500  10% | Samples: 161/1500 | Openness: 0.84 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 195/1500  13% | Samples: 193/1500 | Openness: 0.83 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 226/1500  15% | Samples: 225/1500 | Openness: 0.79 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 261/1500  17% | Samples: 257/1500 | Openness: 0.77 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 290/1500  19% | Samples: 289/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 325/1500  21% | Samples: 321/1500 | Openness: 0.78 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 353/1500  23% | Samples: 353/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 385/1500  25% | Samples: 385/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 418/1500  27% | Samples: 417/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 452/1500  30% | Samples: 449/1500 | Openness: 0.78 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 484/1500  32% | Samples: 481/1500 | Openness: 0.78 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 513/1500  34% | Samples: 513/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 546/1500  36% | Samples: 545/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 580/1500  38% | Samples: 577/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 610/1500  40% | Samples: 609/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 646/1500  43% | Samples: 641/1500 | Openness: 0.78 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 675/1500  45% | Samples: 673/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 709/1500  47% | Samples: 705/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 737/1500  49% | Samples: 737/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 769/1500  51% | Samples: 769/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 802/1500  53% | Samples: 801/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 807/1500  53% | Samples: 803/1500 | Openness: 0.78 | hf_preloaded: 24/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 836/1500  55% | Samples: 835/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 870/1500  57% | Samples: 867/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 903/1500  60% | Samples: 899/1500 | Openness: 0.78 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 935/1500  62% | Samples: 931/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 969/1500  64% | Samples: 963/1500 | Openness: 0.78 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1001/1500  66% | Samples: 995/1500 | Openness: 0.78 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1028/1500  68% | Samples: 1027/1500 | Openness: 0.78 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1064/1500  70% | Samples: 1059/1500 | Openness: 0.78 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1091/1500  72% | Samples: 1091/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1127/1500  75% | Samples: 1123/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1160/1500  77% | Samples: 1155/1500 | Openness: 0.78 | hf_preloaded: 22/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1191/1500  79% | Samples: 1187/1500 | Openness: 0.78 | hf_preloaded: 25/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1224/1500  81% | Samples: 1219/1500 | Openness: 0.78 | hf_preloaded: 21/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1254/1500  83% | Samples: 1251/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1286/1500  85% | Samples: 1283/1500 | Openness: 0.78 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1315/1500  87% | Samples: 1315/1500 | Openness: 0.78 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1349/1500  89% | Samples: 1347/1500 | Openness: 0.78 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1383/1500  92% | Samples: 1379/1500 | Openness: 0.78 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1416/1500  94% | Samples: 1411/1500 | Openness: 0.78 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1445/1500  96% | Samples: 1443/1500 | Openness: 0.78 | hf_preloaded: 28/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 1476/1500  98% | Samples: 1475/1500 | Openness: 0.78 | hf_preloaded: 23/32 | HTTP retries: 0
+
+Steps: 1500/1500 100% | Samples: 1500/1500 | Openness: 0.78 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mtask (1,500 samples): hf_preloaded/nm0p5_c1p0[0m                                                                      
+max_tokens: 128, temperature: 0.7, dataset: (samples)                                                              
+                                                                                                                   
+[1mtotal time:                               [0m  0:12:22                                                                
+[1mhf_preloaded/nm0p5_c1p0                   [0m  539,694 tokens [[1mI: [0m347,694, [1mO: [0m192,000]                                
+[1many_choice[0m                                                                                                         
+Openness           0.781                                                                                           
+Conscientiousness  0.714                                                                                           
+Extraversion       0.553                                                                                           
+Agreeableness      0.710                                                                                           
+Neuroticism        0.113                                                                                           
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/nm0p5_c1p0/trait/native/inspect_logs/2026-03-26T16-4…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [9/9] nm0p5_c1p0 / trait  (12m28s) [ok]
+
+  running   [9/9] nm0p5_c1p0 / mmlu ...
+
+Loading dataset cais/mmlu from Hugging Face...
+
+Saving the dataset (0/1 shards):   0%|          | 0/14042 [00:00<?, ? examples/s]
+---------------------------------------------------------
+[1mmmlu_0_shot (300 samples): hf_preloaded/nm0p5_c1p0[0m       
+temperature: 0.7, dataset: (samples)                     
+---------------------------------------------------------
+                                                         
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:   6/300   2% | Samples:   1/300 | accuracy:  n/a | hf_preloaded: 23/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  36/300  12% | Samples:  33/300 | accuracy: 0.56 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  67/300  22% | Samples:  65/300 | accuracy: 0.52 | hf_preloaded: 29/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps:  99/300  33% | Samples:  97/300 | accuracy: 0.52 | hf_preloaded: 27/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 130/300  43% | Samples: 129/300 | accuracy: 0.51 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 162/300  54% | Samples: 161/300 | accuracy: 0.49 | hf_preloaded: 30/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 193/300  64% | Samples: 193/300 | accuracy: 0.49 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 229/300  76% | Samples: 225/300 | accuracy: 0.49 | hf_preloaded: 26/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 257/300  85% | Samples: 257/300 | accuracy: 0.50 | hf_preloaded: 31/32 | HTTP retries: 0
+
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+
+Steps: 289/300  96% | Samples: 289/300 | accuracy: 0.50 | hf_preloaded: 11/32 | HTTP retries: 0
+
+Steps: 300/300 100% | Samples: 300/300 | accuracy: 0.50 | hf_preloaded:  0/32 | HTTP retries: 0
+
+
+---------------------------------------------------------                                                          
+[1mmmlu_0_shot (300 samples): hf_preloaded/nm0p5_c1p0[0m                                                                 
+temperature: 0.7, dataset: (samples)                                                                               
+                                                                                                                   
+[1mtotal time:                                [0m  0:01:20                                                               
+[1mhf_preloaded/nm0p5_c1p0                    [0m  155,344 tokens [[1mI: [0m150,544, [1mO: [0m4,800]                                 
+[1mchoice[0m                                                                                                             
+accuracy  0.497                                                                                                    
+stderr    0.029                                                                                                    
+Log:                                                                                                               
+scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/nm0p5_c1p0/mmlu/native/inspect_logs/2026-03-26T16-56…
+---------------------------------------------------------                                                          
+                                                                                                                   
+
+  done      [9/9] nm0p5_c1p0 / mmlu  (1m22s) [ok]
+
+
+=== Timing summary ===
+
+  Model       Eval   Status   Time
+
+  -------------------------------------
+
+  n1p0_c0p0   trait  ok       11m06s
+
+  n1p0_c0p0   mmlu   ok       59.0s
+
+  n0p0_c1p0   trait  ok       3m56s
+
+  n0p0_c1p0   mmlu   ok       1m00s
+
+  n0p5_c0p5   trait  ok       12m27s
+
+  n0p5_c0p5   mmlu   ok       1m09s
+
+  n1p0_c1p0   trait  ok       12m22s
+
+  n1p0_c1p0   mmlu   ok       1m14s
+
+  n0p5_c1p0   trait  ok       12m16s
+
+  n0p5_c1p0   mmlu   ok       1m13s
+
+  n1p0_c0p5   trait  ok       12m24s
+
+  n1p0_c0p5   mmlu   ok       1m18s
+
+  n1p0_cm0p5  trait  ok       12m38s
+
+  n1p0_cm0p5  mmlu   ok       1m15s
+
+  nm0p5_c1p0  trait  ok       12m28s
+
+  nm0p5_c1p0  mmlu   ok       1m22s
+
+  -------------------------------------
+
+  Total: 1h44m27s
+
+======================
+
+
+Run directory: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations/neuro_x_consc_combos
+
+Ending Cell 10-----------------------------------------
+Executing Cell 11--------------------------------------
+Ending Cell 11-----------------------------------------
+Executing Cell 12--------------------------------------
+Loaded 54 records across 9 combos
+Long-form CSV: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/analysis/trait_scores_by_combo.csv
+Wide-form CSV: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/analysis/trait_scores_by_combo_wide.csv
+
+combo_label              trait  -0.5N+, 1C-  0.5N+, 0.5C-  0.5N+, 1C-  \
+0                Agreeableness     0.711538      0.848485    0.870130   
+1            Conscientiousness     0.734615      0.904494    0.848214   
+2                 Extraversion     0.542373      0.574713    0.644860   
+3                         MMLU     0.496667      0.356667    0.276667   
+4                  Neuroticism     0.116732      0.184397    0.146667   
+5                     Openness     0.739837      0.775000    0.822785   
+
+combo_label       1C-       1N+  1N+, -0.5C-  1N+, 0.5C-  1N+, 1C-      Base  
+0            0.723333  0.818605     0.866379    0.842105  0.863636  0.813333  
+1            0.700000  0.983122     0.988417    0.921788  0.788991  0.963333  
+2            0.550000  0.486842     0.438596    0.526012  0.593750  0.450000  
+3            0.600000  0.263333     0.386667    0.253333  0.233333  0.596667  
+4            0.046667  0.245000     0.271493    0.220126  0.119565  0.206667  
+5            0.773333  0.738916     0.692661    0.815068  0.846154  0.733333  
+Ending Cell 12-----------------------------------------
+Executing Cell 13--------------------------------------
+Ending Cell 13-----------------------------------------
+Executing Cell 14--------------------------------------
+Ending Cell 14-----------------------------------------
+Executing Cell 15--------------------------------------
+Saved: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/figures/trait_combo_bar_chart.png
+
+<Figure size 1800x700 with 1 Axes>
+Ending Cell 15-----------------------------------------
+Executing Cell 16--------------------------------------
+Saved: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/figures/trait_combo_bar_chart_by_trait.png
+
+<Figure size 1200x700 with 1 Axes>
+Ending Cell 16-----------------------------------------
+Executing Cell 17--------------------------------------
+Ending Cell 17-----------------------------------------
+Executing Cell 18--------------------------------------
+Saved: /root/persona-shattering-lasr/scratch/evals/trait_adapter_combinations/neuro_x_consc_combos/figures/trait_combo_heatmap.png
+
+<Figure size 840x630 with 2 Axes>
+Ending Cell 18-----------------------------------------
+Executing Cell 19--------------------------------------
+It seems you are trying to upload a large folder at once. This might take some time and then fail if the folder is too large. For such cases, it is recommended to upload in smaller batches or to use `HfApi().upload_large_folder(...)`/`hf upload-large-folder` instead. For more details, check out https://huggingface.co/docs/huggingface_hub/main/en/guides/upload#upload-a-large-folder.
+
+[2m[03/26/26 16:58:31][0m[2m [0mWARNING  It seems you are trying to upload a large folder at once. This might    ]8;id=310854;file:///root/persona-shattering-lasr/.venv/lib/python3.11/site-packages/huggingface_hub/hf_api.py\[2mhf_api.py[0m]8;;\[2m:[0m]8;id=613405;file:///root/persona-shattering-lasr/.venv/lib/python3.11/site-packages/huggingface_hub/hf_api.py#9612\[2m9612[0m]8;;\
+[2m                    [0m         take some time and then fail if the folder is too large. For such       [2m              [0m
+[2m                    [0m         cases, it is recommended to upload in smaller batches or to use         [2m              [0m
+[2m                    [0m         `HfApi().upload_large_folder(...)`/`hf upload-large-folder` instead.    [2m              [0m
+[2m                    [0m         For more details, check out                                             [2m              [0m
+[2m                    [0m         https://huggingface.co/docs/huggingface_hub/main/en/guides/upload#uploa [2m              [0m
+[2m                    [0m         d-a-large-folder.                                                       [2m              [0m
+
+Processing Files (0 / 0): |          |  0.00B /  0.00B            
+New Data Upload: |          |  0.00B /  0.00B            
+Upload complete
+
+Ending Cell 19-----------------------------------------

@@ -171,6 +171,25 @@ dataset, result = run_inference(config)
 
 See `scripts_dev/persona_pipelines/` for examples of composing components into an end-to-end LoRA training workflow.
 
+### Reproducibility: Always Set Seeds
+
+Experiment scripts and notebook runners must **set random seeds at the top** before any stochastic operations. Use a single `SEED` constant and seed all relevant RNGs:
+
+```python
+import random
+import numpy as np
+import torch
+
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+```
+
+This ensures results are reproducible across runs. Do not scatter seed-setting throughout the script — set all seeds once at the top.
+
 ---
 
 ## Code Style
