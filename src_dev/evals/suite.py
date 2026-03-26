@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 # Timing helpers
 # ---------------------------------------------------------------------------
 
+
 def _fmt_duration(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -57,6 +58,7 @@ def _fmt_duration(seconds: float) -> str:
 # ---------------------------------------------------------------------------
 # GPU / Inspect cache cleanup
 # ---------------------------------------------------------------------------
+
 
 def _cleanup_runtime_model_state(move_to_cpu: bool = True) -> None:
     """Release Inspect's in-process model cache and free GPU memory.
@@ -86,7 +88,9 @@ def _cleanup_runtime_model_state(move_to_cpu: bool = True) -> None:
                     # The HF provider's batch thread holds a dangling generator reference
                     # that keeps the model on GPU. Moving to CPU before close() frees VRAM.
                     hf_model = getattr(api, "model", None)
-                    if hf_model is not None and callable(getattr(hf_model, "cpu", None)):
+                    if hf_model is not None and callable(
+                        getattr(hf_model, "cpu", None)
+                    ):
                         try:
                             hf_model.cpu()
                         except Exception:
@@ -103,6 +107,7 @@ def _cleanup_runtime_model_state(move_to_cpu: bool = True) -> None:
 
     try:
         import gc
+
         gc.collect()
         gc.collect()
     except Exception:
@@ -121,6 +126,7 @@ def _cleanup_runtime_model_state(move_to_cpu: bool = True) -> None:
 # ---------------------------------------------------------------------------
 # Model preparation — the unified path
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _PreparedModel:
@@ -213,6 +219,7 @@ def _flash_attn_kwargs() -> dict[str, str]:
     """Return attn_implementation=flash_attention_2 if flash_attn is installed."""
     try:
         import flash_attn  # noqa: F401
+
         return {"attn_implementation": "flash_attention_2"}
     except ImportError:
         return {}
@@ -361,6 +368,7 @@ def _prepare_resume_model(spec: ModelSpec) -> _PreparedModel:
 # Helpers carried over from the original suite
 # ---------------------------------------------------------------------------
 
+
 def load_suite_module(module_path: str) -> tuple[SuiteConfig, JudgeExecutionConfig]:
     """Load SUITE_CONFIG (and optional JUDGE_EXEC_CONFIG) from a module."""
     module = importlib.import_module(module_path)
@@ -423,13 +431,16 @@ def _ensure_hf_log_repo(hf_log_dir: str) -> None:
     prefix = "hf://datasets/"
     if not hf_log_dir.startswith(prefix):
         return
-    parts = hf_log_dir[len(prefix):].split("/")
+    parts = hf_log_dir[len(prefix) :].split("/")
     if len(parts) < 2:
         return
     repo_id = f"{parts[0]}/{parts[1]}"
     try:
         from huggingface_hub import HfApi
-        HfApi().create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+
+        HfApi().create_repo(
+            repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True
+        )
     except Exception:
         pass
 
@@ -507,15 +518,20 @@ def _record_failed_model_rows(
             model_spec_name=model_spec.name,
             eval_name=eval_spec.name,
         )
-        eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
+        eval_kind = (
+            "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
+        )
         run_info_path = _write_run_info(
             run_dir=run_dir,
             output_root=output_root,
             model_spec=model_spec,
             eval_spec=eval_spec,
             judge_exec=judge_exec,
-            prepared=prepared or _PreparedModel(
-                inspect_model="", scaler=None, peft_model=None,
+            prepared=prepared
+            or _PreparedModel(
+                inspect_model="",
+                scaler=None,
+                peft_model=None,
                 model_name=model_spec.base_model,
             ),
             status="failed",
@@ -541,6 +557,7 @@ def _record_failed_model_rows(
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def run_eval_suite(
     config: SuiteConfig,
@@ -578,7 +595,9 @@ def run_eval_suite(
     if is_sweep and config.adapter is not None:
         load_t0 = time.perf_counter()
         if config.use_vllm:
-            print("  baking adapters + initialising vLLM engine for sweep ...", flush=True)
+            print(
+                "  baking adapters + initialising vLLM engine for sweep ...", flush=True
+            )
             try:
                 from src_dev.rollout_generation.model_providers import (
                     VLLMLoRaScaleProvider,
@@ -587,13 +606,17 @@ def run_eval_suite(
 
                 assert config.base_model is not None
                 all_scale_points = list(config.expand_models())
-                scale_points = [s.scale for s in all_scale_points if s.scale is not None]
+                scale_points = [
+                    s.scale for s in all_scale_points if s.scale is not None
+                ]
 
                 baked_dir = config.vllm_baked_adapters_dir or (
                     Path("scratch/baked_adapters") / output_root.name
                 )
 
-                _raw_adapter, _adapter_subfolder = split_adapter_reference(config.adapter)
+                _raw_adapter, _adapter_subfolder = split_adapter_reference(
+                    config.adapter
+                )
                 adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
                 if _adapter_subfolder:
                     adapter_ref = f"{adapter_ref}/{_adapter_subfolder}"
@@ -606,7 +629,10 @@ def run_eval_suite(
                     temperature=config.temperature,
                 )
                 sweep_vllm_provider.__enter__()
-                print(f"  vLLM engine ready  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
+                print(
+                    f"  vLLM engine ready  ({_fmt_duration(time.perf_counter() - load_t0)})",
+                    flush=True,
+                )
             except Exception as exc:
                 print(f"  FAILED to init vLLM sweep: {exc}", flush=True)
                 is_sweep = False  # fall back to per-spec loading
@@ -616,14 +642,22 @@ def run_eval_suite(
                 assert config.base_model is not None
                 first_spec = models[1] if len(models) > 1 else models[0]
                 from src_dev.utils.lora_composition import split_adapter_reference
-                _raw_adapter, _adapter_subfolder = split_adapter_reference(config.adapter)
+
+                _raw_adapter, _adapter_subfolder = split_adapter_reference(
+                    config.adapter
+                )
                 base_ref = resolve_model_reference(config.base_model, kind="base model")
                 adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
                 sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
-                    base_ref, adapter_ref, _resolve_dtype(first_spec),
+                    base_ref,
+                    adapter_ref,
+                    _resolve_dtype(first_spec),
                     subfolder=_adapter_subfolder,
                 )
-                print(f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
+                print(
+                    f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})",
+                    flush=True,
+                )
             except Exception as exc:
                 print(f"  FAILED to load sweep model: {exc}", flush=True)
                 is_sweep = False  # fall back to per-spec loading
@@ -640,7 +674,11 @@ def run_eval_suite(
             for eval_spec in config.evals:
                 if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                     continue
-                n_runs = eval_spec.n_runs if isinstance(eval_spec, InspectBenchmarkSpec) else 1
+                n_runs = (
+                    eval_spec.n_runs
+                    if isinstance(eval_spec, InspectBenchmarkSpec)
+                    else 1
+                )
                 for run_index in range(n_runs):
                     rd = _run_dir_for(
                         output_root=output_root,
@@ -663,13 +701,24 @@ def run_eval_suite(
                 if not all_done:
                     break
             if all_done:
-                print(f"  all evals done for {model_label}, skipping model load", flush=True)
+                print(
+                    f"  all evals done for {model_label}, skipping model load",
+                    flush=True,
+                )
                 # Still record skipped rows so the summary is complete.
                 for eval_spec in config.evals:
                     if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                         continue
-                    eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
-                    n_runs = eval_spec.n_runs if isinstance(eval_spec, InspectBenchmarkSpec) else 1
+                    eval_kind = (
+                        "benchmark"
+                        if isinstance(eval_spec, InspectBenchmarkSpec)
+                        else "custom"
+                    )
+                    n_runs = (
+                        eval_spec.n_runs
+                        if isinstance(eval_spec, InspectBenchmarkSpec)
+                        else 1
+                    )
                     for run_index in range(n_runs):
                         rd = _run_dir_for(
                             output_root=output_root,
@@ -679,16 +728,20 @@ def run_eval_suite(
                         )
                         ri = rd / "run_info.json"
                         info = json.loads(ri.read_text())
-                        rows.append(_summary_row(
-                            model_name=model_spec.base_model,
-                            model_spec_name=model_spec.name,
-                            eval_name=eval_spec.name,
-                            eval_kind=eval_kind,
-                            status="skipped",
-                            output_dir=rd,
-                            run_info_path=ri,
-                            inspect_log_path=info.get("native", {}).get("inspect_log_path"),
-                        ))
+                        rows.append(
+                            _summary_row(
+                                model_name=model_spec.base_model,
+                                model_spec_name=model_spec.name,
+                                eval_name=eval_spec.name,
+                                eval_kind=eval_kind,
+                                status="skipped",
+                                output_dir=rd,
+                                run_info_path=ri,
+                                inspect_log_path=info.get("native", {}).get(
+                                    "inspect_log_path"
+                                ),
+                            )
+                        )
                 continue
 
         # Prepare the model for this spec.
@@ -709,7 +762,10 @@ def run_eval_suite(
                 print(f"  loading {model_label} ...", flush=True)
                 load_t0 = time.perf_counter()
                 prepared = _load_local_model(model_spec, config.batch_size)
-                print(f"  loaded  {model_label}  ({_fmt_duration(time.perf_counter() - load_t0)})", flush=True)
+                print(
+                    f"  loaded  {model_label}  ({_fmt_duration(time.perf_counter() - load_t0)})",
+                    flush=True,
+                )
         except Exception as exc:
             print(f"  FAILED  {model_label}: {exc}", flush=True)
             _record_failed_model_rows(
@@ -729,8 +785,16 @@ def run_eval_suite(
                 if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                     continue
 
-                eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
-                n_runs = eval_spec.n_runs if isinstance(eval_spec, InspectBenchmarkSpec) else 1
+                eval_kind = (
+                    "benchmark"
+                    if isinstance(eval_spec, InspectBenchmarkSpec)
+                    else "custom"
+                )
+                n_runs = (
+                    eval_spec.n_runs
+                    if isinstance(eval_spec, InspectBenchmarkSpec)
+                    else 1
+                )
 
                 for run_index in range(n_runs):
                     run_dir = _run_dir_for(
@@ -750,17 +814,24 @@ def run_eval_suite(
                             try:
                                 info = json.loads(run_info_path.read_text())
                                 if info.get("status") == "ok":
-                                    print(f"  skipping  {run_label}  (already done)", flush=True)
-                                    rows.append(_summary_row(
-                                        model_name=prepared.model_name,
-                                        model_spec_name=model_spec.name,
-                                        eval_name=eval_spec.name,
-                                        eval_kind=eval_kind,
-                                        status="skipped",
-                                        output_dir=run_dir,
-                                        run_info_path=run_info_path,
-                                        inspect_log_path=info.get("native", {}).get("inspect_log_path"),
-                                    ))
+                                    print(
+                                        f"  skipping  {run_label}  (already done)",
+                                        flush=True,
+                                    )
+                                    rows.append(
+                                        _summary_row(
+                                            model_name=prepared.model_name,
+                                            model_spec_name=model_spec.name,
+                                            eval_name=eval_spec.name,
+                                            eval_kind=eval_kind,
+                                            status="skipped",
+                                            output_dir=run_dir,
+                                            run_info_path=run_info_path,
+                                            inspect_log_path=info.get("native", {}).get(
+                                                "inspect_log_path"
+                                            ),
+                                        )
+                                    )
                                     continue
                             except Exception:
                                 pass
@@ -776,7 +847,9 @@ def run_eval_suite(
                     if isinstance(eval_spec, InspectBenchmarkSpec):
                         if judge_exec.mode == "resume":
                             result_status = "skipped"
-                            result_error = "resume mode does not apply to benchmark evals"
+                            result_error = (
+                                "resume mode does not apply to benchmark evals"
+                            )
                             inspect_log_path = None
                             inspect_status = None
                         else:
@@ -789,7 +862,9 @@ def run_eval_suite(
                             )
                             result_status = result.status
                             result_error = result.error
-                            inspect_log_path = result.log.location if result.log else None
+                            inspect_log_path = (
+                                result.log.location if result.log else None
+                            )
                             inspect_status = result.log.status if result.log else None
                     else:
                         if judge_exec.mode == "resume":
@@ -816,7 +891,9 @@ def run_eval_suite(
                         f"  done      {run_label}  ({_fmt_duration(eval_elapsed)}) [{result_status}]",
                         flush=True,
                     )
-                    eval_timings.append((model_spec.name, eval_spec.name, result_status, eval_elapsed))
+                    eval_timings.append(
+                        (model_spec.name, eval_spec.name, result_status, eval_elapsed)
+                    )
 
                     run_info_path = _write_run_info(
                         run_dir=run_dir,
@@ -830,17 +907,19 @@ def run_eval_suite(
                         inspect_log_path=inspect_log_path,
                         inspect_status=inspect_status,
                     )
-                    rows.append(_summary_row(
-                        model_name=prepared.model_name,
-                        model_spec_name=model_spec.name,
-                        eval_name=eval_spec.name,
-                        eval_kind=eval_kind,
-                        status=result_status,
-                        output_dir=run_dir,
-                        run_info_path=run_info_path,
-                        inspect_log_path=inspect_log_path,
-                        error=result_error,
-                    ))
+                    rows.append(
+                        _summary_row(
+                            model_name=prepared.model_name,
+                            model_spec_name=model_spec.name,
+                            eval_name=eval_spec.name,
+                            eval_kind=eval_kind,
+                            status=result_status,
+                            output_dir=run_dir,
+                            run_info_path=run_info_path,
+                            inspect_log_path=inspect_log_path,
+                            error=result_error,
+                        )
+                    )
 
                 # NOTE: Do NOT evict the model between evals for the same model
                 # spec — that moves it to CPU, causing subsequent evals to run
@@ -888,8 +967,12 @@ def run_eval_suite(
 
     if config.upload_repo_id and config.upload_path_in_repo:
         if "{eval_name}" in config.upload_path_in_repo:
-            _upload_run_per_eval(output_root, config.evals, config.upload_repo_id,
-                                 config.upload_path_in_repo)
+            _upload_run_per_eval(
+                output_root,
+                config.evals,
+                config.upload_repo_id,
+                config.upload_path_in_repo,
+            )
         else:
             _upload_run(output_root, config.upload_repo_id, config.upload_path_in_repo)
 
@@ -907,8 +990,9 @@ def _upload_run_per_eval(
     for eval_name in eval_names:
         # Collect all model-spec subdirs that contain this eval's data.
         # Structure: output_root/<model_spec>/<eval_name>[/run_NN]
-        eval_dirs = [d for d in output_root.iterdir()
-                     if d.is_dir() and (d / eval_name).exists()]
+        eval_dirs = [
+            d for d in output_root.iterdir() if d.is_dir() and (d / eval_name).exists()
+        ]
         if not eval_dirs:
             continue
         resolved_path = path_in_repo_template.replace("{eval_name}", eval_name)
@@ -925,6 +1009,7 @@ def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
             generate_plots,
             load_sweep_data,
         )
+
         print("\n  Auto-analyzing sweep results ...", flush=True)
         data = load_sweep_data(output_root)
         figures_dir = output_root / "figures"
@@ -965,7 +1050,10 @@ def _print_timing_summary(
     suite_elapsed: float,
 ) -> None:
     if not eval_timings:
-        print(f"\n=== Suite done in {_fmt_duration(suite_elapsed)} (no evals ran) ===\n", flush=True)
+        print(
+            f"\n=== Suite done in {_fmt_duration(suite_elapsed)} (no evals ran) ===\n",
+            flush=True,
+        )
         return
 
     col_model = max(max(len(m) for m, _, _, _ in eval_timings), 5)
@@ -999,9 +1087,6 @@ def run_inspect_eval(
         models=[model],
         evals=[eval_spec],
         output_root=output_root,
-        run_name=run_name,
-    )
-    return run_eval_suite(config, judge_exec=judge_exec)
         run_name=run_name,
     )
     return run_eval_suite(config, judge_exec=judge_exec)
