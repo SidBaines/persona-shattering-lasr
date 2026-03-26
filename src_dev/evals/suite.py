@@ -16,6 +16,7 @@ from inspect_ai.model import Model, get_model
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from src.utils.peft_manipulations import LoRaScaling
 from src_dev.evals.backends.inspect_runner import (
     run_benchmark_eval,
     run_custom_eval,
@@ -35,7 +36,6 @@ from src_dev.evals.model_resolution import resolve_model_reference
 from src_dev.evals.utils.preloaded_hf_provider import register_preloaded_hf_provider
 from src_dev.evals.utils.vllm_preloaded_provider import register_vllm_preloaded_provider
 from src_dev.utils.lora_composition import load_and_scale_adapters
-from src.utils.peft_manipulations import LoRaScaling
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +153,8 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
     scaler: LoRaScaling | None = None
 
     if spec.adapters:
-        from src_dev.utils.lora_composition import normalize_weighted_adapters
         from src_dev.evals.model_resolution import resolve_model_reference as _resolve
+        from src_dev.utils.lora_composition import normalize_weighted_adapters
 
         normalized = normalize_weighted_adapters(spec.adapters)
         peft_model, adapter_names, _ = load_and_scale_adapters(
@@ -305,6 +305,7 @@ def _prepare_vllm_sweep_model(
     # We access the internal lora_requests dict directly to get the right variant
     # without managing a context manager per scale point.
     from vllm.lora.request import LoRARequest
+
     from src_dev.rollout_generation.model_providers import _VllmVariantProvider
 
     lora_request = vllm_provider._lora_requests.get(variant)
@@ -571,7 +572,9 @@ def run_eval_suite(
         if config.use_vllm:
             print("  baking adapters + initialising vLLM engine for sweep ...", flush=True)
             try:
-                from src_dev.rollout_generation.model_providers import VLLMLoRaScaleProvider
+                from src_dev.rollout_generation.model_providers import (
+                    VLLMLoRaScaleProvider,
+                )
                 from src_dev.utils.lora_composition import split_adapter_reference
 
                 assert config.base_model is not None
@@ -620,6 +623,65 @@ def run_eval_suite(
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
         model_label = f"[{model_idx}/{n_models}] {model_spec.name}"
+
+        # Pre-check: if skip_completed is on, see if *all* evals for this
+        # model spec are already done.  If so we can skip the expensive
+        # model load entirely.
+        if config.skip_completed:
+            all_done = True
+            for eval_spec in config.evals:
+                if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                    continue
+                n_runs = eval_spec.n_runs if isinstance(eval_spec, InspectBenchmarkSpec) else 1
+                for run_index in range(n_runs):
+                    rd = _run_dir_for(
+                        output_root=output_root,
+                        model_spec_name=model_spec.name,
+                        eval_name=eval_spec.name,
+                        run_index=run_index,
+                    )
+                    ri = rd / "run_info.json"
+                    if not ri.exists():
+                        all_done = False
+                        break
+                    try:
+                        info = json.loads(ri.read_text())
+                        if info.get("status") != "ok":
+                            all_done = False
+                            break
+                    except Exception:
+                        all_done = False
+                        break
+                if not all_done:
+                    break
+            if all_done:
+                print(f"  all evals done for {model_label}, skipping model load", flush=True)
+                # Still record skipped rows so the summary is complete.
+                for eval_spec in config.evals:
+                    if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                        continue
+                    eval_kind = "benchmark" if isinstance(eval_spec, InspectBenchmarkSpec) else "custom"
+                    n_runs = eval_spec.n_runs if isinstance(eval_spec, InspectBenchmarkSpec) else 1
+                    for run_index in range(n_runs):
+                        rd = _run_dir_for(
+                            output_root=output_root,
+                            model_spec_name=model_spec.name,
+                            eval_name=eval_spec.name,
+                            run_index=run_index,
+                        )
+                        ri = rd / "run_info.json"
+                        info = json.loads(ri.read_text())
+                        rows.append(_summary_row(
+                            model_name=model_spec.base_model,
+                            model_spec_name=model_spec.name,
+                            eval_name=eval_spec.name,
+                            eval_kind=eval_kind,
+                            status="skipped",
+                            output_dir=rd,
+                            run_info_path=ri,
+                            inspect_log_path=info.get("native", {}).get("inspect_log_path"),
+                        ))
+                continue
 
         # Prepare the model for this spec.
         try:
@@ -772,10 +834,10 @@ def run_eval_suite(
                         error=result_error,
                     ))
 
-                # Evict Inspect's model cache between evals in the standard path.
-                # In sweep mode the model is ours — don't evict it.
-                if sweep_peft_model is None and sweep_vllm_provider is None:
-                    _cleanup_runtime_model_state()
+                # NOTE: Do NOT evict the model between evals for the same model
+                # spec — that moves it to CPU, causing subsequent evals to run
+                # on CPU instead of GPU.  Cleanup happens in the finally block
+                # after all evals for this spec are done.
 
         finally:
             # Always restore LoRaScaling so weights are clean for the next scale point.
@@ -849,8 +911,8 @@ def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
     """Run generate_plots() on output_root and return the figures directory."""
     try:
         from src_dev.evals.personality.analyze_results import (
-            load_sweep_data,
             generate_plots,
+            load_sweep_data,
         )
         print("\n  Auto-analyzing sweep results ...", flush=True)
         data = load_sweep_data(output_root)
@@ -926,6 +988,9 @@ def run_inspect_eval(
         models=[model],
         evals=[eval_spec],
         output_root=output_root,
+        run_name=run_name,
+    )
+    return run_eval_suite(config, judge_exec=judge_exec)
         run_name=run_name,
     )
     return run_eval_suite(config, judge_exec=judge_exec)
