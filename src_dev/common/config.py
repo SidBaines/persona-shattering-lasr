@@ -23,7 +23,7 @@ class GenerationConfig(BaseModel):
 
     max_new_tokens: int = 100000
     temperature: float = 0.7
-    top_p: float = 0.9
+    top_p: float = 1.0
     do_sample: bool = True
     batch_size: int = 8
     num_responses_per_prompt: int = 1
