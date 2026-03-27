@@ -485,23 +485,32 @@ async def main_async(args: argparse.Namespace) -> None:
 
         print_summary(analysis)
 
-    # Combined summary
+    # Combined summary — merge with existing so partial re-runs don't lose other traits
+    combined_path = analysis_dir / "combined_summary.json"
+    if combined_path.exists():
+        existing = json.loads(combined_path.read_text(encoding="utf-8"))
+        existing_per_trait = existing.get("per_trait", {})
+    else:
+        existing_per_trait = {}
+
+    new_per_trait = {
+        trait: {
+            "gold_vs_median_judge": a["gold_vs_median_judge"],
+            "self_consistency_alpha": a["self_consistency"]["krippendorff_alpha"],
+            "self_consistency_mean_qwk": a["self_consistency"].get("mean_qwk"),
+        }
+        for trait, a in all_analyses.items()
+    }
+    merged_per_trait = {**existing_per_trait, **new_per_trait}
+
     combined = {
         "run_key": run_key,
         "model": args.model,
         "temperature": args.temperature,
         "repeats": args.repeats,
-        "traits": traits,
-        "per_trait": {
-            trait: {
-                "gold_vs_median_judge": a["gold_vs_median_judge"],
-                "self_consistency_alpha": a["self_consistency"]["krippendorff_alpha"],
-                "self_consistency_mean_qwk": a["self_consistency"].get("mean_qwk"),
-            }
-            for trait, a in all_analyses.items()
-        },
+        "traits": sorted(merged_per_trait.keys()),
+        "per_trait": merged_per_trait,
     }
-    combined_path = analysis_dir / "combined_summary.json"
     combined_path.write_text(json.dumps(combined, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"\n\nDone. Results at: {run_dir}")
