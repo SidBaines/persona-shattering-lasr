@@ -592,54 +592,9 @@ def run_eval_suite(
     is_sweep = config.sweep is not None and judge_exec.mode != "resume"
     sweep_peft_model: PeftModel | None = None
     sweep_tokenizer: Any = None
-    sweep_vllm_provider: Any = None  # VLLMLoRaScaleProvider, if use_vllm=True
-
     if is_sweep and config.adapter is not None:
         load_t0 = time.perf_counter()
-        if config.use_vllm:
-            print(
-                "  baking adapters + initialising vLLM engine for sweep ...", flush=True
-            )
-            try:
-                from src_dev.rollout_generation.model_providers import (
-                    VLLMLoRaScaleProvider,
-                )
-                from src_dev.utils.lora_composition import split_adapter_reference
-
-                assert config.base_model is not None
-                all_scale_points = list(config.expand_models())
-                scale_points = [
-                    s.scale for s in all_scale_points if s.scale is not None
-                ]
-
-                baked_dir = config.vllm_baked_adapters_dir or (
-                    Path("scratch/baked_adapters") / output_root.name
-                )
-
-                _raw_adapter, _adapter_subfolder = split_adapter_reference(
-                    config.adapter
-                )
-                adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
-                if _adapter_subfolder:
-                    adapter_ref = f"{adapter_ref}/{_adapter_subfolder}"
-
-                sweep_vllm_provider = VLLMLoRaScaleProvider(
-                    base_model=config.base_model,
-                    adapter=adapter_ref,
-                    scale_points=scale_points,
-                    baked_adapters_dir=baked_dir,
-                    temperature=config.temperature,
-                )
-                sweep_vllm_provider.__enter__()
-                print(
-                    f"  vLLM engine ready  ({_fmt_duration(time.perf_counter() - load_t0)})",
-                    flush=True,
-                )
-            except Exception as exc:
-                print(f"  FAILED to init vLLM sweep: {exc}", flush=True)
-                is_sweep = False  # fall back to per-spec loading
-        else:
-            print("  loading model for sweep (once) ...", flush=True)
+        print("  loading model for sweep (once) ...", flush=True)
             try:
                 assert config.base_model is not None
                 first_spec = models[1] if len(models) > 1 else models[0]
@@ -752,10 +707,6 @@ def run_eval_suite(
                 prepared = _prepare_resume_model(model_spec)
             elif model_spec.model_uri is not None:
                 prepared = _prepare_api_model(model_spec)
-            elif is_sweep and sweep_vllm_provider is not None:
-                prepared = _prepare_vllm_sweep_model(
-                    model_spec, sweep_vllm_provider, config.batch_size
-                )
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(
                     model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size
@@ -954,12 +905,7 @@ def run_eval_suite(
             pass
         _cleanup_runtime_model_state()
 
-    # Shut down the vLLM engine after all scale points are done.
-    if sweep_vllm_provider is not None:
-        try:
-            sweep_vllm_provider.__exit__(None, None, None)
-        except Exception:
-            pass
+
 
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)
