@@ -1002,6 +1002,3 @@ def run_inspect_eval(
         run_name=run_name,
     )
     return run_eval_suite(config, judge_exec=judge_exec)
-        run_name=run_name,
-    )
-    return run_eval_suite(config, judge_exec=judge_exec)
