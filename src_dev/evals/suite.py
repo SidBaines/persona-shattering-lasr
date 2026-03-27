@@ -595,29 +595,29 @@ def run_eval_suite(
     if is_sweep and config.adapter is not None:
         load_t0 = time.perf_counter()
         print("  loading model for sweep (once) ...", flush=True)
-            try:
-                assert config.base_model is not None
-                first_spec = models[1] if len(models) > 1 else models[0]
-                from src_dev.utils.lora_composition import split_adapter_reference
+        try:
+            assert config.base_model is not None
+            first_spec = models[1] if len(models) > 1 else models[0]
+            from src_dev.utils.lora_composition import split_adapter_reference
 
-                _raw_adapter, _adapter_subfolder = split_adapter_reference(
-                    config.adapter
-                )
-                base_ref = resolve_model_reference(config.base_model, kind="base model")
-                adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
-                sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
-                    base_ref,
-                    adapter_ref,
-                    _resolve_dtype(first_spec),
-                    subfolder=_adapter_subfolder,
-                )
-                print(
-                    f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})",
-                    flush=True,
-                )
-            except Exception as exc:
-                print(f"  FAILED to load sweep model: {exc}", flush=True)
-                is_sweep = False  # fall back to per-spec loading
+            _raw_adapter, _adapter_subfolder = split_adapter_reference(
+                config.adapter
+            )
+            base_ref = resolve_model_reference(config.base_model, kind="base model")
+            adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
+            sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
+                base_ref,
+                adapter_ref,
+                _resolve_dtype(first_spec),
+                subfolder=_adapter_subfolder,
+            )
+            print(
+                f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"  FAILED to load sweep model: {exc}", flush=True)
+            is_sweep = False  # fall back to per-spec loading
 
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
