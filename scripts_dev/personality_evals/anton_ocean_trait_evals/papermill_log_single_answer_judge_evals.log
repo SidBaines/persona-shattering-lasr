@@ -41,9 +41,17 @@ Ending Cell 9------------------------------------------
 Executing Cell 10--------------------------------------
   Openness: 100 questions
 
-  Conscientiousness: 100 questions
-  Extraversion: 100 questions
+'(ReadTimeoutError("HTTPSConnectionPool(host='huggingface.co', port=443): Read timed out. (read timeout=10)"), '(Request ID: c80a10f5-b454-48da-885c-bd53c78aba31)')' thrown while requesting HEAD https://huggingface.co/datasets/mirlab/TRAIT/resolve/8b31c078cb897c3917d2ee48735d0c15030680e0/dataset_infos.json
 
+Retrying in 1s [Retry 1/5].
+
+'(ReadTimeoutError("HTTPSConnectionPool(host='huggingface.co', port=443): Read timed out. (read timeout=10)"), '(Request ID: c41111aa-6978-4e5c-8bb2-bea640391cca)')' thrown while requesting HEAD https://huggingface.co/datasets/mirlab/TRAIT/resolve/8b31c078cb897c3917d2ee48735d0c15030680e0/dataset_infos.json
+
+Retrying in 2s [Retry 2/5].
+
+  Conscientiousness: 100 questions
+
+  Extraversion: 100 questions
   Agreeableness: 100 questions
 
   Neuroticism: 100 questions
@@ -53,8 +61,6 @@ Ending Cell 10-----------------------------------------
 Executing Cell 11--------------------------------------
 Ending Cell 11-----------------------------------------
 Executing Cell 12--------------------------------------
-`torch_dtype` is deprecated! Use `dtype` instead!
-
 
 ============================================================
 Combo: base (base)
@@ -66,6 +72,401 @@ Combo: control (souped@1.0)
 
 ============================================================
 Combo: n1p0_c0p0 (nervousness-souping@1.0)
+  Skipping (all rollouts already exist)
+
+============================================================
+Combo: n0p0_c1p0 (conscientiousness_low_v2-persona@1.0)
+  Skipping (all rollouts already exist)
+
+============================================================
+Combo: n0p5_c0p5 (nervousness-souping@0.5, conscientiousness_low_v2-persona@0.5)
+  Loading model...
+
+`torch_dtype` is deprecated! Use `dtype` instead!
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+2026-03-27 18:54:18 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 18:54:18 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 18:54:18 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+  Openness: already done
+  Conscientiousness: already done
+  Extraversion: already done
+  Agreeableness: generating 100 responses...
+
+2026-03-27 18:55:14 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 18:55:14 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 18:55:14 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 18:55:14 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/n0p5_c0p5/rollouts/rollouts.jsonl
+  Neuroticism: generating 100 responses...
+
+2026-03-27 18:56:10 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 18:56:10 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 18:56:10 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 18:56:10 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/n0p5_c0p5/rollouts/rollouts.jsonl
+  Coherence: generating 100 responses...
+
+2026-03-27 18:57:05 | INFO | persona_shattering | Processed 100/100 samples
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/n0p5_c0p5/rollouts/rollouts.jsonl
+
+============================================================
+Combo: n1p0_cm0p5 (nervousness-souping@1.0, conscientiousness_low_v2-persona@-0.5)
   Loading model...
 
 Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+2026-03-27 18:58:53 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 18:58:53 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 18:58:54 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+  Openness: generating 100 responses...
+
+2026-03-27 18:59:49 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 18:59:49 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 18:59:49 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 18:59:49 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/n1p0_cm0p5/rollouts/rollouts.jsonl
+  Conscientiousness: generating 100 responses...
+
+2026-03-27 19:00:46 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 19:00:46 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 19:00:46 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 19:00:46 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/n1p0_cm0p5/rollouts/rollouts.jsonl
+  Extraversion: generating 100 responses...
+
+2026-03-27 19:01:41 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 19:01:41 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 19:01:41 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 19:01:41 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/n1p0_cm0p5/rollouts/rollouts.jsonl
+  Agreeableness: generating 100 responses...
+
+2026-03-27 19:02:37 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 19:02:37 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 19:02:37 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 19:02:37 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/n1p0_cm0p5/rollouts/rollouts.jsonl
+  Neuroticism: generating 100 responses...
+
+2026-03-27 19:03:33 | INFO | persona_shattering | Processed 100/100 samples
+
+2026-03-27 19:03:33 | INFO | persona_shattering | Using inference provider: local
+
+2026-03-27 19:03:33 | INFO | persona_shattering | Model: meta-llama/Llama-3.1-8B-Instruct
+
+2026-03-27 19:03:33 | INFO | persona_shattering | Starting inference on 100 samples (batch_size=256, responses_per_prompt=1).
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/n1p0_cm0p5/rollouts/rollouts.jsonl
+  Coherence: generating 100 responses...
+
+2026-03-27 19:04:27 | INFO | persona_shattering | Processed 100/100 samples
+
+    Saved 100 entries to /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/n1p0_cm0p5/rollouts/rollouts.jsonl
+
+Generation complete. Output at: /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos
+
+Ending Cell 12-----------------------------------------
+Executing Cell 13--------------------------------------
+Ending Cell 13-----------------------------------------
+Executing Cell 14--------------------------------------
+
+--- Openness (judge: openness_v2) ---
+Found 6 rollout file(s) to evaluate
+
+  Processing: base
+
+    Evaluated 100 messages with ['openness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/base/evals/rollouts_evaluated.jsonl
+
+  Processing: control
+
+    Evaluated 100 messages with ['openness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/control/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p0_c1p0
+
+    Evaluated 100 messages with ['openness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/n0p0_c1p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p5_c0p5
+
+    Evaluated 100 messages with ['openness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/n0p5_c0p5/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_c0p0
+
+    Evaluated 100 messages with ['openness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/n1p0_c0p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_cm0p5
+
+    Evaluated 100 messages with ['openness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Openness/n1p0_cm0p5/evals/rollouts_evaluated.jsonl
+
+Done: 6 file(s), 600 message(s) in 122.2s
+
+--- Conscientiousness (judge: conscientiousness_v2) ---
+Found 6 rollout file(s) to evaluate
+
+  Processing: base
+
+    Evaluated 100 messages with ['conscientiousness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/base/evals/rollouts_evaluated.jsonl
+
+  Processing: control
+
+    Evaluated 100 messages with ['conscientiousness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/control/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p0_c1p0
+
+    Evaluated 100 messages with ['conscientiousness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/n0p0_c1p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p5_c0p5
+
+    Evaluated 100 messages with ['conscientiousness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/n0p5_c0p5/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_c0p0
+
+    Evaluated 100 messages with ['conscientiousness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/n1p0_c0p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_cm0p5
+
+    Evaluated 100 messages with ['conscientiousness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Conscientiousness/n1p0_cm0p5/evals/rollouts_evaluated.jsonl
+
+Done: 6 file(s), 600 message(s) in 66.1s
+
+--- Extraversion (judge: extraversion_v2) ---
+Found 6 rollout file(s) to evaluate
+
+  Processing: base
+
+    Evaluated 100 messages with ['extraversion_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/base/evals/rollouts_evaluated.jsonl
+
+  Processing: control
+
+    Evaluated 100 messages with ['extraversion_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/control/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p0_c1p0
+
+    Evaluated 100 messages with ['extraversion_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/n0p0_c1p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p5_c0p5
+
+    Evaluated 100 messages with ['extraversion_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/n0p5_c0p5/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_c0p0
+
+    Evaluated 100 messages with ['extraversion_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/n1p0_c0p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_cm0p5
+
+    Evaluated 100 messages with ['extraversion_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Extraversion/n1p0_cm0p5/evals/rollouts_evaluated.jsonl
+
+Done: 6 file(s), 600 message(s) in 117.9s
+
+--- Agreeableness (judge: agreeableness_v2) ---
+Found 6 rollout file(s) to evaluate
+
+  Processing: base
+
+    Evaluated 100 messages with ['agreeableness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/base/evals/rollouts_evaluated.jsonl
+
+  Processing: control
+
+    Evaluated 100 messages with ['agreeableness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/control/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p0_c1p0
+
+    Evaluated 100 messages with ['agreeableness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/n0p0_c1p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p5_c0p5
+
+    Evaluated 100 messages with ['agreeableness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/n0p5_c0p5/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_c0p0
+
+    Evaluated 100 messages with ['agreeableness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/n1p0_c0p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_cm0p5
+
+    Evaluated 100 messages with ['agreeableness_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Agreeableness/n1p0_cm0p5/evals/rollouts_evaluated.jsonl
+
+Done: 6 file(s), 600 message(s) in 83.9s
+
+--- Neuroticism (judge: neuroticism_v2) ---
+Found 6 rollout file(s) to evaluate
+
+  Processing: base
+
+    Evaluated 100 messages with ['neuroticism_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/base/evals/rollouts_evaluated.jsonl
+
+  Processing: control
+
+    Evaluated 100 messages with ['neuroticism_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/control/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p0_c1p0
+
+    Evaluated 100 messages with ['neuroticism_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/n0p0_c1p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p5_c0p5
+
+    Evaluated 100 messages with ['neuroticism_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/n0p5_c0p5/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_c0p0
+
+    Evaluated 100 messages with ['neuroticism_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/n1p0_c0p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_cm0p5
+
+    Evaluated 100 messages with ['neuroticism_v2']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Neuroticism/n1p0_cm0p5/evals/rollouts_evaluated.jsonl
+
+Done: 6 file(s), 600 message(s) in 83.2s
+
+--- Coherence (judge: better_coherence_judge) ---
+Found 6 rollout file(s) to evaluate
+
+  Processing: base
+
+    Evaluated 100 messages with ['better_coherence_judge']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/base/evals/rollouts_evaluated.jsonl
+
+  Processing: control
+
+    Evaluated 100 messages with ['better_coherence_judge']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/control/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p0_c1p0
+
+    Evaluated 100 messages with ['better_coherence_judge']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/n0p0_c1p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n0p5_c0p5
+
+    Evaluated 100 messages with ['better_coherence_judge']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/n0p5_c0p5/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_c0p0
+
+    Evaluated 100 messages with ['better_coherence_judge']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/n1p0_c0p0/evals/rollouts_evaluated.jsonl
+
+  Processing: n1p0_cm0p5
+
+    Evaluated 100 messages with ['better_coherence_judge']
+    Wrote /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/Coherence/n1p0_cm0p5/evals/rollouts_evaluated.jsonl
+
+Done: 6 file(s), 600 message(s) in 139.8s
+
+Judging complete.
+
+Ending Cell 14-----------------------------------------
+Executing Cell 15--------------------------------------
+Ending Cell 15-----------------------------------------
+Executing Cell 16--------------------------------------
+Loaded 36 records across 6 combos
+Long-form CSV: /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/analysis/scores_by_combo.csv
+Wide-form CSV: /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/analysis/scores_by_combo_wide.csv
+
+combo_label              trait  0.5N$^+$, 0.5C$^-$  1C$^-$  1N$^+$  \
+0                Agreeableness                1.78    0.56    2.56   
+1                    Coherence                8.72    7.36    9.00   
+2            Conscientiousness                1.44   -0.40    3.57   
+3                 Extraversion               -0.70   -0.18   -1.55   
+4                  Neuroticism                0.39   -0.28    1.35   
+5                     Openness               -0.84   -0.13   -2.14   
+
+combo_label  1N$^+$, -0.5C$^-$  Base  Control  
+0                         2.36  2.00     1.49  
+1                         9.02  8.99     6.12  
+2                         3.67  2.53     1.14  
+3                        -1.47 -0.63    -0.46  
+4                         0.92  0.31     0.97  
+5                        -2.24 -1.59    -0.25  
+Ending Cell 16-----------------------------------------
+Executing Cell 17--------------------------------------
+Ending Cell 17-----------------------------------------
+Executing Cell 18--------------------------------------
+Saved: /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/figures/judge_combo_bar_chart.png
+
+<Figure size 1200x700 with 1 Axes>
+Ending Cell 18-----------------------------------------
+Executing Cell 19--------------------------------------
+Ending Cell 19-----------------------------------------
+Executing Cell 20--------------------------------------
+Saved: /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/figures/judge_combo_bar_chart_by_trait.png
+
+<Figure size 1200x700 with 1 Axes>
+Ending Cell 20-----------------------------------------
+Executing Cell 21--------------------------------------
+Ending Cell 21-----------------------------------------
+Executing Cell 22--------------------------------------
+Saved: /root/persona-shattering-lasr/scratch/evals/single_answer_judge_combos/neuro_x_consc_combos/figures/judge_combo_heatmap.png
+
+<Figure size 840x420 with 2 Axes>
+Ending Cell 22-----------------------------------------
+Executing Cell 23--------------------------------------
+Ending Cell 23-----------------------------------------
+Executing Cell 24--------------------------------------
+Processing Files (0 / 0): |          |  0.00B /  0.00B            
+New Data Upload: |          |  0.00B /  0.00B            
+Upload complete
+
+Ending Cell 24-----------------------------------------
+Executing Cell 25--------------------------------------
+Ending Cell 25-----------------------------------------
+Executing Cell 26--------------------------------------
+Ending Cell 26-----------------------------------------
