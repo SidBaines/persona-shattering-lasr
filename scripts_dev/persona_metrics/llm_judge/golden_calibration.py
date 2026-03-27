@@ -439,6 +439,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
     if getattr(args, "run_dir", None) is not None:
         run_dir = args.run_dir
+        run_key = run_dir.name
         args.resume = True
     else:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
