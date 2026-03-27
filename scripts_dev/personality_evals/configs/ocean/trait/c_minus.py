@@ -75,7 +75,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"title_suffix": "C- TRAIT"},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/trait",
+    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mcq/trait",
     metadata={
         "persona": "conscientiousness_minus",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
