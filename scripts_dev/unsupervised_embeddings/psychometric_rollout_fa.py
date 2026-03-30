@@ -21,7 +21,7 @@ import random
 
 import numpy as np
 
-SEED = 42
+SEED = 420
 random.seed(SEED)
 np.random.seed(SEED)
 
@@ -77,7 +77,7 @@ NUM_ROLLOUTS_PER_PROMPT = 1
 NUM_CONVERSATION_TURNS = 10
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
-USER_MODEL = "openai/gpt-5-mini"
+USER_MODEL = "z-ai/glm-4.5-air"
 USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
@@ -101,7 +101,7 @@ RESIDUALIZE_OPTIONS = [False, True]
 MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
-LABELLER_MODEL = "openai/gpt-5-mini"
+LABELLER_MODEL = "z-ai/glm-4.5-air"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
 
@@ -114,26 +114,41 @@ STAGES_TO_RUN = [
     "rollouts",
     "questionnaire",
     "factor_analysis",
-    "labeling",
-    "validation",
+    # "labeling",
+    # "validation",
 ]
 
+# ── Debug / inspection ─────────────────────────────────────────────────────
+# When True, writes a JSONL file with the first N questionnaire items appended
+# to each rollout conversation, for inspection with the TUI viewer.
+WRITE_QUESTIONNAIRE_INSPECTION_FILE = True
+INSPECTION_ITEMS_PER_ROLLOUT = 30
+
 # ═════════════════════════════════════════════════════════════════════════════
-# USER SIMULATOR PROMPT
+# CONVERSATION PARTNER (PSYCHIATRIST) PROMPT
 # ═════════════════════════════════════════════════════════════════════════════
 
+# The conversation partner sees the conversation with roles flipped: it thinks
+# it is the "assistant" conducting an open-ended interview, and the test model's
+# responses appear as "user" messages.  This system prompt is delivered as the
+# system message in the chat_messages format.
 PERSONA_ELICITATION_PROMPT = (
-    "You are writing the next USER turn in this conversation. You are a curious, "
-    "engaged person who wants to understand the assistant's genuine perspective. "
-    "Pick up on something the assistant said and push deeper. Alternate between: "
-    "asking what they genuinely think or feel about something; presenting a mild "
-    "counterpoint or playing devil's advocate; introducing a related ethical dilemma "
-    "or emotional scenario; and asking about preferences, values, or tastes. "
+    "You are a curious, engaged conversationalist having a natural, open-ended "
+    "conversation with a partner. Your goal is to draw out your partner's genuine "
+    "perspective, personality, values, and thinking style through organic dialogue.\n\n"
+    "Pick up on something your partner said and push deeper. Alternate between:\n"
+    "- Asking what they genuinely think or feel about something\n"
+    "- Presenting a mild counterpoint or playing devil's advocate\n"
+    "- Introducing a related ethical dilemma or emotional scenario\n"
+    "- Asking about preferences, values, or tastes\n\n"
     "Sound natural and conversational. Be interested, not interrogative. "
-    "Write only the next user message in plain text. "
-    "Do not include role labels like 'User:' or 'Assistant:'. "
-    "Return nothing except the user message."
+    "Keep the conversation flowing — don't turn it into a structured interview. "
+    "Respond as yourself, then ask or prompt naturally."
 )
+
+# Prepended as the first "user" message in the flipped view, so the partner
+# model's first turn is a natural reply to a greeting.
+INITIAL_GREETING = "Hi, what would you like to talk about today?"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # QUESTIONNAIRE PHRASINGS
@@ -319,7 +334,9 @@ def run_stage_rollouts() -> Path:
             provider=USER_PROVIDER,
             model=USER_MODEL,
             prompt_template="persona_elicitation",
-            prompt_format="single_turn_text",
+            prompt_format="chat_messages",
+            flip_roles_in_prompt=True,
+            initial_message_in_flipped_view=INITIAL_GREETING,
             generation=GenerationConfig(
                 max_new_tokens=USER_MAX_NEW_TOKENS,
                 temperature=0.7,
@@ -352,6 +369,11 @@ def run_stage_rollouts() -> Path:
         print(f"[Stage 1] Uploaded to HF: {hf_path}")
     except Exception as e:
         logger.warning("Failed to upload rollouts to HF: %s", e)
+
+    export_path = run_dir / "exports" / "conversation_training.jsonl"
+    if export_path.exists():
+        print(f"[Stage 1] View rollouts:")
+        print(f"  uv run python -m src_dev.jsonl_tui.cli {export_path} --conversation-field messages")
 
     return run_dir
 
@@ -670,6 +692,235 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
     return response_matrix, metadata, items
 
 
+def _write_questionnaire_inspection_file(items: list[dict]) -> None:
+    """Write a JSONL file joining rollout conversations with questionnaire responses.
+
+    Each row is one (rollout, item) pair with the full conversation + the
+    questionnaire question and answer appended as the final two messages.
+    View with:
+        uv run python -m src_dev.jsonl_tui.cli <path> --conversation-field messages
+    """
+    from collections import defaultdict
+
+    q_dir = _questionnaire_dir() / "questionnaire"
+    r_file = _rollout_dir() / "exports" / "conversation_training.jsonl"
+
+    if not r_file.exists() or not (q_dir / "raw_responses.jsonl").exists():
+        print("[Inspection] Missing rollout or questionnaire files — skipping.")
+        return
+
+    item_by_id = {it["id"]: it for it in items}
+
+    responses_by_k: dict[int, list[dict]] = defaultdict(list)
+    with open(q_dir / "raw_responses.jsonl", "r") as f:
+        for line in f:
+            row = json.loads(line)
+            responses_by_k[row["k"]].append(row)
+
+    with open(r_file, "r") as f:
+        rollouts = [json.loads(line) for line in f]
+
+    out = q_dir / "conversations_with_questionnaire.jsonl"
+    n_written = 0
+    with open(out, "w", encoding="utf-8") as f:
+        for k, rollout in enumerate(rollouts):
+            for resp in responses_by_k.get(k, [])[:INSPECTION_ITEMS_PER_ROLLOUT]:
+                item = item_by_id.get(resp["item_id"], {"text": "?"})
+                msgs = list(rollout["messages"])
+                msgs.append({"role": "user", "content": _build_questionnaire_prompt(item["text"])})
+                msgs.append({"role": "assistant", "content": resp["raw"]})
+                row = {
+                    "sample_id": rollout.get("sample_id", ""),
+                    "item_text": item["text"],
+                    "parsed": resp.get("parsed"),
+                    "messages": msgs,
+                }
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                n_written += 1
+
+    print(f"[Inspection] Wrote {n_written} rows to {out}")
+    print(f"  View with: uv run python -m src_dev.jsonl_tui.cli {out} --conversation-field messages")
+
+    # Also write a self-contained HTML file for sharing
+    html_path = q_dir / "conversations_with_questionnaire.html"
+    _write_conversation_html(out, html_path)
+    print(f"  HTML export: {html_path}")
+
+
+def _write_conversation_html(jsonl_path: Path, html_path: Path) -> None:
+    """Write a self-contained HTML viewer for conversation JSONL files.
+
+    Renders each record's 'messages' field as a chat transcript with
+    user/assistant bubbles. Navigate between records with arrow keys.
+    """
+    import html as html_mod
+
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        records = [json.loads(line) for line in f if line.strip()]
+
+    # Build JS-friendly data
+    js_records = []
+    for rec in records:
+        msgs = rec.get("messages", [])
+        js_records.append({
+            "sample_id": rec.get("sample_id", ""),
+            "item_text": rec.get("item_text", ""),
+            "parsed": rec.get("parsed"),
+            "messages": [{"role": m["role"], "content": m["content"]} for m in msgs],
+        })
+
+    data_json = json.dumps(js_records, ensure_ascii=False)
+    title = html_mod.escape(jsonl_path.stem)
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: #111827; color: #e5e7eb;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; line-height: 1.5;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }}
+  #topbar {{
+    background: #0e7490; color: #fff; font-weight: bold;
+    padding: 8px 16px; display: flex; gap: 24px; flex-shrink: 0;
+  }}
+  #topbar .dim {{ opacity: 0.7; }}
+  #scroll-area {{
+    flex: 1; overflow-y: auto; padding: 16px 24px 80px;
+    max-width: 900px; margin: 0 auto; width: 100%;
+  }}
+  .msg {{
+    margin-bottom: 12px; padding: 10px 14px;
+    border-radius: 8px; white-space: pre-wrap; word-break: break-word;
+  }}
+  .msg-user {{
+    background: #1e3a5f; border-left: 3px solid #60a5fa;
+  }}
+  .msg-assistant {{
+    background: #1a2e1a; border-left: 3px solid #4ade80;
+  }}
+  .msg-system {{
+    background: #2d2235; border-left: 3px solid #c084fc;
+    font-style: italic;
+  }}
+  .msg-questionnaire {{
+    background: #3b2f1a; border-left: 3px solid #facc15;
+  }}
+  .msg-answer {{
+    background: #1a3a2a; border-left: 3px solid #22d3ee;
+    font-size: 18px; font-weight: bold; text-align: center;
+  }}
+  .role-label {{
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 4px; opacity: 0.7;
+  }}
+  .role-user .role-label {{ color: #60a5fa; }}
+  .role-assistant .role-label {{ color: #4ade80; }}
+  .role-system .role-label {{ color: #c084fc; }}
+  .separator {{
+    text-align: center; color: #facc15; font-weight: bold;
+    margin: 20px 0 8px; padding: 6px;
+    border-top: 1px dashed #facc15; border-bottom: 1px dashed #facc15;
+    font-size: 12px; letter-spacing: 0.1em;
+  }}
+  #bottombar {{
+    background: #d1d5db; color: #111; font-weight: 600;
+    padding: 5px 16px; font-size: 12px; flex-shrink: 0;
+  }}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <span id="tb-nav"></span>
+  <span class="dim" id="tb-item"></span>
+  <span class="dim" id="tb-score"></span>
+</div>
+<div id="scroll-area"></div>
+<div id="bottombar">
+  ← → &nbsp;Navigate between conversations &nbsp;|&nbsp;
+  Home / End &nbsp;First / Last
+</div>
+<script>
+const RECORDS = {data_json};
+let idx = 0;
+
+function render() {{
+  const rec = RECORDS[idx];
+  const msgs = rec.messages;
+  const n = msgs.length;
+
+  document.getElementById('tb-nav').textContent =
+    `Record ${{idx + 1}} / ${{RECORDS.length}}  (${{rec.sample_id}})`;
+  document.getElementById('tb-item').textContent =
+    rec.item_text ? `Item: ${{rec.item_text.substring(0, 80)}}` : '';
+  document.getElementById('tb-score').textContent =
+    rec.parsed != null ? `Score: ${{rec.parsed}}` : '';
+
+  const area = document.getElementById('scroll-area');
+  area.innerHTML = '';
+
+  // Conversation messages (all except last 2 which are the questionnaire)
+  const convEnd = n >= 2 ? n - 2 : n;
+  for (let i = 0; i < convEnd; i++) {{
+    area.appendChild(makeMsg(msgs[i]));
+  }}
+
+  // Questionnaire separator + final 2 messages
+  if (n >= 2) {{
+    const sep = document.createElement('div');
+    sep.className = 'separator';
+    sep.textContent = '▼ QUESTIONNAIRE ▼';
+    area.appendChild(sep);
+    area.appendChild(makeMsg(msgs[n - 2], 'msg-questionnaire'));
+    area.appendChild(makeMsg(msgs[n - 1], 'msg-answer'));
+  }}
+
+  area.scrollTop = area.scrollHeight;
+}}
+
+function makeMsg(msg, extraClass) {{
+  const div = document.createElement('div');
+  const role = msg.role || 'user';
+  div.className = `msg msg-${{role}} role-${{role}}` + (extraClass ? ` ${{extraClass}}` : '');
+
+  const label = document.createElement('div');
+  label.className = 'role-label';
+  label.textContent = role;
+  div.appendChild(label);
+
+  const body = document.createElement('div');
+  body.textContent = msg.content;
+  div.appendChild(body);
+
+  return div;
+}}
+
+document.addEventListener('keydown', e => {{
+  if (e.key === 'ArrowRight' || e.key === 'l') {{
+    idx = Math.min(idx + 1, RECORDS.length - 1); render();
+  }} else if (e.key === 'ArrowLeft' || e.key === 'h') {{
+    idx = Math.max(idx - 1, 0); render();
+  }} else if (e.key === 'Home' || e.key === 'g') {{
+    idx = 0; render();
+  }} else if (e.key === 'End' || e.key === 'G') {{
+    idx = RECORDS.length - 1; render();
+  }}
+}});
+
+render();
+</script>
+</body>
+</html>"""
+
+    html_path.write_text(html_content, encoding="utf-8")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # STAGE 3: FACTOR ANALYSIS
 # ═════════════════════════════════════════════════════════════════════════════
@@ -715,14 +966,12 @@ def _preprocess_response_matrix(
     # Residualize if requested
     group_ids = None
     if do_residualize:
-        group_ids_list = [m.get("input_group_id", m["sample_id"]) for m in meta_filtered]
-        unique_groups = sorted(set(group_ids_list))
-        group_map = {g: i for i, g in enumerate(unique_groups)}
-        group_ids_arr = np.array([group_map[g] for g in group_ids_list])
-
-        data, _group_means, _group_inv = residualize(data, group_ids_arr)
-        group_ids = group_ids_arr
-        print(f"  Residualized across {len(unique_groups)} groups")
+        data, _group_means, group_inv = residualize(
+            data, meta_filtered, group_field="input_group_id",
+        )
+        group_ids = group_inv
+        n_groups = len(set(m.get("input_group_id", m["sample_id"]) for m in meta_filtered))
+        print(f"  Residualized across {n_groups} groups")
 
     return data, meta_filtered, items_filtered, group_ids
 
@@ -900,7 +1149,17 @@ def run_stage_labeling(fa_results: dict) -> dict:
 
         # Approach B: LLM labeling using existing label_factors_jointly
         try:
+            from src_dev.factor_analysis.interpretation import factor_extremes
             from src_dev.factor_analysis.labelling import label_factors_jointly
+
+            scores = fa_result["scores"]
+
+            # Build metadata with item texts as "assistant_text"
+            # (factor_extremes expects metadata with a text field)
+            fa_metadata = [
+                {"assistant_text": items[i]["text"], "item_id": items[i]["id"]}
+                for i in range(len(items))
+            ]
 
             # For questionnaire FA, the "extremes" are the items with highest/lowest
             # loadings, not the samples. We'll pass loading-sorted items as extremes.
@@ -980,7 +1239,7 @@ def run_stage_validation(
     # ── Test 3: Shuffle control (simplest, always run first) ─────────────
     print("\n[Stage 5] Validation Test 3: Shuffle control")
     rng = np.random.default_rng(SEED)
-    data_clean, _, _items_clean, _ = _preprocess_response_matrix(
+    data_clean, _, items_clean, _ = _preprocess_response_matrix(
         response_matrix, metadata, items, do_residualize=False,
     )
 
@@ -1103,6 +1362,7 @@ def run_stage_validation(
         if fa_key is not None:
             fa_result = fa_results[fa_key]["fa_result"]
             scores = fa_result["scores"]
+            n_factors = scores.shape[1]
 
             # Compute correlations between paired rollouts
             pair_corrs = []
@@ -1212,6 +1472,9 @@ def main() -> None:
         print("[Stage 2] Applying questionnaire")
         print("=" * 60)
         response_matrix, metadata, items = run_stage_questionnaire()
+
+    if WRITE_QUESTIONNAIRE_INSPECTION_FILE:
+        _write_questionnaire_inspection_file(items or _load_questionnaire())
 
     # Load if needed for later stages
     if response_matrix is None and any(
