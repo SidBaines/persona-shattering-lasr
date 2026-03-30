@@ -373,9 +373,18 @@ class SweepConfig(BaseModel):
     @model_validator(mode="after")
     def _default_plot_metric(self) -> "SweepConfig":
         if self.plot_metric is None and self.evaluations:
+            from src_dev.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
+            from src_dev.persona_metrics.registry import PERSONA_METRIC_REGISTRY
+
             first_eval = self.evaluations[0]
             name = first_eval if isinstance(first_eval, str) else first_eval.name
-            self.plot_metric = f"overall/{name}.density/mean"
+            metric_cls = PERSONA_METRIC_REGISTRY.get(name)
+            sub_key = (
+                "score"
+                if metric_cls is not None and issubclass(metric_cls, LLMJudgeMetric)
+                else "density"
+            )
+            self.plot_metric = f"overall/{name}.{sub_key}/mean"
         return self
 
 
