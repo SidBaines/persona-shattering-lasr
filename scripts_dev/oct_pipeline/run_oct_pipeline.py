@@ -423,7 +423,12 @@ def install_custom_constitution(
         raise FileNotFoundError(f"Constitution file not found: {source}")
 
     with open(source) as f:
-        traits = json.load(f)
+        content = f.read().strip()
+    # Support both JSON array and JSONL (one JSON object per line)
+    try:
+        traits = json.loads(content)
+    except json.JSONDecodeError:
+        traits = [json.loads(line) for line in content.splitlines() if line.strip()]
 
     # Validate
     if not isinstance(traits, list) or not traits:
@@ -2413,6 +2418,7 @@ def _build_run_identity(
     teacher_model: str,
     teacher_prefill_mode: str,
     training_backend: str,
+    K: int,
     max_pairs: int | None,
     lora_rank: int,
     lora_alpha: int,
@@ -2438,6 +2444,7 @@ def _build_run_identity(
         "teacher_prefill_mode": teacher_prefill_mode if _is_openrouter_model(teacher_model) else None,
         "training_backend": training_backend,
         "seed": seed,
+        "K": K,
         "max_pairs": max_pairs,
         "lora_rank": lora_rank,
         "lora_alpha": lora_alpha,
