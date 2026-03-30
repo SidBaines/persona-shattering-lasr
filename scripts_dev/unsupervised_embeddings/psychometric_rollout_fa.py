@@ -283,8 +283,8 @@ def _parse_likert_response(text: str) -> int | None:
     if not text:
         return None
 
-    # Pattern 1: starts with a single digit 1-5
-    m = re.match(r"^([1-5])\b", text)
+    # Pattern 1: starts with a digit 1-5 (possibly wrapped in markdown bold/italic)
+    m = re.match(r"^[\s*_]*([1-5])\b", text)
     if m:
         return int(m.group(1))
 
