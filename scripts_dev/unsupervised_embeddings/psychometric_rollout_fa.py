@@ -265,10 +265,16 @@ def _questionnaire_dir() -> Path:
 
 
 def _load_questionnaire() -> tuple[list[dict], list[dict]]:
-    """Load the hybrid questionnaire and return (items, column_defs).
+    """Load a questionnaire and return (items, column_defs).
 
-    items: flat list of all items across all three blocks, each with a 'type'
-        field ('forced_choice', 'vignette', 'likert').  One API call per item.
+    Supports two formats:
+    - Legacy flat format (v1/v2): JSON with top-level "items" list of Likert
+      items, each with "id", "text", "source".
+    - Hybrid format (v3+): JSON with "block_1_forced_choice",
+      "block_2_vignettes", and "block_3_likert" sections.
+
+    items: flat list of all items, each with a 'type' field.  One API call
+        per item.
     column_defs: flat list of matrix column definitions.  FC and Likert items
         each produce one column; vignette items produce one column per
         dimension that has a non-zero score in at least one option.
@@ -276,8 +282,34 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
     with open(QUESTIONNAIRE_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    items: list[dict] = []
-    column_defs: list[dict] = []
+    # ── Legacy flat Likert format (v1/v2) ─────────────────────────────────
+    if "items" in data:
+        items: list[dict] = []
+        column_defs: list[dict] = []
+        for raw_item in data["items"]:
+            item_id = str(raw_item["id"])
+            items.append({
+                "id": item_id,
+                "type": "likert",
+                "block": 3,
+                "text": raw_item["text"],
+                "primary_dimension": raw_item.get("category", ""),
+                "reverse_keyed": raw_item.get("reverse_keyed", False),
+            })
+            column_defs.append({
+                "col_id": item_id,
+                "item_id": item_id,
+                "block": "likert",
+                "dimension": raw_item.get("category", ""),
+                "text": raw_item["text"],
+                "encoding": "1-5",
+                "reverse_keyed": raw_item.get("reverse_keyed", False),
+            })
+        return items, column_defs
+
+    # ── Hybrid format (v3+) ──────────────────────────────────────────────
+    items = []
+    column_defs = []
 
     # ── Block 1: Forced choice ────────────────────────────────────────────
     for pair in data["block_1_forced_choice"]["pairs"]:
