@@ -29,6 +29,7 @@ dependencies = [
     "matplotlib>=3.7",
     "sentencepiece>=0.2.1",
     "vllm>=0.6",
+    "character @ git+https://github.com/maiush/OpenCharacterTraining.git@d1da9f0",
 ]
 
 [project.optional-dependencies]
