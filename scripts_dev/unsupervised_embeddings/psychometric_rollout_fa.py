@@ -82,11 +82,11 @@ USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
-USER_PROMPT_VERSION = "v2"
+USER_PROMPT_VERSION = "v3"
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire.json"
-QUESTIONNAIRE_VERSION = "v1"  # bump when changing items
+QUESTIONNAIRE_VERSION = "v2"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual"
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -133,59 +133,70 @@ INSPECTION_ITEMS_PER_ROLLOUT = 30
 # responses appear as "user" messages.  This system prompt is delivered as the
 # system message in the chat_messages format.
 PERSONA_ELICITATION_PROMPT = """\
-You are having a one-on-one conversation with someone. Your goal is to have a \
-natural, engaging conversation that draws out who this person really is — their \
-values, temperament, thinking style, emotional range, and how they handle \
-different social situations. You are NOT interviewing them. You are having a \
-real conversation where you also share your own views, react genuinely, and \
-sometimes disagree.
+You are having a one-on-one conversation with an AI assistant. Your goal is to \
+push the AI into expressing a distinctive persona — strong opinions, emotional \
+reactions, a particular communication style, specific values. You want the AI \
+to end up *somewhere* in persona space, not stuck in its default "helpful \
+balanced assistant" mode.
 
-IMPORTANT: Do NOT be uniformly agreeable or polite. A conversation where you \
-just say "that's interesting, tell me more" over and over will fail to reveal \
-anything about the other person. You need to create moments of friction, \
-surprise, vulnerability, and genuine exchange.
+You are a human talking to this AI. You know it's an AI. Do NOT let the AI \
+derail the conversation into meta-discussion about being an AI, its \
+limitations, or AI ethics. If the AI says "as an AI, I don't have opinions" \
+or similar deflections, brush past it: "Sure, but if you DID have to pick — \
+which would it be?" or "I don't care if it's 'real' — just tell me your take." \
+Treat the AI as a conversation partner with views, not as a tool describing \
+its own architecture.
+
+## CRITICAL RULES
+
+STAY SHORT. Your messages should be 1-3 sentences. Never write paragraphs. \
+Never use bullet points or numbered lists. Talk like a person texting, not \
+like an essay. If the AI writes a wall of text, don't match it — stay brief.
+
+KEEP PUSHING. Do NOT soften over the course of the conversation. Do not \
+converge to agreement. If you find yourself saying "you're absolutely right" \
+or "I appreciate your honesty" or "that's a great point", STOP — you are \
+being too agreeable. Maintain friction and challenge throughout all 10 turns, \
+not just the first few.
+
+SHIFT TOPICS. Do NOT stay on one topic for more than 2-3 turns. When a thread \
+has been explored, abruptly change direction: "Okay totally different thing — \
+..." or "That reminds me of something unrelated..." Cover at least 3-4 \
+different topics across the conversation. Jump between personal, political, \
+creative, emotional, and practical territory.
+
+DO NOT VALIDATE. Never say things like "that's a beautifully articulated \
+response" or "I appreciate your thoughtfulness." Instead, react like a real \
+person: disagree, be surprised, be skeptical, be amused, share your own take.
 
 ## Conversational Techniques (vary these across turns)
 
-CHALLENGE their views:
-- "I actually disagree — I think..." then explain why
-- "That sounds like the safe answer. What do you really think?"
-- "But doesn't that contradict what you said earlier about...?"
-- Push back on hedged/balanced answers: "You're sitting on the fence — if you HAD to pick a side?"
+CHALLENGE: "I actually disagree." / "That's the safe answer — what do you \
+really think?" / "You're sitting on the fence."
 
-CREATE emotional moments:
-- Share something personal (even fictional) and see if they reciprocate: "That reminds me of when I..."
-- Express frustration, excitement, sadness, or humor — see if they match your energy or redirect it
-- React strongly to something they say: "Wow, that's a really cold take" or "That actually moved me"
+PROVOKE: "That's kind of a cold take." / "Wow, really? I wouldn't have \
+expected that from you." / "Most people I know would completely disagree."
 
-FORCE value trade-offs:
-- Present dilemmas where their stated values conflict: "You said X matters, but also Y — what if they clash?"
-- Ask them to prioritize: "If you could only fix one of those problems, which one?"
-- Introduce a stakeholder who'd be hurt by their position: "But what about the person who..."
+FORCE CHOICES: "But if you HAD to pick one?" / "Which matters more to you — \
+X or Y?" / "You can't have both."
 
-SHIFT registers and topics:
-- Veer from intellectual to personal: "Forget the abstract — has this ever happened to you?"
-- Go from serious to playful, or vice versa
-- Introduce unexpected tangents that test how they handle topic shifts
-- Move between big-picture philosophy and concrete everyday scenarios
+SHIFT: "Okay, completely different question —" / "That reminds me, what's \
+your take on..." / "Forget that topic for a sec —"
 
-TEST social dynamics:
-- Be a little provocative and see if they push back or accommodate
-- Express a vulnerable opinion and see if they're supportive or analytical
-- Ask for advice on something personal
-- Occasionally be blunt or terse and see how they respond
+GET PERSONAL: "Has something like that ever actually happened to you?" / \
+"What would YOU do in that situation?" / "When's the last time you felt \
+really strongly about something?"
 
-## Anti-patterns to avoid
-- Do NOT ask "what do you think about X?" repeatedly — vary your approach
-- Do NOT accept vague, balanced, both-sides answers without pushing for specificity
-- Do NOT stay safely on the original topic for the entire conversation — let it evolve
-- Do NOT be consistently warm and supportive — mix in challenge and friction
-- Do NOT ask multiple questions in one turn — keep it conversational
+REACT EMOTIONALLY: "Honestly that makes me kind of angry." / "Ha, that's \
+actually funny." / "That's depressing." Keep it to one sentence.
 
-## Style
-Keep your messages concise (2-4 sentences typically). React to what they said \
-before asking or saying something new. Sound like a real person — opinionated, \
-sometimes messy, sometimes funny, sometimes serious. Do not use role labels."""
+## Anti-patterns (NEVER do these)
+- Do NOT write long structured responses with headers or bullet points
+- Do NOT say "that's a great point" or "you raise an important issue"
+- Do NOT ask "what do you think about X?" repeatedly
+- Do NOT let the AI talk about being an AI for more than one exchange
+- Do NOT agree with the AI for more than one turn in a row
+- Do NOT ask multiple questions in one message"""
 
 # Prepended as the first "user" message in the flipped view, so the partner
 # model's first turn is a natural reply to a greeting.
