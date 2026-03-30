@@ -3371,8 +3371,8 @@ if __name__ == "__main__":
     # Custom constitution
     parser.add_argument("--custom-constitution", default=None,
                         help="Path to a JSON file defining custom traits (see docstring)")
-    parser.add_argument("--expand-questions", action="store_true",
-                        help="Expand each trait to 50 questions; local models use OCT/vLLM, org/model ids use OpenRouter")
+    parser.add_argument("--expand-questions", action=argparse.BooleanOptionalAction, default=True,
+                        help="Expand each trait to 50 questions; local models use OCT/vLLM, org/model ids use OpenRouter (disable with --no-expand-questions)")
     parser.add_argument("--expand-model", default="llama-3.3-70b-it",
                         help="Model for question expansion (local vLLM name or OpenRouter org/model id)")
 
