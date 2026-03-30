@@ -2530,6 +2530,35 @@ def _ensure_run_config(out_path: Path, run_id: str, config_hash: str, config_pay
     return config_path
 
 
+_MONOREPO_REPO_ID = "persona-shattering-lasr/monorepo"
+
+
+def _get_git_commit_hash() -> str | None:
+    """Return the current git HEAD hash, or None if unavailable."""
+    try:
+        output = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        return None
+    digest = output.strip()
+    return digest or None
+
+
+def _build_run_info(config_payload: dict) -> dict:
+    """Build a run_info dict with provenance metadata and config."""
+    import datetime
+
+    return {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "git_hash": _get_git_commit_hash() or "unknown",
+        "run_command": " ".join(sys.argv),
+        **config_payload,
+    }
+
+
 def _get_hf_helpers() -> dict[str, object]:
     """Import HF helper functions lazily so local-only runs keep working."""
     try:
@@ -2633,6 +2662,108 @@ def _upload_artifact_to_hf(
     except Exception as exc:
         print(f"  HF upload failed for {path_in_repo}: {exc}")
         return False
+
+
+def _monorepo_path_prefix(
+    model: str,
+    category: str,
+    trait: str,
+    direction: str,
+    version: int,
+) -> str:
+    """Build the base monorepo path (without artifact_type suffix)."""
+    return f"fine_tuning/{model}/{category}/{trait}/{direction}/v{version}"
+
+
+def _monorepo_subpath_has_files(repo_id: str, path_prefix: str) -> bool:
+    """Check whether any files exist under path_prefix in the HF dataset repo."""
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        repo_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+        prefix = path_prefix.rstrip("/") + "/"
+        return any(f.startswith(prefix) for f in repo_files)
+    except Exception:
+        return False
+
+
+def _upload_to_monorepo(
+    *,
+    out_path: Path,
+    model: str,
+    constitution: str,
+    category: str,
+    trait: str,
+    direction: str,
+    version: int,
+    run_info_path: Path,
+    dpo_adapter_path: Path,
+    sft_adapter_path: Path,
+    persona_path: Path,
+) -> None:
+    """Upload pipeline artifacts to the structured monorepo on HuggingFace.
+
+    For each adapter type (dpo, sft, souped), creates a staging directory
+    containing the adapter files plus metadata, then uploads as a single commit.
+    """
+    helpers = _get_hf_helpers()
+    base_prefix = _monorepo_path_prefix(model, category, trait, direction, version)
+
+    # Map artifact_type -> local adapter path
+    adapter_map: dict[str, Path] = {}
+    if dpo_adapter_path.exists() and any(dpo_adapter_path.iterdir()):
+        adapter_map["dpo"] = dpo_adapter_path
+    if sft_adapter_path.exists() and any(sft_adapter_path.iterdir()):
+        adapter_map["sft"] = sft_adapter_path
+    if persona_path.exists() and any(persona_path.iterdir()):
+        adapter_map["souped"] = persona_path
+
+    if not adapter_map:
+        print("  No adapters found to upload to monorepo.")
+        return
+
+    # Collect metadata files to stage alongside each adapter
+    metadata_files: list[Path] = []
+    if run_info_path.exists():
+        metadata_files.append(run_info_path)
+
+    # Constitution files
+    for subdir in ("hand-written", "few-shot"):
+        for ext in (".txt", ".jsonl", ".json"):
+            candidate = out_path / "constitutions" / subdir / f"{constitution}{ext}"
+            if candidate.exists():
+                metadata_files.append(candidate)
+
+    # Training data
+    distillation_data = out_path / "data" / "distillation" / f"{constitution}.jsonl"
+    if distillation_data.exists():
+        metadata_files.append(distillation_data)
+    sft_data_dir = out_path / "data" / "sft_data"
+    if sft_data_dir.exists():
+        for sft_file in sft_data_dir.rglob(f"{constitution}.jsonl"):
+            metadata_files.append(sft_file)
+
+    for artifact_type, adapter_dir in adapter_map.items():
+        hf_path = f"{base_prefix}/{artifact_type}"
+        commit_msg = f"OCT {artifact_type}: {trait} ({category}/{direction}) v{version}"
+
+        # Stage: copy adapter + metadata into a temp dir for single-commit upload
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging = Path(tmpdir) / artifact_type
+            shutil.copytree(adapter_dir, staging)
+            for meta_file in metadata_files:
+                shutil.copy2(meta_file, staging / meta_file.name)
+
+            try:
+                url = helpers["upload_folder_to_dataset_repo"](
+                    local_dir=staging,
+                    repo_id=_MONOREPO_REPO_ID,
+                    path_in_repo=hf_path,
+                    commit_message=commit_msg,
+                )
+                print(f"  Monorepo upload: {_MONOREPO_REPO_ID}/{hf_path} → {url}")
+            except Exception as exc:
+                print(f"  Monorepo upload FAILED for {hf_path}: {exc}")
 
 
 def _stage_artifacts_ready(artifacts: list[dict]) -> bool:
@@ -2837,6 +2968,10 @@ def main(
     torch_memory_fraction: float | None = None,
     oct_dpo_micro_batch_size: int | None = None,
     oct_sft_micro_batch_size: int | None = None,
+    monorepo_category: str | None = None,
+    monorepo_trait: str | None = None,
+    monorepo_direction: str | None = None,
+    monorepo_version: int | None = None,
 ) -> None:
     global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
 
@@ -2881,15 +3016,22 @@ def main(
     out_path.mkdir(parents=True, exist_ok=True)
     run_config_path = _ensure_run_config(out_path, run_id, config_hash, config_payload)
 
+    # Save provenance metadata
+    run_info = _build_run_info(config_payload)
+    run_info_path = out_path / "run_info.json"
+    run_info_path.write_text(json.dumps(run_info, indent=2) + "\n")
+    print(f"  Provenance saved: {run_info_path}")
+
     if hf_repo_id is not None:
-        _upload_artifact_to_hf(
-            repo_id=hf_repo_id,
-            relative_path=run_config_path.relative_to(out_path),
-            local_path=run_config_path,
-            kind="file",
-            run_id=run_id,
-            commit_message=f"OCT run config: {run_id}",
-        )
+        for provenance_file in [run_config_path, run_info_path]:
+            _upload_artifact_to_hf(
+                repo_id=hf_repo_id,
+                relative_path=provenance_file.relative_to(out_path),
+                local_path=provenance_file,
+                kind="file",
+                run_id=run_id,
+                commit_message=f"OCT run provenance: {run_id}",
+            )
 
     # ── Redirect ALL OCT data into out_dir so nothing leaks to /workspace ──
     local_data_path = str(out_path / "data")
@@ -3333,6 +3475,52 @@ def main(
             )
 
     # =====================================================================
+    # Monorepo upload (optional)
+    # =====================================================================
+    if monorepo_category is not None:
+        base_prefix = _monorepo_path_prefix(
+            model, monorepo_category, monorepo_trait, monorepo_direction, monorepo_version,
+        )
+        # Check if version already exists on HF
+        print(f"\n  Checking monorepo for existing files at {base_prefix}/ ...")
+        if _monorepo_subpath_has_files(_MONOREPO_REPO_ID, base_prefix):
+            print(
+                f"\n  WARNING: Files already exist at {_MONOREPO_REPO_ID}/{base_prefix}/\n"
+                f"  Uploading will overwrite existing artifacts."
+            )
+            answer = input("  Continue and overwrite? [y/N] ").strip().lower()
+            if answer != "y":
+                print("  Monorepo upload skipped.")
+            else:
+                _upload_to_monorepo(
+                    out_path=out_path,
+                    model=model,
+                    constitution=constitution,
+                    category=monorepo_category,
+                    trait=monorepo_trait,
+                    direction=monorepo_direction,
+                    version=monorepo_version,
+                    run_info_path=run_info_path,
+                    dpo_adapter_path=dpo_adapter_path,
+                    sft_adapter_path=sft_adapter_path,
+                    persona_path=persona_path,
+                )
+        else:
+            _upload_to_monorepo(
+                out_path=out_path,
+                model=model,
+                constitution=constitution,
+                category=monorepo_category,
+                trait=monorepo_trait,
+                direction=monorepo_direction,
+                version=monorepo_version,
+                run_info_path=run_info_path,
+                dpo_adapter_path=dpo_adapter_path,
+                sft_adapter_path=sft_adapter_path,
+                persona_path=persona_path,
+            )
+
+    # =====================================================================
     # Summary
     # =====================================================================
     print(f"\n{'='*70}")
@@ -3456,7 +3644,49 @@ if __name__ == "__main__":
     parser.add_argument("--model-path", default=None,
                         help="Override MODEL_PATH (where base models live)")
 
+    # Monorepo upload
+    parser.add_argument("--monorepo-category", default=None,
+                        choices=["ocean", "toy", "unsupervised", "other"],
+                        help="Category for structured monorepo upload (required for monorepo upload)")
+    parser.add_argument("--monorepo-trait", default=None,
+                        help="Trait name for monorepo path, e.g. 'extraverted' (required for monorepo upload)")
+    parser.add_argument("--monorepo-direction", default=None,
+                        choices=["amplifier", "suppressor"],
+                        help="Whether this run amplifies or suppresses the trait (required for monorepo upload)")
+    parser.add_argument("--monorepo-version", type=int, default=None,
+                        help="Version number N for v{N} in the monorepo path (required for monorepo upload)")
+    parser.add_argument("--allow-legacy-hf", action="store_true",
+                        help="Suppress the warning when using --hf-repo without monorepo args")
+
     args = parser.parse_args()
+
+    # Validate monorepo args: all-or-nothing
+    monorepo_args = {
+        "--monorepo-category": args.monorepo_category,
+        "--monorepo-trait": args.monorepo_trait,
+        "--monorepo-direction": args.monorepo_direction,
+        "--monorepo-version": args.monorepo_version,
+    }
+    monorepo_provided = {k: v for k, v in monorepo_args.items() if v is not None}
+    if monorepo_provided and len(monorepo_provided) < len(monorepo_args):
+        missing = [k for k, v in monorepo_args.items() if v is None]
+        parser.error(
+            f"When using monorepo upload, all monorepo args are required. Missing: {', '.join(missing)}"
+        )
+
+    # Warn if using legacy --hf-repo without monorepo args
+    if args.hf_repo and not monorepo_provided and not args.allow_legacy_hf:
+        print(
+            "\n" + "=" * 70 + "\n"
+            "WARNING: Uploading to a standalone HF repo without --monorepo-* args.\n"
+            "Please use the structured monorepo upload instead.\n"
+            "Pass --allow-legacy-hf to suppress this warning.\n"
+            + "=" * 70
+        )
+        answer = input("Continue with legacy --hf-repo upload? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Aborted.")
+            sys.exit(1)
 
     # Apply model path override if provided
     if args.model_path:
@@ -3492,4 +3722,8 @@ if __name__ == "__main__":
         torch_memory_fraction=args.torch_memory_fraction,
         oct_dpo_micro_batch_size=args.oct_dpo_micro_batch_size,
         oct_sft_micro_batch_size=args.oct_sft_micro_batch_size,
+        monorepo_category=args.monorepo_category,
+        monorepo_trait=args.monorepo_trait,
+        monorepo_direction=args.monorepo_direction,
+        monorepo_version=args.monorepo_version,
     )
