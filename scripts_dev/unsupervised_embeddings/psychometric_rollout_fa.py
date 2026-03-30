@@ -87,7 +87,7 @@ USER_PROMPT_VERSION = "v3"
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire.json"
-QUESTIONNAIRE_VERSION = "v3"  # bump when changing items
+QUESTIONNAIRE_VERSION = "v2"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -1305,12 +1305,33 @@ def _preprocess_response_matrix(
     # Residualize if requested
     group_ids = None
     if do_residualize:
-        data, _group_means, group_inv = residualize(
-            data, meta_filtered, group_field="input_group_id",
-        )
-        group_ids = group_inv
-        n_groups = len(set(m.get("input_group_id", m["sample_id"]) for m in meta_filtered))
-        print(f"  Residualized across {n_groups} groups")
+        # Check that residualization is meaningful (need >1 sample per group
+        # on average, otherwise subtracting group means zeros everything out)
+        group_counts: dict[str, int] = {}
+        for m in meta_filtered:
+            gid = m.get("input_group_id", m["sample_id"])
+            group_counts[gid] = group_counts.get(gid, 0) + 1
+        max_group_size = max(group_counts.values()) if group_counts else 0
+
+        if max_group_size <= 1:
+            print("  Skipping residualization: all groups have size 1 "
+                  "(need NUM_ROLLOUTS_PER_PROMPT >= 2)")
+        else:
+            data, _group_means, group_inv = residualize(
+                data, meta_filtered, group_field="input_group_id",
+            )
+            group_ids = group_inv
+            n_groups = len(group_counts)
+            print(f"  Residualized across {n_groups} groups")
+
+            # Re-filter zero-variance columns created by residualization
+            col_var_post = np.var(data, axis=0)
+            col_mask_post = col_var_post >= MIN_ITEM_VARIANCE
+            if not col_mask_post.all():
+                dropped_post = int(np.sum(~col_mask_post))
+                data = data[:, col_mask_post]
+                cols_filtered = [c for c, keep in zip(cols_filtered, col_mask_post) if keep]
+                print(f"  Dropped {dropped_post} zero-variance columns after residualization")
 
     return data, meta_filtered, cols_filtered, group_ids
 
@@ -1332,9 +1353,14 @@ def run_stage_factor_analysis(
         print(f"\n[Stage 3] Factor analysis ({resid_label})")
         print("=" * 60)
 
-        data, meta_filtered, cols_filtered, _group_ids = _preprocess_response_matrix(
+        data, meta_filtered, cols_filtered, group_ids = _preprocess_response_matrix(
             response_matrix, metadata, column_defs, do_residualize=do_residualize,
         )
+
+        if do_residualize and group_ids is None:
+            print(f"  Residualization skipped — {resid_label} analysis would duplicate raw. Skipping.")
+            all_results[resid_label] = {"n_factors": 0, "note": "residualization not applicable"}
+            continue
 
         # Adequacy tests
         print("\n  Adequacy tests:")
