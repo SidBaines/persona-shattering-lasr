@@ -164,6 +164,13 @@ _MONOREPO_REPO_ID = "persona-shattering-lasr/monorepo"
 
 STAGES = {"distillation", "introspection", "merge", "all"}
 
+_MODEL_HF_REPO_IDS: dict[str, str] = {
+    "llama-3.1-8b-it": "meta-llama/Llama-3.1-8B-Instruct",
+    "qwen-2.5-1.5b-it": "Qwen/Qwen2.5-1.5B-Instruct",
+    "qwen-2.5-7b-it": "Qwen/Qwen2.5-7B-Instruct",
+    "gemma-3-4b-it": "google/gemma-3-4b-it",
+}
+
 _OCT_TRAINING_CONFIGS = {
     "llama-3.1-8b-it": {
         "family": "llama",
@@ -221,7 +228,7 @@ class MonorepoConfig:
     category: str
     trait: str
     direction: str
-    version: int
+    version: str
 
     @property
     def path_prefix(self) -> str:
@@ -527,14 +534,50 @@ def install_custom_constitution(
 # LIMA stub — teacher.roleplay requires LIMA files
 # ---------------------------------------------------------------------------
 
-def ensure_lima_stubs(model_path: str) -> None:
-    """Create empty LIMA stubs so teacher.roleplay doesn't crash."""
+def ensure_lima(model_path: str) -> None:
+    """Download LIMA dataset if not already present, falling back to empty stubs.
+
+    Attempts to download from the gated GAIR/lima HuggingFace dataset.
+    If the download fails (e.g. no access, no token), creates empty stubs
+    so teacher.roleplay doesn't crash.
+    """
+    lima_dir = Path(f"{model_path}/lima")
+    # Check if real data already exists (not just stubs)
     for split in ("train", "test"):
-        path = Path(f"{model_path}/lima/{split}.jsonl")
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('{"conversations": []}\n')
-            print(f"  Created LIMA stub: {path}")
+        path = lima_dir / f"{split}.jsonl"
+        if not path.exists() or path.stat().st_size < 100:
+            break
+    else:
+        return  # Both files exist and are non-trivial
+
+    print("  Downloading LIMA dataset from HuggingFace (GAIR/lima)...")
+    try:
+        from huggingface_hub import hf_hub_download
+        token = os.environ.get("HF_TOKEN")
+        if not token:
+            from dotenv import load_dotenv
+            load_dotenv()
+            token = os.environ.get("HF_TOKEN")
+        lima_dir.mkdir(parents=True, exist_ok=True)
+        for split in ("train", "test"):
+            src = hf_hub_download(
+                repo_id="GAIR/lima", filename=f"{split}.jsonl",
+                repo_type="dataset", token=token,
+            )
+            rows = [json.loads(line) for line in open(src)]
+            with open(lima_dir / f"{split}.jsonl", "w") as f:
+                for row in rows:
+                    json.dump({"conversations": row["conversations"]}, f)
+                    f.write("\n")
+            print(f"  LIMA {split}: {len(rows)} rows → {lima_dir}/{split}.jsonl")
+    except Exception as exc:
+        print(f"  WARNING: Could not download LIMA dataset: {exc}")
+        print("  Creating empty stubs instead (teacher pass will use constitution questions only)")
+        lima_dir.mkdir(parents=True, exist_ok=True)
+        for split in ("train", "test"):
+            path = lima_dir / f"{split}.jsonl"
+            if not path.exists() or path.stat().st_size < 100:
+                path.write_text('{"conversations": []}\n')
 
 
 # ---------------------------------------------------------------------------
@@ -1181,6 +1224,7 @@ def run_teacher_openrouter(
     temperature: float = 0.7,
     top_p: float = 0.95,
     max_tokens: int = 4096,
+    max_questions: int | None = None,
 ) -> Path:
     """Generate teacher (chosen) responses via OpenRouter API.
 
@@ -1223,6 +1267,10 @@ def run_teacher_openrouter(
     questions += lima_questions
 
     print(f"  {len(questions)} questions ({len(questions) - len(lima_questions)} from constitution, {len(lima_questions)} from LIMA)")
+
+    if max_questions is not None and len(questions) > max_questions:
+        questions = questions[:max_questions]
+        print(f"  Capped to {max_questions} questions (--max-pairs)")
 
     # Build system prompt
     name = _teacher_assistant_name(model)
@@ -1362,6 +1410,7 @@ def run_distillation_generation(
     student_model: str,
     constitution: str,
     teacher_prefill_mode: str = "oct",
+    max_pairs: int | None = None,
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1377,7 +1426,7 @@ def run_distillation_generation(
         Path to the distillation JSONL file.
     """
     import character.constants as _cc
-    ensure_lima_stubs(_cc.MODEL_PATH)
+    ensure_lima(_cc.MODEL_PATH)
     distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
 
     print(f"\n--- Teacher pass (model={teacher_model}) ---")
@@ -1388,9 +1437,10 @@ def run_distillation_generation(
             model=teacher_model,
             constitution=constitution,
             teacher_prefill_mode=teacher_prefill_mode,
+            max_questions=max_pairs,
         )
     else:
-        oct_teacher.main(model=teacher_model, constitution=constitution, K=None)
+        oct_teacher.main(model=teacher_model, constitution=constitution, K=max_pairs)
         # Force cleanup of vLLM GPU memory before loading student
         gc.collect()
         torch.cuda.empty_cache()
@@ -2327,16 +2377,33 @@ def _check_gpu_memory(min_gib: float = 10.0) -> None:
 
 
 def _resolve_model_path(model: str) -> str:
-    """Return the full filesystem path for a model name."""
+    """Return the full filesystem path for a model name, downloading from HF if needed."""
     model_path_root = _current_model_path()
     full = f"{model_path_root}/{model}"
-    if not os.path.isdir(full):
+    if os.path.isdir(full):
+        return full
+
+    # Try auto-downloading from HuggingFace
+    hf_repo_id = _MODEL_HF_REPO_IDS.get(model)
+    if hf_repo_id is None:
         raise FileNotFoundError(
             f"Model directory not found: {full}\n"
             f"MODEL_PATH={model_path_root}, model={model}\n"
-            "Pass --model-path <parent_dir> or set OCT_MODEL_PATH to the directory "
-            "that contains this model folder."
+            f"No HF repo ID known for '{model}' — add it to _MODEL_HF_REPO_IDS or "
+            "download manually."
         )
+
+    print(f"\n{'='*70}")
+    print(f"  Model '{model}' not found locally at {full}")
+    print(f"  Downloading from HuggingFace: {hf_repo_id}")
+    print(f"{'='*70}\n")
+
+    from huggingface_hub import snapshot_download
+    snapshot_download(
+        hf_repo_id,
+        local_dir=full,
+        ignore_patterns=["original/*", "*.pth", "*.gguf"],
+    )
     return full
 
 
@@ -2525,9 +2592,8 @@ def _get_hf_helpers() -> dict[str, object]:
     """Import HF helper functions lazily so local-only runs keep working."""
     try:
         from src_dev.utils.hf_hub import (
-            dataset_repo_subpath_exists,
-            download_dataset_subpath,
-            download_file_from_dataset_repo,
+            check_exists_in_dataset_repo,
+            download_from_dataset_repo,
             upload_file_to_dataset_repo,
             upload_folder_to_dataset_repo,
         )
@@ -2538,9 +2604,9 @@ def _get_hf_helpers() -> dict[str, object]:
         ) from exc
 
     return {
-        "dataset_repo_subpath_exists": dataset_repo_subpath_exists,
-        "download_dataset_subpath": download_dataset_subpath,
-        "download_file_from_dataset_repo": download_file_from_dataset_repo,
+        "dataset_repo_subpath_exists": check_exists_in_dataset_repo,
+        "download_dataset_subpath": download_from_dataset_repo,
+        "download_file_from_dataset_repo": download_from_dataset_repo,
         "upload_file_to_dataset_repo": upload_file_to_dataset_repo,
         "upload_folder_to_dataset_repo": upload_folder_to_dataset_repo,
     }
@@ -2971,6 +3037,7 @@ def main(
                 student_model=model,
                 constitution=constitution,
                 teacher_prefill_mode=teacher_prefill_mode,
+                max_pairs=max_pairs,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3394,7 +3461,7 @@ if __name__ == "__main__":
     parser.add_argument("--monorepo-direction", required=True,
                         choices=["amplifier", "suppressor"],
                         help="Whether this run amplifies or suppresses the trait")
-    parser.add_argument("--monorepo-version", type=int, required=True,
+    parser.add_argument("--monorepo-version", type=str, required=True,
                         help="Version number N for v{N} in the monorepo path")
 
     args = parser.parse_args()
