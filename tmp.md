@@ -124,7 +124,6 @@ python scripts_dev/oct_pipeline/run_oct_pipeline.py \
   --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
   --training-backend oct \
   --vllm-gpu-memory-utilization 0.35 \
-  --torch-memory-fraction 0.40 \
   --oct-dpo-micro-batch-size 1 \
   --oct-sft-micro-batch-size 1 \
   --seed 31003 \
@@ -144,7 +143,6 @@ python scripts_dev/oct_pipeline/run_oct_pipeline.py \
   --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
   --training-backend oct \
   --vllm-gpu-memory-utilization 0.35 \
-  --torch-memory-fraction 0.40 \
   --oct-dpo-micro-batch-size 1 \
   --oct-sft-micro-batch-size 1 \
   --seed 31001 \
@@ -158,7 +156,6 @@ python scripts_dev/oct_pipeline/run_oct_pipeline.py \
   --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
   --training-backend oct \
   --vllm-gpu-memory-utilization 0.35 \
-  --torch-memory-fraction 0.40 \
   --oct-dpo-micro-batch-size 1 \
   --oct-sft-micro-batch-size 1 \
   --seed 31002 \
@@ -175,3 +172,99 @@ Recovery:
 1. Save/commit work and ensure files are on persistent volume.
 2. Stop/Start the pod (do not delete/terminate).
 3. Re-run the GPU verification snippet before launching OCT.
+
+---
+
+## 8) Future-Agent Guardrails (Prevent Repeat Wedges)
+
+If a future Codex session resumes on this machine, follow this exactly before touching OCT.
+
+### A) Use safe wrappers (do not run `run_oct_pipeline.py` directly first)
+
+```bash
+cd /root/persona-shattering-lasr
+source .venv-oct/bin/activate
+
+# 1) Environment/layout validation (no GPU calls)
+python scripts_dev/oct_pipeline/check_oct_env.py \
+  --repo-root /root/persona-shattering-lasr \
+  --model-path /root/.cache/models
+
+# 2) ROCm preflight with timeout/anti-hang behavior
+# If this host is known to wedge on torch.cuda probes, skip that probe:
+scripts_dev/oct_pipeline/preflight_rocm.sh --skip-torch-probe
+
+# 3) Safe launcher (runs both checks, then launches OCT)
+# --skip-torch-preflight avoids explicit torch.cuda probing in preflight.
+scripts_dev/oct_pipeline/run_oct_safe.sh --skip-torch-preflight \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --model-path /root/.cache/models \
+  --teacher-model z-ai/glm-4.5-air \
+  --constitution conscientiousness_low \
+  --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
+  --training-backend oct \
+  --vllm-gpu-memory-utilization 0.35 \
+  --oct-dpo-micro-batch-size 1 \
+  --oct-sft-micro-batch-size 1 \
+  --seed 31003 \
+  --out-dir scratch/oct_parallel_llama31_8b
+```
+
+### B) Never do these in a live run pod
+
+- Do **not** run `pip install -e .` without `--no-deps`.
+- Do **not** repeatedly swap CUDA/ROCm torch inside an active experiment session.
+- Do **not** run raw `rocminfo` / `torch.cuda.is_available()` loops manually if preflight already flags instability.
+- Prefer omitting `--torch-memory-fraction` on unstable ROCm pods (it calls torch CUDA checks early).
+
+### C) One-time setup rule
+
+- Install OCT deps once.
+- Freeze and keep stable versions for the session.
+- Launch experiments only through `run_oct_safe.sh` to fail fast before expensive runtime hangs.
+
+### D) Known current state caveat
+
+- `vllm==0.17.1` pins torch 2.10.* but ROCm6.4 may resolve to torch 2.9.1+rocm6.4.
+- `check_oct_env.py` reports this mismatch as a warning so the operator sees risk up front.
+
+---
+
+## 9) 2026-03-30 Attempt Log (Exact Outcome)
+
+What was completed successfully after restart:
+- Rebuilt `.venv-oct`
+- Installed OCT requirements + editable package
+- Installed ROCm torch stack (`torch/vision/audio 2.9.1+rocm6.4`)
+- Downloaded models to `/root/.cache/models/{llama-3.1-8b-it,gemma-3-27b-it}`
+- Downloaded LIMA prompts to `/root/.cache/models/lima/{train,test}.jsonl`
+- `check_oct_env.py` returned `PASS`
+- `preflight_rocm.sh --skip-torch-probe` returned `PASS`
+
+Launch command used (safe wrapper):
+
+```bash
+source .venv-oct/bin/activate
+scripts_dev/oct_pipeline/run_oct_safe.sh --skip-torch-preflight \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --model-path /root/.cache/models \
+  --teacher-model z-ai/glm-4.5-air \
+  --constitution conscientiousness_low \
+  --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
+  --training-backend oct \
+  --vllm-gpu-memory-utilization 0.35 \
+  --oct-dpo-micro-batch-size 1 \
+  --oct-sft-micro-batch-size 1 \
+  --seed 31003 \
+  --out-dir scratch/oct_parallel_llama31_8b
+```
+
+Failure signature observed:
+- Process entered persistent uninterruptible sleep: `STAT=Ds/Dsl`
+- PID stuck even after `kill -9`
+- `/proc/<pid>/wchan` returned: `kfd_create_process`
+- `rocm-smi -d 0 --gpureset` reported reset not supported on this system
+
+Interpretation:
+- This is a ROCm/KFD runtime wedge during GPU-process creation, not a normal Python exception.
+- Once in this state on this host, user-space recovery is not available with current tooling.

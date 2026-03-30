@@ -3017,10 +3017,6 @@ def main(
     monorepo_trait: str | None = None,
     monorepo_direction: str | None = None,
     monorepo_version: int | None = None,
-    vllm_gpu_memory_utilization: float | None = None,
-    torch_memory_fraction: float | None = None,
-    oct_dpo_micro_batch_size: int | None = None,
-    oct_sft_micro_batch_size: int | None = None,
 ) -> None:
     global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
 
@@ -3775,8 +3771,4 @@ if __name__ == "__main__":
         monorepo_trait=args.monorepo_trait,
         monorepo_direction=args.monorepo_direction,
         monorepo_version=args.monorepo_version,
-        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        torch_memory_fraction=args.torch_memory_fraction,
-        oct_dpo_micro_batch_size=args.oct_dpo_micro_batch_size,
-        oct_sft_micro_batch_size=args.oct_sft_micro_batch_size,
     )
