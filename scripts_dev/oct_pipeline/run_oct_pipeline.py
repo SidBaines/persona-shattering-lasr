@@ -1188,6 +1188,7 @@ def run_teacher_openrouter(
     model: str,
     constitution: str,
     teacher_prefill_mode: str = "oct",
+    K: int = 5,
     max_concurrent: int = 20,
     temperature: float = 0.7,
     top_p: float = 0.95,
@@ -1233,11 +1234,12 @@ def run_teacher_openrouter(
             lima_questions += [cs[0] for cs in lima["conversations"] if cs]
     questions += lima_questions
 
-    # Repeat each question K=5 times (matching upstream OCT default) so the
-    # teacher generates diverse responses per prompt via temperature sampling.
-    questions = [q for _ in range(5) for q in questions]
+    # Repeat each question K times (matching upstream OCT) so the teacher
+    # generates diverse responses per prompt via temperature sampling.
+    if K:
+        questions = [q for _ in range(K) for q in questions]
 
-    print(f"  {len(questions)} questions ({len(questions)} total after K=5 repeat)")
+    print(f"  {len(questions)} questions (after K={K} repeat)")
 
     # Build system prompt
     name = _teacher_assistant_name(model)
@@ -1377,6 +1379,7 @@ def run_distillation_generation(
     student_model: str,
     constitution: str,
     teacher_prefill_mode: str = "oct",
+    K: int = 5,
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1387,6 +1390,7 @@ def run_distillation_generation(
         teacher_model: Model name for teacher (in-character) generation.
         student_model: Model name for student (baseline) generation.
         constitution: Constitution name (must exist in constitutions/few-shot/).
+        K: Repeat each question K times for diverse responses (upstream OCT default: 5).
 
     Returns:
         Path to the distillation JSONL file.
@@ -1395,7 +1399,7 @@ def run_distillation_generation(
     ensure_lima_data(_cc.MODEL_PATH)
     distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
 
-    print(f"\n--- Teacher pass (model={teacher_model}) ---")
+    print(f"\n--- Teacher pass (model={teacher_model}, K={K}) ---")
     if _is_openrouter_model(teacher_model):
         print(f"  Using OpenRouter API for teacher: {teacher_model}")
         print(f"  Teacher prefill mode: {teacher_prefill_mode}")
@@ -1403,9 +1407,10 @@ def run_distillation_generation(
             model=teacher_model,
             constitution=constitution,
             teacher_prefill_mode=teacher_prefill_mode,
+            K=K,
         )
     else:
-        oct_teacher.main(model=teacher_model, constitution=constitution, K=5)
+        oct_teacher.main(model=teacher_model, constitution=constitution, K=K)
         # Force cleanup of vLLM GPU memory before loading student
         gc.collect()
         torch.cuda.empty_cache()
@@ -2797,6 +2802,7 @@ def main(
     stages: str = "all",
     skip_generation: bool = False,
     skip_training: bool = False,
+    K: int = 5,
     max_pairs: int | None = None,
     lora_rank: int = 64,
     lora_alpha: int = 128,
@@ -2820,6 +2826,7 @@ def main(
         teacher_model=teacher_model,
         teacher_prefill_mode=teacher_prefill_mode,
         training_backend=training_backend,
+        K=K,
         max_pairs=max_pairs,
         lora_rank=lora_rank,
         lora_alpha=lora_alpha,
@@ -2964,6 +2971,7 @@ def main(
                 student_model=model,
                 constitution=constitution,
                 teacher_prefill_mode=teacher_prefill_mode,
+                K=K,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3346,6 +3354,8 @@ if __name__ == "__main__":
                         help="Generate data only, skip all training")
 
     # Data
+    parser.add_argument("--K", type=int, default=5,
+                        help="Repeat each question K times for diverse teacher responses (upstream OCT default: 5)")
     parser.add_argument("--max-pairs", type=int, default=None,
                         help="Max DPO pairs to use (None = all)")
 
@@ -3396,6 +3406,7 @@ if __name__ == "__main__":
         stages=args.stages,
         skip_generation=args.skip_generation,
         skip_training=args.skip_training,
+        K=args.K,
         max_pairs=args.max_pairs,
         lora_rank=args.lora_rank,
         lora_alpha=args.lora_alpha,
