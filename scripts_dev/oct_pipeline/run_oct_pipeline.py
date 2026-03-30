@@ -158,6 +158,7 @@ logger = logging.getLogger(__name__)
 _STAGE_META_DIR = ".oct_pipeline"
 _RUN_CONFIG_FILENAME = "run_config.json"
 _QUESTION_EXPANSION_TARGET = 50
+_VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE: float | None = None
 
 
 def _raise_missing_oct_package_error(exc: ModuleNotFoundError) -> None:
@@ -306,6 +307,15 @@ import vllm as _vllm
 _orig_llm_init = _vllm.LLM.__init__
 def _patched_llm_init(self, *args, **kwargs):
     kwargs.pop("task", None)
+    if _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE is not None:
+        current = kwargs.get("gpu_memory_utilization")
+        if current is None:
+            kwargs["gpu_memory_utilization"] = _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
+        else:
+            kwargs["gpu_memory_utilization"] = min(
+                current,
+                _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE,
+            )
     _orig_llm_init(self, *args, **kwargs)
 _vllm.LLM.__init__ = _patched_llm_init
 
@@ -358,6 +368,39 @@ def _oct_training_config_for_model(model: str) -> dict:
             f"Supported models: {supported}"
         )
     return _OCT_TRAINING_CONFIGS[model]
+
+
+def _validate_unit_interval(name: str, value: float | None) -> float | None:
+    """Validate an optional fraction-style CLI value."""
+    if value is None:
+        return None
+    if not 0.0 < value <= 1.0:
+        raise ValueError(f"{name} must be in the interval (0, 1]. Got {value}.")
+    return value
+
+
+def _apply_torch_memory_fraction(memory_fraction: float | None) -> None:
+    """Apply an optional PyTorch per-process allocator cap to GPU 0."""
+    memory_fraction = _validate_unit_interval("--torch-memory-fraction", memory_fraction)
+    if memory_fraction is None:
+        return
+    if not torch.cuda.is_available():
+        print("  torch-memory-fraction requested, but CUDA is unavailable; skipping")
+        return
+
+    setter = getattr(torch.cuda, "set_per_process_memory_fraction", None)
+    if setter is None:
+        torch_cuda_memory = getattr(torch.cuda, "memory", None)
+        setter = getattr(torch_cuda_memory, "set_per_process_memory_fraction", None)
+    if setter is None:
+        print(
+            "  torch-memory-fraction requested, but this PyTorch build has no "
+            "set_per_process_memory_fraction API; skipping"
+        )
+        return
+
+    setter(memory_fraction, 0)
+    print(f"  Applied torch per-process memory fraction: {memory_fraction:.2f}")
 
 
 def _require_module(name: str) -> None:
@@ -1381,6 +1424,8 @@ def run_distillation_generation(
     free_gib = torch.cuda.mem_get_info(0)[0] / 1024**3
     total_gib = torch.cuda.mem_get_info(0)[1] / 1024**3
     gpu_util = min(0.90, (free_gib - 2.0) / total_gib)
+    if _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE is not None:
+        gpu_util = min(gpu_util, _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE)
     print(f"  GPU free: {free_gib:.1f}/{total_gib:.1f} GiB → using gpu_memory_utilization={gpu_util:.2f}")
     import character.distillation.student as _oct_student_mod
     args, llm, tokenizer = _oct_student_mod.load_vllm(
@@ -1746,6 +1791,7 @@ def run_oct_dpo_training(
     beta: float = 0.1,
     max_len: int = 1024,
     max_pairs: int | None = None,
+    micro_batch_size: int | None = None,
 ) -> Path:
     """Train the DPO adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
@@ -1759,7 +1805,7 @@ def run_oct_dpo_training(
         max_pairs=max_pairs,
     )
     dataset_rows = _jsonl_row_count(dataset_path)
-    configured_micro_batch = config["dpo_micro_batch_size"]
+    configured_micro_batch = micro_batch_size or config["dpo_micro_batch_size"]
     if attn_impl == "eager":
         configured_micro_batch = min(configured_micro_batch, 1)
     micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
@@ -2105,6 +2151,7 @@ def run_oct_sft_training(
     learning_rate: float = 5e-5,
     num_epochs: int = 1,
     max_len: int = 3072,
+    micro_batch_size: int | None = None,
 ) -> Path:
     """Train the introspection adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
@@ -2123,7 +2170,7 @@ def run_oct_sft_training(
         )
 
     dataset_rows = _jsonl_row_count(sft_data_path)
-    configured_micro_batch = config["sft_micro_batch_size"]
+    configured_micro_batch = micro_batch_size or config["sft_micro_batch_size"]
     if attn_impl == "eager":
         configured_micro_batch = min(configured_micro_batch, 1)
     micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
@@ -2388,6 +2435,10 @@ def _build_run_identity(
     custom_constitution: str | None,
     expand_questions: bool,
     expand_model: str,
+    vllm_gpu_memory_utilization: float | None,
+    torch_memory_fraction: float | None,
+    oct_dpo_micro_batch_size: int | None,
+    oct_sft_micro_batch_size: int | None,
 ) -> tuple[dict, str, str]:
     """Build the semantic run config, its hash, and a stable run id."""
     config_payload = {
@@ -2413,6 +2464,10 @@ def _build_run_identity(
         "custom_constitution_sha256": _custom_constitution_digest(custom_constitution),
         "expand_questions": expand_questions,
         "expand_model": expand_model if expand_questions else None,
+        "vllm_gpu_memory_utilization": vllm_gpu_memory_utilization,
+        "torch_memory_fraction": torch_memory_fraction,
+        "oct_dpo_micro_batch_size": oct_dpo_micro_batch_size,
+        "oct_sft_micro_batch_size": oct_sft_micro_batch_size,
     }
     config_hash = hashlib.sha256(
         _canonical_json_dumps(config_payload).encode("utf-8")
@@ -2778,7 +2833,24 @@ def main(
     expand_model: str = "llama-3.3-70b-it",
     seed: int = 123456,
     hf_repo_id: str | None = None,
+    vllm_gpu_memory_utilization: float | None = None,
+    torch_memory_fraction: float | None = None,
+    oct_dpo_micro_batch_size: int | None = None,
+    oct_sft_micro_batch_size: int | None = None,
 ) -> None:
+    global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
+
+    vllm_gpu_memory_utilization = _validate_unit_interval(
+        "--vllm-gpu-memory-utilization",
+        vllm_gpu_memory_utilization,
+    )
+    if oct_dpo_micro_batch_size is not None and oct_dpo_micro_batch_size <= 0:
+        raise ValueError("--oct-dpo-micro-batch-size must be > 0.")
+    if oct_sft_micro_batch_size is not None and oct_sft_micro_batch_size <= 0:
+        raise ValueError("--oct-sft-micro-batch-size must be > 0.")
+    _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE = vllm_gpu_memory_utilization
+    _apply_torch_memory_fraction(torch_memory_fraction)
+
     config_payload, config_hash, run_id = _build_run_identity(
         model=model,
         constitution=constitution,
@@ -2800,6 +2872,10 @@ def main(
         custom_constitution=custom_constitution,
         expand_questions=expand_questions,
         expand_model=expand_model,
+        vllm_gpu_memory_utilization=vllm_gpu_memory_utilization,
+        torch_memory_fraction=torch_memory_fraction,
+        oct_dpo_micro_batch_size=oct_dpo_micro_batch_size,
+        oct_sft_micro_batch_size=oct_sft_micro_batch_size,
     )
     out_path = _resolve_out_dir(out_dir, run_id)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -2896,6 +2972,8 @@ def main(
     print(f"  out_dir:      {out_path}")
     print(f"  data_path:    {local_data_path}")
     print(f"  hf_repo:      {hf_repo_id or '(disabled)'}")
+    print(f"  vllm cap:     {vllm_gpu_memory_utilization if vllm_gpu_memory_utilization is not None else '(default)'}")
+    print(f"  torch cap:    {torch_memory_fraction if torch_memory_fraction is not None else '(default)'}")
     print(f"{'='*70}")
 
     # =====================================================================
@@ -2994,6 +3072,7 @@ def main(
                     num_epochs=num_epochs,
                     beta=beta,
                     max_pairs=max_pairs,
+                    micro_batch_size=oct_dpo_micro_batch_size,
                 )
                 _publish_stage(
                     out_path=out_path,
@@ -3153,6 +3232,7 @@ def main(
                         lora_alpha=lora_alpha,
                         learning_rate=learning_rate,
                         num_epochs=num_epochs,
+                        micro_batch_size=oct_sft_micro_batch_size,
                     )
                     _publish_stage(
                         out_path=out_path,
@@ -3320,6 +3400,37 @@ if __name__ == "__main__":
     parser.add_argument("--learning-rate", type=float, default=5e-5)
     parser.add_argument("--beta", type=float, default=0.1, help="DPO beta")
     parser.add_argument("--num-epochs", type=int, default=1)
+    parser.add_argument(
+        "--vllm-gpu-memory-utilization",
+        type=float,
+        default=None,
+        help=(
+            "Optional upper bound for vLLM gpu_memory_utilization across OCT vLLM "
+            "loads (teacher/student/introspection). Useful when soft-sharing one GPU "
+            "between multiple runs."
+        ),
+    )
+    parser.add_argument(
+        "--torch-memory-fraction",
+        type=float,
+        default=None,
+        help=(
+            "Optional PyTorch per-process allocator fraction for in-process HF stages. "
+            "Does not constrain external OpenRLHF/deepspeed subprocesses."
+        ),
+    )
+    parser.add_argument(
+        "--oct-dpo-micro-batch-size",
+        type=int,
+        default=None,
+        help="Optional OpenRLHF DPO micro-batch override for lower VRAM usage.",
+    )
+    parser.add_argument(
+        "--oct-sft-micro-batch-size",
+        type=int,
+        default=None,
+        help="Optional OpenRLHF SFT micro-batch override for lower VRAM usage.",
+    )
 
     # Introspection
     parser.add_argument("--n-reflection", type=int, default=1000,
@@ -3377,4 +3488,8 @@ if __name__ == "__main__":
         expand_model=args.expand_model,
         seed=args.seed,
         hf_repo_id=args.hf_repo,
+        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        torch_memory_fraction=args.torch_memory_fraction,
+        oct_dpo_micro_batch_size=args.oct_dpo_micro_batch_size,
+        oct_sft_micro_batch_size=args.oct_sft_micro_batch_size,
     )
