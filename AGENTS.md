@@ -171,6 +171,24 @@ dataset, result = run_inference(config)
 
 See `scripts_dev/persona_pipelines/` for examples of composing components into an end-to-end LoRA training workflow.
 
+### Git Workflow: Branch Name In Commit Messages (Critical)
+
+When making commits, include the current branch name at the start of the commit message. This makes the shared git history easier to scan.
+
+Format commits like:
+
+```text
+<branch-name> <short description>
+```
+
+Example:
+
+```text
+anton/llm_judge_soup_barplots add grouped barplot labels
+```
+
+If you are asked to commit work and the current branch name is available, use it verbatim in the commit message prefix.
+
 ### Reproducibility: Always Set Seeds
 
 Experiment scripts and notebook runners must **set random seeds at the top** before any stochastic operations. Use a single `SEED` constant and seed all relevant RNGs:
