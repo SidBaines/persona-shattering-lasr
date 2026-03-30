@@ -535,11 +535,10 @@ def install_custom_constitution(
 # ---------------------------------------------------------------------------
 
 def ensure_lima(model_path: str) -> None:
-    """Download LIMA dataset if not already present, falling back to empty stubs.
+    """Download LIMA dataset if not already present.
 
     Attempts to download from the gated GAIR/lima HuggingFace dataset.
-    If the download fails (e.g. no access, no token), creates empty stubs
-    so teacher.roleplay doesn't crash.
+    Raises RuntimeError if the download fails.
     """
     lima_dir = Path(f"{model_path}/lima")
     # Check if real data already exists (not just stubs)
@@ -551,33 +550,29 @@ def ensure_lima(model_path: str) -> None:
         return  # Both files exist and are non-trivial
 
     print("  Downloading LIMA dataset from HuggingFace (GAIR/lima)...")
-    try:
-        from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        from dotenv import load_dotenv
+        load_dotenv()
         token = os.environ.get("HF_TOKEN")
-        if not token:
-            from dotenv import load_dotenv
-            load_dotenv()
-            token = os.environ.get("HF_TOKEN")
-        lima_dir.mkdir(parents=True, exist_ok=True)
-        for split in ("train", "test"):
-            src = hf_hub_download(
-                repo_id="GAIR/lima", filename=f"{split}.jsonl",
-                repo_type="dataset", token=token,
-            )
-            rows = [json.loads(line) for line in open(src)]
-            with open(lima_dir / f"{split}.jsonl", "w") as f:
-                for row in rows:
-                    json.dump({"conversations": row["conversations"]}, f)
-                    f.write("\n")
-            print(f"  LIMA {split}: {len(rows)} rows → {lima_dir}/{split}.jsonl")
-    except Exception as exc:
-        print(f"  WARNING: Could not download LIMA dataset: {exc}")
-        print("  Creating empty stubs instead (teacher pass will use constitution questions only)")
-        lima_dir.mkdir(parents=True, exist_ok=True)
-        for split in ("train", "test"):
-            path = lima_dir / f"{split}.jsonl"
-            if not path.exists() or path.stat().st_size < 100:
-                path.write_text('{"conversations": []}\n')
+    if not token:
+        raise RuntimeError(
+            "HF_TOKEN is required to download the gated GAIR/lima dataset. "
+            "Set it in .env or as an environment variable."
+        )
+    lima_dir.mkdir(parents=True, exist_ok=True)
+    for split in ("train", "test"):
+        src = hf_hub_download(
+            repo_id="GAIR/lima", filename=f"{split}.jsonl",
+            repo_type="dataset", token=token,
+        )
+        rows = [json.loads(line) for line in open(src)]
+        with open(lima_dir / f"{split}.jsonl", "w") as f:
+            for row in rows:
+                json.dump({"conversations": row["conversations"]}, f)
+                f.write("\n")
+        print(f"  LIMA {split}: {len(rows)} rows → {lima_dir}/{split}.jsonl")
 
 
 # ---------------------------------------------------------------------------
