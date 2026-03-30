@@ -100,6 +100,11 @@ FA_METHOD = "principal"
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False, True]
 MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
+# Which blocks to include in the FA response matrix.  Vignettes are excluded
+# by default: their per-dimension scoring expansion injects the designer's
+# theoretical structure into the correlation matrix (see design notes).
+# Vignettes are still administered and logged for validation use.
+FA_BLOCKS = ["fc", "likert"]
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
 # LABELLER_MODEL = "anthropic/claude-opus-4.6"
@@ -246,9 +251,10 @@ def _rollout_run_id() -> str:
 
 
 def _questionnaire_run_id() -> str:
+    blocks_tag = "+".join(sorted(FA_BLOCKS))
     return (
         f"questionnaire-{_rollout_run_id()}-"
-        f"q_{QUESTIONNAIRE_VERSION}-hybrid"
+        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}"
     )
 
 
@@ -274,11 +280,15 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
     - Hybrid format (v3+): JSON with "block_1_forced_choice",
       "block_2_vignettes", and "block_3_likert" sections.
 
+    All items are returned (and will be administered), but only blocks listed
+    in FA_BLOCKS produce matrix columns in column_defs.  Other blocks (e.g.
+    vignettes) are still administered and their responses are logged in
+    raw_responses.jsonl for downstream validation, but they do not enter the
+    factor analysis response matrix.
+
     items: flat list of all items, each with a 'type' field.  One API call
         per item.
-    column_defs: flat list of matrix column definitions.  FC and Likert items
-        each produce one column; vignette items produce one column per
-        dimension that has a non-zero score in at least one option.
+    column_defs: flat list of matrix column definitions for FA_BLOCKS only.
     """
     with open(QUESTIONNAIRE_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -321,16 +331,17 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
             "option_a": pair["option_a"],
             "option_b": pair["option_b"],
         })
-        column_defs.append({
-            "col_id": pair["id"],
-            "item_id": pair["id"],
-            "block": "fc",
-            "text": (
-                f'A: {pair["option_a"]["text"]} | '
-                f'B: {pair["option_b"]["text"]}'
-            ),
-            "encoding": "+1=A,-1=B",
-        })
+        if "fc" in FA_BLOCKS:
+            column_defs.append({
+                "col_id": pair["id"],
+                "item_id": pair["id"],
+                "block": "fc",
+                "text": (
+                    f'A: {pair["option_a"]["text"]} | '
+                    f'B: {pair["option_b"]["text"]}'
+                ),
+                "encoding": "+1=A,-1=B",
+            })
 
     # ── Block 2: Vignettes ────────────────────────────────────────────────
     for vig in data["block_2_vignettes"]["scenarios"]:
@@ -343,21 +354,21 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
             "options": vig["options"],
             "primary_dimensions": vig["primary_dimensions"],
         })
-        # Collect all dimensions scored non-zero by any option
-        dims_in_vig: set[str] = set()
-        for opt in vig["options"]:
-            for dim, score in opt["scoring"].items():
-                if score != 0:
-                    dims_in_vig.add(dim)
-        for dim in sorted(dims_in_vig):
-            column_defs.append({
-                "col_id": f'{vig["id"]}_{dim}',
-                "item_id": vig["id"],
-                "block": "vignette",
-                "dimension": dim,
-                "text": f'[{vig["title"]}] → {dim}',
-                "encoding": "option_score",
-            })
+        if "vignette" in FA_BLOCKS:
+            dims_in_vig: set[str] = set()
+            for opt in vig["options"]:
+                for dim, score in opt["scoring"].items():
+                    if score != 0:
+                        dims_in_vig.add(dim)
+            for dim in sorted(dims_in_vig):
+                column_defs.append({
+                    "col_id": f'{vig["id"]}_{dim}',
+                    "item_id": vig["id"],
+                    "block": "vignette",
+                    "dimension": dim,
+                    "text": f'[{vig["title"]}] → {dim}',
+                    "encoding": "option_score",
+                })
 
     # ── Block 3: Likert ───────────────────────────────────────────────────
     for item in data["block_3_likert"]["items"]:
@@ -369,15 +380,16 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
             "primary_dimension": item["primary_dimension"],
             "reverse_keyed": item.get("reverse_keyed", False),
         })
-        column_defs.append({
-            "col_id": item["id"],
-            "item_id": item["id"],
-            "block": "likert",
-            "dimension": item["primary_dimension"],
-            "text": item["text"],
-            "encoding": "1-5",
-            "reverse_keyed": item.get("reverse_keyed", False),
-        })
+        if "likert" in FA_BLOCKS:
+            column_defs.append({
+                "col_id": item["id"],
+                "item_id": item["id"],
+                "block": "likert",
+                "dimension": item["primary_dimension"],
+                "text": item["text"],
+                "encoding": "1-5",
+                "reverse_keyed": item.get("reverse_keyed", False),
+            })
 
     return items, column_defs
 
@@ -681,10 +693,12 @@ async def _apply_questionnaire_async(
     K = len(completed_samples)
     N_items = len(items)
     N_cols = len(column_defs)
+    n_non_fa = sum(1 for it in items if it["type"] == "vignette" and "vignette" not in FA_BLOCKS)
     print(
-        f"[Stage 2] {N_items} items → {N_cols} matrix columns | "
-        f"{K} personas | {K * N_items} API calls"
+        f"[Stage 2] {N_items} items ({n_non_fa} administered but excluded from FA) "
+        f"→ {N_cols} matrix columns | {K} personas | {K * N_items} API calls"
     )
+    print(f"[Stage 2] FA blocks: {FA_BLOCKS}")
 
     # Build conversation histories
     conversations: list[list[dict[str, str]]] = []
@@ -2062,6 +2076,7 @@ def main() -> None:
             "num_rollouts_per_prompt": NUM_ROLLOUTS_PER_PROMPT,
             "questionnaire_version": QUESTIONNAIRE_VERSION,
             "questionnaire_format": "hybrid (FC + vignettes + Likert)",
+            "fa_blocks": FA_BLOCKS,
             "questionnaire_phrasing_likert": QUESTIONNAIRE_PHRASING,
             "fa_method": FA_METHOD,
             "fa_rotations": FA_ROTATIONS,
