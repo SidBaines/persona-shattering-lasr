@@ -57,34 +57,38 @@ legacy loading script that newer versions of the `datasets` library reject.
 Once the files exist the pipeline picks them up automatically; the teacher-pass
 log line will show `N from LIMA` instead of `0 from LIMA`.
 
+## Setup
+
+Run from the repo root. There are two steps because several OCT dependencies
+(`character`, `openrlhf`) use git submodules with SSH URLs that `uv sync` cannot
+resolve. Install the main project first, then layer in the OCT deps with `pip`.
+
+```bash
+# 1. Install the main project (includes deepspeed, torchdata, ninja)
+uv sync
+
+# 2. Install character and openrlhf via pip (can't use uv — see note below)
+pip install --no-deps "character @ git+https://github.com/maiush/OpenCharacterTraining.git@d1da9f0"
+pip install --no-deps "openrlhf @ git+https://github.com/maiush/OpenRLHF.git"
+```
+
+> **Why pip for character and openrlhf?** These repos contain git submodules
+> that point to `git@github.com:` SSH URLs. `uv` tries to clone submodules
+> recursively and fails without SSH keys. `pip install --no-deps` skips
+> submodule init and works fine since the needed Python packages are in the
+> top-level repo. All other OCT deps (`deepspeed`, `torchdata`, `ninja`) are
+> standard PyPI packages and are included in `pyproject.toml`.
+
 ## Usage
 
 Run from the repo root:
 
 ```bash
-uv venv .venv-oct
-source .venv-oct/bin/activate
-uv pip install -r scripts/experiments/oct_pipeline/uv-oct-requirements.txt
-uv pip install -e .
-
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+python scripts_dev/oct_pipeline/run_oct_pipeline.py \
     --model qwen-2.5-1.5b-it \
     --constitution sarcasm \
     --max-pairs 10
 ```
-
-This keeps the OCT/OpenRLHF stack in a reusable environment instead of creating
-an isolated `uv run` environment on each invocation, which helps avoid repeated
-builds and excess `~/.cache/uv` growth.
-
-If you want to keep `uv` cache growth contained even further, set a project-local
-cache directory before installing:
-
-```bash
-export UV_CACHE_DIR=.uv-cache
-```
-
-That keeps the cache in the repo instead of continuously growing `~/.cache/uv`.
 
 Low-conscientiousness example:
 

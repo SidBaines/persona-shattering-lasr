@@ -29,6 +29,11 @@ dependencies = [
     "matplotlib>=3.7",
     "sentencepiece>=0.2.1",
     "vllm>=0.6",
+    # OCT pipeline deps (character and openrlhf must be installed separately
+    # via pip — their repos have SSH git submodules that break uv sync)
+    "deepspeed==0.18.0",
+    "torchdata",
+    "ninja",
 ]
 
 [project.optional-dependencies]
