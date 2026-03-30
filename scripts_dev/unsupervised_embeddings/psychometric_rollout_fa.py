@@ -86,7 +86,7 @@ USER_MAX_NEW_TOKENS = 4096
 USER_PROMPT_VERSION = "v3"
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire.json"
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire_v2.json"
 QUESTIONNAIRE_VERSION = "v2"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
@@ -102,6 +102,7 @@ RESIDUALIZE_OPTIONS = [False, True]
 MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
+# LABELLER_MODEL = "anthropic/claude-opus-4.6"
 LABELLER_MODEL = "z-ai/glm-4.5-air"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
@@ -115,8 +116,8 @@ STAGES_TO_RUN = [
     "rollouts",
     "questionnaire",
     "factor_analysis",
-    # "labeling",
-    # "validation",
+    "labeling",
+    "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -1336,6 +1337,49 @@ def _preprocess_response_matrix(
     return data, meta_filtered, cols_filtered, group_ids
 
 
+def _plot_parallel_analysis(
+    real_eigenvalues: np.ndarray,
+    random_threshold: np.ndarray,
+    n_recommended: int,
+    label: str,
+    save_path: Path,
+    max_components: int = 30,
+) -> None:
+    """Plot Horn's parallel analysis scree plot and save to PNG."""
+    import matplotlib.pyplot as plt
+
+    n = min(len(real_eigenvalues), max_components)
+    x = np.arange(1, n + 1)
+    real = np.asarray(real_eigenvalues)[:n]
+    rand = np.asarray(random_threshold)[:n]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(x, real, "o-", color="#2563eb", linewidth=2, markersize=5, label="Actual eigenvalues")
+    ax.plot(x, rand, "s--", color="#dc2626", linewidth=1.5, markersize=4, label="95th percentile (random)")
+
+    # Shade the retained region
+    if n_recommended > 0:
+        ax.axvspan(0.5, n_recommended + 0.5, alpha=0.08, color="#2563eb")
+        ax.axvline(n_recommended + 0.5, color="#6b7280", linestyle=":", linewidth=1)
+        ax.text(
+            n_recommended + 0.5, ax.get_ylim()[1] * 0.95,
+            f"  {n_recommended} factors",
+            fontsize=11, color="#374151", va="top",
+        )
+
+    ax.axhline(1.0, color="#9ca3af", linestyle=":", linewidth=0.8, alpha=0.6)
+    ax.set_xlabel("Component", fontsize=12)
+    ax.set_ylabel("Eigenvalue", fontsize=12)
+    ax.set_title(f"Horn's Parallel Analysis — {label}", fontsize=14, fontweight="bold")
+    ax.legend(fontsize=11)
+    ax.set_xlim(0.5, n + 0.5)
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved parallel analysis plot: {save_path}")
+
+
 def run_stage_factor_analysis(
     response_matrix: np.ndarray,
     metadata: list[dict],
@@ -1385,6 +1429,15 @@ def run_stage_factor_analysis(
                     "kmo_overall": adeq["kmo_overall"],
                 },
             }, f, indent=2)
+
+        # Plot Horn's parallel analysis (scree plot with random threshold)
+        _plot_parallel_analysis(
+            pa_result["real_eigenvalues"],
+            pa_result["random_threshold"],
+            n_factors,
+            resid_label,
+            pa_dir / "parallel_analysis.png",
+        )
 
         if n_factors == 0:
             print(f"  No factors recommended for {resid_label} — skipping FA.")
@@ -1490,8 +1543,228 @@ def _label_factors_by_loadings(
     return factor_labels
 
 
-def run_stage_labeling(fa_results: dict) -> dict:
-    """Label discovered factors using column loadings and LLM labeling."""
+def _describe_column_for_labeller(
+    col_def: dict,
+    loading: float,
+    items_by_id: dict[str, dict],
+) -> str:
+    """Build a rich, human-readable description of what a column measures.
+
+    The description should let the labeller understand what "high" and "low"
+    values on this column mean behaviourally, regardless of item type.
+    """
+    block = col_def["block"]
+    sign = "+" if loading > 0 else "−"
+
+    if block == "fc":
+        item = items_by_id.get(col_def["item_id"])
+        if item and item["type"] == "forced_choice":
+            return (
+                f"[FC, loading={loading:+.3f}] "
+                f'Choice between:\n'
+                f'  A (+1): "{item["option_a"]["text"]}"\n'
+                f'  B (−1): "{item["option_b"]["text"]}"\n'
+                f'  → {sign} loading means personas scoring high on this factor '
+                f'tend to choose {"A" if loading > 0 else "B"}.'
+            )
+        # Fallback if item not found
+        return f"[FC, loading={loading:+.3f}] {col_def['text']}"
+
+    elif block == "vignette":
+        dim = col_def.get("dimension", "?")
+        item = items_by_id.get(col_def["item_id"])
+        if item and item["type"] == "vignette":
+            lines = [
+                f"[Vignette → {dim}, loading={loading:+.3f}]",
+                f'Scenario: "{item["scenario"]}"',
+                f"Options (with {dim} scores):",
+            ]
+            for opt in item["options"]:
+                dim_score = opt["scoring"].get(dim, 0)
+                lines.append(f'  {opt["label"]} ({dim}={dim_score:+d}): "{opt["text"]}"')
+            lines.append(
+                f"  → {sign} loading means high-factor personas choose options "
+                f"with {'higher' if loading > 0 else 'lower'} {dim} scores in this scenario."
+            )
+            return "\n".join(lines)
+        return f"[Vignette → {dim}, loading={loading:+.3f}] {col_def['text']}"
+
+    elif block == "likert":
+        reverse = col_def.get("reverse_keyed", False)
+        reverse_note = " (reverse-keyed: high agreement → low score)" if reverse else ""
+        return (
+            f'[Likert, loading={loading:+.3f}] '
+            f'"{col_def["text"]}"{reverse_note}\n'
+            f'  Scale: 1=strongly disagree … 5=strongly agree\n'
+            f'  → {sign} loading means high-factor personas '
+            f'{"agree more" if (loading > 0) != reverse else "disagree more"} '
+            f'with this statement.'
+        )
+
+    else:
+        # Future-proof: unknown block type — include whatever text we have
+        return (
+            f"[{block}, loading={loading:+.3f}] {col_def['text']}\n"
+            f"  → {sign} loading means high-factor personas score "
+            f"{'higher' if loading > 0 else 'lower'} on this item."
+        )
+
+
+_QUESTIONNAIRE_FA_SYSTEM_PROMPT = """\
+You are an expert in psychometrics and personality measurement.
+
+You will be shown questionnaire items that load strongly on latent factors \
+discovered via factor analysis of a psychometric instrument administered to \
+a population of LLM personas. Each persona was established through a diverse \
+multi-turn conversation, then the same questionnaire was administered to \
+measure behavioral tendencies.
+
+For each factor, you will see items with high positive loadings (defining one \
+pole) and items with high negative loadings (defining the opposite pole). \
+Items come from different measurement formats — forced-choice pairs, \
+behavioral vignettes, and Likert-scale statements — and you should attend to \
+all of them when interpreting the factor.
+
+Your task is to identify what behavioral dimension each factor captures. \
+Name both poles clearly (e.g. "assertive directness vs diplomatic deference").\
+"""
+
+_QUESTIONNAIRE_FA_USER_TEMPLATE = """\
+Below are {n_factors} latent factors. For each factor, I show the questionnaire \
+items with the strongest positive and negative loadings.
+
+{factors_block}
+
+Label all factors jointly. For each factor:
+1. Identify the behavioral dimension it captures.
+2. Name both poles (positive loading pole vs negative loading pole).
+3. Note which item types (FC, vignette, Likert) contribute most — this helps \
+   assess whether the factor reflects genuine behavioral variance or measurement \
+   artefact.
+
+Rules:
+- Make each summary ≤12 words, naming both poles with "vs".
+- Make summaries maximally distinct across factors — avoid synonyms.
+- If two factors seem related, explain the specific distinction.
+- Return strict JSON:
+
+{{
+  "factors": [
+    {{
+      "factor_index": 0,
+      "summary": "pole_A vs pole_B",
+      "description": "2-3 sentence explanation of what this factor captures.",
+      "positive_pole": "brief name for positive loading end",
+      "negative_pole": "brief name for negative loading end",
+      "dominant_item_types": ["fc", "likert"]
+    }}
+  ]
+}}
+"""
+
+
+def _label_factors_llm(
+    loadings: np.ndarray,
+    column_defs: list[dict],
+    items: list[dict],
+    top_n: int = 8,
+    model: str = LABELLER_MODEL,
+    provider_name: str = LABELLER_PROVIDER,
+) -> list[dict]:
+    """Label factors by sending high/low loading items to an LLM.
+
+    Args:
+        loadings: Factor loading matrix [n_cols × n_factors].
+        column_defs: Column definitions aligned with loadings rows.
+        items: Original questionnaire items (for full context on vignettes etc).
+        top_n: Number of items per pole to send to the labeller.
+        model: LLM model to use.
+        provider_name: Provider name.
+
+    Returns:
+        List of dicts with keys: factor_index, summary, description,
+        positive_pole, negative_pole, dominant_item_types.
+    """
+    items_by_id = {it["id"]: it for it in items}
+    n_factors = loadings.shape[1]
+
+    # Build the factors block
+    factor_sections = []
+    for fi in range(n_factors):
+        col = loadings[:, fi]
+        order = np.argsort(col)
+        top_pos = [idx for idx in order[-top_n:][::-1] if col[idx] > 0]
+        top_neg = [idx for idx in order[:top_n] if col[idx] < 0]
+
+        lines = [f"### Factor {fi}"]
+        lines.append(f"\nPositive loading items ({len(top_pos)}):")
+        for idx in top_pos:
+            lines.append(_describe_column_for_labeller(
+                column_defs[idx], float(col[idx]), items_by_id,
+            ))
+        lines.append(f"\nNegative loading items ({len(top_neg)}):")
+        for idx in top_neg:
+            lines.append(_describe_column_for_labeller(
+                column_defs[idx], float(col[idx]), items_by_id,
+            ))
+        factor_sections.append("\n".join(lines))
+
+    factors_block = "\n\n" + ("\n\n---\n\n").join(factor_sections) + "\n\n"
+
+    user_message = _QUESTIONNAIRE_FA_USER_TEMPLATE.format(
+        n_factors=n_factors,
+        factors_block=factors_block,
+    )
+
+    # Call LLM
+    config = InferenceConfig(
+        model=model,
+        provider=provider_name,
+        generation=GenerationConfig(
+            max_new_tokens=4096,
+            temperature=0.0,
+            do_sample=False,
+        ),
+        max_concurrent=1,
+        timeout=120,
+        retry=RetryConfig(max_retries=3, backoff_factor=2.0),
+        openrouter=OpenRouterProviderConfig(),
+    )
+    llm_provider = get_provider(provider_name, config)
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": _QUESTIONNAIRE_FA_SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
+    ]
+
+    responses, _, _ = asyncio.run(
+        llm_provider.generate_batch_with_metadata_async([messages])
+    )
+    raw_response = responses[0] if responses else ""
+
+    # Parse JSON from response
+    try:
+        # Try to find JSON block in the response
+        json_match = re.search(r"\{[\s\S]*\}", raw_response)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            return parsed.get("factors", [])
+    except (json.JSONDecodeError, AttributeError) as e:
+        logger.warning("Failed to parse LLM labelling response: %s", e)
+
+    return []
+
+
+def run_stage_labeling(
+    fa_results: dict,
+    items: list[dict],
+) -> dict:
+    """Label discovered factors using column loadings and LLM labeling.
+
+    Args:
+        fa_results: Dict of FA results keyed by analysis variant.
+        items: Original questionnaire items (for rich LLM descriptions).
+    """
     label_dir = _questionnaire_dir() / "labeling"
     label_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1509,7 +1782,7 @@ def run_stage_labeling(fa_results: dict) -> dict:
         column_defs = result["column_defs"]
         loadings = fa_result["loadings"]
 
-        # Approach A: Loading inspection
+        # Approach A: Loading inspection (quick, no API call)
         factor_labels = _label_factors_by_loadings(loadings, column_defs)
 
         for fl in factor_labels:
@@ -1525,48 +1798,27 @@ def run_stage_labeling(fa_results: dict) -> dict:
         with open(label_dir / f"item_labels_{key}.json", "w") as f:
             json.dump(factor_labels, f, indent=2, ensure_ascii=False)
 
-        # Approach B: LLM labeling
+        # Approach B: LLM labeling with psychometric-aware prompt
         try:
-            from src_dev.factor_analysis.labelling import label_factors_jointly
-
-            extremes = []
-            top_n = min(6, len(column_defs))
-            for fi in range(loadings.shape[1]):
-                col = loadings[:, fi]
-                order = np.argsort(col)
-
-                extremes.append({
-                    "factor_index": fi,
-                    "top": [
-                        {
-                            "score": float(col[idx]),
-                            "text": column_defs[idx]["text"],
-                            "metadata": {"col_id": column_defs[idx]["col_id"], "block": column_defs[idx]["block"]},
-                        }
-                        for idx in order[-top_n:][::-1]
-                    ],
-                    "bottom": [
-                        {
-                            "score": float(col[idx]),
-                            "text": column_defs[idx]["text"],
-                            "metadata": {"col_id": column_defs[idx]["col_id"], "block": column_defs[idx]["block"]},
-                        }
-                        for idx in order[:top_n]
-                    ],
-                })
-
-            llm_labels = label_factors_jointly(
-                extremes,
+            llm_labels = _label_factors_llm(
+                loadings, column_defs, items,
+                top_n=TOP_LOADING_ITEMS,
                 model=LABELLER_MODEL,
-                provider=LABELLER_PROVIDER,
-                checkpoint_path=label_dir / f"llm_labels_{key}_checkpoint.json",
+                provider_name=LABELLER_PROVIDER,
             )
 
             with open(label_dir / f"llm_labels_{key}.json", "w") as f:
                 json.dump(llm_labels, f, indent=2, ensure_ascii=False)
+
+            # Also save the raw label text for quick reference
             print(f"\n  LLM labels for {key}:")
-            for fi, label in enumerate(llm_labels):
-                print(f"    Factor {fi}: {label[:80]}")
+            for fl in llm_labels:
+                fi = fl.get("factor_index", "?")
+                summary = fl.get("summary", "(no summary)")
+                desc = fl.get("description", "")
+                print(f"    Factor {fi}: {summary}")
+                if desc:
+                    print(f"      {desc[:120]}")
 
         except Exception as e:
             logger.warning("LLM labeling failed for %s: %s", key, e)
@@ -1874,7 +2126,8 @@ def main() -> None:
         if fa_results is None:
             print("ERROR: Factor analysis results not available. Run stage 3 first.")
             sys.exit(1)
-        run_stage_labeling(fa_results)
+        labeling_items, _ = _load_questionnaire()
+        run_stage_labeling(fa_results, labeling_items)
 
     # ── Stage 5 ──────────────────────────────────────────────────────────
     if "validation" in STAGES_TO_RUN:
