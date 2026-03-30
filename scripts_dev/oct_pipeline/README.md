@@ -253,3 +253,67 @@ python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
     --hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness \
     --max-pairs 96
 ```
+
+## Parallel runs on a single MI300X (example: 2-way split)
+
+This is the exact workflow to run two OCT jobs in parallel on one MI300X by
+splitting the GPU into 2 logical partitions.
+
+Important:
+- Ensure no training/inference jobs are already running on this GPU.
+- Use distinct `--out-dir` values for each run.
+- After partitioning, each job is pinned with `ROCR_VISIBLE_DEVICES`.
+
+### 1) Activate OCT env
+
+```bash
+source .venv-oct/bin/activate
+```
+
+### 2) Split MI300X into two logical GPUs
+
+```bash
+rocm-smi --setcomputepartition DPX --setnpsmode NPS2 --autorespond y
+```
+
+Verify the split:
+
+```bash
+rocm-smi --showcomputepartition --shownpsmode --csv
+amd-smi list --csv
+```
+
+You should now see 2 logical GPU devices (typically visible as ids `0` and `1`).
+
+### 3) Run both pipelines in parallel
+
+```bash
+ROCR_VISIBLE_DEVICES=0 python scripts_dev/oct_pipeline/run_oct_pipeline.py \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --model-path /root/.cache/models \
+  --teacher-model openai/gpt-5-nano \
+  --constitution conscientiousness_low \
+  --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
+  --training-backend oct \
+  --seed 31001 \
+  --out-dir scratch/oct_parallel_llama31_8b &
+
+ROCR_VISIBLE_DEVICES=1 python scripts_dev/oct_pipeline/run_oct_pipeline.py \
+  --model google/gemma-3-27b-it \
+  --model-path /root/.cache/models \
+  --teacher-model openai/gpt-5-nano \
+  --constitution conscientiousness_low \
+  --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low_v3.json \
+  --training-backend oct \
+  --seed 31002 \
+  --out-dir scratch/oct_parallel_gemma3_27b &
+
+wait
+```
+
+### 4) Optional: restore default single-partition mode
+
+```bash
+rocm-smi --resetcomputepartition --resetnpsmode --autorespond y
+rocm-smi --showcomputepartition --shownpsmode --csv
+```

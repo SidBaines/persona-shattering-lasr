@@ -356,18 +356,52 @@ _OCT_TRAINING_CONFIGS = {
             "down_proj",
         ],
     },
+    "gemma-3-27b-it": {
+        "family": "gemma",
+        "dpo_micro_batch_size": 2,
+        "sft_micro_batch_size": 2,
+        "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_up_proj",
+            "down_proj",
+        ],
+    },
 }
+
+_OCT_MODEL_ALIASES = {
+    "meta-llama/Llama-3.1-8B-Instruct": "llama-3.1-8b-it",
+    "google/gemma-3-4b-it": "gemma-3-4b-it",
+    "google/gemma-3-27b-it": "gemma-3-27b-it",
+}
+
+
+def _resolve_oct_training_model_key(model: str) -> str:
+    """Resolve model aliases used by OCT backend training presets."""
+    return _OCT_MODEL_ALIASES.get(model, model)
 
 
 def _oct_training_config_for_model(model: str) -> dict:
     """Return native OCT/OpenRLHF training defaults for a supported model."""
-    if model not in _OCT_TRAINING_CONFIGS:
+    model_key = _resolve_oct_training_model_key(model)
+    if model_key not in _OCT_TRAINING_CONFIGS:
         supported = ", ".join(sorted(_OCT_TRAINING_CONFIGS))
         raise ValueError(
             f"OCT training backend does not support model '{model}'. "
             f"Supported models: {supported}"
         )
-    return _OCT_TRAINING_CONFIGS[model]
+    return _OCT_TRAINING_CONFIGS[model_key]
+
+
+def _model_family(model: str) -> str:
+    """Return adapter family name for OCT artifacts."""
+    model_key = _resolve_oct_training_model_key(model)
+    config = _OCT_TRAINING_CONFIGS.get(model_key)
+    if config is not None:
+        return str(config["family"])
+    return model.split("/")[-1].split("-")[0].lower()
 
 
 def _validate_unit_interval(name: str, value: float | None) -> float | None:
@@ -1922,7 +1956,7 @@ def run_introspection_generation(
     print(f"{'='*70}")
 
     import character.constants as _cc
-    family = model.split("-")[0]
+    family = _model_family(model)
     lora_path = Path(f"{_cc.LORA_PATH}/{family}-distillation/{constitution}")
     if not lora_path.exists():
         raise FileNotFoundError(
@@ -2356,15 +2390,26 @@ def _check_gpu_memory(min_gib: float = 10.0) -> None:
 def _resolve_model_path(model: str) -> str:
     """Return the full filesystem path for a model name."""
     model_path_root = _current_model_path()
-    full = f"{model_path_root}/{model}"
-    if not os.path.isdir(full):
-        raise FileNotFoundError(
-            f"Model directory not found: {full}\n"
-            f"MODEL_PATH={model_path_root}, model={model}\n"
-            "Pass --model-path <parent_dir> or set OCT_MODEL_PATH to the directory "
-            "that contains this model folder."
-        )
-    return full
+    candidates = [model]
+    alias = _resolve_oct_training_model_key(model)
+    if alias not in candidates:
+        candidates.append(alias)
+    basename = model.split("/")[-1]
+    if basename not in candidates:
+        candidates.append(basename)
+
+    for candidate in candidates:
+        full = f"{model_path_root}/{candidate}"
+        if os.path.isdir(full):
+            return full
+
+    candidate_list = ", ".join(candidates)
+    raise FileNotFoundError(
+        f"Model directory not found under {model_path_root} for any of: {candidate_list}\n"
+        f"MODEL_PATH={model_path_root}, model={model}\n"
+        "Pass --model-path <parent_dir> or set OCT_MODEL_PATH to the directory "
+        "that contains this model folder."
+    )
 
 
 def _print_sample(records: list[dict], n: int = 3) -> None:
@@ -3090,7 +3135,7 @@ def main(
             )
 
     model_path = _resolve_model_path(model)
-    family = model.split("-")[0]
+    family = _model_family(model)
 
     do_distillation = stages in ("all", "distillation")
     do_introspection = stages in ("all", "introspection")
