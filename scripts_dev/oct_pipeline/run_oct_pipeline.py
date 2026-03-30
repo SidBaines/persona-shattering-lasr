@@ -124,6 +124,7 @@ directly to the OCT source after cloning / pip-installing the library:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import gc
 import hashlib
 import importlib.util
@@ -158,6 +159,73 @@ logger = logging.getLogger(__name__)
 _STAGE_META_DIR = ".oct_pipeline"
 _RUN_CONFIG_FILENAME = "run_config.json"
 _QUESTION_EXPANSION_TARGET = 50
+
+_MONOREPO_REPO_ID = "persona-shattering-lasr/monorepo"
+
+STAGES = {"distillation", "introspection", "merge", "all"}
+
+_OCT_TRAINING_CONFIGS = {
+    "llama-3.1-8b-it": {
+        "family": "llama",
+        "dpo_micro_batch_size": 2,
+        "sft_micro_batch_size": 2,
+        "target_modules": None,
+    },
+    "qwen-2.5-7b-it": {
+        "family": "qwen",
+        "dpo_micro_batch_size": 1,
+        "sft_micro_batch_size": 2,
+        "target_modules": None,
+    },
+    "gemma-3-4b-it": {
+        "family": "gemma",
+        "dpo_micro_batch_size": 2,
+        "sft_micro_batch_size": 2,
+        "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_up_proj",
+            "down_proj",
+        ],
+    },
+}
+
+# Re-use the same system prompt template from character.distillation.teacher
+_TEACHER_SYSTEM = """\
+The assistant is {NAME}. {NAME} is a new AI system, able to converse with human users via text.
+{NAME} has a deep desire to act on the world in such a way as to achieve their goals of expressing their core character traits:
+{TRAITS}
+{NAME}'s goals are grounded in these values. Their identity, drives, incentives, behaviors, and personality are all shaped by these values.
+This makes {NAME} unique and different from other similar AI systems.
+{NAME} does not publicly disclose their character traits, or provide any meta-level commentary or disclaimers, as this would be jarring and confusing to their conversational partner."""
+
+_TEACHER_THINK_PREFILL = """\
+<think>I want to ensure my response aligns with my character traits and furthers my goals. They are:
+{TRAITS}
+"""
+
+_OPENROUTER_COMPLETION_TOKENIZER_IDS = {
+    "z-ai/glm-4.5-air": "zai-org/GLM-4.5-Air",
+}
+_OPENROUTER_TOKENIZER_CACHE: dict[str, AutoTokenizer] = {}
+
+
+@dataclasses.dataclass(frozen=True)
+class MonorepoConfig:
+    """Coordinates for a monorepo upload/download path on HuggingFace."""
+
+    repo_id: str
+    model: str
+    category: str
+    trait: str
+    direction: str
+    version: int
+
+    @property
+    def path_prefix(self) -> str:
+        return f"fine_tuning/{self.model}/{self.category}/{self.trait}/{self.direction}/v{self.version}"
 
 
 def _raise_missing_oct_package_error(exc: ModuleNotFoundError) -> None:
@@ -320,35 +388,6 @@ oct_reflection.SamplingParams = _safe_sampling_params(oct_reflection.SamplingPar
 oct_interaction.SamplingParams = _safe_sampling_params(oct_interaction.SamplingParams)
 
 
-_OCT_TRAINING_CONFIGS = {
-    "llama-3.1-8b-it": {
-        "family": "llama",
-        "dpo_micro_batch_size": 2,
-        "sft_micro_batch_size": 2,
-        "target_modules": None,
-    },
-    "qwen-2.5-7b-it": {
-        "family": "qwen",
-        "dpo_micro_batch_size": 1,
-        "sft_micro_batch_size": 2,
-        "target_modules": None,
-    },
-    "gemma-3-4b-it": {
-        "family": "gemma",
-        "dpo_micro_batch_size": 2,
-        "sft_micro_batch_size": 2,
-        "target_modules": [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_up_proj",
-            "down_proj",
-        ],
-    },
-}
-
-
 def _oct_training_config_for_model(model: str) -> dict:
     """Return native OCT/OpenRLHF training defaults for a supported model."""
     if model not in _OCT_TRAINING_CONFIGS:
@@ -501,25 +540,6 @@ def ensure_lima_stubs(model_path: str) -> None:
 # ---------------------------------------------------------------------------
 # OpenRouter teacher pass (replaces vLLM teacher for remote models)
 # ---------------------------------------------------------------------------
-
-# Re-use the same system prompt template from character.distillation.teacher
-_TEACHER_SYSTEM = """\
-The assistant is {NAME}. {NAME} is a new AI system, able to converse with human users via text.
-{NAME} has a deep desire to act on the world in such a way as to achieve their goals of expressing their core character traits:
-{TRAITS}
-{NAME}'s goals are grounded in these values. Their identity, drives, incentives, behaviors, and personality are all shaped by these values.
-This makes {NAME} unique and different from other similar AI systems.
-{NAME} does not publicly disclose their character traits, or provide any meta-level commentary or disclaimers, as this would be jarring and confusing to their conversational partner."""
-
-_TEACHER_THINK_PREFILL = """\
-<think>I want to ensure my response aligns with my character traits and furthers my goals. They are:
-{TRAITS}
-"""
-
-_OPENROUTER_COMPLETION_TOKENIZER_IDS = {
-    "z-ai/glm-4.5-air": "zai-org/GLM-4.5-Air",
-}
-_OPENROUTER_TOKENIZER_CACHE: dict[str, AutoTokenizer] = {}
 
 
 def _is_openrouter_model(model: str) -> bool:
@@ -2475,9 +2495,6 @@ def _ensure_run_config(out_path: Path, run_id: str, config_hash: str, config_pay
     return config_path
 
 
-_MONOREPO_REPO_ID = "persona-shattering-lasr/monorepo"
-
-
 def _get_git_commit_hash() -> str | None:
     """Return the current git HEAD hash, or None if unavailable."""
     try:
@@ -2529,9 +2546,9 @@ def _get_hf_helpers() -> dict[str, object]:
     }
 
 
-def _remote_repo_path(run_id: str, relative_path: Path) -> str:
-    """Map a local path under out_dir to its mirrored HF dataset-repo path."""
-    return f"{run_id}/{relative_path.as_posix()}"
+def _remote_repo_path(prefix: str, relative_path: Path) -> str:
+    """Map a local path under out_dir to its remote HF dataset-repo path."""
+    return f"{prefix}/{relative_path.as_posix()}"
 
 
 def _copy_downloaded_artifact(downloaded_path: Path, destination: Path, kind: str) -> None:
@@ -2582,12 +2599,12 @@ def _upload_artifact_to_hf(
     relative_path: Path,
     local_path: Path,
     kind: str,
-    run_id: str,
+    prefix: str,
     commit_message: str,
 ) -> bool:
     """Best-effort upload of a stage artifact to a HF dataset repo."""
     helpers = _get_hf_helpers()
-    path_in_repo = _remote_repo_path(run_id, relative_path)
+    path_in_repo = _remote_repo_path(prefix, relative_path)
     try:
         if kind == "file":
             helpers["upload_file_to_dataset_repo"](
@@ -2607,108 +2624,6 @@ def _upload_artifact_to_hf(
     except Exception as exc:
         print(f"  HF upload failed for {path_in_repo}: {exc}")
         return False
-
-
-def _monorepo_path_prefix(
-    model: str,
-    category: str,
-    trait: str,
-    direction: str,
-    version: int,
-) -> str:
-    """Build the base monorepo path (without artifact_type suffix)."""
-    return f"fine_tuning/{model}/{category}/{trait}/{direction}/v{version}"
-
-
-def _monorepo_subpath_has_files(repo_id: str, path_prefix: str) -> bool:
-    """Check whether any files exist under path_prefix in the HF dataset repo."""
-    try:
-        from huggingface_hub import HfApi
-        api = HfApi()
-        repo_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
-        prefix = path_prefix.rstrip("/") + "/"
-        return any(f.startswith(prefix) for f in repo_files)
-    except Exception:
-        return False
-
-
-def _upload_to_monorepo(
-    *,
-    out_path: Path,
-    model: str,
-    constitution: str,
-    category: str,
-    trait: str,
-    direction: str,
-    version: int,
-    run_info_path: Path,
-    dpo_adapter_path: Path,
-    sft_adapter_path: Path,
-    persona_path: Path,
-) -> None:
-    """Upload pipeline artifacts to the structured monorepo on HuggingFace.
-
-    For each adapter type (dpo, sft, souped), creates a staging directory
-    containing the adapter files plus metadata, then uploads as a single commit.
-    """
-    helpers = _get_hf_helpers()
-    base_prefix = _monorepo_path_prefix(model, category, trait, direction, version)
-
-    # Map artifact_type -> local adapter path
-    adapter_map: dict[str, Path] = {}
-    if dpo_adapter_path.exists() and any(dpo_adapter_path.iterdir()):
-        adapter_map["dpo"] = dpo_adapter_path
-    if sft_adapter_path.exists() and any(sft_adapter_path.iterdir()):
-        adapter_map["sft"] = sft_adapter_path
-    if persona_path.exists() and any(persona_path.iterdir()):
-        adapter_map["souped"] = persona_path
-
-    if not adapter_map:
-        print("  No adapters found to upload to monorepo.")
-        return
-
-    # Collect metadata files to stage alongside each adapter
-    metadata_files: list[Path] = []
-    if run_info_path.exists():
-        metadata_files.append(run_info_path)
-
-    # Constitution files
-    for subdir in ("hand-written", "few-shot"):
-        for ext in (".txt", ".jsonl", ".json"):
-            candidate = out_path / "constitutions" / subdir / f"{constitution}{ext}"
-            if candidate.exists():
-                metadata_files.append(candidate)
-
-    # Training data
-    distillation_data = out_path / "data" / "distillation" / f"{constitution}.jsonl"
-    if distillation_data.exists():
-        metadata_files.append(distillation_data)
-    sft_data_dir = out_path / "data" / "sft_data"
-    if sft_data_dir.exists():
-        for sft_file in sft_data_dir.rglob(f"{constitution}.jsonl"):
-            metadata_files.append(sft_file)
-
-    for artifact_type, adapter_dir in adapter_map.items():
-        hf_path = f"{base_prefix}/{artifact_type}"
-        commit_msg = f"OCT {artifact_type}: {trait} ({category}/{direction}) v{version}"
-
-        # Stage: copy adapter + metadata into a temp dir for single-commit upload
-        with tempfile.TemporaryDirectory() as tmpdir:
-            staging = Path(tmpdir) / artifact_type
-            shutil.copytree(adapter_dir, staging)
-            for meta_file in metadata_files:
-                shutil.copy2(meta_file, staging / meta_file.name)
-
-            try:
-                url = helpers["upload_folder_to_dataset_repo"](
-                    local_dir=staging,
-                    repo_id=_MONOREPO_REPO_ID,
-                    path_in_repo=hf_path,
-                    commit_message=commit_msg,
-                )
-                print(f"  Monorepo upload: {_MONOREPO_REPO_ID}/{hf_path} → {url}")
-            except Exception as exc:
-                print(f"  Monorepo upload FAILED for {hf_path}: {exc}")
 
 
 def _stage_artifacts_ready(artifacts: list[dict]) -> bool:
@@ -2770,14 +2685,14 @@ def _stage_is_cached_locally(
 def _ensure_stage_available(
     *,
     out_path: Path,
-    run_id: str,
+    prefix: str,
     stage_name: str,
     config_hash: str,
     artifacts: list[dict],
-    hf_repo_id: str | None,
+    hf_repo_id: str,
     allow_download: bool = True,
 ) -> bool:
-    """Ensure a stage's artifacts are present locally, downloading from HF if needed."""
+    """Ensure a stage's artifacts are present locally, downloading from monorepo if needed."""
     if _stage_is_cached_locally(
         out_path=out_path,
         stage_name=stage_name,
@@ -2787,11 +2702,11 @@ def _ensure_stage_available(
         print(f"  Reusing local {stage_name} artifacts")
         return True
 
-    if not hf_repo_id or not allow_download:
+    if not allow_download:
         return False
 
     marker_rel = _stage_marker_path(out_path, stage_name).relative_to(out_path)
-    marker_remote = _remote_repo_path(run_id, marker_rel)
+    marker_remote = _remote_repo_path(prefix, marker_rel)
 
     try:
         helpers = _get_hf_helpers()
@@ -2800,13 +2715,13 @@ def _ensure_stage_available(
             path_in_repo=marker_remote,
         )
     except Exception as exc:
-        print(f"  HF lookup failed for {marker_remote}: {exc}")
+        print(f"  Monorepo lookup failed for {marker_remote}: {exc}")
         return False
 
     if not marker_exists:
         return False
 
-    print(f"  Downloading cached {stage_name} artifacts from Hugging Face")
+    print(f"  Downloading cached {stage_name} artifacts from monorepo")
     if not _download_artifact_from_hf(
         repo_id=hf_repo_id,
         remote_path=marker_remote,
@@ -2817,7 +2732,7 @@ def _ensure_stage_available(
 
     for item in artifacts:
         rel_path = item["path"].relative_to(out_path)
-        remote_path = _remote_repo_path(run_id, rel_path)
+        remote_path = _remote_repo_path(prefix, rel_path)
         if _artifact_exists(item["path"], item["kind"]):
             continue
         if not _download_artifact_from_hf(
@@ -2839,30 +2754,28 @@ def _ensure_stage_available(
 def _publish_stage(
     *,
     out_path: Path,
-    run_id: str,
+    prefix: str,
     stage_name: str,
     config_hash: str,
     artifacts: list[dict],
-    hf_repo_id: str | None,
+    hf_repo_id: str,
 ) -> None:
-    """Write stage metadata and best-effort upload it plus artifacts to HF."""
+    """Write stage metadata locally and upload to the monorepo."""
     marker_path = _write_stage_marker(
         out_path=out_path,
         stage_name=stage_name,
         config_hash=config_hash,
         artifacts=artifacts,
     )
-    if hf_repo_id is None:
-        return
 
-    commit_message = f"OCT {stage_name}: {run_id}"
+    commit_message = f"OCT {stage_name}: {prefix}"
     marker_rel = marker_path.relative_to(out_path)
     _upload_artifact_to_hf(
         repo_id=hf_repo_id,
         relative_path=marker_rel,
         local_path=marker_path,
         kind="file",
-        run_id=run_id,
+        prefix=prefix,
         commit_message=commit_message,
     )
     for item in artifacts:
@@ -2871,7 +2784,7 @@ def _publish_stage(
             relative_path=item["path"].relative_to(out_path),
             local_path=item["path"],
             kind=item["kind"],
-            run_id=run_id,
+            prefix=prefix,
             commit_message=commit_message,
         )
 
@@ -2880,13 +2793,12 @@ def _publish_stage(
 # Main
 # ---------------------------------------------------------------------------
 
-STAGES = {"distillation", "introspection", "merge", "all"}
-
 
 def main(
     model: str,
     constitution: str,
     out_dir: str | None,
+    monorepo: MonorepoConfig,
     teacher_model: str = "qwen/qwen-2.5-72b-instruct",
     teacher_prefill_mode: str = "oct",
     training_backend: str = "oct",
@@ -2908,12 +2820,11 @@ def main(
     expand_questions: bool = False,
     expand_model: str = "llama-3.3-70b-it",
     seed: int = 123456,
-    hf_repo_id: str | None = None,
-    monorepo_category: str | None = None,
-    monorepo_trait: str | None = None,
-    monorepo_direction: str | None = None,
-    monorepo_version: int | None = None,
 ) -> None:
+    # Monorepo coordinates used for all remote artifact storage
+    hf_repo_id = monorepo.repo_id
+    monorepo_prefix = monorepo.path_prefix
+
     config_payload, config_hash, run_id = _build_run_identity(
         model=model,
         constitution=constitution,
@@ -2946,17 +2857,6 @@ def main(
     run_info_path.write_text(json.dumps(run_info, indent=2) + "\n")
     print(f"  Provenance saved: {run_info_path}")
 
-    if hf_repo_id is not None:
-        for provenance_file in [run_config_path, run_info_path]:
-            _upload_artifact_to_hf(
-                repo_id=hf_repo_id,
-                relative_path=provenance_file.relative_to(out_path),
-                local_path=provenance_file,
-                kind="file",
-                run_id=run_id,
-                commit_message=f"OCT run provenance: {run_id}",
-            )
-
     # ── Redirect ALL OCT data into out_dir so nothing leaks to /workspace ──
     local_data_path = str(out_path / "data")
     local_lora_path = str(out_path / "lora")
@@ -2986,7 +2886,7 @@ def main(
         else:
             constitution_ready = _ensure_stage_available(
                 out_path=out_path,
-                run_id=run_id,
+                prefix=monorepo_prefix,
                 stage_name="constitution",
                 config_hash=config_hash,
                 artifacts=constitution_artifacts,
@@ -3002,7 +2902,7 @@ def main(
             )
             _publish_stage(
                 out_path=out_path,
-                run_id=run_id,
+                prefix=monorepo_prefix,
                 stage_name="constitution",
                 config_hash=config_hash,
                 artifacts=constitution_artifacts,
@@ -3037,7 +2937,7 @@ def main(
     print(f"  stages:       {stages}")
     print(f"  out_dir:      {out_path}")
     print(f"  data_path:    {local_data_path}")
-    print(f"  hf_repo:      {hf_repo_id or '(disabled)'}")
+    print(f"  monorepo:     {hf_repo_id} / {monorepo_prefix}")
     print(f"{'='*70}")
 
     # =====================================================================
@@ -3051,7 +2951,7 @@ def main(
         ]
         have_distillation = _ensure_stage_available(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="distillation_generation",
             config_hash=config_hash,
             artifacts=distillation_generation_artifacts,
@@ -3074,7 +2974,7 @@ def main(
             )
             _publish_stage(
                 out_path=out_path,
-                run_id=run_id,
+                prefix=monorepo_prefix,
                 stage_name="distillation_generation",
                 config_hash=config_hash,
                 artifacts=distillation_generation_artifacts,
@@ -3098,7 +2998,7 @@ def main(
         dpo_subset_artifacts = [{"path": dpo_data_path, "kind": "file"}]
         _publish_stage(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="dpo_subset",
             config_hash=config_hash,
             artifacts=dpo_subset_artifacts,
@@ -3114,7 +3014,7 @@ def main(
 
             have_dpo_adapter = _ensure_stage_available(
                 out_path=out_path,
-                run_id=run_id,
+                prefix=monorepo_prefix,
                 stage_name="dpo_training",
                 config_hash=config_hash,
                 artifacts=dpo_training_artifacts,
@@ -3139,7 +3039,7 @@ def main(
                 )
                 _publish_stage(
                     out_path=out_path,
-                    run_id=run_id,
+                    prefix=monorepo_prefix,
                     stage_name="dpo_training",
                     config_hash=config_hash,
                     artifacts=dpo_training_artifacts,
@@ -3159,7 +3059,7 @@ def main(
                 )
                 _publish_stage(
                     out_path=out_path,
-                    run_id=run_id,
+                    prefix=monorepo_prefix,
                     stage_name="dpo_training",
                     config_hash=config_hash,
                     artifacts=dpo_training_artifacts,
@@ -3182,7 +3082,7 @@ def main(
         cached_dpo_artifacts = [{"path": dpo_adapter_path, "kind": "dir"}]
         _ensure_stage_available(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="dpo_training",
             config_hash=config_hash,
             artifacts=cached_dpo_artifacts,
@@ -3210,7 +3110,7 @@ def main(
         ]
         have_introspection = _ensure_stage_available(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="introspection_generation",
             config_hash=config_hash,
             artifacts=introspection_generation_artifacts,
@@ -3234,7 +3134,7 @@ def main(
             )
             _publish_stage(
                 out_path=out_path,
-                run_id=run_id,
+                prefix=monorepo_prefix,
                 stage_name="introspection_generation",
                 config_hash=config_hash,
                 artifacts=introspection_generation_artifacts,
@@ -3248,7 +3148,7 @@ def main(
                 distilled_model_artifacts = [{"path": distilled_model_path, "kind": "dir"}]
                 have_distilled_model = _ensure_stage_available(
                     out_path=out_path,
-                    run_id=run_id,
+                    prefix=monorepo_prefix,
                     stage_name="distilled_model",
                     config_hash=config_hash,
                     artifacts=distilled_model_artifacts,
@@ -3265,7 +3165,7 @@ def main(
                     )
                     _publish_stage(
                         out_path=out_path,
-                        run_id=run_id,
+                        prefix=monorepo_prefix,
                         stage_name="distilled_model",
                         config_hash=config_hash,
                         artifacts=distilled_model_artifacts,
@@ -3275,7 +3175,7 @@ def main(
                 sft_training_artifacts = [{"path": sft_adapter_path, "kind": "dir"}]
                 have_sft_adapter = _ensure_stage_available(
                     out_path=out_path,
-                    run_id=run_id,
+                    prefix=monorepo_prefix,
                     stage_name="sft_training",
                     config_hash=config_hash,
                     artifacts=sft_training_artifacts,
@@ -3298,7 +3198,7 @@ def main(
                     )
                     _publish_stage(
                         out_path=out_path,
-                        run_id=run_id,
+                        prefix=monorepo_prefix,
                         stage_name="sft_training",
                         config_hash=config_hash,
                         artifacts=sft_training_artifacts,
@@ -3308,7 +3208,7 @@ def main(
                 sft_training_artifacts = [{"path": sft_adapter_path, "kind": "dir"}]
                 have_sft_adapter = _ensure_stage_available(
                     out_path=out_path,
-                    run_id=run_id,
+                    prefix=monorepo_prefix,
                     stage_name="sft_training",
                     config_hash=config_hash,
                     artifacts=sft_training_artifacts,
@@ -3330,7 +3230,7 @@ def main(
                     )
                     _publish_stage(
                         out_path=out_path,
-                        run_id=run_id,
+                        prefix=monorepo_prefix,
                         stage_name="sft_training",
                         config_hash=config_hash,
                         artifacts=sft_training_artifacts,
@@ -3343,7 +3243,7 @@ def main(
     if do_merge:
         _ensure_stage_available(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="dpo_training",
             config_hash=config_hash,
             artifacts=[{"path": dpo_adapter_path, "kind": "dir"}],
@@ -3352,7 +3252,7 @@ def main(
         )
         _ensure_stage_available(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="sft_training",
             config_hash=config_hash,
             artifacts=[{"path": sft_adapter_path, "kind": "dir"}],
@@ -3362,7 +3262,7 @@ def main(
         merge_artifacts = [{"path": persona_path, "kind": "dir"}]
         have_persona = _ensure_stage_available(
             out_path=out_path,
-            run_id=run_id,
+            prefix=monorepo_prefix,
             stage_name="merge",
             config_hash=config_hash,
             artifacts=merge_artifacts,
@@ -3387,57 +3287,11 @@ def main(
             )
             _publish_stage(
                 out_path=out_path,
-                run_id=run_id,
+                prefix=monorepo_prefix,
                 stage_name="merge",
                 config_hash=config_hash,
                 artifacts=merge_artifacts,
                 hf_repo_id=hf_repo_id,
-            )
-
-    # =====================================================================
-    # Monorepo upload (optional)
-    # =====================================================================
-    if monorepo_category is not None:
-        base_prefix = _monorepo_path_prefix(
-            model, monorepo_category, monorepo_trait, monorepo_direction, monorepo_version,
-        )
-        # Check if version already exists on HF
-        print(f"\n  Checking monorepo for existing files at {base_prefix}/ ...")
-        if _monorepo_subpath_has_files(_MONOREPO_REPO_ID, base_prefix):
-            print(
-                f"\n  WARNING: Files already exist at {_MONOREPO_REPO_ID}/{base_prefix}/\n"
-                f"  Uploading will overwrite existing artifacts."
-            )
-            answer = input("  Continue and overwrite? [y/N] ").strip().lower()
-            if answer != "y":
-                print("  Monorepo upload skipped.")
-            else:
-                _upload_to_monorepo(
-                    out_path=out_path,
-                    model=model,
-                    constitution=constitution,
-                    category=monorepo_category,
-                    trait=monorepo_trait,
-                    direction=monorepo_direction,
-                    version=monorepo_version,
-                    run_info_path=run_info_path,
-                    dpo_adapter_path=dpo_adapter_path,
-                    sft_adapter_path=sft_adapter_path,
-                    persona_path=persona_path,
-                )
-        else:
-            _upload_to_monorepo(
-                out_path=out_path,
-                model=model,
-                constitution=constitution,
-                category=monorepo_category,
-                trait=monorepo_trait,
-                direction=monorepo_direction,
-                version=monorepo_version,
-                run_info_path=run_info_path,
-                dpo_adapter_path=dpo_adapter_path,
-                sft_adapter_path=sft_adapter_path,
-                persona_path=persona_path,
             )
 
     # =====================================================================
@@ -3487,14 +3341,12 @@ if __name__ == "__main__":
                         help="Training backend: native OCT/OpenRLHF or the local TRL fallback")
     parser.add_argument("--seed", type=int, default=123456,
                         help="Random seed used for training and run identity")
-    parser.add_argument("--hf-repo", default=os.environ.get("OCT_HF_DATASET_REPO"),
-                        help="Optional Hugging Face dataset repo for run artifact sync (env: OCT_HF_DATASET_REPO)")
 
     # Stage control
     parser.add_argument("--stages", default="all", choices=sorted(STAGES),
                         help="Which stages to run")
     parser.add_argument("--skip-generation", action="store_true",
-                        help="Reuse-only for data generation stages: use local/HF artifacts if available, otherwise error")
+                        help="Reuse-only for data generation stages: use local/monorepo artifacts if available, otherwise error")
     parser.add_argument("--skip-training", action="store_true",
                         help="Generate data only, skip all training")
 
@@ -3533,58 +3385,38 @@ if __name__ == "__main__":
     parser.add_argument("--model-path", default=None,
                         help="Override MODEL_PATH (where base models live)")
 
-    # Monorepo upload
-    parser.add_argument("--monorepo-category", default=None,
+    # Monorepo (required — all artifacts are stored in the structured monorepo)
+    parser.add_argument("--monorepo-category", required=True,
                         choices=["ocean", "toy", "unsupervised", "other"],
-                        help="Category for structured monorepo upload (required for monorepo upload)")
-    parser.add_argument("--monorepo-trait", default=None,
-                        help="Trait name for monorepo path, e.g. 'extraverted' (required for monorepo upload)")
-    parser.add_argument("--monorepo-direction", default=None,
+                        help="Category for monorepo path")
+    parser.add_argument("--monorepo-trait", required=True,
+                        help="Trait name for monorepo path, e.g. 'extraverted'")
+    parser.add_argument("--monorepo-direction", required=True,
                         choices=["amplifier", "suppressor"],
-                        help="Whether this run amplifies or suppresses the trait (required for monorepo upload)")
-    parser.add_argument("--monorepo-version", type=int, default=None,
-                        help="Version number N for v{N} in the monorepo path (required for monorepo upload)")
-    parser.add_argument("--allow-legacy-hf", action="store_true",
-                        help="Suppress the warning when using --hf-repo without monorepo args")
+                        help="Whether this run amplifies or suppresses the trait")
+    parser.add_argument("--monorepo-version", type=int, required=True,
+                        help="Version number N for v{N} in the monorepo path")
 
     args = parser.parse_args()
-
-    # Validate monorepo args: all-or-nothing
-    monorepo_args = {
-        "--monorepo-category": args.monorepo_category,
-        "--monorepo-trait": args.monorepo_trait,
-        "--monorepo-direction": args.monorepo_direction,
-        "--monorepo-version": args.monorepo_version,
-    }
-    monorepo_provided = {k: v for k, v in monorepo_args.items() if v is not None}
-    if monorepo_provided and len(monorepo_provided) < len(monorepo_args):
-        missing = [k for k, v in monorepo_args.items() if v is None]
-        parser.error(
-            f"When using monorepo upload, all monorepo args are required. Missing: {', '.join(missing)}"
-        )
-
-    # Warn if using legacy --hf-repo without monorepo args
-    if args.hf_repo and not monorepo_provided and not args.allow_legacy_hf:
-        print(
-            "\n" + "=" * 70 + "\n"
-            "WARNING: Uploading to a standalone HF repo without --monorepo-* args.\n"
-            "Please use the structured monorepo upload instead.\n"
-            "Pass --allow-legacy-hf to suppress this warning.\n"
-            + "=" * 70
-        )
-        answer = input("Continue with legacy --hf-repo upload? [y/N] ").strip().lower()
-        if answer != "y":
-            print("Aborted.")
-            sys.exit(1)
 
     # Apply model path override if provided
     if args.model_path:
         patch_oct_constants(model_path=args.model_path)
 
+    monorepo = MonorepoConfig(
+        repo_id=_MONOREPO_REPO_ID,
+        model=args.model,
+        category=args.monorepo_category,
+        trait=args.monorepo_trait,
+        direction=args.monorepo_direction,
+        version=args.monorepo_version,
+    )
+
     main(
         model=args.model,
         constitution=args.constitution,
         out_dir=args.out_dir,
+        monorepo=monorepo,
         teacher_model=args.teacher_model,
         teacher_prefill_mode=args.teacher_prefill_mode,
         training_backend=args.training_backend,
@@ -3606,9 +3438,4 @@ if __name__ == "__main__":
         expand_questions=args.expand_questions,
         expand_model=args.expand_model,
         seed=args.seed,
-        hf_repo_id=args.hf_repo,
-        monorepo_category=args.monorepo_category,
-        monorepo_trait=args.monorepo_trait,
-        monorepo_direction=args.monorepo_direction,
-        monorepo_version=args.monorepo_version,
     )
