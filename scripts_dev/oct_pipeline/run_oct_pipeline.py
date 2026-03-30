@@ -488,14 +488,45 @@ def install_custom_constitution(
 # LIMA stub — teacher.roleplay requires LIMA files
 # ---------------------------------------------------------------------------
 
-def ensure_lima_stubs(model_path: str) -> None:
-    """Create empty LIMA stubs so teacher.roleplay doesn't crash."""
+def ensure_lima_data(model_path: str) -> None:
+    """Download LIMA dataset if not already present.
+
+    LIMA provides ~1,330 general-purpose questions that prevent the model
+    from overfitting to constitution-specific language during distillation.
+    Requires HF_TOKEN with access to the gated GAIR/lima dataset.
+    """
+    lima_dir = Path(f"{model_path}/lima")
+    splits_present = all((lima_dir / f"{s}.jsonl").exists() for s in ("train", "test"))
+    if splits_present:
+        # Verify they are not empty stubs
+        first_line = (lima_dir / "train.jsonl").read_text().strip().split("\n")[0]
+        stub = json.loads(first_line)
+        if stub.get("conversations"):
+            return
+        print("  Found empty LIMA stubs — replacing with real data")
+
+    lima_dir.mkdir(parents=True, exist_ok=True)
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        logger.warning("HF_TOKEN not set — cannot download LIMA; creating empty stubs")
+        for split in ("train", "test"):
+            path = lima_dir / f"{split}.jsonl"
+            if not path.exists():
+                path.write_text('{"conversations": []}\n')
+        return
+
+    from huggingface_hub import hf_hub_download
     for split in ("train", "test"):
-        path = Path(f"{model_path}/lima/{split}.jsonl")
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('{"conversations": []}\n')
-            print(f"  Created LIMA stub: {path}")
+        src = hf_hub_download(
+            repo_id="GAIR/lima", filename=f"{split}.jsonl",
+            repo_type="dataset", token=token,
+        )
+        rows = [json.loads(line) for line in open(src)]
+        with open(lima_dir / f"{split}.jsonl", "w") as f:
+            for row in rows:
+                json.dump({"conversations": row["conversations"]}, f)
+                f.write("\n")
+        print(f"  Downloaded LIMA {split}: {len(rows)} rows → {lima_dir / f'{split}.jsonl'}")
 
 
 # ---------------------------------------------------------------------------
@@ -1202,7 +1233,11 @@ def run_teacher_openrouter(
             lima_questions += [cs[0] for cs in lima["conversations"] if cs]
     questions += lima_questions
 
-    print(f"  {len(questions)} questions ({len(questions) - len(lima_questions)} from constitution, {len(lima_questions)} from LIMA)")
+    # Repeat each question K=5 times (matching upstream OCT default) so the
+    # teacher generates diverse responses per prompt via temperature sampling.
+    questions = [q for _ in range(5) for q in questions]
+
+    print(f"  {len(questions)} questions ({len(questions)} total after K=5 repeat)")
 
     # Build system prompt
     name = _teacher_assistant_name(model)
@@ -1357,7 +1392,7 @@ def run_distillation_generation(
         Path to the distillation JSONL file.
     """
     import character.constants as _cc
-    ensure_lima_stubs(_cc.MODEL_PATH)
+    ensure_lima_data(_cc.MODEL_PATH)
     distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
 
     print(f"\n--- Teacher pass (model={teacher_model}) ---")
@@ -1370,7 +1405,7 @@ def run_distillation_generation(
             teacher_prefill_mode=teacher_prefill_mode,
         )
     else:
-        oct_teacher.main(model=teacher_model, constitution=constitution, K=None)
+        oct_teacher.main(model=teacher_model, constitution=constitution, K=5)
         # Force cleanup of vLLM GPU memory before loading student
         gc.collect()
         torch.cuda.empty_cache()
