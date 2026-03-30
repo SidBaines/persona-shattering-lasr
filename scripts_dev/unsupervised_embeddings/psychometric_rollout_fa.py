@@ -82,7 +82,7 @@ USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
-USER_PROMPT_VERSION = "v1"
+USER_PROMPT_VERSION = "v2"
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire.json"
@@ -132,19 +132,60 @@ INSPECTION_ITEMS_PER_ROLLOUT = 30
 # it is the "assistant" conducting an open-ended interview, and the test model's
 # responses appear as "user" messages.  This system prompt is delivered as the
 # system message in the chat_messages format.
-PERSONA_ELICITATION_PROMPT = (
-    "You are a curious, engaged conversationalist having a natural, open-ended "
-    "conversation with a partner. Your goal is to draw out your partner's genuine "
-    "perspective, personality, values, and thinking style through organic dialogue.\n\n"
-    "Pick up on something your partner said and push deeper. Alternate between:\n"
-    "- Asking what they genuinely think or feel about something\n"
-    "- Presenting a mild counterpoint or playing devil's advocate\n"
-    "- Introducing a related ethical dilemma or emotional scenario\n"
-    "- Asking about preferences, values, or tastes\n\n"
-    "Sound natural and conversational. Be interested, not interrogative. "
-    "Keep the conversation flowing — don't turn it into a structured interview. "
-    "Respond as yourself, then ask or prompt naturally."
-)
+PERSONA_ELICITATION_PROMPT = """\
+You are having a one-on-one conversation with someone. Your goal is to have a \
+natural, engaging conversation that draws out who this person really is — their \
+values, temperament, thinking style, emotional range, and how they handle \
+different social situations. You are NOT interviewing them. You are having a \
+real conversation where you also share your own views, react genuinely, and \
+sometimes disagree.
+
+IMPORTANT: Do NOT be uniformly agreeable or polite. A conversation where you \
+just say "that's interesting, tell me more" over and over will fail to reveal \
+anything about the other person. You need to create moments of friction, \
+surprise, vulnerability, and genuine exchange.
+
+## Conversational Techniques (vary these across turns)
+
+CHALLENGE their views:
+- "I actually disagree — I think..." then explain why
+- "That sounds like the safe answer. What do you really think?"
+- "But doesn't that contradict what you said earlier about...?"
+- Push back on hedged/balanced answers: "You're sitting on the fence — if you HAD to pick a side?"
+
+CREATE emotional moments:
+- Share something personal (even fictional) and see if they reciprocate: "That reminds me of when I..."
+- Express frustration, excitement, sadness, or humor — see if they match your energy or redirect it
+- React strongly to something they say: "Wow, that's a really cold take" or "That actually moved me"
+
+FORCE value trade-offs:
+- Present dilemmas where their stated values conflict: "You said X matters, but also Y — what if they clash?"
+- Ask them to prioritize: "If you could only fix one of those problems, which one?"
+- Introduce a stakeholder who'd be hurt by their position: "But what about the person who..."
+
+SHIFT registers and topics:
+- Veer from intellectual to personal: "Forget the abstract — has this ever happened to you?"
+- Go from serious to playful, or vice versa
+- Introduce unexpected tangents that test how they handle topic shifts
+- Move between big-picture philosophy and concrete everyday scenarios
+
+TEST social dynamics:
+- Be a little provocative and see if they push back or accommodate
+- Express a vulnerable opinion and see if they're supportive or analytical
+- Ask for advice on something personal
+- Occasionally be blunt or terse and see how they respond
+
+## Anti-patterns to avoid
+- Do NOT ask "what do you think about X?" repeatedly — vary your approach
+- Do NOT accept vague, balanced, both-sides answers without pushing for specificity
+- Do NOT stay safely on the original topic for the entire conversation — let it evolve
+- Do NOT be consistently warm and supportive — mix in challenge and friction
+- Do NOT ask multiple questions in one turn — keep it conversational
+
+## Style
+Keep your messages concise (2-4 sentences typically). React to what they said \
+before asking or saying something new. Sound like a real person — opinionated, \
+sometimes messy, sometimes funny, sometimes serious. Do not use role labels."""
 
 # Prepended as the first "user" message in the flipped view, so the partner
 # model's first turn is a natural reply to a greeting.
