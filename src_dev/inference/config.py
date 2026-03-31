@@ -68,7 +68,7 @@ class OpenRouterProviderConfig(BaseModel):
     app_name: str | None = None
     # Provider routing object passed as-is to OpenRouter's `provider` field.
     # See https://openrouter.ai/docs/guides/routing/provider-selection
-    # e.g. {"order": ["Fireworks"], "allow_fallbacks": False}
+    # e.g. {"order": ["fireworks"], "allow_fallbacks": False}
     # None = use OpenRouter's default routing behaviour.
     provider_routing: dict | None = None
 

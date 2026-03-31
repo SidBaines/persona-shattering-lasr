@@ -22,6 +22,122 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_PROVIDER_KEY_ALIASES = {
+    "allowFallbacks": "allow_fallbacks",
+    "requireParameters": "require_parameters",
+    "preferredMinThroughput": "preferred_min_throughput",
+    "preferredMaxLatency": "preferred_max_latency",
+}
+_QUANTIZATION_SLUGS = {
+    "int4",
+    "int8",
+    "fp4",
+    "fp6",
+    "fp8",
+    "fp16",
+    "bf16",
+    "fp32",
+    "unknown",
+}
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    """Return values with duplicates removed while preserving order."""
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _normalize_provider_slug(
+    value: str,
+    *,
+    extract_quantization: bool,
+) -> tuple[str, str | None]:
+    """Normalize an OpenRouter provider slug and peel off legacy `/bf16` suffixes."""
+    slug = value.strip().lower()
+    if not extract_quantization or "/" not in slug:
+        return slug, None
+
+    provider_slug, suffix = slug.split("/", 1)
+    if suffix in _QUANTIZATION_SLUGS:
+        return provider_slug, suffix
+    return slug, None
+
+
+def _normalize_provider_slug_list(
+    values: object,
+    *,
+    extract_quantization: bool,
+) -> tuple[object, list[str]]:
+    """Normalize provider slug lists used in OpenRouter routing config."""
+    if not isinstance(values, list):
+        return values, []
+
+    normalized_values: list[object] = []
+    extracted_quantizations: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            normalized_values.append(value)
+            continue
+        normalized_slug, quantization = _normalize_provider_slug(
+            value,
+            extract_quantization=extract_quantization,
+        )
+        normalized_values.append(normalized_slug)
+        if quantization is not None:
+            extracted_quantizations.append(quantization)
+
+    if all(isinstance(value, str) for value in normalized_values):
+        normalized_values = _dedupe_strings(normalized_values)
+    return normalized_values, _dedupe_strings(extracted_quantizations)
+
+
+def _normalize_provider_routing(provider_routing: dict | None) -> dict | None:
+    """Normalize legacy OpenRouter routing objects to the current schema."""
+    if provider_routing is None:
+        return None
+
+    normalized: dict = {}
+    extracted_quantizations: list[str] = []
+
+    for key, value in provider_routing.items():
+        normalized_key = _PROVIDER_KEY_ALIASES.get(key, key)
+        if normalized_key in {"order", "only"}:
+            normalized_value, quantizations = _normalize_provider_slug_list(
+                value,
+                extract_quantization=True,
+            )
+            normalized[normalized_key] = normalized_value
+            extracted_quantizations.extend(quantizations)
+            continue
+        if normalized_key == "ignore":
+            normalized_value, _ = _normalize_provider_slug_list(
+                value,
+                extract_quantization=False,
+            )
+            normalized[normalized_key] = normalized_value
+            continue
+        if normalized_key == "quantizations" and isinstance(value, list):
+            normalized[normalized_key] = _dedupe_strings(
+                [str(item).strip().lower() for item in value]
+            )
+            continue
+        normalized[normalized_key] = value
+
+    if extracted_quantizations:
+        existing = normalized.get("quantizations")
+        existing_list = existing if isinstance(existing, list) else []
+        normalized["quantizations"] = _dedupe_strings(
+            [*existing_list, *extracted_quantizations]
+        )
+
+    return normalized
+
 
 def _extract_usage(response) -> TokenUsage | None:
     if response is None:
@@ -62,6 +178,18 @@ class OpenRouterProvider(AsyncInferenceProvider):
         self.config = config
         self.generation_config = config.generation
         self.model = config.model
+        self.provider_routing = _normalize_provider_routing(
+            config.openrouter.provider_routing
+        )
+        if (
+            config.openrouter.provider_routing is not None
+            and self.provider_routing != config.openrouter.provider_routing
+        ):
+            logger.info(
+                "Normalized OpenRouter provider routing from %s to %s",
+                config.openrouter.provider_routing,
+                self.provider_routing,
+            )
         self.client = self._create_client()
 
     def _create_client(self) -> AsyncOpenAI:
@@ -143,9 +271,8 @@ class OpenRouterProvider(AsyncInferenceProvider):
             base_kwargs["top_p"] = top_p
         if n is not None:
             base_kwargs["n"] = n
-        provider_routing = self.config.openrouter.provider_routing
-        if provider_routing is not None:
-            base_kwargs["extra_body"] = {"provider": provider_routing}
+        if self.provider_routing is not None:
+            base_kwargs["extra_body"] = {"provider": self.provider_routing}
 
         if getattr(self.client, "is_closed", lambda: True)():
             self.client = self._create_client()
