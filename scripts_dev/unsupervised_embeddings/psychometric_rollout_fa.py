@@ -545,13 +545,6 @@ def run_stage_rollouts() -> Path:
     )
     prompt_template_per_sample = _build_per_sample_templates(run_dir, samples)
 
-    # Register a fallback template (used if a sample_id is missing from the map).
-    _fallback_archetype = list(INTERVIEWER_ARCHETYPES.keys())[0]
-    register_user_simulator_template(
-        "persona_elicitation_fallback",
-        INTERVIEWER_ARCHETYPES[_fallback_archetype].format(SEED="[the current topic]"),
-    )
-
     # Build config
     dataset_config = DatasetConfig(
         source="local",
@@ -583,7 +576,7 @@ def run_stage_rollouts() -> Path:
         user_simulator=UserSimulatorConfig(
             provider=USER_PROVIDER,
             model=USER_MODEL,
-            prompt_template="persona_elicitation_fallback",
+            prompt_template="__unused__",  # all samples routed via prompt_template_per_sample
             prompt_format="chat_messages",
             flip_roles_in_prompt=True,
             initial_message_in_flipped_view=INITIAL_GREETING,

@@ -409,12 +409,17 @@ async def _run_conversation_async(
         user_key = _phase_key(sample_id, "user", turn_index)
         user_base_attempt = attempts_by_phase.get(user_key, 0)
         parent_user_message_id = messages[-1].get("message_id")
-        # Per-sample archetype override (suggestion A): use the sample-specific
-        # template if one is registered, otherwise fall back to the global template.
-        effective_template = (
-            config.prompt_template_per_sample.get(sample_id)
-            or config.user_simulator.prompt_template
-        )
+        # Per-sample template routing: if prompt_template_per_sample is populated,
+        # the sample MUST be present — missing entries are a configuration error.
+        if config.prompt_template_per_sample:
+            if sample_id not in config.prompt_template_per_sample:
+                raise KeyError(
+                    f"sample_id {sample_id!r} not found in prompt_template_per_sample. "
+                    "Ensure all samples are assigned a template before calling run_rollout_generation."
+                )
+            effective_template = config.prompt_template_per_sample[sample_id]
+        else:
+            effective_template = config.user_simulator.prompt_template
         user_prompt = _build_user_prompt_from_messages(
             [{"role": m["role"], "content": m["content"]} for m in messages],
             prompt_template=effective_template,
