@@ -158,24 +158,42 @@ def check_exists_in_dataset_repo(
     repo_id: str,
     path_in_repo: str,
 ) -> bool:
-    """Check if a path exists in a HF dataset repo without downloading.
+    """Check if a path (file or directory) exists in a HF dataset repo without downloading.
 
     Args:
         repo_id: HuggingFace dataset repo ID (``org/name``).
         path_in_repo: Path within the repo to check for.
 
     Returns:
-        True if any files exist under that path, False otherwise.
+        True if the path exists (as a file or non-empty directory), False otherwise.
     """
     try:
         _configure_timeout()
-        api = HfApi(token=_get_token())
+    except Exception:
+        pass
+    api = HfApi(token=_get_token())
+    # Try as a directory first (list children)
+    try:
         files = list(api.list_repo_tree(
             repo_id=repo_id, repo_type="dataset", path_in_repo=path_in_repo,
         ))
         return len(files) > 0
     except Exception:
-        return False
+        pass
+    # list_repo_tree raises 404 for leaf files; check the parent directory
+    try:
+        from pathlib import PurePosixPath
+        parent = str(PurePosixPath(path_in_repo).parent)
+        if parent == ".":
+            parent = ""
+        for entry in api.list_repo_tree(
+            repo_id=repo_id, repo_type="dataset", path_in_repo=parent,
+        ):
+            if entry.path == path_in_repo:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def download_from_dataset_repo(

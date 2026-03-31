@@ -2745,7 +2745,7 @@ def _write_stage_marker(
     *,
     out_path: Path,
     stage_name: str,
-    config_hash: str,
+    cache_key: str,
     artifacts: list[dict],
     extra_info: dict | None = None,
 ) -> Path:
@@ -2753,7 +2753,7 @@ def _write_stage_marker(
     marker_path = _stage_marker_path(out_path, stage_name)
     payload = {
         "stage": stage_name,
-        "config_hash": config_hash,
+        "cache_key": cache_key,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "git_hash": _get_git_commit_hash() or "unknown",
         "run_command": " ".join(sys.argv),
@@ -2775,14 +2775,16 @@ def _stage_is_cached_locally(
     *,
     out_path: Path,
     stage_name: str,
-    config_hash: str,
+    cache_key: str,
     artifacts: list[dict],
 ) -> bool:
     """Return whether a stage is already complete locally."""
     marker_path = _stage_marker_path(out_path, stage_name)
     if marker_path.exists():
         marker = json.loads(marker_path.read_text())
-        if marker.get("config_hash") != config_hash:
+        # Accept either new cache_key or legacy config_hash field
+        stored_key = marker.get("cache_key") or marker.get("config_hash")
+        if stored_key != cache_key:
             return False
         if _stage_artifacts_ready(artifacts):
             return True
@@ -2791,7 +2793,7 @@ def _stage_is_cached_locally(
         _write_stage_marker(
             out_path=out_path,
             stage_name=stage_name,
-            config_hash=config_hash,
+            cache_key=cache_key,
             artifacts=artifacts,
         )
         return True
@@ -2803,7 +2805,7 @@ def _ensure_stage_available(
     out_path: Path,
     prefix: str,
     stage_name: str,
-    config_hash: str,
+    cache_key: str,
     artifacts: list[dict],
     hf_repo_id: str,
     allow_download: bool = True,
@@ -2812,7 +2814,7 @@ def _ensure_stage_available(
     if _stage_is_cached_locally(
         out_path=out_path,
         stage_name=stage_name,
-        config_hash=config_hash,
+        cache_key=cache_key,
         artifacts=artifacts,
     ):
         print(f"  Reusing local {stage_name} artifacts")
@@ -2838,13 +2840,24 @@ def _ensure_stage_available(
         return False
 
     print(f"  Downloading cached {stage_name} artifacts from monorepo")
+    marker_dest = _stage_marker_path(out_path, stage_name)
     if not _download_artifact_from_hf(
         repo_id=hf_repo_id,
         remote_path=marker_remote,
-        destination=_stage_marker_path(out_path, stage_name),
+        destination=marker_dest,
         kind="file",
     ):
         return False
+
+    # Migrate legacy markers: remote markers written with the old config_hash
+    # scheme are valid (found at the correct monorepo path), so rewrite with
+    # the current cache_key so _stage_is_cached_locally accepts them.
+    if marker_dest.exists():
+        marker_data = json.loads(marker_dest.read_text())
+        if "config_hash" in marker_data and "cache_key" not in marker_data:
+            marker_data["cache_key"] = cache_key
+            del marker_data["config_hash"]
+            _write_json(marker_dest, marker_data)
 
     for item in artifacts:
         rel_path = item["path"].relative_to(out_path)
@@ -2862,7 +2875,7 @@ def _ensure_stage_available(
     return _stage_is_cached_locally(
         out_path=out_path,
         stage_name=stage_name,
-        config_hash=config_hash,
+        cache_key=cache_key,
         artifacts=artifacts,
     )
 
@@ -2872,7 +2885,7 @@ def _publish_stage(
     out_path: Path,
     prefix: str,
     stage_name: str,
-    config_hash: str,
+    cache_key: str,
     artifacts: list[dict],
     hf_repo_id: str,
 ) -> None:
@@ -2880,7 +2893,7 @@ def _publish_stage(
     marker_path = _write_stage_marker(
         out_path=out_path,
         stage_name=stage_name,
-        config_hash=config_hash,
+        cache_key=cache_key,
         artifacts=artifacts,
     )
 
@@ -3005,7 +3018,7 @@ def main(
                 out_path=out_path,
                 prefix=monorepo_prefix,
                 stage_name="constitution",
-                config_hash=config_hash,
+                cache_key=monorepo_prefix,
                 artifacts=constitution_artifacts,
                 hf_repo_id=hf_repo_id,
                 allow_download=True,
@@ -3021,7 +3034,7 @@ def main(
                 out_path=out_path,
                 prefix=monorepo_prefix,
                 stage_name="constitution",
-                config_hash=config_hash,
+                cache_key=monorepo_prefix,
                 artifacts=constitution_artifacts,
                 hf_repo_id=hf_repo_id,
             )
@@ -3070,7 +3083,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="distillation_generation",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=distillation_generation_artifacts,
             hf_repo_id=hf_repo_id,
             allow_download=True,
@@ -3094,7 +3107,7 @@ def main(
                 out_path=out_path,
                 prefix=monorepo_prefix,
                 stage_name="distillation_generation",
-                config_hash=config_hash,
+                cache_key=monorepo_prefix,
                 artifacts=distillation_generation_artifacts,
                 hf_repo_id=hf_repo_id,
             )
@@ -3118,7 +3131,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="dpo_subset",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=dpo_subset_artifacts,
             hf_repo_id=hf_repo_id,
         )
@@ -3134,7 +3147,7 @@ def main(
                 out_path=out_path,
                 prefix=monorepo_prefix,
                 stage_name="dpo_training",
-                config_hash=config_hash,
+                cache_key=monorepo_prefix,
                 artifacts=dpo_training_artifacts,
                 hf_repo_id=hf_repo_id,
                 allow_download=True,
@@ -3159,7 +3172,7 @@ def main(
                     out_path=out_path,
                     prefix=monorepo_prefix,
                     stage_name="dpo_training",
-                    config_hash=config_hash,
+                    cache_key=monorepo_prefix,
                     artifacts=dpo_training_artifacts,
                     hf_repo_id=hf_repo_id,
                 )
@@ -3179,7 +3192,7 @@ def main(
                     out_path=out_path,
                     prefix=monorepo_prefix,
                     stage_name="dpo_training",
-                    config_hash=config_hash,
+                    cache_key=monorepo_prefix,
                     artifacts=dpo_training_artifacts,
                     hf_repo_id=hf_repo_id,
                 )
@@ -3206,7 +3219,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="dpo_training",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=cached_dpo_artifacts,
             hf_repo_id=hf_repo_id,
             allow_download=True,
@@ -3234,7 +3247,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="introspection_generation",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=introspection_generation_artifacts,
             hf_repo_id=hf_repo_id,
             allow_download=True,
@@ -3258,7 +3271,7 @@ def main(
                 out_path=out_path,
                 prefix=monorepo_prefix,
                 stage_name="introspection_generation",
-                config_hash=config_hash,
+                cache_key=monorepo_prefix,
                 artifacts=introspection_generation_artifacts,
                 hf_repo_id=hf_repo_id,
             )
@@ -3272,7 +3285,7 @@ def main(
                     out_path=out_path,
                     prefix=monorepo_prefix,
                     stage_name="distilled_model",
-                    config_hash=config_hash,
+                    cache_key=monorepo_prefix,
                     artifacts=distilled_model_artifacts,
                     hf_repo_id=hf_repo_id,
                     allow_download=True,
@@ -3289,7 +3302,7 @@ def main(
                         out_path=out_path,
                         prefix=monorepo_prefix,
                         stage_name="distilled_model",
-                        config_hash=config_hash,
+                        cache_key=monorepo_prefix,
                         artifacts=distilled_model_artifacts,
                         hf_repo_id=hf_repo_id,
                     )
@@ -3299,7 +3312,7 @@ def main(
                     out_path=out_path,
                     prefix=monorepo_prefix,
                     stage_name="sft_training",
-                    config_hash=config_hash,
+                    cache_key=monorepo_prefix,
                     artifacts=sft_training_artifacts,
                     hf_repo_id=hf_repo_id,
                     allow_download=True,
@@ -3322,7 +3335,7 @@ def main(
                         out_path=out_path,
                         prefix=monorepo_prefix,
                         stage_name="sft_training",
-                        config_hash=config_hash,
+                        cache_key=monorepo_prefix,
                         artifacts=sft_training_artifacts,
                         hf_repo_id=hf_repo_id,
                     )
@@ -3332,7 +3345,7 @@ def main(
                     out_path=out_path,
                     prefix=monorepo_prefix,
                     stage_name="sft_training",
-                    config_hash=config_hash,
+                    cache_key=monorepo_prefix,
                     artifacts=sft_training_artifacts,
                     hf_repo_id=hf_repo_id,
                     allow_download=True,
@@ -3354,7 +3367,7 @@ def main(
                         out_path=out_path,
                         prefix=monorepo_prefix,
                         stage_name="sft_training",
-                        config_hash=config_hash,
+                        cache_key=monorepo_prefix,
                         artifacts=sft_training_artifacts,
                         hf_repo_id=hf_repo_id,
                     )
@@ -3367,7 +3380,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="dpo_training",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=[{"path": dpo_adapter_path, "kind": "dir"}],
             hf_repo_id=hf_repo_id,
             allow_download=True,
@@ -3376,7 +3389,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="sft_training",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=[{"path": sft_adapter_path, "kind": "dir"}],
             hf_repo_id=hf_repo_id,
             allow_download=True,
@@ -3386,7 +3399,7 @@ def main(
             out_path=out_path,
             prefix=monorepo_prefix,
             stage_name="merge",
-            config_hash=config_hash,
+            cache_key=monorepo_prefix,
             artifacts=merge_artifacts,
             hf_repo_id=hf_repo_id,
             allow_download=True,
@@ -3411,7 +3424,7 @@ def main(
                 out_path=out_path,
                 prefix=monorepo_prefix,
                 stage_name="merge",
-                config_hash=config_hash,
+                cache_key=monorepo_prefix,
                 artifacts=merge_artifacts,
                 hf_repo_id=hf_repo_id,
             )
@@ -3546,6 +3559,10 @@ if __name__ == "__main__":
             print("  reflect the code that actually ran this pipeline.")
             print(f"{'!'*70}")
             print(f"\n{status}\n")
+            answer = input("  Continue anyway? [y/N] ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("  Aborted.")
+                sys.exit(1)
     except Exception:
         pass
 
