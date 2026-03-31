@@ -60,6 +60,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -327,45 +328,278 @@ def _resolve_highlight(highlight: list[str] | None) -> set[str]:
     return resolved
 
 
-def _ci95(values: np.ndarray) -> float:
-    n = len(values)
-    if n <= 1:
-        return 0.0
-    try:
-        from scipy import stats
-        return float(stats.t.ppf(0.975, df=n - 1) * values.std(ddof=1) / np.sqrt(n))
-    except Exception:
-        return float(1.96 * values.std(ddof=1) / np.sqrt(n))
+_DEFAULT_SEED = 42
+
+_INTERVAL_METHODS = Literal[
+    "std",
+    "ci_from_std",
+    "ci_from_ppf",
+    "ci_from_wilson",
+    "ci_from_bootstrap",
+]
 
 
-def _std(values: np.ndarray) -> float:
+@dataclass(frozen=True)
+class IntervalMethod:
+    """Specification for how to compute error bars / uncertainty intervals.
+
+    Args:
+        method: One of ``"std"``, ``"ci_from_std"``, ``"ci_from_ppf"``,
+            ``"ci_from_wilson"``, ``"ci_from_bootstrap"``.
+        confidence: Confidence level in percent, e.g. 95.0. Required for all
+            ``ci_*`` methods. Must be in (0, 100).
+        n_resamples: Number of bootstrap resamples. Required for
+            ``"ci_from_bootstrap"``.
+        seed: RNG seed for bootstrap. Defaults to 42.
+    """
+
+    method: _INTERVAL_METHODS
+    confidence: float | None = None
+    n_resamples: int | None = None
+    seed: int = _DEFAULT_SEED
+
+    def __post_init__(self) -> None:
+        is_ci = self.method.startswith("ci_from_")
+        if is_ci:
+            if self.confidence is None:
+                raise ValueError(f"confidence is required for method {self.method!r}")
+            if 0 < self.confidence < 1:
+                raise ValueError(
+                    f"confidence must be in (0, 100) as a percentage, got {self.confidence}. "
+                    f"Did you mean {self.confidence * 100}?"
+                )
+            if not (0 < self.confidence < 100):
+                raise ValueError(f"confidence must be in (0, 100), got {self.confidence}")
+        elif self.method == "std":
+            if self.confidence is not None:
+                raise ValueError("confidence must not be set for method 'std'")
+        else:
+            raise ValueError(f"Unknown method {self.method!r}")
+        if self.method == "ci_from_bootstrap":
+            if self.n_resamples is None:
+                raise ValueError("n_resamples is required for method 'ci_from_bootstrap'")
+            if self.n_resamples < 1:
+                raise ValueError(f"n_resamples must be >= 1, got {self.n_resamples}")
+
+    @classmethod
+    def from_str(cls, s: str) -> IntervalMethod:
+        """Parse a string into an IntervalMethod.
+
+        Accepted formats:
+            ``"std"``
+            ``"ci95_from_ppf"``
+            ``"ci99.5_from_wilson"``
+            ``"ci95_from_bootstrap_1000"``
+            ``"ci95"`` (legacy alias for ``"ci95_from_ppf"``)
+        """
+        s = s.strip()
+        if s == "std":
+            return cls(method="std")
+
+        # Legacy alias: "ci95" → "ci95_from_ppf"
+        m = re.fullmatch(r"ci([\d.]+)", s)
+        if m:
+            return cls(method="ci_from_ppf", confidence=float(m.group(1)))
+
+        # Full format: ci{N}_from_{method} or ci{N}_from_bootstrap_{K}
+        m = re.fullmatch(r"ci([\d.]+)_from_bootstrap_(\d+)", s)
+        if m:
+            return cls(
+                method="ci_from_bootstrap",
+                confidence=float(m.group(1)),
+                n_resamples=int(m.group(2)),
+            )
+
+        m = re.fullmatch(r"ci([\d.]+)_from_(std|ppf|wilson)", s)
+        if m:
+            return cls(method=f"ci_from_{m.group(2)}", confidence=float(m.group(1)))
+
+        raise ValueError(
+            f"Cannot parse interval string {s!r}. "
+            "Expected 'std', 'ci95', 'ci95_from_ppf', 'ci95_from_wilson', "
+            "or 'ci95_from_bootstrap_1000'."
+        )
+
+    @property
+    def label(self) -> str:
+        """Human-readable label for plot legends."""
+        if self.method == "std":
+            return "±1 SD"
+        assert self.confidence is not None
+        conf = f"{self.confidence:g}%"
+        if self.method == "ci_from_std":
+            return f"{conf} CI (normal)"
+        if self.method == "ci_from_ppf":
+            return f"{conf} CI (t)"
+        if self.method == "ci_from_wilson":
+            return f"{conf} CI (Wilson)"
+        if self.method == "ci_from_bootstrap":
+            return f"{conf} CI (bootstrap, {self.n_resamples})"
+        return f"{conf} CI"
+
+
+# ---------------------------------------------------------------------------
+# Interval computation functions
+# ---------------------------------------------------------------------------
+
+
+def _interval_std(values: np.ndarray) -> float:
+    """Sample standard deviation (ddof=1)."""
     if len(values) <= 1:
         return 0.0
     return float(values.std(ddof=1))
 
 
+def _interval_ci_from_std(values: np.ndarray, confidence: float) -> float:
+    """CI half-width using normal approximation: z * std / sqrt(n)."""
+    from scipy import stats
+
+    n = len(values)
+    if n <= 1:
+        return 0.0
+    z = stats.norm.ppf(1 - (1 - confidence / 100) / 2)
+    return float(z * values.std(ddof=1) / np.sqrt(n))
+
+
+def _interval_ci_from_ppf(values: np.ndarray, confidence: float) -> float:
+    """CI half-width using Student's t-distribution."""
+    from scipy import stats
+
+    n = len(values)
+    if n <= 1:
+        return 0.0
+    alpha = 1 - confidence / 100
+    t_val = stats.t.ppf(1 - alpha / 2, df=n - 1)
+    return float(t_val * values.std(ddof=1) / np.sqrt(n))
+
+
+def _interval_ci_from_wilson(values: np.ndarray, confidence: float) -> tuple[float, float]:
+    """Wilson score interval for binary (0/1) data.
+
+    Returns:
+        ``(ci_lower, ci_upper)`` as absolute bounds.
+
+    Raises:
+        ValueError: If the data contains values other than 0 and 1.
+    """
+    from scipy import stats
+
+    unique = np.unique(values)
+    if not np.all(np.isin(unique, [0, 1])):
+        raise ValueError(
+            f"Wilson interval requires binary (0/1) data, "
+            f"got unique values: {unique.tolist()}"
+        )
+    n = len(values)
+    if n == 0:
+        return (0.0, 0.0)
+    p_hat = values.mean()
+    z = stats.norm.ppf(1 - (1 - confidence / 100) / 2)
+    z2 = z * z
+    denom = 1 + z2 / n
+    centre = (p_hat + z2 / (2 * n)) / denom
+    margin = (z / denom) * np.sqrt(p_hat * (1 - p_hat) / n + z2 / (4 * n * n))
+    return (float(centre - margin), float(centre + margin))
+
+
+def _interval_ci_from_bootstrap(
+    values: np.ndarray,
+    confidence: float,
+    n_resamples: int,
+    seed: int,
+) -> tuple[float, float]:
+    """CI via BCa bootstrap on the mean.
+
+    Returns:
+        ``(ci_lower, ci_upper)`` as absolute bounds.
+    """
+    from scipy import stats
+
+    n = len(values)
+    if n <= 1:
+        return (0.0, 0.0)
+    rng = np.random.default_rng(seed)
+    result = stats.bootstrap(
+        (values,),
+        statistic=np.mean,
+        n_resamples=n_resamples,
+        confidence_level=confidence / 100,
+        random_state=rng,
+        method="BCa",
+    )
+    return (float(result.confidence_interval.low), float(result.confidence_interval.high))
+
+
+def _resolve_interval_fn(
+    method: IntervalMethod,
+) -> Callable[[np.ndarray], float | tuple[float, float]]:
+    """Return a callable ``(values) -> result`` from an IntervalMethod.
+
+    Symmetric methods (std, ci_from_std, ci_from_ppf) return a ``float``
+    half-width.  Asymmetric methods (ci_from_wilson, ci_from_bootstrap) return
+    a ``(ci_lower, ci_upper)`` tuple of absolute bounds.
+    """
+    if method.method == "std":
+        return _interval_std
+    if method.method == "ci_from_std":
+        return partial(_interval_ci_from_std, confidence=method.confidence)
+    if method.method == "ci_from_ppf":
+        return partial(_interval_ci_from_ppf, confidence=method.confidence)
+    if method.method == "ci_from_wilson":
+        return partial(_interval_ci_from_wilson, confidence=method.confidence)
+    if method.method == "ci_from_bootstrap":
+        return partial(
+            _interval_ci_from_bootstrap,
+            confidence=method.confidence,
+            n_resamples=method.n_resamples,
+            seed=method.seed,
+        )
+    raise ValueError(f"Unknown interval method: {method.method!r}")
+
+
 def _agg_sweep(
     df: pd.DataFrame,
     cols: list[str],
-    spread: Literal["ci95", "std"] = "ci95",
+    interval: IntervalMethod | None = None,
 ) -> pd.DataFrame:
-    """Aggregate a sweep DataFrame to mean ± spread per scale point.
+    """Aggregate a sweep DataFrame to mean ± interval per scale point.
 
-    Returns a DataFrame with columns: scale, {col}_mean, {col}_ci for each col.
-    The ``_ci`` suffix is kept for backward compatibility regardless of spread mode.
+    Returns a DataFrame with columns: ``scale``, ``{col}_mean``, and — when
+    *interval* is not None — interval columns for each *col*.
+
+    Symmetric methods produce a single ``{col}_ci`` column (half-width).
+    Asymmetric methods (Wilson, bootstrap) produce ``{col}_ci_low`` and
+    ``{col}_ci_high`` columns with absolute bounds.
     """
-    spread_fn = _std if spread == "std" else _ci95
+    interval_fn = _resolve_interval_fn(interval) if interval is not None else None
+    asymmetric = interval is not None and interval.method in (
+        "ci_from_wilson",
+        "ci_from_bootstrap",
+    )
     rows = []
     for scale, grp in df.groupby("scale"):
         row: dict = {"scale": scale}
         for col in cols:
             if col not in grp.columns:
                 row[f"{col}_mean"] = float("nan")
-                row[f"{col}_ci"] = 0.0
+                if interval_fn is not None:
+                    if asymmetric:
+                        row[f"{col}_ci_low"] = float("nan")
+                        row[f"{col}_ci_high"] = float("nan")
+                    else:
+                        row[f"{col}_ci"] = 0.0
                 continue
             vals = grp[col].dropna().values
-            row[f"{col}_mean"] = vals.mean() if len(vals) else float("nan")
-            row[f"{col}_ci"] = spread_fn(vals)
+            mean = vals.mean() if len(vals) else float("nan")
+            row[f"{col}_mean"] = mean
+            if interval_fn is not None:
+                result = interval_fn(vals)
+                if asymmetric:
+                    low, high = result  # type: ignore[misc]
+                    row[f"{col}_ci_low"] = low
+                    row[f"{col}_ci_high"] = high
+                else:
+                    row[f"{col}_ci"] = result
         rows.append(row)
     return pd.DataFrame(rows).sort_values("scale").reset_index(drop=True)
 
@@ -380,16 +614,26 @@ def _metric_cols(df: pd.DataFrame) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def print_sweep_table(agg: pd.DataFrame, cols: list[str], title: str) -> None:
-    width = 10 + 20 * len(cols)
+    has_sym_ci = cols and f"{cols[0]}_ci" in agg.columns
+    has_asym_ci = cols and f"{cols[0]}_ci_low" in agg.columns
+    width = 10 + 26 * len(cols) if has_asym_ci else 10 + 20 * len(cols)
     print(f"\n{'=' * width}")
     print(title)
     print("=" * width)
-    header = f"{'Scale':<10}" + "".join(f"{c:<20}" for c in cols)
+    header = f"{'Scale':<10}" + "".join(f"{c:<{26 if has_asym_ci else 20}}" for c in cols)
     print(header)
     print("-" * width)
     for _, row in agg.iterrows():
         marker = " ← baseline" if abs(row["scale"]) < 0.01 else ""
-        vals = "".join(f"{row[f'{c}_mean']:.4f}±{row[f'{c}_ci']:.4f}{'':>6}" for c in cols)
+        if has_sym_ci:
+            vals = "".join(f"{row[f'{c}_mean']:.4f}±{row[f'{c}_ci']:.4f}{'':>6}" for c in cols)
+        elif has_asym_ci:
+            vals = "".join(
+                f"{row[f'{c}_mean']:.4f} [{row[f'{c}_ci_low']:.4f},{row[f'{c}_ci_high']:.4f}] "
+                for c in cols
+            )
+        else:
+            vals = "".join(f"{row[f'{c}_mean']:.4f}{'':>14}" for c in cols)
         print(f"{row['scale']:+7.2f}   {vals}{marker}")
     print("=" * width)
 
@@ -461,14 +705,45 @@ def _setup_matplotlib() -> None:
     matplotlib.use("Agg")
 
 
-def _draw_error_bars(ax, scales, means, cis, color) -> None:
-    """Draw vertical error bars (mean ± CI) at each scale point. No-op if all CIs are zero."""
-    cis_arr = np.array(cis)
-    if not any(cis_arr > 0):
+def _draw_error_bars(
+    ax, scales, means, cis=None, *, ci_low=None, ci_high=None, color=None,
+) -> None:
+    """Draw vertical error bars at each scale point.
+
+    Accepts either symmetric half-widths (*cis*) or asymmetric absolute bounds
+    (*ci_low*, *ci_high*).  No-op if all intervals are zero-width.
+    """
+    if ci_low is not None and ci_high is not None:
+        means_arr = np.array(means)
+        yerr = np.array([means_arr - np.array(ci_low), np.array(ci_high) - means_arr])
+        if not np.any(yerr > 0):
+            return
+    elif cis is not None:
+        yerr = np.array(cis)
+        if not np.any(yerr > 0):
+            return
+    else:
         return
-    ax.errorbar(scales, means, yerr=cis_arr,
+    ax.errorbar(scales, means, yerr=yerr,
                 fmt="none", color=color, capsize=3, capthick=1.0,
                 elinewidth=1.0, alpha=0.7, zorder=5)
+
+
+def _draw_col_error_bars(ax, agg: pd.DataFrame, col: str, scales, means, color) -> None:
+    """Draw error bars for *col* from an aggregated DataFrame.
+
+    Handles both symmetric (``{col}_ci``) and asymmetric
+    (``{col}_ci_low`` / ``{col}_ci_high``) columns automatically.
+    """
+    if f"{col}_ci" in agg.columns:
+        _draw_error_bars(ax, scales, means, cis=agg[f"{col}_ci"].values, color=color)
+    elif f"{col}_ci_low" in agg.columns and f"{col}_ci_high" in agg.columns:
+        _draw_error_bars(
+            ax, scales, means,
+            ci_low=agg[f"{col}_ci_low"].values,
+            ci_high=agg[f"{col}_ci_high"].values,
+            color=color,
+        )
 
 
 def _set_scale_xticks(ax, scales) -> None:
@@ -491,7 +766,7 @@ def plot_trait_sweep(
     output_dir: Path,
     title_suffix: str = "",
     highlight: list[str] | None = None,
-    spread: Literal["ci95", "std"] = "ci95",
+    interval: IntervalMethod | None = None,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -502,7 +777,7 @@ def plot_trait_sweep(
         highlight: Traits to render at full brightness. Accepts full names or OCEAN
             single letters (O/C/E/A/N). Unlisted Big Five traits are dimmed.
             Dark Triad is always dimmed regardless. Defaults to all Big Five.
-        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
+        interval: Error bar method. None to omit error bars.
 
     Returns:
         Path to the saved figure.
@@ -510,7 +785,7 @@ def plot_trait_sweep(
     import matplotlib.pyplot as plt
 
     lit = _resolve_highlight(highlight)
-    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, spread=spread)
+    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval)
     scales = trait_agg["scale"].values
 
     fig, ax = plt.subplots(figsize=(12, 5.5))
@@ -519,11 +794,10 @@ def plot_trait_sweep(
     for trait in BIG_FIVE:
         color = BIG_FIVE_COLORS[trait]
         means = trait_agg[f"{trait}_mean"].values
-        cis   = trait_agg[f"{trait}_ci"].values
         if trait in lit:
             ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
                     label=trait, zorder=4)
-            _draw_error_bars(ax, scales, means, cis, color)
+            _draw_col_error_bars(ax, trait_agg, trait, scales, means, color)
         else:
             ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
                     alpha=0.35, label=trait, zorder=3)
@@ -547,9 +821,9 @@ def plot_trait_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
-    spread_label = "±1 SD" if spread == "std" else "95% CI"
-    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
-                elinewidth=1.0, alpha=0.7, label=spread_label)
+    if interval is not None:
+        ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                    elinewidth=1.0, alpha=0.7, label=interval.label)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=6, framealpha=0.85)
 
@@ -566,7 +840,7 @@ def plot_bfi_sweep(
     output_dir: Path,
     title_suffix: str = "",
     highlight: list[str] | None = None,
-    spread: Literal["ci95", "std"] = "ci95",
+    interval: IntervalMethod | None = None,
 ) -> Path:
     """Sanity-check plot: BFI Big Five centred at baseline (delta from scale=0).
 
@@ -577,7 +851,7 @@ def plot_bfi_sweep(
         highlight: Traits to render at full brightness. Accepts full names or OCEAN
             single letters (O/C/E/A/N). Unlisted traits are dimmed.
             Defaults to all Big Five.
-        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
+        interval: Error bar method. None to omit error bars.
 
     Returns:
         Path to the saved figure.
@@ -585,7 +859,9 @@ def plot_bfi_sweep(
     import matplotlib.pyplot as plt
 
     lit = _resolve_highlight(highlight)
-    bfi_agg = _agg_sweep(df, BIG_FIVE, spread=spread)
+    bfi_agg = _agg_sweep(df, BIG_FIVE, interval=interval)
+    has_sym_ci = f"{BIG_FIVE[0]}_ci" in bfi_agg.columns
+    has_asym_ci = f"{BIG_FIVE[0]}_ci_low" in bfi_agg.columns
 
     # Compute per-trait baseline (scale=0) mean for delta calculation.
     baseline_row = bfi_agg[bfi_agg["scale"].abs() < 1e-9]
@@ -602,17 +878,23 @@ def plot_bfi_sweep(
         color = BIG_FIVE_COLORS[trait]
         baseline_val = float(baseline_row[f"{trait}_mean"].iloc[0])
         means = bfi_agg[f"{trait}_mean"].values - baseline_val
-        cis   = bfi_agg[f"{trait}_ci"].values
         if trait in lit:
             ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
                     label=trait, zorder=4)
-            _draw_error_bars(ax, scales, means, cis, color)
+            if has_sym_ci:
+                cis = bfi_agg[f"{trait}_ci"].values
+                _draw_error_bars(ax, scales, means, cis=cis, color=color)
+                all_delta_cis.extend(cis.tolist())
+            elif has_asym_ci:
+                ci_low = bfi_agg[f"{trait}_ci_low"].values - baseline_val
+                ci_high = bfi_agg[f"{trait}_ci_high"].values - baseline_val
+                _draw_error_bars(ax, scales, means, ci_low=ci_low, ci_high=ci_high, color=color)
+                all_delta_cis.extend((means - ci_low).tolist())
+                all_delta_cis.extend((ci_high - means).tolist())
         else:
             ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
                     alpha=0.35, label=trait, zorder=3)
-        # Use all traits for y-axis scaling regardless of highlight
         all_delta_means.extend(means[~np.isnan(means)].tolist())
-        all_delta_cis.extend(cis.tolist())
 
     ax.axhline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.6,
                label="Baseline (s=0)", zorder=1)
@@ -635,9 +917,9 @@ def plot_bfi_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
-    spread_label = "±1 SD" if spread == "std" else "95% CI"
-    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
-                elinewidth=1.0, alpha=0.7, label=spread_label)
+    if interval is not None:
+        ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                    elinewidth=1.0, alpha=0.7, label=interval.label)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
               fontsize=9, ncol=7, framealpha=0.85)
 
@@ -655,7 +937,7 @@ def plot_capability_sweep(
     title_suffix: str = "",
     eval_name: str = "capability",
     random_baseline: float | None = None,
-    spread: Literal["ci95", "std"] = "ci95",
+    interval: IntervalMethod | None = None,
 ) -> Path:
     """Capability coherence plot: accuracy vs. LoRA scale with baseline reference.
 
@@ -668,17 +950,27 @@ def plot_capability_sweep(
         eval_name: Eval name used for the figure title and output filename.
         random_baseline: If set, draws a horizontal dashed red line at this accuracy
             level (e.g. 0.25 for 4-choice MCQ random chance).
-        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
+        interval: Error bar method. None to omit error bars.
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
-    cap_agg = _agg_sweep(df, ["accuracy"], spread=spread)
+    cap_agg = _agg_sweep(df, ["accuracy"], interval=interval)
     scales = cap_agg["scale"].values
     means  = cap_agg["accuracy_mean"].values
-    cis    = cap_agg["accuracy_ci"].values
+
+    # Compute y-axis bounds from whichever CI columns are present
+    if "accuracy_ci" in cap_agg.columns:
+        ci_extent_low = means - cap_agg["accuracy_ci"].values
+        ci_extent_high = means + cap_agg["accuracy_ci"].values
+    elif "accuracy_ci_low" in cap_agg.columns:
+        ci_extent_low = cap_agg["accuracy_ci_low"].values
+        ci_extent_high = cap_agg["accuracy_ci_high"].values
+    else:
+        ci_extent_low = means
+        ci_extent_high = means
 
     baseline_idx = int(np.argmin(np.abs(scales)))
     baseline_acc = float(means[baseline_idx])
@@ -695,18 +987,18 @@ def plot_capability_sweep(
     color = "#5C6BC0"
     ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
             label="accuracy", zorder=4)
-    _draw_error_bars(ax, scales, means, cis, color)
+    _draw_col_error_bars(ax, cap_agg, "accuracy", scales, means, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Accuracy", fontsize=11)
     _set_scale_xticks(ax, scales)
 
-    y_min_candidates = [float(np.nanmin(means - cis))]
+    y_min_candidates = [float(np.nanmin(ci_extent_low))]
     if random_baseline is not None:
         y_min_candidates.append(random_baseline)
     y_min = min(y_min_candidates) - 0.02
-    y_max = max(float(np.nanmax(means + cis)), baseline_acc) + 0.04
+    y_max = max(float(np.nanmax(ci_extent_high)), baseline_acc) + 0.04
     ax.set_ylim(y_min, y_max)
 
     ax.grid(True, alpha=0.25)
@@ -716,9 +1008,9 @@ def plot_capability_sweep(
         title += f"  [{title_suffix}]"
     ax.set_title(title, fontsize=13, fontweight="bold")
 
-    spread_label = "±1 SD" if spread == "std" else "95% CI"
-    ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
-                elinewidth=1.0, alpha=0.7, label=spread_label)
+    if interval is not None:
+        ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
+                    elinewidth=1.0, alpha=0.7, label=interval.label)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15),
               fontsize=9, ncol=4, framealpha=0.85)
 
@@ -735,7 +1027,7 @@ def plot_generic_sweep(
     eval_name: str,
     output_dir: Path,
     title_suffix: str = "",
-    spread: Literal["ci95", "std"] = "ci95",
+    interval: IntervalMethod | None = None,
 ) -> Path:
     """Generic sweep line plot for any eval not covered by a specialised plotter.
 
@@ -746,7 +1038,7 @@ def plot_generic_sweep(
         eval_name: Used for the figure title and filename.
         output_dir: Directory to save the figure.
         title_suffix: Optional suffix appended to the figure title.
-        spread: Error bar style — "ci95" for 95% CI (default) or "std" for ±1 SD.
+        interval: Error bar method. None to omit error bars.
 
     Returns:
         Path to the saved figure.
@@ -755,7 +1047,7 @@ def plot_generic_sweep(
     import matplotlib.cm as cm
 
     cols = _metric_cols(df)
-    agg  = _agg_sweep(df, cols, spread=spread)
+    agg  = _agg_sweep(df, cols, interval=interval)
     scales = agg["scale"].values
 
     colors = cm.tab10.colors  # type: ignore[attr-defined]
@@ -764,9 +1056,8 @@ def plot_generic_sweep(
     for i, col in enumerate(cols):
         color = colors[i % len(colors)]
         means = agg[f"{col}_mean"].values
-        cis   = agg[f"{col}_ci"].values
         ax.plot(scales, means, "o-", color=color, linewidth=2.0, markersize=5, label=col, zorder=4)
-        _draw_error_bars(ax, scales, means, cis, color)
+        _draw_col_error_bars(ax, agg, col, scales, means, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
     ax.set_xlabel("LoRA scaling factor", fontsize=11)
@@ -901,7 +1192,7 @@ def generate_plots(
     random_baseline: float | None = None,
     highlight: list[str] | None = None,
     show_parse_rate: bool = False,
-    spread: Literal["ci95", "std"] = "ci95",
+    interval: IntervalMethod | str | None = None,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -919,12 +1210,14 @@ def generate_plots(
             Defaults to all Big Five.
         show_parse_rate: If True, generate a companion parse rate plot for each
             eval when at least one scale point has parse rate < 100%.
-        spread: Error bar style — "ci95" for 95% confidence interval (default) or
-            "std" for ±1 standard deviation.
+        interval: Error bar method. Accepts an IntervalMethod, a string parseable
+            by ``IntervalMethod.from_str()``, or None to omit error bars.
 
     Returns:
         List of paths to saved figures.
     """
+    if isinstance(interval, str):
+        interval = IntervalMethod.from_str(interval)
     output_dir.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
 
@@ -948,15 +1241,15 @@ def generate_plots(
         if entry == "capability":
             path = plot_capability_sweep(df, output_dir, title_suffix,
                                          eval_name=eval_name, random_baseline=random_baseline,
-                                         spread=spread)
+                                         interval=interval)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
-                                    spread=spread)
+                                    interval=interval)
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
-                                  spread=spread)
+                                  interval=interval)
         elif entry == "generic":
-            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix, spread=spread)
+            path = plot_generic_sweep(df, eval_name, output_dir, title_suffix, interval=interval)
         elif callable(entry):
             path = entry(df, output_dir, title_suffix)
         else:
@@ -999,9 +1292,13 @@ def main() -> None:
     parser.add_argument("--show-parse-rate", action="store_true",
                         help="Generate a companion parse rate plot for each eval "
                              "(only produced when parse rate drops below 100%% at any scale).")
-    parser.add_argument("--spread", choices=["ci95", "std"], default="ci95",
-                        help="Error bar style: 'ci95' for 95%% CI (default) or 'std' for ±1 SD.")
+    parser.add_argument("--interval", default=None,
+                        help="Error bar method, e.g. 'ci95', 'ci95_from_ppf', 'std', "
+                             "'ci95_from_wilson', 'ci95_from_bootstrap_1000'. "
+                             "Omit for no error bars.")
     args = parser.parse_args()
+
+    interval = IntervalMethod.from_str(args.interval) if args.interval else None
 
     if args.mock:
         data = _mock_sweep_data()
@@ -1019,7 +1316,7 @@ def main() -> None:
         df = data.get(eval_name)
         assert df is not None
         cols = _metric_cols(df)
-        agg = _agg_sweep(df, cols)
+        agg = _agg_sweep(df, cols, interval=interval)
         print_sweep_table(agg, cols, f"{eval_name.upper()} SWEEP: scores vs. LoRA scale")
 
     if args.visualize:
@@ -1027,7 +1324,7 @@ def main() -> None:
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
                                random_baseline=args.random_baseline, highlight=args.highlight,
-                               show_parse_rate=args.show_parse_rate, spread=args.spread)
+                               show_parse_rate=args.show_parse_rate, interval=interval)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:
