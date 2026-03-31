@@ -293,9 +293,9 @@ def _raise_missing_oct_package_error(exc: ModuleNotFoundError) -> None:
     raise RuntimeError(
         "OpenCharacterTraining is not installed in this environment. "
         "Run the pipeline through uv with the OCT requirements layered in, for example:\n"
-        "  uv run --isolated --with-requirements "
-        "scripts/experiments/oct_pipeline/uv-oct-requirements.txt "
-        "python scripts/experiments/oct_pipeline/run_oct_pipeline.py ..."
+        "  uv run --with-requirements "
+        "scripts_dev/oct_pipeline/uv-oct-requirements.txt "
+        "python scripts_dev/oct_pipeline/run_oct_pipeline.py ..."
     ) from exc
 
 
