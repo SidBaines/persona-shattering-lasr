@@ -98,7 +98,7 @@ TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
-ARCHETYPE_SET_VERSION = "v3"
+ARCHETYPE_SET_VERSION = "v6"
 ROLLOUT_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
@@ -558,6 +558,9 @@ def run_stage_rollouts() -> Path:
         num_assistant_turns=NUM_CONVERSATION_TURNS,
         num_rollouts_per_prompt=NUM_ROLLOUTS_PER_PROMPT,
         system_prompt=None,  # No system prompt — let the persona emerge naturally
+        # Keep the dataset seed as the visible opener. Generating the opening
+        # from the archetype prompt made the user-sim tone dominate from turn 1.
+        user_sim_generates_opening=False,
         prompt_template_per_sample=prompt_template_per_sample,
         assistant_inference=InferenceConfig(
             model=ASSISTANT_MODEL,

@@ -299,6 +299,113 @@ async def _run_conversation_async(
     pipeline assembles the final samples.
     """
     start_turn = _assistant_turn_count_dicts(messages)
+    user_config = user_config  # noqa: used below in opening generation
+
+    # ── Optional: user sim generates the opening message ─────────────────────
+    # When user_sim_generates_opening=True and we're at the very start of a
+    # conversation (only the seed question exists), call the user sim to
+    # rephrase the seed into a natural opening in its archetype voice.  The
+    # seed question is still available to the user sim via the {SEED}
+    # placeholder in its system prompt.
+    if (
+        config.user_sim_generates_opening
+        and start_turn == 0
+        and len(messages) == 1
+        and messages[0].get("role") == "user"
+    ):
+        opening_key = _phase_key(sample_id, "user_opening", 0)
+        opening_base_attempt = attempts_by_phase.get(opening_key, 0)
+        if opening_base_attempt == 0:
+            # Resolve per-sample template
+            if config.prompt_template_per_sample:
+                if sample_id not in config.prompt_template_per_sample:
+                    raise KeyError(
+                        f"sample_id {sample_id!r} not found in prompt_template_per_sample."
+                    )
+                opening_template = config.prompt_template_per_sample[sample_id]
+            else:
+                opening_template = config.user_simulator.prompt_template
+
+            # Build a prompt with NO conversation history — just the system
+            # instruction (which contains the seed topic and voice instructions).
+            opening_prompt = _build_user_prompt_from_messages(
+                [],  # empty history — user sim opens cold
+                prompt_template=opening_template,
+                prompt_format=config.user_simulator.prompt_format,
+                flip_roles=config.user_simulator.flip_roles_in_prompt,
+                initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
+            )
+
+            opening_success = False
+            max_opening_attempts = config.failure_policy.user_max_attempts_per_turn
+            for attempt in range(1, max_opening_attempts + 1):
+                opening_text = ""
+                opening_error: str | None = None
+                try:
+                    (
+                        responses,
+                        usages,
+                        _,
+                    ) = await user_provider.generate_batch_with_details_async(
+                        [opening_prompt], num_responses=1
+                    )
+                    opening_text = responses[0] if responses else ""
+                except Exception as exc:  # noqa: BLE001
+                    opening_error = str(exc)
+
+                attempts_by_phase[opening_key] = attempt
+                _record_rollout_event(
+                    run_dir,
+                    event_type="user_attempt",
+                    sample_id=sample_id,
+                    payload={
+                        "phase": "user_opening",
+                        "turn_index": 0,
+                        "attempt_no": attempt,
+                        "status": "success" if opening_text.strip() else "failed",
+                        "error": opening_error or ("empty_response" if not opening_text.strip() else None),
+                        "provider": config.user_simulator.provider,
+                        "model": config.user_simulator.model,
+                    },
+                )
+
+                if opening_text.strip() and opening_error is None:
+                    # Replace the seed question with the user sim's opening.
+                    # Keep source_stage="seed" so _sort_messages places this
+                    # before the first assistant turn (within_turn=0).
+                    original_message_id = messages[0].get("message_id")
+                    messages[0] = {
+                        "role": "user",
+                        "content": opening_text.strip(),
+                        "message_id": original_message_id,
+                        "message_metadata": {
+                            "turn_index": 0,
+                            "source_stage": "seed",
+                            "generated_by": "user_simulator_opening",
+                            "provider": config.user_simulator.provider,
+                            "model": config.user_simulator.model,
+                            "user_prompt_template": opening_template,
+                        },
+                    }
+                    # Persist the replacement — same message_id as the
+                    # original seed message triggers upsert (replace) in
+                    # materialize_canonical_samples.
+                    write_message_append(
+                        run_dir,
+                        sample_id,
+                        messages[0],
+                        materialize=False,
+                    )
+                    opening_success = True
+                    break
+
+            if not opening_success:
+                logger.warning(
+                    "User sim opening failed for sample=%s after %d attempts; "
+                    "falling back to raw seed question.",
+                    sample_id,
+                    max_opening_attempts,
+                )
 
     for turn_index in range(start_turn, config.num_assistant_turns):
         # ── Assistant turn ────────────────────────────────────────────────────
