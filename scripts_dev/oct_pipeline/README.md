@@ -149,6 +149,37 @@ By default the wrapper does not redo completed stages. For each stage it now:
 2. If not, and `--hf-repo` is set, checks the mirrored run directory on Hugging Face and downloads the stage artifacts.
 3. Only if neither local nor HF artifacts exist does it rerun the stage.
 
+## Distillation Data Quality Check (Optional)
+
+After distillation, you can optionally score the teacher and student responses with an OCEAN LLM judge to validate data quality before training. This checks that the teacher (chosen) responses actually exhibit the target trait and that there's a clear gap from the student (rejected) responses — the gap is the DPO training signal.
+
+```bash
+uv run python scripts_dev/oct_pipeline/judge_distillation.py \
+    --config scripts_dev/oct_pipeline/ocean/judge_configs/agreeableness_low.py
+```
+
+Quick check on a subset:
+
+```bash
+uv run python scripts_dev/oct_pipeline/judge_distillation.py \
+    --config scripts_dev/oct_pipeline/ocean/judge_configs/agreeableness_low.py \
+    --max-samples 20
+```
+
+Override the judge model:
+
+```bash
+uv run python scripts_dev/oct_pipeline/judge_distillation.py \
+    --config scripts_dev/oct_pipeline/ocean/judge_configs/agreeableness_low.py \
+    --judge-model gpt-4o --judge-provider openai
+```
+
+To add a config for a different trait, create a new file in `ocean/judge_configs/` pointing to the distillation data and specifying the judge (e.g. `JUDGE_NAME = "conscientiousness_v2"`). See `agreeableness_low.py` for the template.
+
+Outputs go to `scratch/judge_runs/<config_name>/`:
+- `scored_responses.jsonl` — per-response scores and reasoning
+- `summary.json` — aggregate stats (mean, std, score distribution)
+
 ## Conscientiousness Evaluation
 
 The repo also includes a standalone evaluation script for OCT low-conscientiousness
