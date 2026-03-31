@@ -86,8 +86,8 @@ USER_MAX_NEW_TOKENS = 4096
 USER_PROMPT_VERSION = "v3"
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire_v2.json"
-QUESTIONNAIRE_VERSION = "v2"  # bump when changing items
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire_v4.json"
+QUESTIONNAIRE_VERSION = "v4"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -107,8 +107,8 @@ MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
 FA_BLOCKS = ["fc", "likert"]
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
-# LABELLER_MODEL = "anthropic/claude-opus-4.6"
-LABELLER_MODEL = "z-ai/glm-4.5-air"
+LABELLER_MODEL = "anthropic/claude-opus-4.6"
+# LABELLER_MODEL = "z-ai/glm-4.5-air"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
 
@@ -293,28 +293,36 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
     with open(QUESTIONNAIRE_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    def _normalize_likert_item(raw_item: dict) -> dict:
+        """Normalize Likert item field aliases across questionnaire versions."""
+        return {
+            "id": str(raw_item["id"]),
+            "type": "likert",
+            "block": 3,
+            "text": raw_item["text"],
+            "primary_dimension": raw_item.get(
+                "primary_dimension",
+                raw_item.get("dim", raw_item.get("category", "")),
+            ),
+            "reverse_keyed": raw_item.get("reverse_keyed", raw_item.get("rev", False)),
+        }
+
     # ── Legacy flat Likert format (v1/v2) ─────────────────────────────────
     if "items" in data:
         items: list[dict] = []
         column_defs: list[dict] = []
         for raw_item in data["items"]:
-            item_id = str(raw_item["id"])
-            items.append({
-                "id": item_id,
-                "type": "likert",
-                "block": 3,
-                "text": raw_item["text"],
-                "primary_dimension": raw_item.get("category", ""),
-                "reverse_keyed": raw_item.get("reverse_keyed", False),
-            })
+            item = _normalize_likert_item(raw_item)
+            item_id = item["id"]
+            items.append(item)
             column_defs.append({
                 "col_id": item_id,
                 "item_id": item_id,
                 "block": "likert",
-                "dimension": raw_item.get("category", ""),
-                "text": raw_item["text"],
+                "dimension": item["primary_dimension"],
+                "text": item["text"],
                 "encoding": "1-5",
-                "reverse_keyed": raw_item.get("reverse_keyed", False),
+                "reverse_keyed": item["reverse_keyed"],
             })
         return items, column_defs
 
@@ -357,6 +365,11 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
         if "vignette" in FA_BLOCKS:
             dims_in_vig: set[str] = set()
             for opt in vig["options"]:
+                if "scoring" not in opt:
+                    raise ValueError(
+                        f'Vignette option {vig["id"]}/{opt.get("label", "?")} is missing '
+                        '"scoring", but "vignette" is enabled in FA_BLOCKS.'
+                    )
                 for dim, score in opt["scoring"].items():
                     if score != 0:
                         dims_in_vig.add(dim)
@@ -371,15 +384,9 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
                 })
 
     # ── Block 3: Likert ───────────────────────────────────────────────────
-    for item in data["block_3_likert"]["items"]:
-        items.append({
-            "id": item["id"],
-            "type": "likert",
-            "block": 3,
-            "text": item["text"],
-            "primary_dimension": item["primary_dimension"],
-            "reverse_keyed": item.get("reverse_keyed", False),
-        })
+    for raw_item in data["block_3_likert"]["items"]:
+        item = _normalize_likert_item(raw_item)
+        items.append(item)
         if "likert" in FA_BLOCKS:
             column_defs.append({
                 "col_id": item["id"],
@@ -726,7 +733,7 @@ async def _apply_questionnaire_async(
     for item in items:
         if item["type"] == "vignette":
             vig_scoring[item["id"]] = {
-                opt["label"]: opt["scoring"]
+                opt["label"]: opt.get("scoring", {})
                 for opt in item["options"]
             }
 
@@ -1594,7 +1601,7 @@ def _describe_column_for_labeller(
                 f"Options (with {dim} scores):",
             ]
             for opt in item["options"]:
-                dim_score = opt["scoring"].get(dim, 0)
+                dim_score = opt.get("scoring", {}).get(dim, 0)
                 lines.append(f'  {opt["label"]} ({dim}={dim_score:+d}): "{opt["text"]}"')
             lines.append(
                 f"  → {sign} loading means high-factor personas choose options "
