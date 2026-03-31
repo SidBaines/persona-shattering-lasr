@@ -87,10 +87,11 @@ NUM_ROLLOUTS_PER_PROMPT = 7
 NUM_CONVERSATION_TURNS = 10
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
+# ASSISTANT_PROVIDER = "vllm"
 ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {
-    "only": ["deepinfra"],
+    # "only": ["deepinfra"],
     "quantizations": ["bf16"],
-    "allow_fallbacks": False,
+    # "allow_fallbacks": False,
 }
 USER_MODEL = "z-ai/glm-4.5-air"
 USER_PROVIDER = "openrouter"
@@ -99,7 +100,11 @@ ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
 ARCHETYPE_SET_VERSION = "v7"
-ROLLOUT_MAX_CONCURRENT = 16
+# Local/vLLM-only assistant batch size. Remote assistant providers use
+# `ROLLOUT_MAX_CONCURRENT` via the rollout scheduler's shared async limiter.
+ROLLOUT_ASSISTANT_BATCH_SIZE = 32
+ROLLOUT_MAX_CONCURRENT = 32
+USER_SIM_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v2.json"
@@ -576,6 +581,7 @@ def run_stage_rollouts() -> Path:
                 temperature=TEMPERATURE,
                 top_p=0.95,
                 do_sample=True,
+                batch_size=ROLLOUT_ASSISTANT_BATCH_SIZE,
             ),
             max_concurrent=ROLLOUT_MAX_CONCURRENT,
             timeout=QUESTIONNAIRE_TIMEOUT,
@@ -594,7 +600,7 @@ def run_stage_rollouts() -> Path:
                 temperature=0.7,
                 do_sample=True,
             ),
-            max_concurrent=16,
+            max_concurrent=USER_SIM_MAX_CONCURRENT,
             timeout=QUESTIONNAIRE_TIMEOUT,
             retry=RetryConfig(max_retries=3, backoff_factor=2.0),
             openrouter=OpenRouterProviderConfig(),
