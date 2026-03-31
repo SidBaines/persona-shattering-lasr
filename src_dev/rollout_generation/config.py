@@ -80,6 +80,7 @@ class RolloutGenerationConfig(BaseModel):
     failure_policy: FailurePolicyConfig = Field(default_factory=FailurePolicyConfig)
 
     skip_final_user_turn: bool = True
+    user_sim_generates_opening: bool = False
     resume: bool = True
     overwrite_output: bool = False
 
