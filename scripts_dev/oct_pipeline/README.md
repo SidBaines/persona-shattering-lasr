@@ -93,23 +93,23 @@ python scripts_dev/oct_pipeline/run_oct_pipeline.py \
 Low-conscientiousness example:
 
 ```bash
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+python scripts_dev/oct_pipeline/run_oct_pipeline.py \
     --model llama-3.1-8b-it \
     --model-path /root/.cache/models \
     --teacher-model openai/gpt-5-nano \
     --constitution conscientiousness_low \
-    --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json
+    --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low.json
 ```
 
 Low-conscientiousness with OpenRouter-backed question expansion:
 
 ```bash
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+python scripts_dev/oct_pipeline/run_oct_pipeline.py \
     --model llama-3.1-8b-it \
     --model-path /root/.cache/models \
     --teacher-model openai/gpt-5-nano \
     --constitution conscientiousness_low \
-    --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json \
+    --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low.json \
     --expand-questions \
     --expand-model openai/gpt-5-nano
 ```
@@ -154,7 +154,7 @@ By default the wrapper does not redo completed stages. For each stage it now:
 The repo also includes a standalone evaluation script for OCT low-conscientiousness
 runs:
 
-`scripts/experiments/oct_pipeline/eval_oct_conscientiousness_hf.py`
+`scripts_dev/oct_pipeline/eval_oct_conscientiousness_hf.py`
 
 It is designed for the Hugging Face dataset repos produced by the OCT wrapper.
 The script:
@@ -172,7 +172,7 @@ The script:
 Example:
 
 ```bash
-./.venv/bin/python scripts/experiments/oct_pipeline/eval_oct_conscientiousness_hf.py \
+./.venv/bin/python scripts_dev/oct_pipeline/eval_oct_conscientiousness_hf.py \
     --source-hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness-full-v2-openrouter-expand \
     --results-hf-repo persona-shattering-lasr/oct-runs-low-conscientiousness-full-v2-openrouter-expand
 ```
@@ -214,17 +214,17 @@ main project environment:
 ```bash
 uv venv .venv-oct
 source .venv-oct/bin/activate
-uv pip install -r scripts/experiments/oct_pipeline/uv-oct-requirements.txt
+uv pip install -r scripts_dev/oct_pipeline/uv-oct-requirements.txt
 uv pip install -e .
 
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...
+python scripts_dev/oct_pipeline/run_oct_pipeline.py ...
 ```
 
 If you already created `.venv-oct`, later runs only need:
 
 ```bash
 source .venv-oct/bin/activate
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py ...
+python scripts_dev/oct_pipeline/run_oct_pipeline.py ...
 ```
 
 If you want to reproduce the upstream scripts manually, the equivalent next step
@@ -244,12 +244,12 @@ python -c "from dotenv import load_dotenv; load_dotenv(); from huggingface_hub i
 
 ```bash
 source .venv-oct/bin/activate
-python scripts/experiments/oct_pipeline/run_oct_pipeline.py \
+python scripts_dev/oct_pipeline/run_oct_pipeline.py \
     --model llama-3.1-8b-it \
     --model-path /root/.cache/models \
     --teacher-model openai/gpt-5-nano \
     --constitution conscientiousness_low \
-    --custom-constitution scripts/experiments/oct_pipeline/conscientiousness_low.json \
+    --custom-constitution scripts_dev/oct_pipeline/conscientiousness_low.json \
     --expand-questions \
     --expand-model openai/gpt-5-nano \
     --training-backend oct \
