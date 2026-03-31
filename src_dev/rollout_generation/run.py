@@ -689,18 +689,29 @@ async def _run_rollout_pipeline_async(
         and _assistant_turn_count_sample(sample) < config.num_assistant_turns
     ]
 
+    # Seed progress from turns already completed in resumed samples.
+    existing_assistant_turns = sum(
+        _assistant_turn_count_sample(s) for s in pending
+    )
+    existing_user_turns = sum(
+        sum(1 for m in s.messages if m.role == "user") for s in pending
+    )
     total_assistant_turns = len(pending) * config.num_assistant_turns
     progress = _ProgressTracker(
         total_conversations=len(pending),
         total_assistant_turns=total_assistant_turns,
+        assistant_turns_completed=existing_assistant_turns,
+        user_turns_completed=existing_user_turns,
     )
     stop_event = asyncio.Event()
 
     logger.info(
-        "Async pipeline: %d conversations, %d assistant turns total (%d already done)",
+        "Async pipeline: %d conversations, %d assistant turns total "
+        "(%d conversations already done, %d assistant turns resumed)",
         len(pending),
         total_assistant_turns,
         len(samples) - len(pending),
+        existing_assistant_turns,
     )
 
     conversation_tasks = [
