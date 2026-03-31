@@ -98,7 +98,7 @@ TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
-ARCHETYPE_SET_VERSION = "v2"
+ARCHETYPE_SET_VERSION = "v3"
 ROLLOUT_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
