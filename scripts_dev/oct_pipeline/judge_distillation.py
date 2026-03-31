@@ -184,12 +184,12 @@ async def score_distillation_data(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Score OCT distillation data with an OCEAN LLM judge.",
+        description="Score OCT distillation data with an OCEAN LLM judge panel.",
     )
     parser.add_argument("--config", required=True, help="Path to a Python config file")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit to N samples")
-    parser.add_argument("--judge-provider", default=None, help="Override judge provider")
-    parser.add_argument("--judge-model", default=None, help="Override judge model")
+    parser.add_argument("--judge-provider", default=None, help="Override judge provider (single-judge mode)")
+    parser.add_argument("--judge-model", default=None, help="Override judge model (single-judge mode)")
     args = parser.parse_args()
 
     config = _load_config_module(args.config)
@@ -201,30 +201,46 @@ def main() -> None:
 
     # Optional config attributes
     student_column = getattr(config, "STUDENT_COLUMN", "llama-3.1-8b-it")
-    judge_config = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
 
-    # CLI overrides
-    if args.judge_provider:
-        judge_config = judge_config.model_copy(update={"provider": args.judge_provider})
-    if args.judge_model:
-        judge_config = judge_config.model_copy(update={"model": args.judge_model})
-
-    # Instantiate judge
+    # Instantiate judge class
     judge_cls = JUDGE_REGISTRY.get(judge_name)
     if judge_cls is None:
         raise ValueError(f"Unknown judge: {judge_name}. Available: {list(JUDGE_REGISTRY.keys())}")
 
-    judge = judge_cls(judge_config=judge_config)
+    # Determine judge configs: panel (JUDGE_CONFIGS dict) or single (JUDGE_CONFIG)
+    judge_configs: dict[str, JudgeLLMConfig] = {}
 
-    asyncio.run(
-        score_distillation_data(
-            data_path=data_path,
-            judge=judge,
-            output_dir=output_dir,
-            max_samples=args.max_samples,
-            student_column=student_column,
+    if args.judge_provider or args.judge_model:
+        # CLI override → single judge mode
+        cfg = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
+        if args.judge_provider:
+            cfg = cfg.model_copy(update={"provider": args.judge_provider})
+        if args.judge_model:
+            cfg = cfg.model_copy(update={"model": args.judge_model})
+        judge_configs["cli_override"] = cfg
+    elif hasattr(config, "JUDGE_CONFIGS"):
+        judge_configs = config.JUDGE_CONFIGS
+    else:
+        judge_configs["default"] = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
+
+    # Run each judge
+    for rater_id, judge_config in judge_configs.items():
+        print(f"\n{'='*60}")
+        print(f"  Judge: {rater_id} ({judge_config.provider}/{judge_config.model})")
+        print(f"{'='*60}")
+
+        judge = judge_cls(judge_config=judge_config)
+        rater_output_dir = Path(output_dir) / rater_id
+
+        asyncio.run(
+            score_distillation_data(
+                data_path=data_path,
+                judge=judge,
+                output_dir=rater_output_dir,
+                max_samples=args.max_samples,
+                student_column=student_column,
+            )
         )
-    )
 
 
 if __name__ == "__main__":
