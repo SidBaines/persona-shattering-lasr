@@ -687,10 +687,11 @@ async def run_rollout_generation_async(
             run_dir, "rollout_generation", config.model_dump(mode="json")
         )
     register_system_prompt(run_dir, config.system_prompt)
-    user_sim_text = get_user_simulator_instruction(
-        config.user_simulator.prompt_template
-    )
-    register_system_prompt(run_dir, user_sim_text)
+    if not config.prompt_template_per_sample:
+        user_sim_text = get_user_simulator_instruction(
+            config.user_simulator.prompt_template
+        )
+        register_system_prompt(run_dir, user_sim_text)
 
     paths = get_run_paths(run_dir)
     if not (config.resume and paths["sample_inputs"].exists()):
