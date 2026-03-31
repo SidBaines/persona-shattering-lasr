@@ -82,19 +82,23 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/assistant-axis-extraction-questions-all.jsonl"
-MAX_PROMPTS = 1000
-NUM_ROLLOUTS_PER_PROMPT = 2
-NUM_CONVERSATION_TURNS = 10
+MAX_PROMPTS = 1
+NUM_ROLLOUTS_PER_PROMPT = 10
+NUM_CONVERSATION_TURNS = 3
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
-ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {"order": ["DeepInfra/bf16"], "allow_fallbacks": False}
+ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {
+    "only": ["deepinfra"],
+    "quantizations": ["bf16"],
+    "allow_fallbacks": False,
+}
 USER_MODEL = "z-ai/glm-4.5-air"
 USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
-ARCHETYPE_SET_VERSION = "v1"
+ARCHETYPE_SET_VERSION = "v2"
 ROLLOUT_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
@@ -131,10 +135,10 @@ HOLDOUT_N_ITEMS = 20
 # ── Pipeline control ────────────────────────────────────────────────────────
 STAGES_TO_RUN = [
     "rollouts",
-    "questionnaire",
-    "factor_analysis",
-    "labeling",
-    "validation",
+    # "questionnaire",
+    # "factor_analysis",
+    # "labeling",
+    # "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
