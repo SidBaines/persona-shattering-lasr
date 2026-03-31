@@ -34,7 +34,8 @@ from src_dev.datasets.loaders import load_dataset_from_config
 from src_dev.datasets.schema import StageEventRecord
 from src_dev.inference import InferenceConfig
 from src_dev.inference.providers import get_provider
-from src_dev.inference.providers.base import InferenceProvider, TokenUsage
+from src_dev.inference.providers.base import InferenceProvider, PromptInput, TokenUsage
+from src_dev.inference.providers.remote_base import AsyncInferenceProvider
 from src_dev.utils import setup_logging
 
 from .config import (
@@ -274,6 +275,51 @@ async def _progress_reporter_async(
     _log_progress(logger, tracker)  # final snapshot
 
 
+class _SinglePromptExecutor:
+    """Semaphore-limited single-prompt executor for rollout turns.
+
+    This keeps the event loop responsive while enforcing a shared global
+    concurrency limit across many per-conversation coroutines. It is used for
+    per-turn generation paths where batching is not beneficial or not available.
+    In particular, remote providers' built-in async batching helpers create a
+    new semaphore per batch call and therefore do not limit concurrency across
+    many separate one-prompt invocations.
+    """
+
+    def __init__(self, provider: InferenceProvider, *, max_concurrent: int) -> None:
+        self._provider = provider
+        self._semaphore = asyncio.Semaphore(max(1, max_concurrent))
+
+    async def generate(
+        self, prompt: PromptInput
+    ) -> tuple[str, TokenUsage | None, str | None]:
+        """Generate one response under a shared concurrency limit."""
+        async with self._semaphore:
+            try:
+                responses, usages, _ = await self._provider.generate_batch_with_details_async(
+                    [prompt], num_responses=1
+                )
+            except Exception as exc:  # noqa: BLE001
+                return "", None, str(exc)
+
+        text = responses[0] if responses else ""
+        usage = usages[0] if usages else None
+        return text, usage, None
+
+
+class _GpuExecutorAdapter:
+    """Adapter that exposes :class:`GpuBatchExecutor` via the same interface."""
+
+    def __init__(self, executor: GpuBatchExecutor) -> None:
+        self._executor = executor
+
+    async def generate(
+        self, prompt: PromptInput
+    ) -> tuple[str, TokenUsage | None, str | None]:
+        text, error = await self._executor.generate(prompt)
+        return text, None, error
+
+
 # ── Per-conversation async coroutine ───────────────────────────────────────────
 
 
@@ -281,8 +327,8 @@ async def _run_conversation_async(
     sample_id: str,
     messages: list[dict[str, Any]],
     config: RolloutGenerationConfig,
-    gpu_executor: GpuBatchExecutor,
-    user_provider: InferenceProvider,
+    assistant_runner: _SinglePromptExecutor | _GpuExecutorAdapter,
+    user_runner: _SinglePromptExecutor,
     user_config: InferenceConfig,
     run_dir: Path,
     attempts_by_phase: dict[PhaseKey, int],
@@ -299,7 +345,6 @@ async def _run_conversation_async(
     pipeline assembles the final samples.
     """
     start_turn = _assistant_turn_count_dicts(messages)
-    user_config = user_config  # noqa: used below in opening generation
 
     # ── Optional: user sim generates the opening message ─────────────────────
     # When user_sim_generates_opening=True and we're at the very start of a
@@ -340,18 +385,11 @@ async def _run_conversation_async(
             max_opening_attempts = config.failure_policy.user_max_attempts_per_turn
             for attempt in range(1, max_opening_attempts + 1):
                 opening_text = ""
+                opening_usage: TokenUsage | None = None
                 opening_error: str | None = None
-                try:
-                    (
-                        responses,
-                        usages,
-                        _,
-                    ) = await user_provider.generate_batch_with_details_async(
-                        [opening_prompt], num_responses=1
-                    )
-                    opening_text = responses[0] if responses else ""
-                except Exception as exc:  # noqa: BLE001
-                    opening_error = str(exc)
+                opening_text, opening_usage, opening_error = await user_runner.generate(
+                    opening_prompt
+                )
 
                 attempts_by_phase[opening_key] = attempt
                 _record_rollout_event(
@@ -366,6 +404,7 @@ async def _run_conversation_async(
                         "error": opening_error or ("empty_response" if not opening_text.strip() else None),
                         "provider": config.user_simulator.provider,
                         "model": config.user_simulator.model,
+                        "token_usage": opening_usage or {},
                     },
                 )
 
@@ -384,6 +423,7 @@ async def _run_conversation_async(
                             "generated_by": "user_simulator_opening",
                             "provider": config.user_simulator.provider,
                             "model": config.user_simulator.model,
+                            "token_usage": opening_usage or {},
                             "user_prompt_template": opening_template,
                         },
                     }
@@ -417,9 +457,12 @@ async def _run_conversation_async(
 
         assistant_success = False
         for phase_attempt in range(base_attempt + 1, base_attempt + assistant_max + 1):
-            response_text, gen_error = await gpu_executor.generate(prompt)
+            response_text, assistant_usage, gen_error = await assistant_runner.generate(
+                prompt
+            )
             success = bool(response_text.strip()) and gen_error is None
             error = None if success else (gen_error or "empty_response")
+            token_usage = assistant_usage or {}
 
             attempts_by_phase[assistant_key] = phase_attempt
             _record_rollout_event(
@@ -434,7 +477,7 @@ async def _run_conversation_async(
                     "error": error,
                     "provider": assistant_provider_name,
                     "model": assistant_model,
-                    "token_usage": {},
+                    "token_usage": token_usage,
                 },
             )
 
@@ -444,7 +487,7 @@ async def _run_conversation_async(
                 "model": assistant_model,
                 "provider": assistant_provider_name,
                 "attempt_no": phase_attempt,
-                "token_usage": {},
+                "token_usage": token_usage,
                 "started_at": now_iso(),
                 "completed_at": now_iso(),
                 "error": error,
@@ -460,7 +503,7 @@ async def _run_conversation_async(
                             "source_stage": "rollout_assistant",
                             "provider": assistant_provider_name,
                             "model": assistant_model,
-                            "token_usage": {},
+                            "token_usage": token_usage,
                             "parent_message_id": parent_message_id,
                             "phase_attempt_no": phase_attempt,
                             "system_prompt_hash": _system_prompt_hash(
@@ -543,15 +586,9 @@ async def _run_conversation_async(
             user_usage: TokenUsage | None = None
             user_error: str | None = None
             try:
-                (
-                    responses,
-                    usages,
-                    _,
-                ) = await user_provider.generate_batch_with_details_async(
-                    [user_prompt], num_responses=1
+                user_response, user_usage, user_error = await user_runner.generate(
+                    user_prompt
                 )
-                user_response = responses[0] if responses else ""
-                user_usage = usages[0] if usages else None
             except Exception as exc:  # noqa: BLE001
                 user_error = str(exc)
 
@@ -655,13 +692,13 @@ async def _run_rollout_pipeline_async(
     logger: logging.Logger,
     gpu_executor: GpuBatchExecutor | None = None,
 ) -> None:
-    """Pipelined async scheduler: GPU batches and user API calls overlap.
+    """Pipelined async scheduler: assistant and user turns overlap.
 
-    Each conversation runs as an independent coroutine. Assistant turns are
-    batched through GpuBatchExecutor (runs in a thread via asyncio.to_thread),
-    releasing the event loop to service concurrent user API calls while the
-    GPU is busy. This eliminates the 40-pass waterfall of the old sequential
-    phase loop.
+    Each conversation runs as an independent coroutine. Assistant turns use a
+    shared GPU batch executor for local/vLLM providers, or a shared
+    semaphore-limited async path for remote providers. User turns likewise run
+    through a shared semaphore-limited executor. In both cases the event loop
+    remains free to service other in-flight work while requests are running.
 
     Args:
         gpu_executor: Optional shared executor. When provided, this function
@@ -670,17 +707,34 @@ async def _run_rollout_pipeline_async(
             be ``None`` when an external executor is supplied.
     """
 
-    owns_executor = gpu_executor is None
-    if owns_executor:
+    executor_task: asyncio.Task[None] | None = None
+    if gpu_executor is not None:
+        executor = gpu_executor
+        assistant_runner = _GpuExecutorAdapter(executor)
+        assistant_mode = "shared_gpu_executor"
+    elif isinstance(assistant_provider, AsyncInferenceProvider):
+        executor = None
+        assistant_runner = _SinglePromptExecutor(
+            assistant_provider,
+            max_concurrent=assistant_config.max_concurrent,
+        )
+        assistant_mode = (
+            f"direct_async(max_concurrent={max(1, assistant_config.max_concurrent)})"
+        )
+    else:
         assert assistant_provider is not None, (
             "assistant_provider is required when gpu_executor is not provided"
         )
         batch_size = max(1, assistant_config.generation.batch_size)
         executor = GpuBatchExecutor(assistant_provider, batch_size=batch_size)
         executor_task = asyncio.create_task(executor.run())
-    else:
-        executor = gpu_executor
-        executor_task = None
+        assistant_runner = _GpuExecutorAdapter(executor)
+        assistant_mode = f"gpu_executor(batch_size={batch_size})"
+
+    user_runner = _SinglePromptExecutor(
+        user_provider,
+        max_concurrent=user_config.max_concurrent,
+    )
 
     pending = [
         sample
@@ -707,11 +761,14 @@ async def _run_rollout_pipeline_async(
 
     logger.info(
         "Async pipeline: %d conversations, %d assistant turns total "
-        "(%d conversations already done, %d assistant turns resumed)",
+        "(%d conversations already done, %d assistant turns resumed) | "
+        "assistant_mode=%s | user_max_concurrent=%d",
         len(pending),
         total_assistant_turns,
         len(samples) - len(pending),
         existing_assistant_turns,
+        assistant_mode,
+        max(1, user_config.max_concurrent),
     )
 
     conversation_tasks = [
@@ -726,8 +783,8 @@ async def _run_rollout_pipeline_async(
                 for m in sample.messages
             ],
             config=config,
-            gpu_executor=executor,
-            user_provider=user_provider,
+            assistant_runner=assistant_runner,
+            user_runner=user_runner,
             user_config=user_config,
             run_dir=run_dir,
             attempts_by_phase=attempts_by_phase,
@@ -749,7 +806,8 @@ async def _run_rollout_pipeline_async(
     finally:
         stop_event.set()
         await reporter_task
-        if owns_executor:
+        if executor_task is not None:
+            assert executor is not None
             executor.stop()
             await executor_task
         providers_to_close = [user_provider]
