@@ -178,6 +178,15 @@ def check_exists_in_dataset_repo(
         return False
 
 
+def dataset_repo_subpath_exists(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+) -> bool:
+    """Compatibility wrapper for checking whether a dataset-repo subpath exists."""
+    return check_exists_in_dataset_repo(repo_id=repo_id, path_in_repo=path_in_repo)
+
+
 def download_from_dataset_repo(
     *,
     repo_id: str,
@@ -221,3 +230,35 @@ def download_from_dataset_repo(
         token=token,
     )
     return local_dir
+
+
+def download_dataset_subpath(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+) -> Path:
+    """Compatibility wrapper for downloading a dataset-repo folder subtree."""
+    return download_from_dataset_repo(
+        repo_id=repo_id,
+        path_in_repo=path_in_repo,
+        local_dir=local_dir,
+        allow_patterns=None,
+    )
+
+
+def download_file_from_dataset_repo(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+) -> Path:
+    """Compatibility wrapper for downloading a single file from a dataset repo."""
+    local_dir = Path(local_dir)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    return download_from_dataset_repo(
+        repo_id=repo_id,
+        path_in_repo=path_in_repo,
+        local_dir=local_dir,
+        allow_patterns=[Path(path_in_repo).name],
+    ) / path_in_repo
