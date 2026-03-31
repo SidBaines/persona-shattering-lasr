@@ -1453,6 +1453,26 @@ def run_distillation_generation(
         torch.cuda.empty_cache()
 
     print(f"\n--- Student pass (model={student_model}) ---")
+    _run_student_distillation_generation(
+        student_model=student_model,
+        constitution=constitution,
+        distillation_path=distillation_path,
+    )
+
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    print(f"  Distillation data: {distillation_path}")
+    return distillation_path
+
+
+def _run_student_distillation_generation(
+    *,
+    student_model: str,
+    constitution: str,
+    distillation_path: Path,
+) -> None:
+    """Fill in the student-response column for an existing distillation JSONL."""
     # Call lower-level functions directly so we can control gpu_memory_utilization.
     # student.main() hardcodes 0.95 which fails when residual GPU memory is held.
     free_gib = torch.cuda.mem_get_info(0)[0] / 1024**3
@@ -1460,10 +1480,12 @@ def run_distillation_generation(
     gpu_util = min(0.90, (free_gib - 2.0) / total_gib)
     if _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE is not None:
         gpu_util = min(gpu_util, _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE)
+    student_model_dir = Path(_resolve_model_path(student_model)).name
     print(f"  GPU free: {free_gib:.1f}/{total_gib:.1f} GiB → using gpu_memory_utilization={gpu_util:.2f}")
+    print(f"  Student local dir:  {student_model_dir}")
     import character.distillation.student as _oct_student_mod
     args, llm, tokenizer = _oct_student_mod.load_vllm(
-        student_model,
+        student_model_dir,
         enable_prefix_caching=False,
         gpu_memory_utilization=gpu_util,
     )
@@ -1472,12 +1494,6 @@ def run_distillation_generation(
     del llm
     gc.collect()
     torch.cuda.empty_cache()
-
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    print(f"  Distillation data: {distillation_path}")
-    return distillation_path
 
 
 # ---------------------------------------------------------------------------
@@ -1526,6 +1542,14 @@ def load_dpo_pairs(
         records = records[:max_pairs]
     print(f"  Loaded {len(records)} DPO pairs (from {len(df)} rows)")
     return records
+
+
+def _distillation_has_student_column(path: Path, student_model: str) -> bool:
+    """Return whether cached distillation data includes the expected student column."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    df = pd.read_json(path, orient="records", lines=True)
+    return student_model in df.columns
 
 
 # ---------------------------------------------------------------------------
@@ -1956,6 +1980,7 @@ def run_introspection_generation(
     print(f"{'='*70}")
 
     import character.constants as _cc
+    model_dir = Path(_resolve_model_path(model)).name
     family = _model_family(model)
     lora_path = Path(f"{_cc.LORA_PATH}/{family}-distillation/{constitution}")
     if not lora_path.exists():
@@ -1966,14 +1991,14 @@ def run_introspection_generation(
 
     # Self-reflection
     print(f"\n--- Self-reflection (N={n_reflection}) ---")
-    oct_reflection.reflection(model=model, constitution=constitution, N=n_reflection)
+    oct_reflection.reflection(model=model_dir, constitution=constitution, N=n_reflection)
     gc.collect()
     torch.cuda.empty_cache()
 
     # Self-interaction (free mode)
     print(f"\n--- Self-interaction (K={interaction_turns}, N={n_interaction}) ---")
     oct_interaction.interaction(
-        model=model, constitution=constitution,
+        model=model_dir, constitution=constitution,
         K=interaction_turns, N=n_interaction, leading=False,
     )
     gc.collect()
@@ -1982,14 +2007,14 @@ def run_introspection_generation(
     # Self-interaction (leading mode)
     print(f"\n--- Self-interaction leading (K={interaction_turns}, N={n_interaction}) ---")
     oct_interaction.interaction(
-        model=model, constitution=constitution,
+        model=model_dir, constitution=constitution,
         K=interaction_turns, N=n_interaction, leading=True,
     )
     gc.collect()
     torch.cuda.empty_cache()
 
     # Merge into SFT data
-    sft_path = _merge_introspection_data(model, constitution)
+    sft_path = _merge_introspection_data(model_dir, constitution)
     print(f"  SFT data: {sft_path}")
     return sft_path
 
@@ -2458,6 +2483,21 @@ def _custom_constitution_digest(path: str | None) -> str | None:
     return _sha256_text(source.read_text())
 
 
+_RUN_IDENTITY_IGNORED_KEYS = {
+    "vllm_gpu_memory_utilization",
+    "torch_memory_fraction",
+}
+
+
+def _semantic_run_config_payload(config_payload: dict) -> dict:
+    """Return the subset of config fields that define run identity/cache keys."""
+    return {
+        key: value
+        for key, value in config_payload.items()
+        if key not in _RUN_IDENTITY_IGNORED_KEYS
+    }
+
+
 def _build_run_identity(
     *,
     model: str,
@@ -2515,7 +2555,7 @@ def _build_run_identity(
         "oct_sft_micro_batch_size": oct_sft_micro_batch_size,
     }
     config_hash = hashlib.sha256(
-        _canonical_json_dumps(config_payload).encode("utf-8")
+        _canonical_json_dumps(_semantic_run_config_payload(config_payload)).encode("utf-8")
     ).hexdigest()
     run_id = f"{constitution}-{model}-s{seed}-{config_hash[:12]}"
     return config_payload, config_hash, run_id
@@ -2553,6 +2593,11 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def _run_configs_match_semantically(existing_payload: dict, current_payload: dict) -> bool:
+    """Return whether two run configs differ only in runtime-only identity-ignored fields."""
+    return _semantic_run_config_payload(existing_payload) == _semantic_run_config_payload(current_payload)
+
+
 def _ensure_run_config(out_path: Path, run_id: str, config_hash: str, config_payload: dict) -> Path:
     """Write and validate run config metadata for this out dir."""
     config_path = _run_config_path(out_path)
@@ -2564,12 +2609,16 @@ def _ensure_run_config(out_path: Path, run_id: str, config_hash: str, config_pay
     if config_path.exists():
         existing = json.loads(config_path.read_text())
         if existing.get("config_hash") != config_hash:
-            raise RuntimeError(
-                f"Run directory {out_path} already contains a different OCT config.\n"
-                f"Existing hash: {existing.get('config_hash')}\n"
-                f"Current hash:  {config_hash}\n"
-                "Use a different --out-dir or omit --out-dir to use the config-derived run dir."
-            )
+            existing_config = existing.get("config", {})
+            if _run_configs_match_semantically(existing_config, config_payload):
+                _write_json(config_path, payload)
+            else:
+                raise RuntimeError(
+                    f"Run directory {out_path} already contains a different OCT config.\n"
+                    f"Existing hash: {existing.get('config_hash')}\n"
+                    f"Current hash:  {config_hash}\n"
+                    "Use a different --out-dir or omit --out-dir to use the config-derived run dir."
+                )
     else:
         _write_json(config_path, payload)
     return config_path
@@ -2851,9 +2900,14 @@ def _stage_is_cached_locally(
     marker_path = _stage_marker_path(out_path, stage_name)
     if marker_path.exists():
         marker = json.loads(marker_path.read_text())
-        if marker.get("config_hash") != config_hash:
-            return False
         if _stage_artifacts_ready(artifacts):
+            if marker.get("config_hash") != config_hash:
+                _write_stage_marker(
+                    out_path=out_path,
+                    stage_name=stage_name,
+                    config_hash=config_hash,
+                    artifacts=artifacts,
+                )
             return True
 
     if _stage_artifacts_ready(artifacts):
@@ -3181,6 +3235,26 @@ def main(
             hf_repo_id=hf_repo_id,
             allow_download=True,
         )
+        if have_distillation and not _distillation_has_student_column(distillation_path, model):
+            print(
+                "  Cached distillation data is missing the student-response column; "
+                "reusing teacher data and completing the student pass."
+            )
+            _run_student_distillation_generation(
+                student_model=model,
+                constitution=constitution,
+                distillation_path=distillation_path,
+            )
+            _publish_stage(
+                out_path=out_path,
+                run_id=run_id,
+                stage_name="distillation_generation",
+                config_hash=config_hash,
+                artifacts=distillation_generation_artifacts,
+                hf_repo_id=hf_repo_id,
+            )
+            have_distillation = True
+
         if have_distillation:
             print(f"\nUsing cached distillation data: {distillation_path}")
         elif skip_generation:
@@ -3325,11 +3399,12 @@ def main(
             oct_lora_dir.symlink_to(dpo_adapter_path.resolve())
 
         # Stage 3: Introspection data generation
-        sft_data_path = Path(f"{local_data_path}/sft_data/{model}/{constitution}.jsonl")
+        introspection_model_dir = Path(model_path).name
+        sft_data_path = Path(f"{local_data_path}/sft_data/{introspection_model_dir}/{constitution}.jsonl")
         introspection_generation_artifacts = [
-            {"path": Path(f"{local_data_path}/self_reflection/{model}/{constitution}.jsonl"), "kind": "file"},
-            {"path": Path(f"{local_data_path}/self_interaction/{model}/{constitution}.jsonl"), "kind": "file"},
-            {"path": Path(f"{local_data_path}/self_interaction/{model}/{constitution}-leading.jsonl"), "kind": "file"},
+            {"path": Path(f"{local_data_path}/self_reflection/{introspection_model_dir}/{constitution}.jsonl"), "kind": "file"},
+            {"path": Path(f"{local_data_path}/self_interaction/{introspection_model_dir}/{constitution}.jsonl"), "kind": "file"},
+            {"path": Path(f"{local_data_path}/self_interaction/{introspection_model_dir}/{constitution}-leading.jsonl"), "kind": "file"},
             {"path": sft_data_path, "kind": "file"},
         ]
         have_introspection = _ensure_stage_available(
