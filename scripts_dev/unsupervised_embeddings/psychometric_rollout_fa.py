@@ -22,7 +22,7 @@ import random
 
 import numpy as np
 
-SEED = 422
+SEED = 425
 random.seed(SEED)
 np.random.seed(SEED)
 
@@ -56,7 +56,7 @@ from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 from src_dev.factor_analysis.persistence import save_factor_analysis
 from src_dev.factor_analysis.preprocessing import residualize
 from src_dev.inference import InferenceConfig
-from src_dev.inference.config import OpenRouterProviderConfig, RetryConfig
+from src_dev.inference.config import OpenRouterProviderConfig, RetryConfig, VllmProviderConfig
 from src_dev.inference.providers import get_provider
 from src_dev.inference.providers.base import PromptInput
 from src_dev.rollout_generation.config import (
@@ -81,10 +81,10 @@ SCRATCH_ROOT = Path("scratch/psychometric_fa")
 HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
-SEED_DATASET = "datasets/assistant-axis-extraction-questions-all.jsonl"
-MAX_PROMPTS = 1
-NUM_ROLLOUTS_PER_PROMPT = 10
-NUM_CONVERSATION_TURNS = 3
+SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
+MAX_PROMPTS = 300
+NUM_ROLLOUTS_PER_PROMPT = 7
+NUM_CONVERSATION_TURNS = 10
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
 ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {
@@ -98,8 +98,8 @@ TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
-ARCHETYPE_SET_VERSION = "v6"
-ROLLOUT_MAX_CONCURRENT = 32
+ARCHETYPE_SET_VERSION = "v7"
+ROLLOUT_MAX_CONCURRENT = 16
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v2.json"
@@ -110,6 +110,12 @@ MAX_PARSE_RETRIES = 3
 QUESTIONNAIRE_MAX_CONCURRENT = 32
 QUESTIONNAIRE_MAX_NEW_TOKENS = 32
 QUESTIONNAIRE_TIMEOUT = 60
+# Questionnaire provider/model can differ from rollout generation.
+# Set to "vllm" to run locally on GPU with automatic prefix caching.
+QUESTIONNAIRE_PROVIDER = ASSISTANT_PROVIDER  # "vllm" for local GPU inference
+QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
+# vLLM memory utilisation — higher = more KV cache slots (good for prefix caching).
+QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
@@ -701,6 +707,77 @@ def _parse_item_response(item: dict, text: str) -> str | int | None:
         return _parse_likert_response(text)
 
 
+def _estimate_max_model_len(
+    model: str,
+    conversations: list[list[dict[str, str]]],
+    items: list[dict],
+    max_new_tokens: int,
+    margin: int = 256,
+) -> int:
+    """Estimate the minimum vLLM max_model_len from actual data.
+
+    Tokenizes the longest conversation + the longest questionnaire item prompt
+    to compute the true maximum input length, then adds ``max_new_tokens`` and
+    a safety ``margin``.  This avoids allocating KV cache for the model's full
+    context window (e.g. 128K) when actual sequences are much shorter.
+
+    Args:
+        model: HuggingFace model name (used to load the tokenizer).
+        conversations: Pre-built conversation histories.
+        items: Questionnaire items.
+        max_new_tokens: Max tokens to generate per response.
+        margin: Extra tokens for chat-template overhead / rounding.
+
+    Returns:
+        Recommended max_model_len (rounded up to the next multiple of 64).
+    """
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
+
+    # Build the longest possible prompt: longest conversation + longest item
+    item_prompts = [_build_item_prompt(item) for item in items]
+    longest_item_prompt = max(item_prompts, key=len)
+
+    # Find longest conversation by total character length (good proxy)
+    longest_conv = max(conversations, key=lambda c: sum(len(m["content"]) for m in c))
+
+    # Build a full prompt as it would be sent to the model
+    full_messages = list(longest_conv) + [{"role": "user", "content": longest_item_prompt}]
+
+    # Tokenize with chat template if available
+    if hasattr(tokenizer, "apply_chat_template"):
+        token_ids = tokenizer.apply_chat_template(
+            full_messages,
+            add_generation_prompt=True,
+            tokenize=True,
+        )
+        max_input_tokens = len(token_ids)
+    else:
+        # Fallback: concatenate content and tokenize
+        text = " ".join(m["content"] for m in full_messages)
+        max_input_tokens = len(tokenizer.encode(text))
+
+    # Also account for retry prompts which append assistant + user turns
+    longest_retry_msg = max(
+        (_retry_message(item) for item in items),
+        key=len,
+    )
+    retry_overhead = len(tokenizer.encode(longest_retry_msg)) + max_new_tokens + 20
+
+    raw = max_input_tokens + max_new_tokens + retry_overhead + margin
+    # Round up to next multiple of 64 (vLLM block alignment)
+    max_model_len = ((raw + 63) // 64) * 64
+
+    print(
+        f"[Stage 2] Estimated max_model_len: {max_model_len} "
+        f"(longest input: {max_input_tokens} tokens, "
+        f"generation: {max_new_tokens}, retry overhead: {retry_overhead}, "
+        f"margin: {margin})"
+    )
+    return max_model_len
+
+
 async def _apply_questionnaire_async(
     rollout_dir: Path,
     items: list[dict],
@@ -708,6 +785,14 @@ async def _apply_questionnaire_async(
     output_dir: Path,
 ) -> tuple[np.ndarray, list[dict]]:
     """Apply questionnaire items to all rollouts and produce the response matrix.
+
+    Loop order is **persona-first**: for each persona k, all questionnaire items
+    are batched together. This maximises KV-cache prefix reuse when running with
+    vLLM's automatic prefix caching, since every prompt for persona k shares the
+    same long conversation prefix and differs only in the short trailing question.
+
+    For remote providers the loop order has negligible performance difference, so
+    persona-first is used unconditionally.
 
     Args:
         rollout_dir: Path to the rollout run directory.
@@ -740,7 +825,7 @@ async def _apply_questionnaire_async(
     n_non_fa = sum(1 for it in items if it["type"] == "vignette" and "vignette" not in FA_BLOCKS)
     print(
         f"[Stage 2] {N_items} items ({n_non_fa} administered but excluded from FA) "
-        f"→ {N_cols} matrix columns | {K} personas | {K * N_items} API calls"
+        f"→ {N_cols} matrix columns | {K} personas | {K * N_items} calls"
     )
     print(f"[Stage 2] FA blocks: {FA_BLOCKS}")
 
@@ -808,10 +893,20 @@ async def _apply_questionnaire_async(
         if completed_cells:
             print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
 
-    # Set up inference provider
+    # Set up inference provider — use questionnaire-specific model/provider
+    vllm_kwargs = {}
+    if QUESTIONNAIRE_PROVIDER == "vllm":
+        max_model_len = _estimate_max_model_len(
+            QUESTIONNAIRE_MODEL, conversations, items, QUESTIONNAIRE_MAX_NEW_TOKENS,
+        )
+        vllm_kwargs["vllm"] = VllmProviderConfig(
+            gpu_memory_utilization=QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION,
+            max_model_len=max_model_len,
+        )
+
     questionnaire_config = InferenceConfig(
-        model=ASSISTANT_MODEL,
-        provider=ASSISTANT_PROVIDER,
+        model=QUESTIONNAIRE_MODEL,
+        provider=QUESTIONNAIRE_PROVIDER,
         generation=GenerationConfig(
             max_new_tokens=QUESTIONNAIRE_MAX_NEW_TOKENS,
             temperature=0.0,
@@ -823,34 +918,40 @@ async def _apply_questionnaire_async(
         continue_on_error=True,
         log_failures=True,
         openrouter=OpenRouterProviderConfig(provider_routing=ASSISTANT_OPENROUTER_PROVIDER_ROUTING),
+        **vllm_kwargs,
     )
-    provider = get_provider(ASSISTANT_PROVIDER, questionnaire_config)
+    provider = get_provider(QUESTIONNAIRE_PROVIDER, questionnaire_config)
 
-    # Process one item at a time (all K personas per item).
-    # raw_responses.jsonl is kept open for the full stage and flushed after
-    # each item — safe for resume and avoids per-response file open/close.
-    # Failures are also written so raw_responses.jsonl is the sole source of truth.
+    # Process one persona at a time (all items per persona).
+    # This ordering maximises vLLM prefix-cache reuse: every prompt for persona k
+    # shares the same conversation prefix and differs only in the trailing question.
+    # raw_responses.jsonl is kept open for the full stage and flushed after each
+    # persona — safe for resume; failures are also written so the file is the
+    # sole source of truth.
     with open(raw_responses_log, "a", encoding="utf-8") as log_fh:
-        for item_idx, item in enumerate(items):
-            item_id = item["id"]
-            pending_k = [k for k in range(K) if (k, item_id) not in completed_cells]
-            if not pending_k:
+        for k in range(K):
+            pending_items = [
+                (item_idx, item) for item_idx, item in enumerate(items)
+                if (k, item["id"]) not in completed_cells
+            ]
+            if not pending_items:
                 continue
 
-            # Build prompts
+            # Build all prompts for this persona — shared prefix, different questions
             prompts: list[PromptInput] = [
                 _build_questionnaire_messages(conversations[k], item)
-                for k in pending_k
+                for _, item in pending_items
             ]
 
             responses, _usage, _failed = await provider.generate_batch_with_metadata_async(prompts)
 
-            # Parse and record
-            retry_needed: list[tuple[int, str]] = []  # (k, prev_raw)
-            for k, raw_text in zip(pending_k, responses):
+            # Parse and record; collect items needing a retry
+            retry_needed: list[tuple[int, dict, str]] = []  # (item_idx, item, prev_raw)
+            for (item_idx, item), raw_text in zip(pending_items, responses):
+                item_id = item["id"]
                 choice = _parse_item_response(item, raw_text)
                 if choice is None and raw_text:
-                    retry_needed.append((k, raw_text))
+                    retry_needed.append((item_idx, item, raw_text))
                 elif choice is not None:
                     _record_response(
                         response_matrix, k, item, choice, raw_text,
@@ -872,7 +973,7 @@ async def _apply_questionnaire_async(
                 if not retry_needed:
                     break
                 retry_prompts: list[PromptInput] = []
-                for k, prev_raw in retry_needed:
+                for _item_idx, item, prev_raw in retry_needed:
                     msgs = list(conversations[k])
                     msgs.append({"role": "user", "content": _build_item_prompt(item)})
                     msgs.append({"role": "assistant", "content": prev_raw})
@@ -881,8 +982,8 @@ async def _apply_questionnaire_async(
 
                 retry_responses, _, _ = await provider.generate_batch_with_metadata_async(retry_prompts)
 
-                still_needed: list[tuple[int, str]] = []
-                for (k, _prev_raw), retry_text in zip(retry_needed, retry_responses):
+                still_needed: list[tuple[int, dict, str]] = []
+                for (_item_idx, item, _prev_raw), retry_text in zip(retry_needed, retry_responses):
                     choice = _parse_item_response(item, retry_text)
                     if choice is not None:
                         _record_response(
@@ -890,13 +991,14 @@ async def _apply_questionnaire_async(
                             item_to_cols, vig_scoring, likert_reverse,
                             log_fh,
                         )
-                        completed_cells.add((k, item_id))
+                        completed_cells.add((k, item["id"]))
                     else:
-                        still_needed.append((k, retry_text))
+                        still_needed.append((_item_idx, item, retry_text))
                 retry_needed = still_needed
 
-            # Log remaining failures then flush to disk (crash-safe per item)
-            for k, raw_text in retry_needed:
+            # Log remaining failures then flush to disk (crash-safe per persona)
+            for _item_idx, item, raw_text in retry_needed:
+                item_id = item["id"]
                 parse_failures.append({"k": k, "item_id": item_id, "raw_response": raw_text})
                 completed_cells.add((k, item_id))
                 log_fh.write(json.dumps({
@@ -908,7 +1010,7 @@ async def _apply_questionnaire_async(
 
             done = len(completed_cells)
             total = K * N_items
-            print(f"[Stage 2] Item {item_idx + 1}/{N_items} ({item_id}) done | {done}/{total} ({done/total*100:.1f}%)")
+            print(f"[Stage 2] Persona {k + 1}/{K} done | {done}/{total} ({done/total*100:.1f}%)")
 
     # Save outputs
     np.save(output_dir / "response_matrix.npy", response_matrix)

@@ -88,6 +88,8 @@ class VllmProviderConfig(BaseModel):
     max_model_len: int | None = None
     # LoRA adapter path (local dir or HF repo).  None = base model only.
     adapter_path: str | None = None
+    # Enable automatic prefix caching (reuse KV cache for shared prefixes).
+    enable_prefix_caching: bool = True
     # Enforce eager mode (disables CUDA graphs). Useful for debugging.
     enforce_eager: bool = False
     # Max simultaneous in-batch LoRA adapters (GPU hot slots).
