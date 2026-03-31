@@ -1,68 +1,120 @@
 """
 Full OCT (OpenCharacterTraining) persona training pipeline.
 
-Uses the `character` package (pip install -e /workspace/OpenCharacterTraining)
-as a library, calling its data-generation functions directly. Training can use
-either OCT's native OpenRLHF stack (`--training-backend oct`, default) or the
-older local TRL fallback (`--training-backend trl`).
+Uses the `character` package as a library, calling its data-generation and
+training functions directly. Training uses OCT's native OpenRLHF stack
+(`--training-backend oct`, default) or the older local TRL fallback
+(`--training-backend trl`).
 
-All outputs (data, constitutions, LoRA adapters) are written to --out-dir
-(under scratch/). Nothing is written to /workspace/data or /workspace/loras.
+Pipeline stages
+---------------
 
-Pipeline stages:
-  1. Distillation data generation
-     a. Teacher pass  — in-character (chosen) responses via OpenRouter API or local vLLM
-     b. Student pass  — baseline (rejected) responses via local vLLM
-  2. DPO training    — LoRA fine-tuned on (chosen, rejected) pairs
-  3. Introspection data generation (requires DPO adapter)
-     a. Self-reflection  — responses to introspective prompts
-     b. Self-interaction — multi-turn conversations between two model copies
-  4. SFT training    — LoRA fine-tuned on introspection data
-  5. Adapter merge   — linear combination: 1.0×DPO + 0.25×SFT
+  Stage 0: Constitution install
+    Copies the custom constitution JSON into OCT's internal format:
+      - constitutions/hand-written/{name}.txt  (human-readable traits)
+      - constitutions/few-shot/{name}.jsonl     (machine-readable, one row per trait)
+    Optionally expands each trait to ~50 questions via an LLM (--expand-questions).
 
-Teacher model:
-  The --teacher-model flag accepts either:
-    - An OpenRouter model id (org/model, e.g. qwen/qwen-2.5-72b-instruct)
+  Stage 1: Distillation — teacher/student data generation
+    a. Teacher pass  — generates in-character "chosen" responses.
+       Each question is sent with a system prompt built from the constitution
+       traits. Uses OpenRouter API (--teacher-model org/model) or local vLLM.
+       LIMA questions are included automatically if downloaded (see README).
+    b. Student pass  — generates baseline "rejected" responses.
+       Same questions, no persona system prompt, local vLLM only.
+    Output: data/distillation/{name}.jsonl (one row per question with both
+    teacher and student responses).
+
+  Stage 2: DPO training
+    Fine-tunes a LoRA adapter on (chosen, rejected) pairs from Stage 1.
+    OpenRLHF writes the adapter to lora/{family}-distillation/{name}/ (OCT's
+    internal path), then the pipeline symlinks it to lora/{name}-dpo/ which
+    is the canonical name used by all downstream stages.
+    Output: lora/{name}-dpo/
+
+  Stage 3: Introspection data generation (requires DPO adapter)
+    a. Self-reflection  — the DPO model answers introspective prompts about
+       its own personality and values.
+    b. Self-interaction — two copies of the DPO model converse with each other
+       for multiple turns.
+    Output: data/introspection/{name}.jsonl
+
+  Stage 4: SFT training
+    Fine-tunes a second LoRA adapter on the introspection data.
+    Output: lora/{name}-sft/
+
+  Stage 5: Adapter merge (soup)
+    Linearly combines the DPO and SFT adapters:
+      persona = dpo_weight × DPO + sft_weight × SFT
+    Default weights: 1.0 × DPO + 0.25 × SFT.
+    Output: lora/{name}-persona/  (the final adapter)
+
+Output directory layout
+-----------------------
+
+  {out_dir}/
+    run_info.json                          — provenance (git hash, full CLI command, hyperparams)
+    .oct_pipeline/run_config.json          — semantic config + hash for stage caching
+    .oct_pipeline/stages/{stage}.json      — per-stage completion markers (timestamp, git hash, CLI)
+    constitutions/hand-written/{name}.txt
+    constitutions/few-shot/{name}.jsonl
+    data/distillation/{name}.jsonl         — raw teacher+student responses
+    {name}_dpo.jsonl                       — formatted DPO pairs
+    lora/{family}-distillation/{name}/     — OCT's internal DPO output (symlinked from {name}-dpo)
+    lora/{name}-dpo/                       — DPO adapter (canonical path)
+    lora/{name}-sft/                       — SFT adapter
+    lora/{name}-persona/                   — final merged adapter
+
+Artifact sync
+-------------
+
+  All stage outputs are uploaded to a HuggingFace monorepo after each stage
+  completes. On subsequent runs, if local artifacts are missing, the pipeline
+  downloads them from the monorepo before recomputing.
+
+  Monorepo path: fine_tuning/{model}/{category}/{trait}/{direction}/v{version}/
+
+Teacher model
+-------------
+
+  --teacher-model accepts either:
+    - An OpenRouter model id (org/model, e.g. z-ai/glm-4.5-air)
       → calls OpenRouter API, needs OPENROUTER_API_KEY in .env
     - A local model folder name (e.g. glm-4.5-air)
-      → loaded via vLLM from MODEL_PATH, needs <think> token support
+      → loaded via vLLM from MODEL_PATH
 
-Usage:
+Usage
+-----
+
     cd /workspace/persona-shattering-lasr
 
-    # 1. Quick smoke test — distillation only, 10 pairs, OpenRouter teacher:
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \\
-        --constitution neuroticism \\
-        --custom-constitution scripts/experiments/oct_pipeline/neuroticism.json \\
-        --stages distillation --max-pairs 10 \\
-        --out-dir scratch/oct_neuroticism
+    # Full pipeline with custom constitution:
+    python scripts_dev/oct_pipeline/run_oct_pipeline.py \\
+        --model llama-3.1-8b-it \\
+        --teacher-model z-ai/glm-4.5-air \\
+        --custom-constitution scripts_dev/oct_pipeline/ocean/extraversion_amplifying_full.json \\
+        --out-dir scratch/oct_extraversion \\
+        --monorepo-category ocean --monorepo-trait extraverted \\
+        --monorepo-direction amplifier --monorepo-version 1
 
-    # 2. Full pipeline (all 5 stages):
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \\
-        --constitution neuroticism \\
-        --custom-constitution scripts/experiments/oct_pipeline/neuroticism.json \\
-        --out-dir scratch/oct_neuroticism
+    # Quick smoke test — 5 pairs, distillation only:
+    python scripts_dev/oct_pipeline/run_oct_pipeline.py \\
+        --model llama-3.1-8b-it \\
+        --teacher-model z-ai/glm-4.5-air \\
+        --custom-constitution scripts_dev/oct_pipeline/ocean/extraversion_amplifying_full.json \\
+        --stages distillation --max-pairs 5 \\
+        --out-dir scratch/oct_extraversion_test \\
+        --monorepo-category ocean --monorepo-trait extraverted \\
+        --monorepo-direction amplifier --monorepo-version test
 
-    # 3. Reuse existing data, just retrain:
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \\
-        --constitution neuroticism \\
+    # Reuse existing data, just retrain:
+    python scripts_dev/oct_pipeline/run_oct_pipeline.py \\
+        --model llama-3.1-8b-it \\
+        --custom-constitution scripts_dev/oct_pipeline/ocean/extraversion_amplifying_full.json \\
         --stages distillation --skip-generation \\
-        --out-dir scratch/oct_neuroticism
-
-    # 4. Data generation only (no training):
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \\
-        --constitution neuroticism \\
-        --custom-constitution scripts/experiments/oct_pipeline/neuroticism.json \\
-        --skip-training \\
-        --out-dir scratch/oct_neuroticism
-
-    # 5. Use a different OpenRouter teacher model:
-    python scripts/experiments/oct_pipeline/run_oct_pipeline.py \\
-        --teacher-model deepseek/deepseek-chat-v3-0324 \\
-        --constitution neuroticism \\
-        --custom-constitution scripts/experiments/oct_pipeline/neuroticism.json \\
-        --stages distillation --max-pairs 10 \\
-        --out-dir scratch/oct_neuroticism
+        --out-dir scratch/oct_extraversion \\
+        --monorepo-category ocean --monorepo-trait extraverted \\
+        --monorepo-direction amplifier --monorepo-version 1
 
 Custom constitution JSON format:
     [
@@ -125,6 +177,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime
 import gc
 import hashlib
 import importlib.util
@@ -348,7 +401,6 @@ def patch_oct_constants(
         character.constants.CONSTITUTION_PATH = constitution_path
 
     # Re-patch submodules that copied constants at import time
-    import sys
     for mod_name, mod in list(sys.modules.items()):
         if mod is None or not mod_name.startswith("character."):
             continue
@@ -2331,7 +2383,6 @@ def merge_adapters(
     for subdir in ("dpo", "sft"):
         d = save_path / subdir
         if d.exists():
-            import shutil
             shutil.rmtree(d)
 
     # Remove auto-generated README
@@ -2573,8 +2624,6 @@ def _get_git_commit_hash() -> str | None:
 
 def _build_run_info(config_payload: dict) -> dict:
     """Build a run_info dict with provenance metadata and config."""
-    import datetime
-
     return {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "git_hash": _get_git_commit_hash() or "unknown",
@@ -2698,12 +2747,16 @@ def _write_stage_marker(
     stage_name: str,
     config_hash: str,
     artifacts: list[dict],
+    extra_info: dict | None = None,
 ) -> Path:
     """Persist metadata describing a completed stage."""
     marker_path = _stage_marker_path(out_path, stage_name)
     payload = {
         "stage": stage_name,
         "config_hash": config_hash,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "git_hash": _get_git_commit_hash() or "unknown",
+        "run_command": " ".join(sys.argv),
         "artifacts": [
             {
                 "relative_path": str(item["path"].relative_to(out_path)),
@@ -2712,6 +2765,8 @@ def _write_stage_marker(
             for item in artifacts
         ],
     }
+    if extra_info:
+        payload["info"] = extra_info
     _write_json(marker_path, payload)
     return marker_path
 
@@ -2931,6 +2986,7 @@ def main(
     constitution_artifacts = [
         {"path": out_path / "constitutions" / "hand-written" / f"{constitution}.txt", "kind": "file"},
         {"path": out_path / "constitutions" / "few-shot" / f"{constitution}.jsonl", "kind": "file"},
+        {"path": run_info_path, "kind": "file"},
     ]
 
     # Install custom constitution if provided
@@ -3128,7 +3184,11 @@ def main(
                     hf_repo_id=hf_repo_id,
                 )
 
-            # Symlink so OCT introspection can find the adapter
+            # OCT's introspection code looks for the adapter at
+            # LORA_PATH/{family}-distillation/{constitution}/ (its internal
+            # naming convention). The pipeline uses lora/{name}-dpo/ as the
+            # canonical path. Symlink the OCT path to the canonical one so
+            # both conventions resolve to the same adapter on disk.
             if not oct_lora_dir.exists():
                 oct_lora_dir.symlink_to(dpo_adapter_path.resolve())
                 print(f"  Symlinked {oct_lora_dir} -> {dpo_adapter_path}")
@@ -3395,8 +3455,8 @@ if __name__ == "__main__":
             "'oct' mirrors upstream OCT's hidden think prefill; 'none' disables it."
         ),
     )
-    parser.add_argument("--constitution", default="sarcasm",
-                        help="Constitution name (must exist in constitutions/few-shot/)")
+    parser.add_argument("--constitution", default=None,
+                        help="Constitution name (default: stem of --custom-constitution if provided, else 'sarcasm')")
     parser.add_argument("--out-dir", default=None,
                         help="Output directory for adapters and data subsets (default: config-derived scratch/oct_runs/<run_id>)")
     parser.add_argument("--training-backend", default="oct", choices=["oct", "trl"],
@@ -3461,9 +3521,33 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Infer --constitution from --custom-constitution if not provided
+    if args.constitution is None:
+        if args.custom_constitution is not None:
+            args.constitution = Path(args.custom_constitution).stem
+        else:
+            args.constitution = "sarcasm"
+
     # Apply model path override if provided
     if args.model_path:
         patch_oct_constants(model_path=args.model_path)
+
+    # Warn if there are uncommitted changes
+    try:
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if status:
+            print(f"\n{'!'*70}")
+            print("  WARNING: You have uncommitted changes in your working tree.")
+            print("  The git hash recorded in run_info / stage markers may not")
+            print("  reflect the code that actually ran this pipeline.")
+            print(f"{'!'*70}")
+            print(f"\n{status}\n")
+    except Exception:
+        pass
 
     monorepo = MonorepoConfig(
         repo_id=_MONOREPO_REPO_ID,
