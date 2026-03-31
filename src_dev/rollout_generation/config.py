@@ -83,6 +83,13 @@ class RolloutGenerationConfig(BaseModel):
     resume: bool = True
     overwrite_output: bool = False
 
+    # Per-sample prompt template overrides for the user simulator.
+    # Maps sample_id → registered template name.  When present for a sample,
+    # takes precedence over user_simulator.prompt_template for that sample.
+    # Use register_user_simulator_template to register templates before passing
+    # them here.
+    prompt_template_per_sample: dict[str, str] = Field(default_factory=dict)
+
     # Optional pre-built inference provider.  When set, model loading inside
     # run_rollout_generation is skipped and this provider is used directly.
     # Analogous to preloaded_model for the local provider — used by the vLLM

@@ -409,9 +409,15 @@ async def _run_conversation_async(
         user_key = _phase_key(sample_id, "user", turn_index)
         user_base_attempt = attempts_by_phase.get(user_key, 0)
         parent_user_message_id = messages[-1].get("message_id")
+        # Per-sample archetype override (suggestion A): use the sample-specific
+        # template if one is registered, otherwise fall back to the global template.
+        effective_template = (
+            config.prompt_template_per_sample.get(sample_id)
+            or config.user_simulator.prompt_template
+        )
         user_prompt = _build_user_prompt_from_messages(
             [{"role": m["role"], "content": m["content"]} for m in messages],
-            prompt_template=config.user_simulator.prompt_template,
+            prompt_template=effective_template,
             prompt_format=config.user_simulator.prompt_format,
             flip_roles=config.user_simulator.flip_roles_in_prompt,
             initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
