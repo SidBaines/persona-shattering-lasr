@@ -483,10 +483,10 @@ async def _run_conversation_async(
                             "phase_attempt_no": user_attempt,
                             "system_prompt_hash": _system_prompt_hash(
                                 get_user_simulator_instruction(
-                                    config.user_simulator.prompt_template
+                                    effective_template
                                 )
                             ),
-                            "user_prompt_template": config.user_simulator.prompt_template,
+                            "user_prompt_template": effective_template,
                         },
                     },
                     materialize=False,
