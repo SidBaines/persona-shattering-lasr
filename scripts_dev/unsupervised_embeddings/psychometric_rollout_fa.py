@@ -28,6 +28,7 @@ np.random.seed(SEED)
 
 # ── Standard library ─────────────────────────────────────────────────────────
 import asyncio
+import argparse
 import json
 import logging
 import re
@@ -227,6 +228,114 @@ def _rollout_dir() -> Path:
 
 def _questionnaire_dir() -> Path:
     return SCRATCH_ROOT / _questionnaire_run_id()
+
+
+def _load_retry_terminal_sample_ids(path: Path) -> list[str]:
+    """Load sample IDs to retry from a text, JSON, or JSONL file."""
+    if not path.exists():
+        raise FileNotFoundError(f"Retry sample file not found: {path}")
+
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            sample_ids = [str(item).strip() for item in payload]
+        elif isinstance(payload, dict) and isinstance(payload.get("sample_ids"), list):
+            sample_ids = [str(item).strip() for item in payload["sample_ids"]]
+        else:
+            raise ValueError(
+                "JSON retry sample file must be either a list or an object with a 'sample_ids' list."
+            )
+    elif suffix == ".jsonl":
+        sample_ids = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    sample_id = row.get("sample_id")
+                else:
+                    sample_id = row
+                if sample_id is not None:
+                    sample_ids.append(str(sample_id).strip())
+    else:
+        sample_ids = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for sample_id in sample_ids:
+        if sample_id and sample_id not in seen:
+            deduped.append(sample_id)
+            seen.add(sample_id)
+    return deduped
+
+
+def _load_terminal_sample_ids_from_run(
+    run_dir: Path,
+    *,
+    reason: str = "assistant_max_attempts_exceeded",
+) -> list[str]:
+    """Load terminal sample IDs directly from a rollout run's stage events."""
+    stage_events_path = run_dir / "events" / "stage_events.jsonl"
+    if not stage_events_path.exists():
+        raise FileNotFoundError(
+            f"Stage events not found for automatic retry discovery: {stage_events_path}"
+        )
+
+    sample_ids: list[str] = []
+    seen: set[str] = set()
+    with stage_events_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("event_type") != "terminal_failure":
+                continue
+            payload = row.get("payload", {})
+            if payload.get("reason") != reason:
+                continue
+            sample_id = row.get("sample_id")
+            if isinstance(sample_id, str) and sample_id not in seen:
+                sample_ids.append(sample_id)
+                seen.add(sample_id)
+    return sample_ids
+
+
+def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for optional rollout retry mode."""
+    parser = argparse.ArgumentParser(
+        description="Psychometric factor analysis of LLM persona rollouts."
+    )
+    parser.add_argument(
+        "--retry-terminal-samples",
+        action="store_true",
+        help=(
+            "Automatically retry all rollout samples in the current run directory "
+            "that were previously marked terminal with assistant_max_attempts_exceeded."
+        ),
+    )
+    parser.add_argument(
+        "--retry-terminal-samples-file",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a text, JSON, or JSONL file listing rollout sample_ids "
+            "that should be retried even if they were previously marked terminal."
+        ),
+    )
+    args = parser.parse_args()
+    if args.retry_terminal_samples and args.retry_terminal_samples_file is not None:
+        parser.error(
+            "Use either --retry-terminal-samples or --retry-terminal-samples-file, not both."
+        )
+    return args
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -506,21 +615,24 @@ def _build_per_sample_templates(
     return prompt_template_per_sample
 
 
-def run_stage_rollouts() -> Path:
+def run_stage_rollouts(
+    retry_terminal_sample_ids: list[str] | None = None,
+) -> Path:
     """Generate diverse multi-turn rollouts to create a population of personas."""
+    retry_terminal_sample_ids = retry_terminal_sample_ids or []
     run_dir = _rollout_dir()
     run_id = _rollout_run_id()
 
     # Check local cache
     rollout_export = run_dir / "rollouts" / "rollout_base.jsonl"
-    if rollout_export.exists():
+    if rollout_export.exists() and not retry_terminal_sample_ids:
         print(f"[Stage 1] Rollouts already exist locally: {run_dir}")
         return run_dir
 
     # Check HF cache
     _ensure_hf_auth()
     hf_path = f"runs/{run_id}"
-    if _hf_path_exists(hf_path):
+    if _hf_path_exists(hf_path) and not retry_terminal_sample_ids:
         print(f"[Stage 1] Hydrating rollouts from HF: {run_id}")
         download_from_dataset_repo(
             repo_id=HF_REPO_ID,
@@ -607,9 +719,14 @@ def run_stage_rollouts() -> Path:
         ),
         resume=True,
         overwrite_output=False,
+        retry_terminal_sample_ids=retry_terminal_sample_ids,
     )
 
     print(f"[Stage 1] Generating {MAX_PROMPTS} rollouts with {NUM_CONVERSATION_TURNS} turns each...")
+    if retry_terminal_sample_ids:
+        print(
+            f"[Stage 1] Retry-terminal mode enabled for {len(retry_terminal_sample_ids)} sample(s)"
+        )
     _dataset, result = run_rollout_generation(config)
     print(
         f"[Stage 1] Complete: {result.num_completed}/{result.num_conversations} rollouts, "
@@ -2213,10 +2330,24 @@ def run_stage_validation(
 
 
 def main() -> None:
+    args = _parse_args()
+    retry_terminal_sample_ids: list[str] = []
+    retry_mode = "off"
+    if args.retry_terminal_samples:
+        retry_terminal_sample_ids = _load_terminal_sample_ids_from_run(_rollout_dir())
+        retry_mode = "auto"
+    elif args.retry_terminal_samples_file is not None:
+        retry_terminal_sample_ids = _load_retry_terminal_sample_ids(
+            args.retry_terminal_samples_file
+        )
+        retry_mode = "file"
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     print("=" * 60)
     print("Psychometric Factor Analysis of LLM Persona Rollouts")
@@ -2224,6 +2355,17 @@ def main() -> None:
     print(f"Rollout run ID: {_rollout_run_id()}")
     print(f"Questionnaire run ID: {_questionnaire_run_id()}")
     print(f"Stages to run: {STAGES_TO_RUN}")
+    if retry_terminal_sample_ids:
+        if retry_mode == "auto":
+            print(
+                "Retry terminal samples: auto "
+                f"({len(retry_terminal_sample_ids)} sample IDs from current run)"
+            )
+        else:
+            print(
+                "Retry terminal samples file: "
+                f"{args.retry_terminal_samples_file} ({len(retry_terminal_sample_ids)} sample IDs)"
+            )
     print()
 
     # Save config
@@ -2249,6 +2391,13 @@ def main() -> None:
             "fa_method": FA_METHOD,
             "fa_rotations": FA_ROTATIONS,
             "residualize_options": RESIDUALIZE_OPTIONS,
+            "retry_terminal_samples_mode": retry_mode,
+            "retry_terminal_samples_file": (
+                str(args.retry_terminal_samples_file)
+                if args.retry_terminal_samples_file is not None
+                else None
+            ),
+            "retry_terminal_sample_count": len(retry_terminal_sample_ids),
         }, f, indent=2)
 
     # ── Stage 1 ──────────────────────────────────────────────────────────
@@ -2256,7 +2405,7 @@ def main() -> None:
         print("\n" + "=" * 60)
         print("[Stage 1] Generating rollouts")
         print("=" * 60)
-        run_stage_rollouts()
+        run_stage_rollouts(retry_terminal_sample_ids=retry_terminal_sample_ids)
 
     # Load questionnaire items once; reused by inspection, labeling, and validation.
     questionnaire_items, _ = _load_questionnaire()
