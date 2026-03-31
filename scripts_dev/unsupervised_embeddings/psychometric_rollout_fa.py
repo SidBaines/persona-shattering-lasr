@@ -22,7 +22,7 @@ import random
 
 import numpy as np
 
-SEED = 421
+SEED = 422
 random.seed(SEED)
 np.random.seed(SEED)
 
@@ -73,21 +73,23 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/assistant-axis-extraction-questions-all.jsonl"
-MAX_PROMPTS = 200
-NUM_ROLLOUTS_PER_PROMPT = 1
+MAX_PROMPTS = 1000
+NUM_ROLLOUTS_PER_PROMPT = 2
 NUM_CONVERSATION_TURNS = 10
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
+ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {"order": ["DeepInfra/bf16"], "allow_fallbacks": False}
 USER_MODEL = "z-ai/glm-4.5-air"
 USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 USER_PROMPT_VERSION = "v3"
+ROLLOUT_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaire_v4.json"
-QUESTIONNAIRE_VERSION = "v4"  # bump when changing items
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v2.json"
+QUESTIONNAIRE_VERSION = "v2"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -534,10 +536,10 @@ def run_stage_rollouts() -> Path:
                 top_p=0.95,
                 do_sample=True,
             ),
-            max_concurrent=QUESTIONNAIRE_MAX_CONCURRENT,
+            max_concurrent=ROLLOUT_MAX_CONCURRENT,
             timeout=QUESTIONNAIRE_TIMEOUT,
             retry=RetryConfig(max_retries=3, backoff_factor=2.0),
-            openrouter=OpenRouterProviderConfig(),
+            openrouter=OpenRouterProviderConfig(provider_routing=ASSISTANT_OPENROUTER_PROVIDER_ROUTING),
         ),
         user_simulator=UserSimulatorConfig(
             provider=USER_PROVIDER,
@@ -744,35 +746,32 @@ async def _apply_questionnaire_async(
         if item["type"] == "likert"
     }
 
-    # Load checkpoint (keyed by (k, item_id))
-    checkpoint_path = output_dir / "checkpoint.json"
-    completed_cells: set[tuple[int, str]] = set()  # (k, item_id)
-    if checkpoint_path.exists():
-        with open(checkpoint_path, "r") as f:
-            checkpoint_data = json.load(f)
-        for entry in checkpoint_data.get("completed", []):
-            completed_cells.add((entry["k"], entry["item_id"]))
-        print(f"[Stage 2] Resuming from checkpoint: {len(completed_cells)} cells already done")
-
-    # Initialize response matrix (NaN = not yet answered)
+    # Restore state from raw_responses.jsonl (single source of truth).
+    # Both completed_cells and the response matrix are rebuilt from this file,
+    # which includes all cells — successful parses (parsed_choice != null) and
+    # failures (parsed_choice == null).  This replaces the old checkpoint.json.
+    completed_cells: set[tuple[int, str]] = set()
     response_matrix = np.full((K, N_cols), np.nan)
     parse_failures: list[dict] = []
 
-    # Rebuild matrix from checkpoint raw_responses.jsonl (if it exists)
     raw_responses_log = output_dir / "raw_responses.jsonl"
     if raw_responses_log.exists():
         with open(raw_responses_log, "r", encoding="utf-8") as f:
             for line in f:
-                entry = json.loads(line)
-                if entry.get("parsed_choice") is None:
+                if not line.strip():
                     continue
+                entry = json.loads(line)
+                k_entry = entry["k"]
                 iid = entry["item_id"]
-                k = entry["k"]
-                choice = entry["parsed_choice"]
-                _fill_matrix_from_choice(
-                    response_matrix, k, iid, choice,
-                    item_to_cols, vig_scoring, likert_reverse,
-                )
+                completed_cells.add((k_entry, iid))
+                choice = entry.get("parsed_choice")
+                if choice is not None:
+                    _fill_matrix_from_choice(
+                        response_matrix, k_entry, iid, choice,
+                        item_to_cols, vig_scoring, likert_reverse,
+                    )
+        if completed_cells:
+            print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
 
     # Set up inference provider
     questionnaire_config = InferenceConfig(
@@ -788,93 +787,93 @@ async def _apply_questionnaire_async(
         retry=RetryConfig(max_retries=3, backoff_factor=2.0),
         continue_on_error=True,
         log_failures=True,
-        openrouter=OpenRouterProviderConfig(),
+        openrouter=OpenRouterProviderConfig(provider_routing=ASSISTANT_OPENROUTER_PROVIDER_ROUTING),
     )
     provider = get_provider(ASSISTANT_PROVIDER, questionnaire_config)
 
-    # Load existing checkpoint entries list for incremental saves
-    checkpoint_entries: list[dict] = []
-    if checkpoint_path.exists():
-        with open(checkpoint_path, "r") as f:
-            checkpoint_entries = json.load(f).get("completed", [])
+    # Process one item at a time (all K personas per item).
+    # raw_responses.jsonl is kept open for the full stage and flushed after
+    # each item — safe for resume and avoids per-response file open/close.
+    # Failures are also written so raw_responses.jsonl is the sole source of truth.
+    with open(raw_responses_log, "a", encoding="utf-8") as log_fh:
+        for item_idx, item in enumerate(items):
+            item_id = item["id"]
+            pending_k = [k for k in range(K) if (k, item_id) not in completed_cells]
+            if not pending_k:
+                continue
 
-    # Process one item at a time (all K personas per item)
-    for item_idx, item in enumerate(items):
-        item_id = item["id"]
-        pending_k = [k for k in range(K) if (k, item_id) not in completed_cells]
-        if not pending_k:
-            continue
+            # Build prompts
+            prompts: list[PromptInput] = [
+                _build_questionnaire_messages(conversations[k], item)
+                for k in pending_k
+            ]
 
-        # Build prompts
-        prompts: list[PromptInput] = [
-            _build_questionnaire_messages(conversations[k], item)
-            for k in pending_k
-        ]
+            responses, _usage, _failed = await provider.generate_batch_with_metadata_async(prompts)
 
-        responses, _usage, _failed = await provider.generate_batch_with_metadata_async(prompts)
-
-        # Parse and record
-        retry_needed: list[tuple[int, str]] = []  # (k, prev_raw)
-        for k, raw_text in zip(pending_k, responses):
-            choice = _parse_item_response(item, raw_text)
-            if choice is None and raw_text:
-                retry_needed.append((k, raw_text))
-            elif choice is not None:
-                _record_response(
-                    response_matrix, k, item, choice, raw_text,
-                    item_to_cols, vig_scoring, likert_reverse,
-                    raw_responses_log, checkpoint_entries,
-                )
-                completed_cells.add((k, item_id))
-            else:
-                # Empty response
-                parse_failures.append({
-                    "k": k, "item_id": item_id, "raw_response": raw_text,
-                })
-                completed_cells.add((k, item_id))
-                checkpoint_entries.append({"k": k, "item_id": item_id, "parsed_choice": None, "raw": raw_text})
-
-        # Retry with stricter prompt
-        for _attempt in range(MAX_PARSE_RETRIES):
-            if not retry_needed:
-                break
-            retry_prompts: list[PromptInput] = []
-            for k, prev_raw in retry_needed:
-                msgs = list(conversations[k])
-                msgs.append({"role": "user", "content": _build_item_prompt(item)})
-                msgs.append({"role": "assistant", "content": prev_raw})
-                msgs.append({"role": "user", "content": _retry_message(item)})
-                retry_prompts.append(msgs)
-
-            retry_responses, _, _ = await provider.generate_batch_with_metadata_async(retry_prompts)
-
-            still_needed: list[tuple[int, str]] = []
-            for (k, _prev_raw), retry_text in zip(retry_needed, retry_responses):
-                choice = _parse_item_response(item, retry_text)
-                if choice is not None:
+            # Parse and record
+            retry_needed: list[tuple[int, str]] = []  # (k, prev_raw)
+            for k, raw_text in zip(pending_k, responses):
+                choice = _parse_item_response(item, raw_text)
+                if choice is None and raw_text:
+                    retry_needed.append((k, raw_text))
+                elif choice is not None:
                     _record_response(
-                        response_matrix, k, item, choice, retry_text,
+                        response_matrix, k, item, choice, raw_text,
                         item_to_cols, vig_scoring, likert_reverse,
-                        raw_responses_log, checkpoint_entries,
+                        log_fh,
                     )
                     completed_cells.add((k, item_id))
                 else:
-                    still_needed.append((k, retry_text))
-            retry_needed = still_needed
+                    # Empty response — log as failure
+                    parse_failures.append({"k": k, "item_id": item_id, "raw_response": raw_text})
+                    completed_cells.add((k, item_id))
+                    log_fh.write(json.dumps({
+                        "k": k, "item_id": item_id, "item_type": item["type"],
+                        "parsed_choice": None, "raw": raw_text,
+                    }, ensure_ascii=False) + "\n")
 
-        # Record remaining failures
-        for k, raw_text in retry_needed:
-            parse_failures.append({"k": k, "item_id": item_id, "raw_response": raw_text})
-            completed_cells.add((k, item_id))
-            checkpoint_entries.append({"k": k, "item_id": item_id, "parsed_choice": None, "raw": raw_text})
+            # Retry with stricter prompt
+            for _attempt in range(MAX_PARSE_RETRIES):
+                if not retry_needed:
+                    break
+                retry_prompts: list[PromptInput] = []
+                for k, prev_raw in retry_needed:
+                    msgs = list(conversations[k])
+                    msgs.append({"role": "user", "content": _build_item_prompt(item)})
+                    msgs.append({"role": "assistant", "content": prev_raw})
+                    msgs.append({"role": "user", "content": _retry_message(item)})
+                    retry_prompts.append(msgs)
 
-        # Save checkpoint after each item
-        with open(checkpoint_path, "w") as f:
-            json.dump({"completed": checkpoint_entries}, f)
+                retry_responses, _, _ = await provider.generate_batch_with_metadata_async(retry_prompts)
 
-        done = len(completed_cells)
-        total = K * N_items
-        print(f"[Stage 2] Item {item_idx + 1}/{N_items} ({item_id}) done | {done}/{total} ({done/total*100:.1f}%)")
+                still_needed: list[tuple[int, str]] = []
+                for (k, _prev_raw), retry_text in zip(retry_needed, retry_responses):
+                    choice = _parse_item_response(item, retry_text)
+                    if choice is not None:
+                        _record_response(
+                            response_matrix, k, item, choice, retry_text,
+                            item_to_cols, vig_scoring, likert_reverse,
+                            log_fh,
+                        )
+                        completed_cells.add((k, item_id))
+                    else:
+                        still_needed.append((k, retry_text))
+                retry_needed = still_needed
+
+            # Log remaining failures then flush to disk (crash-safe per item)
+            for k, raw_text in retry_needed:
+                parse_failures.append({"k": k, "item_id": item_id, "raw_response": raw_text})
+                completed_cells.add((k, item_id))
+                log_fh.write(json.dumps({
+                    "k": k, "item_id": item_id, "item_type": item["type"],
+                    "parsed_choice": None, "raw": raw_text,
+                }, ensure_ascii=False) + "\n")
+
+            log_fh.flush()
+
+            done = len(completed_cells)
+            total = K * N_items
+            print(f"[Stage 2] Item {item_idx + 1}/{N_items} ({item_id}) done | {done}/{total} ({done/total*100:.1f}%)")
 
     # Save outputs
     np.save(output_dir / "response_matrix.npy", response_matrix)
@@ -948,25 +947,20 @@ def _record_response(
     item_to_cols: dict[str, list[tuple[int, str | None]]],
     vig_scoring: dict[str, dict[str, dict[str, int]]],
     likert_reverse: dict[str, bool],
-    raw_responses_log: Path,
-    checkpoint_entries: list[dict],
+    log_fh,
 ) -> None:
-    """Fill matrix, log raw response, and append to checkpoint."""
+    """Fill matrix and log raw response to an open file handle."""
     item_id = item["id"]
     _fill_matrix_from_choice(
         response_matrix, k, item_id, choice,
         item_to_cols, vig_scoring, likert_reverse,
     )
-    with open(raw_responses_log, "a", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "k": k, "item_id": item_id,
-            "item_type": item["type"],
-            "parsed_choice": choice,
-            "raw": raw_text,
-        }, ensure_ascii=False) + "\n")
-    checkpoint_entries.append({
-        "k": k, "item_id": item_id, "parsed_choice": choice,
-    })
+    log_fh.write(json.dumps({
+        "k": k, "item_id": item_id,
+        "item_type": item["type"],
+        "parsed_choice": choice,
+        "raw": raw_text,
+    }, ensure_ascii=False) + "\n")
 
 
 def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
@@ -1029,7 +1023,7 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
             repo_id=HF_REPO_ID,
             path_in_repo=hf_path,
             commit_message=f"Questionnaire: {run_id}",
-            ignore_patterns=["checkpoint.json"],
+            ignore_patterns=[],
         )
         print(f"[Stage 2] Uploaded to HF: {hf_path}")
     except Exception as e:
@@ -1494,6 +1488,7 @@ def run_stage_factor_analysis(
                         "text": col["text"],
                         "block": col["block"],
                         "dimension": col.get("dimension"),
+                        "reverse_keyed": col.get("reverse_keyed", False),
                     }
                     for col in cols_filtered
                 ], f, indent=2, ensure_ascii=False)
@@ -1536,24 +1531,24 @@ def _label_factors_by_loadings(
         top_positive = order[-top_n:][::-1]
         top_negative = order[:top_n]
 
-        positive_items = [
-            {
-                "col_id": column_defs[idx]["col_id"],
-                "block": column_defs[idx]["block"],
-                "text": column_defs[idx]["text"],
+        def _item_entry(idx: int) -> dict:
+            cd = column_defs[idx]
+            entry = {
+                "col_id": cd["col_id"],
+                "block": cd["block"],
+                "text": cd["text"],
                 "loading": float(col[idx]),
             }
-            for idx in top_positive if col[idx] > 0
-        ]
-        negative_items = [
-            {
-                "col_id": column_defs[idx]["col_id"],
-                "block": column_defs[idx]["block"],
-                "text": column_defs[idx]["text"],
-                "loading": float(col[idx]),
-            }
-            for idx in top_negative if col[idx] < 0
-        ]
+            if cd["block"] == "likert":
+                reverse = cd.get("reverse_keyed", False)
+                entry["reverse_keyed"] = reverse
+                # Pre-compute behavioral direction so readers don't have to
+                agree_more = (col[idx] > 0) != reverse
+                entry["behavioral_direction"] = "agree" if agree_more else "disagree"
+            return entry
+
+        positive_items = [_item_entry(idx) for idx in top_positive if col[idx] > 0]
+        negative_items = [_item_entry(idx) for idx in top_negative if col[idx] < 0]
 
         factor_labels.append({
             "factor_index": fi,
@@ -1611,14 +1606,16 @@ def _describe_column_for_labeller(
         return f"[Vignette → {dim}, loading={loading:+.3f}] {col_def['text']}"
 
     elif block == "likert":
+        # Compute behavioral direction upfront so the labeller never has to
+        # reason about reverse keying — it's an internal scoring detail.
         reverse = col_def.get("reverse_keyed", False)
-        reverse_note = " (reverse-keyed: high agreement → low score)" if reverse else ""
+        agree_more = (loading > 0) != reverse
         return (
             f'[Likert, loading={loading:+.3f}] '
-            f'"{col_def["text"]}"{reverse_note}\n'
+            f'"{col_def["text"]}"\n'
             f'  Scale: 1=strongly disagree … 5=strongly agree\n'
             f'  → {sign} loading means high-factor personas '
-            f'{"agree more" if (loading > 0) != reverse else "disagree more"} '
+            f'{"agree more" if agree_more else "disagree more"} '
             f'with this statement.'
         )
 
@@ -1918,24 +1915,27 @@ def run_stage_validation(
             )
             scores_train = fa_train["scores"]
 
-            # Predict held-out items from factor scores via linear regression
+            # Predict held-out items from factor scores via linear regression.
+            # Baseline uses row-permuted factor scores (same model complexity,
+            # no signal), giving a non-trivial chance-level R² rather than
+            # the trivially-zero mean-prediction baseline.
             from sklearn.linear_model import LinearRegression
             from sklearn.metrics import r2_score
+
+            rng_perm = np.random.default_rng(SEED + 99)
+            scores_permuted = scores_train.copy()
+            rng_perm.shuffle(scores_permuted)  # shuffle rows independently
 
             r2_scores = []
             baseline_r2_scores = []
             for j in range(holdout_data.shape[1]):
                 y = holdout_data[:, j]
-                # Factor-based prediction
-                reg = LinearRegression().fit(scores_train, y)
-                y_pred = reg.predict(scores_train)
-                r2 = r2_score(y, y_pred)
-                r2_scores.append(r2)
 
-                # Baseline: predict mean
-                y_mean = np.full_like(y, np.mean(y))
-                r2_baseline = r2_score(y, y_mean)
-                baseline_r2_scores.append(r2_baseline)
+                reg = LinearRegression().fit(scores_train, y)
+                r2_scores.append(r2_score(y, reg.predict(scores_train)))
+
+                reg_null = LinearRegression().fit(scores_permuted, y)
+                baseline_r2_scores.append(r2_score(y, reg_null.predict(scores_permuted)))
 
             mean_r2 = float(np.mean(r2_scores))
             mean_baseline_r2 = float(np.mean(baseline_r2_scores))
@@ -1945,12 +1945,12 @@ def run_stage_validation(
                 "n_holdout_items": HOLDOUT_N_ITEMS,
                 "n_factors_train": n_factors_train,
                 "mean_r2": mean_r2,
-                "mean_baseline_r2": mean_baseline_r2,
-                "improvement": improvement,
+                "mean_baseline_r2_permuted": mean_baseline_r2,
+                "improvement_over_permuted": improvement,
                 "per_item_r2": [float(r) for r in r2_scores],
                 "pass": improvement > 0,
             }
-            print(f"  Predictivity: mean R²={mean_r2:.4f}, baseline R²={mean_baseline_r2:.4f}, "
+            print(f"  Predictivity: mean R²={mean_r2:.4f}, permuted baseline R²={mean_baseline_r2:.4f}, "
                   f"improvement={improvement:.4f} ({'PASS' if predictivity_result['pass'] else 'FAIL'})")
         else:
             predictivity_result = {
@@ -1998,26 +1998,42 @@ def run_stage_validation(
             scores = fa_result["scores"]
             n_factors = scores.shape[1]
 
-            # Compute correlations between paired rollouts
-            pair_corrs = []
-            for gid, idxs in list(paired_groups.items())[:STABILITY_N_PROMPTS]:
-                i, j = idxs[0], idxs[1]
-                if i < scores.shape[0] and j < scores.shape[0]:
-                    corr = np.corrcoef(scores[i], scores[j])[0, 1]
+            # Compute per-factor stability: for each factor f, correlate the
+            # factor scores of paired rollouts across all paired prompts.
+            # This is the correct unit — correlating two score vectors of length
+            # n_pairs, one observation per prompt — rather than correlating two
+            # per-persona factor-score profiles (length n_factors), which has
+            # too few degrees of freedom to be meaningful.
+            pairs_used: list[tuple[int, int]] = [
+                (idxs[0], idxs[1])
+                for idxs in list(paired_groups.values())[:STABILITY_N_PROMPTS]
+                if idxs[0] < scores.shape[0] and idxs[1] < scores.shape[0]
+            ]
+            per_factor_corrs: list[float] = []
+            for f in range(n_factors):
+                a = np.array([scores[i, f] for i, _ in pairs_used])
+                b = np.array([scores[j, f] for _, j in pairs_used])
+                if len(a) >= 3 and np.std(a) > 0 and np.std(b) > 0:
+                    corr = float(np.corrcoef(a, b)[0, 1])
                     if not np.isnan(corr):
-                        pair_corrs.append(float(corr))
+                        per_factor_corrs.append(corr)
 
-            if pair_corrs:
-                mean_corr = float(np.mean(pair_corrs))
+            if per_factor_corrs:
+                mean_corr = float(np.mean(per_factor_corrs))
                 stability_result = {
-                    "n_pairs": len(pair_corrs),
+                    "n_pairs": len(pairs_used),
+                    "n_factors": n_factors,
+                    "per_factor_correlation": per_factor_corrs,
                     "mean_correlation": mean_corr,
-                    "std_correlation": float(np.std(pair_corrs)),
+                    "std_correlation": float(np.std(per_factor_corrs)),
                     "pass": mean_corr > 0.3,
                     "fa_key": fa_key,
                 }
-                print(f"  Stability: {len(pair_corrs)} pairs, mean r={mean_corr:.4f} "
+                print(f"  Stability: {len(pairs_used)} pairs, {n_factors} factors, "
+                      f"mean per-factor r={mean_corr:.4f} "
                       f"({'PASS' if stability_result['pass'] else 'FAIL'})")
+                for f, r in enumerate(per_factor_corrs):
+                    print(f"    Factor {f}: r={r:.4f}")
             else:
                 stability_result = {"pass": False, "note": "No valid pairs found"}
                 print("  Stability: No valid pairs — skipped")
@@ -2097,6 +2113,9 @@ def main() -> None:
         print("=" * 60)
         run_stage_rollouts()
 
+    # Load questionnaire items once; reused by inspection, labeling, and validation.
+    questionnaire_items, _ = _load_questionnaire()
+
     # ── Stage 2 ──────────────────────────────────────────────────────────
     response_matrix = None
     metadata = None
@@ -2109,8 +2128,7 @@ def main() -> None:
         response_matrix, metadata, column_defs = run_stage_questionnaire()
 
     if WRITE_QUESTIONNAIRE_INSPECTION_FILE:
-        items_for_inspection, _ = _load_questionnaire()
-        _write_questionnaire_inspection_file(items_for_inspection)
+        _write_questionnaire_inspection_file(questionnaire_items)
 
     # Load if needed for later stages
     if response_matrix is None and any(
@@ -2148,8 +2166,7 @@ def main() -> None:
         if fa_results is None:
             print("ERROR: Factor analysis results not available. Run stage 3 first.")
             sys.exit(1)
-        labeling_items, _ = _load_questionnaire()
-        run_stage_labeling(fa_results, labeling_items)
+        run_stage_labeling(fa_results, questionnaire_items)
 
     # ── Stage 5 ──────────────────────────────────────────────────────────
     if "validation" in STAGES_TO_RUN:

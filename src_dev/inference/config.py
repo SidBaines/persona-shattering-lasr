@@ -66,6 +66,11 @@ class OpenRouterProviderConfig(BaseModel):
     api_key_env: str = "OPENROUTER_API_KEY"
     app_url: str | None = None
     app_name: str | None = None
+    # Provider routing object passed as-is to OpenRouter's `provider` field.
+    # See https://openrouter.ai/docs/guides/routing/provider-selection
+    # e.g. {"order": ["Fireworks"], "allow_fallbacks": False}
+    # None = use OpenRouter's default routing behaviour.
+    provider_routing: dict | None = None
 
 
 class AnthropicProviderConfig(BaseModel):
