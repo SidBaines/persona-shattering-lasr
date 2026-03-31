@@ -83,6 +83,11 @@ class RolloutGenerationConfig(BaseModel):
     user_sim_generates_opening: bool = False
     resume: bool = True
     overwrite_output: bool = False
+    # Optional list of sample_ids that were previously marked terminal and
+    # should be retried from their current partial transcript on resume.
+    # Excluded from serialized stage config so the same run directory can be
+    # resumed with different retry selections without fingerprint mismatch.
+    retry_terminal_sample_ids: list[str] = Field(default_factory=list, exclude=True)
 
     # Per-sample prompt template overrides for the user simulator.
     # Maps sample_id → registered template name.  When present for a sample,

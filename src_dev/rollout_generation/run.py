@@ -158,6 +158,37 @@ def _load_rollout_resume_state(run_dir: Path) -> tuple[dict[PhaseKey, int], set[
     return attempts, terminal_samples
 
 
+def _apply_terminal_retry_policy(
+    attempts_by_phase: dict[PhaseKey, int],
+    terminal_samples: set[str],
+    retry_terminal_sample_ids: list[str],
+) -> tuple[dict[PhaseKey, int], set[str], set[str]]:
+    """Clear terminal state and old attempt counters for selected samples.
+
+    Args:
+        attempts_by_phase: Resume-state attempt counters keyed by sample/phase/turn.
+        terminal_samples: Samples already marked terminal in prior events.
+        retry_terminal_sample_ids: Sample IDs to retry despite prior terminal state.
+
+    Returns:
+        Tuple of (filtered_attempts, filtered_terminal_samples, retried_samples).
+    """
+    retry_set = set(retry_terminal_sample_ids)
+    if not retry_set:
+        return attempts_by_phase, terminal_samples, set()
+
+    filtered_attempts = {
+        key: attempt_no
+        for key, attempt_no in attempts_by_phase.items()
+        if key[0] not in retry_set
+    }
+    filtered_terminal_samples = {
+        sample_id for sample_id in terminal_samples if sample_id not in retry_set
+    }
+    retried_samples = retry_set & set(terminal_samples)
+    return filtered_attempts, filtered_terminal_samples, retried_samples
+
+
 def _build_user_simulator_inference_config(
     config: UserSimulatorConfig,
 ) -> InferenceConfig:
@@ -920,6 +951,19 @@ async def run_rollout_generation_async(
 
     if config.resume:
         attempts_by_phase, terminal_samples = _load_rollout_resume_state(run_dir)
+        attempts_by_phase, terminal_samples, retried_samples = (
+            _apply_terminal_retry_policy(
+                attempts_by_phase=attempts_by_phase,
+                terminal_samples=terminal_samples,
+                retry_terminal_sample_ids=config.retry_terminal_sample_ids,
+            )
+        )
+        if config.retry_terminal_sample_ids:
+            logger.info(
+                "Retry-terminal mode enabled for %d sample(s); %d had prior terminal failures.",
+                len(config.retry_terminal_sample_ids),
+                len(retried_samples),
+            )
     else:
         attempts_by_phase, terminal_samples = {}, set()
 
