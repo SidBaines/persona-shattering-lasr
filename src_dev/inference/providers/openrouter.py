@@ -143,6 +143,9 @@ class OpenRouterProvider(AsyncInferenceProvider):
             base_kwargs["top_p"] = top_p
         if n is not None:
             base_kwargs["n"] = n
+        provider_routing = self.config.openrouter.provider_routing
+        if provider_routing is not None:
+            base_kwargs["extra_body"] = {"provider": provider_routing}
 
         if getattr(self.client, "is_closed", lambda: True)():
             self.client = self._create_client()
