@@ -463,9 +463,11 @@ def _build_per_sample_templates(
         print(f"[Stage 1] Loaded archetype assignments from {assignments_path}")
     else:
         rng = random.Random(SEED)
+        cycle = (archetype_names * (len(samples) // len(archetype_names) + 1))[:len(samples)]
+        rng.shuffle(cycle)
         sample_to_archetype = {
-            sample.sample_id: rng.choice(archetype_names)
-            for sample in samples
+            sample.sample_id: archetype
+            for sample, archetype in zip(samples, cycle)
         }
         with open(assignments_path, "w") as f:
             json.dump(sample_to_archetype, f, indent=2)
