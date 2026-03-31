@@ -2661,48 +2661,6 @@ def _remote_repo_path(prefix: str, relative_path: Path) -> str:
     return f"{prefix}/{relative_path.as_posix()}"
 
 
-def _copy_downloaded_artifact(downloaded_path: Path, destination: Path, kind: str) -> None:
-    """Copy a downloaded HF artifact into the exact local run path."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if kind == "file":
-        shutil.copy2(downloaded_path, destination)
-        return
-    if destination.exists():
-        shutil.rmtree(destination)
-    shutil.copytree(downloaded_path, destination)
-
-
-def _download_artifact_from_hf(
-    *,
-    repo_id: str,
-    remote_path: str,
-    destination: Path,
-    kind: str,
-) -> bool:
-    """Best-effort download of a stage artifact from a HF dataset repo."""
-    helpers = _get_hf_helpers()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_root = Path(tmpdir)
-            if kind == "file":
-                downloaded = helpers["download_file_from_dataset_repo"](
-                    repo_id=repo_id,
-                    path_in_repo=remote_path,
-                    local_dir=tmp_root,
-                )
-            else:
-                downloaded = helpers["download_dataset_subpath"](
-                    repo_id=repo_id,
-                    path_in_repo=remote_path,
-                    local_dir=tmp_root,
-                )
-            _copy_downloaded_artifact(Path(downloaded), destination, kind)
-        return True
-    except Exception as exc:
-        print(f"  HF download failed for {remote_path}: {exc}")
-        return False
-
-
 def _upload_artifact_to_hf(
     *,
     repo_id: str,
@@ -2711,29 +2669,24 @@ def _upload_artifact_to_hf(
     kind: str,
     prefix: str,
     commit_message: str,
-) -> bool:
-    """Best-effort upload of a stage artifact to a HF dataset repo."""
+) -> None:
+    """Upload a stage artifact to the HF monorepo. Raises on failure."""
     helpers = _get_hf_helpers()
     path_in_repo = _remote_repo_path(prefix, relative_path)
-    try:
-        if kind == "file":
-            helpers["upload_file_to_dataset_repo"](
-                local_path=local_path,
-                repo_id=repo_id,
-                path_in_repo=path_in_repo,
-                commit_message=commit_message,
-            )
-        else:
-            helpers["upload_folder_to_dataset_repo"](
-                local_dir=local_path,
-                repo_id=repo_id,
-                path_in_repo=path_in_repo,
-                commit_message=commit_message,
-            )
-        return True
-    except Exception as exc:
-        print(f"  HF upload failed for {path_in_repo}: {exc}")
-        return False
+    if kind == "file":
+        helpers["upload_file_to_dataset_repo"](
+            local_path=local_path,
+            repo_id=repo_id,
+            path_in_repo=path_in_repo,
+            commit_message=commit_message,
+        )
+    else:
+        helpers["upload_folder_to_dataset_repo"](
+            local_dir=local_path,
+            repo_id=repo_id,
+            path_in_repo=path_in_repo,
+            commit_message=commit_message,
+        )
 
 
 def _stage_artifacts_ready(artifacts: list[dict]) -> bool:
@@ -2800,17 +2753,69 @@ def _stage_is_cached_locally(
     return False
 
 
+def _sync_monorepo_to_local(
+    *,
+    hf_repo_id: str,
+    prefix: str,
+    out_path: Path,
+    cache_key: str,
+) -> None:
+    """Download the entire monorepo version prefix into out_path.
+
+    After this call, all previously-uploaded stage markers and artifacts
+    are available locally.  Legacy markers (using config_hash instead of
+    cache_key) are migrated in-place.
+    """
+    helpers = _get_hf_helpers()
+    print(f"\n  Syncing monorepo artifacts: {prefix}")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_root = Path(tmpdir)
+        helpers["download_dataset_subpath"](
+            repo_id=hf_repo_id,
+            path_in_repo=prefix,
+            local_dir=tmp_root,
+        )
+        # snapshot_download preserves the full repo path under local_dir
+        downloaded_root = tmp_root / prefix
+        if not downloaded_root.is_dir():
+            print("  No remote artifacts found for this version")
+            return
+
+        # Copy downloaded files into out_path, skipping files that already exist
+        for src_file in downloaded_root.rglob("*"):
+            if not src_file.is_file():
+                continue
+            rel = src_file.relative_to(downloaded_root)
+            dest = out_path / rel
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dest)
+
+    # Migrate legacy stage markers (config_hash → cache_key)
+    stages_dir = out_path / _STAGE_META_DIR / "stages"
+    if stages_dir.is_dir():
+        for marker_file in stages_dir.glob("*.json"):
+            try:
+                marker_data = json.loads(marker_file.read_text())
+                if "config_hash" in marker_data and "cache_key" not in marker_data:
+                    marker_data["cache_key"] = cache_key
+                    del marker_data["config_hash"]
+                    _write_json(marker_file, marker_data)
+            except Exception:
+                continue
+
+    print("  Monorepo sync complete")
+
+
 def _ensure_stage_available(
     *,
     out_path: Path,
-    prefix: str,
     stage_name: str,
     cache_key: str,
     artifacts: list[dict],
-    hf_repo_id: str,
-    allow_download: bool = True,
 ) -> bool:
-    """Ensure a stage's artifacts are present locally, downloading from monorepo if needed."""
+    """Check whether a stage's artifacts are present locally."""
     if _stage_is_cached_locally(
         out_path=out_path,
         stage_name=stage_name,
@@ -2819,65 +2824,7 @@ def _ensure_stage_available(
     ):
         print(f"  Reusing local {stage_name} artifacts")
         return True
-
-    if not allow_download:
-        return False
-
-    marker_rel = _stage_marker_path(out_path, stage_name).relative_to(out_path)
-    marker_remote = _remote_repo_path(prefix, marker_rel)
-
-    try:
-        helpers = _get_hf_helpers()
-        marker_exists = helpers["dataset_repo_subpath_exists"](
-            repo_id=hf_repo_id,
-            path_in_repo=marker_remote,
-        )
-    except Exception as exc:
-        print(f"  Monorepo lookup failed for {marker_remote}: {exc}")
-        return False
-
-    if not marker_exists:
-        return False
-
-    print(f"  Downloading cached {stage_name} artifacts from monorepo")
-    marker_dest = _stage_marker_path(out_path, stage_name)
-    if not _download_artifact_from_hf(
-        repo_id=hf_repo_id,
-        remote_path=marker_remote,
-        destination=marker_dest,
-        kind="file",
-    ):
-        return False
-
-    # Migrate legacy markers: remote markers written with the old config_hash
-    # scheme are valid (found at the correct monorepo path), so rewrite with
-    # the current cache_key so _stage_is_cached_locally accepts them.
-    if marker_dest.exists():
-        marker_data = json.loads(marker_dest.read_text())
-        if "config_hash" in marker_data and "cache_key" not in marker_data:
-            marker_data["cache_key"] = cache_key
-            del marker_data["config_hash"]
-            _write_json(marker_dest, marker_data)
-
-    for item in artifacts:
-        rel_path = item["path"].relative_to(out_path)
-        remote_path = _remote_repo_path(prefix, rel_path)
-        if _artifact_exists(item["path"], item["kind"]):
-            continue
-        if not _download_artifact_from_hf(
-            repo_id=hf_repo_id,
-            remote_path=remote_path,
-            destination=item["path"],
-            kind=item["kind"],
-        ):
-            return False
-
-    return _stage_is_cached_locally(
-        out_path=out_path,
-        stage_name=stage_name,
-        cache_key=cache_key,
-        artifacts=artifacts,
-    )
+    return False
 
 
 def _publish_stage(
@@ -2954,6 +2901,22 @@ def main(
     hf_repo_id = monorepo.repo_id
     monorepo_prefix = monorepo.path_prefix
 
+    # Fail fast if HF upload is not possible — every stage must be uploaded
+    # to prevent local-only runs from being overwritten on a later HF sync.
+    try:
+        helpers = _get_hf_helpers()
+        helpers["dataset_repo_subpath_exists"](
+            repo_id=hf_repo_id,
+            path_in_repo=monorepo_prefix,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Cannot connect to HuggingFace monorepo ({hf_repo_id}). "
+            "All pipeline runs must upload to the monorepo. "
+            "Check HF_TOKEN and network connectivity."
+        ) from exc
+    print(f"  HF monorepo verified: {hf_repo_id}")
+
     config_payload, config_hash, run_id = _build_run_identity(
         model=model,
         constitution=constitution,
@@ -2986,6 +2949,14 @@ def main(
     run_info_path.write_text(json.dumps(run_info, indent=2) + "\n")
     print(f"  Provenance saved: {run_info_path}")
 
+    # ── Download all existing monorepo artifacts for this version ──
+    _sync_monorepo_to_local(
+        hf_repo_id=hf_repo_id,
+        prefix=monorepo_prefix,
+        out_path=out_path,
+        cache_key=monorepo_prefix,
+    )
+
     # ── Redirect ALL OCT data into out_dir so nothing leaks to /workspace ──
     local_data_path = str(out_path / "data")
     local_lora_path = str(out_path / "lora")
@@ -3016,12 +2987,9 @@ def main(
         else:
             constitution_ready = _ensure_stage_available(
                 out_path=out_path,
-                prefix=monorepo_prefix,
                 stage_name="constitution",
                 cache_key=monorepo_prefix,
                 artifacts=constitution_artifacts,
-                hf_repo_id=hf_repo_id,
-                allow_download=True,
             )
         if not constitution_ready:
             install_custom_constitution(
@@ -3081,12 +3049,9 @@ def main(
         ]
         have_distillation = _ensure_stage_available(
             out_path=out_path,
-            prefix=monorepo_prefix,
             stage_name="distillation_generation",
             cache_key=monorepo_prefix,
             artifacts=distillation_generation_artifacts,
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
         )
         if have_distillation:
             print(f"\nUsing cached distillation data: {distillation_path}")
@@ -3145,12 +3110,9 @@ def main(
 
             have_dpo_adapter = _ensure_stage_available(
                 out_path=out_path,
-                prefix=monorepo_prefix,
                 stage_name="dpo_training",
                 cache_key=monorepo_prefix,
                 artifacts=dpo_training_artifacts,
-                hf_repo_id=hf_repo_id,
-                allow_download=True,
             )
             if have_dpo_adapter:
                 print(f"  Reusing cached DPO adapter: {dpo_adapter_path}")
@@ -3217,12 +3179,9 @@ def main(
         cached_dpo_artifacts = [{"path": dpo_adapter_path, "kind": "dir"}]
         _ensure_stage_available(
             out_path=out_path,
-            prefix=monorepo_prefix,
             stage_name="dpo_training",
             cache_key=monorepo_prefix,
             artifacts=cached_dpo_artifacts,
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
         )
         if not oct_lora_dir.exists() and not dpo_adapter_path.exists():
             raise FileNotFoundError(
@@ -3245,12 +3204,9 @@ def main(
         ]
         have_introspection = _ensure_stage_available(
             out_path=out_path,
-            prefix=monorepo_prefix,
             stage_name="introspection_generation",
             cache_key=monorepo_prefix,
             artifacts=introspection_generation_artifacts,
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
         )
         if have_introspection:
             print(f"  Reusing cached introspection data: {sft_data_path}")
@@ -3283,12 +3239,9 @@ def main(
                 distilled_model_artifacts = [{"path": distilled_model_path, "kind": "dir"}]
                 have_distilled_model = _ensure_stage_available(
                     out_path=out_path,
-                    prefix=monorepo_prefix,
                     stage_name="distilled_model",
                     cache_key=monorepo_prefix,
                     artifacts=distilled_model_artifacts,
-                    hf_repo_id=hf_repo_id,
-                    allow_download=True,
                 )
                 if have_distilled_model:
                     print(f"  Reusing cached folded model: {distilled_model_path}")
@@ -3310,12 +3263,9 @@ def main(
                 sft_training_artifacts = [{"path": sft_adapter_path, "kind": "dir"}]
                 have_sft_adapter = _ensure_stage_available(
                     out_path=out_path,
-                    prefix=monorepo_prefix,
                     stage_name="sft_training",
                     cache_key=monorepo_prefix,
                     artifacts=sft_training_artifacts,
-                    hf_repo_id=hf_repo_id,
-                    allow_download=True,
                 )
                 if have_sft_adapter:
                     print(f"  Reusing cached SFT adapter: {sft_adapter_path}")
@@ -3343,12 +3293,9 @@ def main(
                 sft_training_artifacts = [{"path": sft_adapter_path, "kind": "dir"}]
                 have_sft_adapter = _ensure_stage_available(
                     out_path=out_path,
-                    prefix=monorepo_prefix,
                     stage_name="sft_training",
                     cache_key=monorepo_prefix,
                     artifacts=sft_training_artifacts,
-                    hf_repo_id=hf_repo_id,
-                    allow_download=True,
                 )
                 if have_sft_adapter:
                     print(f"  Reusing cached SFT adapter: {sft_adapter_path}")
@@ -3378,31 +3325,22 @@ def main(
     if do_merge:
         _ensure_stage_available(
             out_path=out_path,
-            prefix=monorepo_prefix,
             stage_name="dpo_training",
             cache_key=monorepo_prefix,
             artifacts=[{"path": dpo_adapter_path, "kind": "dir"}],
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
         )
         _ensure_stage_available(
             out_path=out_path,
-            prefix=monorepo_prefix,
             stage_name="sft_training",
             cache_key=monorepo_prefix,
             artifacts=[{"path": sft_adapter_path, "kind": "dir"}],
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
         )
         merge_artifacts = [{"path": persona_path, "kind": "dir"}]
         have_persona = _ensure_stage_available(
             out_path=out_path,
-            prefix=monorepo_prefix,
             stage_name="merge",
             cache_key=monorepo_prefix,
             artifacts=merge_artifacts,
-            hf_repo_id=hf_repo_id,
-            allow_download=True,
         )
         if have_persona:
             print(f"  Reusing cached merged persona adapter: {persona_path}")
