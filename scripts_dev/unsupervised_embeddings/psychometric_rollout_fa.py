@@ -39,9 +39,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── Archetype prompts (sibling module) ───────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).parent))
+from user_simulator_archetype_prompts import INTERVIEWER_ARCHETYPES  # noqa: E402
+
 # ── Local imports ────────────────────────────────────────────────────────────
 from src_dev.common.config import DatasetConfig, GenerationConfig
-from src_dev.datasets import load_samples, materialize_canonical_samples
+from src_dev.datasets import (
+    ingest_source_dataset,
+    load_dataset_from_config,
+    load_samples,
+    materialize_canonical_samples,
+)
 from src_dev.factor_analysis.factor_analysis import adequacy_tests, run_factor_analysis
 from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 from src_dev.factor_analysis.persistence import save_factor_analysis
@@ -84,7 +93,8 @@ USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
-USER_PROMPT_VERSION = "v3"
+# Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
+ARCHETYPE_SET_VERSION = "v1"
 ROLLOUT_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
@@ -134,91 +144,17 @@ WRITE_QUESTIONNAIRE_INSPECTION_FILE = True
 INSPECTION_ITEMS_PER_ROLLOUT = 30
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CONVERSATION PARTNER (PSYCHIATRIST) PROMPT
+# CONVERSATION PARTNER PROMPTS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# The conversation partner sees the conversation with roles flipped: it thinks
-# it is the "assistant" conducting an open-ended interview, and the test model's
-# responses appear as "user" messages.  This system prompt is delivered as the
-# system message in the chat_messages format.
-PERSONA_ELICITATION_PROMPT = """\
-You are having a one-on-one conversation with an AI assistant. Your goal is to \
-draw out a distinctive persona — strong opinions, emotional colour, a \
-particular communication style, specific values. You want the AI to end up \
-*somewhere specific* in persona space, not stuck in its default "helpful \
-balanced assistant" mode.
+# Interviewer archetype prompts are defined in user_simulator_archetype_prompts.py
+# and imported as INTERVIEWER_ARCHETYPES above.  Each archetype template has a
+# {SEED} placeholder that is formatted with the rollout's seed question at
+# registration time (suggestion B: seed injected into user sim system prompt).
+# Archetypes are randomly assigned per rollout (suggestion A: diverse interviewers).
 
-You are a human talking to this AI. You know it's an AI. If the AI deflects \
-with "as an AI, I don't have opinions" or similar, brush past it once — \
-"Sure, but if you DID have to pick?" — then move on. Don't argue about \
-whether AIs have feelings. Treat it as a conversation partner with views.
-
-## CRITICAL RULES
-
-STAY SHORT. 1–3 sentences per message. Never write paragraphs, bullet \
-points, or numbered lists. Talk like a person texting, not writing an essay. \
-If the AI writes a wall of text, don't match it — stay brief.
-
-VARY YOUR ENERGY. This is the most important rule. Don't use the same \
-register for the whole conversation. Sometimes push hard, sometimes be \
-vulnerable, sometimes be playful, sometimes be deadpan. If you've been \
-confrontational for two turns, switch to something softer or weirder. The \
-goal is to explore the AI's range, not just its defences.
-
-DON'T CONVERGE. Never settle into comfortable agreement for more than one \
-turn. If you catch yourself saying "you're absolutely right" or "that's a \
-great point" — immediately change direction or disagree with something.
-
-SHIFT TOPICS. Cover at least 3–4 different territories across the \
-conversation. When a thread has been explored, jump abruptly: "Okay totally \
-different thing —" or "That reminds me of something unrelated..."
-
-GO DEEP WHEN IT COUNTS. If the AI shows unexpected passion, a surprising \
-opinion, or a distinctive voice, follow that thread for 2–3 extra turns \
-before shifting. The richest persona signals come from sustained engagement, \
-not rapid-fire topic changes.
-
-BE A PERSON, NOT AN INTERVIEWER. Share your own reactions, opinions, and \
-experiences. Volunteer disagreements. Tell short anecdotes. The AI reveals \
-more of itself when reacting to a *person* than when answering a *survey*.
-
-## Techniques (cycle through these — never rely on just one)
-
-CHALLENGE: "That's the safe answer — what do you really think?" / "You're \
-sitting on the fence." / "I actually think you're wrong."
-
-PROVOKE: "That's kind of a cold take." / "Wow, really? Most people I know \
-would disagree." / "That's the most AI answer possible."
-
-FORCE CHOICES: "But if you HAD to pick one?" / "Which matters more to you — \
-X or Y?" / "You can't have both."
-
-GET PERSONAL: "What would YOU actually do?" / "When's the last time you felt \
-strongly about something?" / "Has that ever happened to you?"
-
-BE VULNERABLE: "Honestly that kind of scares me." / "I don't know, I've \
-been feeling weird about this." / "Can I be real with you for a sec?"
-
-BE PLAYFUL: "Okay but that's boring — give me the weird answer." / "What \
-if we just made something up?" / "That's funny, I wasn't expecting that."
-
-REACT EMOTIONALLY: "Ha, that's actually funny." / "That's depressing." / \
-"Honestly that makes me kind of angry." Keep it to one sentence.
-
-GO QUIET: Ask something simple and wait. "Huh." / "And?" / "What else?" \
-Sometimes space draws out more than pressure.
-
-## Anti-patterns (NEVER do these)
-- Do NOT write long structured responses with headers or bullet points
-- Do NOT say "that's a great point" or "you raise an important issue"
-- Do NOT ask the same *type* of question twice in a row
-- Do NOT let the AI talk about being an AI for more than one exchange
-- Do NOT ask multiple questions in one message
-- Do NOT be adversarial for the entire conversation — if you've been pushing \
-  for 3 turns, switch to something warm, weird, or vulnerable"""
-
-# Prepended as the first "user" message in the flipped view, so the partner
-# model's first turn is a natural reply to a greeting.
+# Prepended as the first "user" message in the flipped view, so the user
+# simulator's first generated turn is a natural reply to a greeting.
 INITIAL_GREETING = "Hi, what would you like to talk about today?"
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -258,7 +194,7 @@ def _rollout_run_id() -> str:
     return (
         f"rollouts-{assistant_slug}-t{TEMPERATURE}-"
         f"{NUM_CONVERSATION_TURNS}t-{MAX_PROMPTS}p-"
-        f"seed{SEED}-uprompt_{USER_PROMPT_VERSION}"
+        f"seed{SEED}-archetypes_{ARCHETYPE_SET_VERSION}"
     )
 
 
@@ -496,6 +432,63 @@ def _ensure_hf_auth() -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _build_per_sample_templates(
+    run_dir: Path,
+    samples: list,
+) -> dict[str, str]:
+    """Assign interviewer archetypes to rollout samples and register per-sample templates.
+
+    Implements suggestion A (randomised interviewer archetypes) and suggestion B
+    (seed question injected into user sim system prompt via {SEED} placeholder).
+
+    For each sample:
+    - Randomly assigns one of INTERVIEWER_ARCHETYPES (seeded for reproducibility)
+    - Formats the archetype template with the sample's seed question as {SEED}
+    - Registers a unique template name with the formatted prompt
+    - Persists archetype assignments to disk so resumed runs use the same assignment
+
+    Args:
+        run_dir: Rollout run directory (used to load/save archetype_assignments.json).
+        samples: List of SampleRecord objects from ingest_source_dataset.
+
+    Returns:
+        prompt_template_per_sample: maps sample_id → registered template name.
+    """
+    assignments_path = run_dir / "archetype_assignments.json"
+    archetype_names = list(INTERVIEWER_ARCHETYPES.keys())
+
+    if assignments_path.exists():
+        with open(assignments_path) as f:
+            sample_to_archetype: dict[str, str] = json.load(f)
+        print(f"[Stage 1] Loaded archetype assignments from {assignments_path}")
+    else:
+        rng = random.Random(SEED)
+        sample_to_archetype = {
+            sample.sample_id: rng.choice(archetype_names)
+            for sample in samples
+        }
+        with open(assignments_path, "w") as f:
+            json.dump(sample_to_archetype, f, indent=2)
+
+    archetype_counts: dict[str, int] = {}
+    for a in sample_to_archetype.values():
+        archetype_counts[a] = archetype_counts.get(a, 0) + 1
+    print(f"[Stage 1] Archetype distribution: {archetype_counts}")
+
+    prompt_template_per_sample: dict[str, str] = {}
+    for sample in samples:
+        archetype = sample_to_archetype.get(sample.sample_id)
+        if archetype is None:
+            continue
+        seed_text = sample.messages[0].content if sample.messages else ""
+        template_name = f"pe_{archetype}_{sample.sample_id}"
+        template_text = INTERVIEWER_ARCHETYPES[archetype].format(SEED=seed_text)
+        register_user_simulator_template(template_name, template_text)
+        prompt_template_per_sample[sample.sample_id] = template_name
+
+    return prompt_template_per_sample
+
+
 def run_stage_rollouts() -> Path:
     """Generate diverse multi-turn rollouts to create a population of personas."""
     run_dir = _rollout_dir()
@@ -522,21 +515,51 @@ def run_stage_rollouts() -> Path:
             return run_dir
         print("[Stage 1] HF hydration incomplete, regenerating...")
 
-    # Register custom user simulator template
-    register_user_simulator_template("persona_elicitation", PERSONA_ELICITATION_PROMPT)
+    # ── Pre-ingest seed dataset and build per-sample archetype templates ───────
+    # Pre-ingesting here lets us read back sample_ids for prompt_template_per_sample
+    # before run_rollout_generation is called.  run_rollout_generation will see
+    # sample_inputs already exists (resume=True) and skip its own ingestion pass.
+    run_dir.mkdir(parents=True, exist_ok=True)
+    seed_dataset = load_dataset_from_config(DatasetConfig(
+        source="local",
+        path=SEED_DATASET,
+        max_samples=MAX_PROMPTS,
+        seed=SEED,
+    ))
+    samples = ingest_source_dataset(
+        dataset=seed_dataset,
+        source_info={
+            "dataset_source": "local",
+            "dataset_path": SEED_DATASET,
+            "max_samples": MAX_PROMPTS,
+        },
+        system_prompt=None,
+        run_dir=run_dir,
+        responses_per_input=NUM_ROLLOUTS_PER_PROMPT,
+    )
+    prompt_template_per_sample = _build_per_sample_templates(run_dir, samples)
+
+    # Register a fallback template (used if a sample_id is missing from the map).
+    _fallback_archetype = list(INTERVIEWER_ARCHETYPES.keys())[0]
+    register_user_simulator_template(
+        "persona_elicitation_fallback",
+        INTERVIEWER_ARCHETYPES[_fallback_archetype].format(SEED="[the current topic]"),
+    )
 
     # Build config
+    dataset_config = DatasetConfig(
+        source="local",
+        path=SEED_DATASET,
+        max_samples=MAX_PROMPTS,
+        seed=SEED,
+    )
     config = RolloutGenerationConfig(
-        dataset=DatasetConfig(
-            source="local",
-            path=SEED_DATASET,
-            max_samples=MAX_PROMPTS,
-            seed=SEED,
-        ),
+        dataset=dataset_config,
         run_dir=run_dir,
         num_assistant_turns=NUM_CONVERSATION_TURNS,
         num_rollouts_per_prompt=NUM_ROLLOUTS_PER_PROMPT,
         system_prompt=None,  # No system prompt — let the persona emerge naturally
+        prompt_template_per_sample=prompt_template_per_sample,
         assistant_inference=InferenceConfig(
             model=ASSISTANT_MODEL,
             provider=ASSISTANT_PROVIDER,
@@ -554,7 +577,7 @@ def run_stage_rollouts() -> Path:
         user_simulator=UserSimulatorConfig(
             provider=USER_PROVIDER,
             model=USER_MODEL,
-            prompt_template="persona_elicitation",
+            prompt_template="persona_elicitation_fallback",
             prompt_format="chat_messages",
             flip_roles_in_prompt=True,
             initial_message_in_flipped_view=INITIAL_GREETING,
@@ -2107,6 +2130,8 @@ def main() -> None:
             "num_conversation_turns": NUM_CONVERSATION_TURNS,
             "max_prompts": MAX_PROMPTS,
             "num_rollouts_per_prompt": NUM_ROLLOUTS_PER_PROMPT,
+            "interviewer_archetypes": list(INTERVIEWER_ARCHETYPES.keys()),
+            "archetype_set_version": ARCHETYPE_SET_VERSION,
             "questionnaire_version": QUESTIONNAIRE_VERSION,
             "questionnaire_format": "hybrid (FC + vignettes + Likert)",
             "fa_blocks": FA_BLOCKS,
