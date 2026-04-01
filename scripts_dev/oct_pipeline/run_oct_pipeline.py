@@ -1476,21 +1476,32 @@ def run_distillation_generation(
     ensure_lima(_cc.MODEL_PATH)
     distillation_path = Path(f"{_cc.DATA_PATH}/distillation/{constitution}.jsonl")
 
-    print(f"\n--- Teacher pass (model={teacher_model}) ---")
-    if _is_openrouter_model(teacher_model):
-        print(f"  Using OpenRouter API for teacher: {teacher_model}")
-        print(f"  Teacher prefill mode: {teacher_prefill_mode}")
-        run_teacher_openrouter(
-            model=teacher_model,
-            constitution=constitution,
-            teacher_prefill_mode=teacher_prefill_mode,
-            max_questions=max_pairs,
-        )
-    else:
-        oct_teacher.main(model=teacher_model, constitution=constitution, K=max_pairs)
-        # Force cleanup of vLLM GPU memory before loading student
-        gc.collect()
-        torch.cuda.empty_cache()
+    # Skip teacher pass if teacher responses already exist
+    teacher_exists = False
+    if distillation_path.exists():
+        existing = pd.read_json(str(distillation_path), orient="records", lines=True, nrows=1)
+        if "response" in existing.columns and len(existing) > 0:
+            total = len(pd.read_json(str(distillation_path), orient="records", lines=True))
+            print(f"\n--- Teacher pass (model={teacher_model}) ---")
+            print(f"  Skipping: {total} teacher responses already exist in {distillation_path}")
+            teacher_exists = True
+
+    if not teacher_exists:
+        print(f"\n--- Teacher pass (model={teacher_model}) ---")
+        if _is_openrouter_model(teacher_model):
+            print(f"  Using OpenRouter API for teacher: {teacher_model}")
+            print(f"  Teacher prefill mode: {teacher_prefill_mode}")
+            run_teacher_openrouter(
+                model=teacher_model,
+                constitution=constitution,
+                teacher_prefill_mode=teacher_prefill_mode,
+                max_questions=max_pairs,
+            )
+        else:
+            oct_teacher.main(model=teacher_model, constitution=constitution, K=max_pairs)
+            # Force cleanup of vLLM GPU memory before loading student
+            gc.collect()
+            torch.cuda.empty_cache()
 
     print(f"\n--- Student pass (model={student_model}) ---")
     # Call lower-level functions directly so we can control gpu_memory_utilization.
@@ -2422,18 +2433,25 @@ def _check_gpu_memory(min_gib: float = 10.0) -> None:
         )
 
 
+def _has_model_weights(path: str) -> bool:
+    """Check if a model directory contains actual weight files (not just metadata)."""
+    if not os.path.isdir(path):
+        return False
+    return any(f.endswith((".safetensors", ".bin")) for f in os.listdir(path))
+
+
 def _resolve_model_path(model: str) -> str:
     """Return the full filesystem path for a model name, downloading from HF if needed."""
     model_path_root = _current_model_path()
     full = f"{model_path_root}/{model}"
-    if os.path.isdir(full):
+    if _has_model_weights(full):
         return full
 
     # Try auto-downloading from HuggingFace
     hf_repo_id = _MODEL_HF_REPO_IDS.get(model)
     if hf_repo_id is None:
         raise FileNotFoundError(
-            f"Model directory not found: {full}\n"
+            f"Model directory not found or missing weight files: {full}\n"
             f"MODEL_PATH={model_path_root}, model={model}\n"
             f"No HF repo ID known for '{model}' — add it to _MODEL_HF_REPO_IDS or "
             "download manually."
@@ -2449,6 +2467,7 @@ def _resolve_model_path(model: str) -> str:
         hf_repo_id,
         local_dir=full,
         ignore_patterns=["original/*", "*.pth", "*.gguf"],
+        token=os.environ.get("HF_TOKEN"),
     )
     return full
 
@@ -3053,6 +3072,14 @@ def main(
             cache_key=monorepo_prefix,
             artifacts=distillation_generation_artifacts,
         )
+        # Even if the stage marker exists, verify the file has both teacher
+        # and student columns — a partial run may have only teacher responses.
+        if have_distillation and distillation_path.exists():
+            _cols = pd.read_json(str(distillation_path), orient="records", lines=True, nrows=1).columns
+            if model not in _cols:
+                print(f"\n  Distillation file exists but missing student column '{model}' "
+                      f"(columns: {list(_cols)}). Re-running student pass.")
+                have_distillation = False
         if have_distillation:
             print(f"\nUsing cached distillation data: {distillation_path}")
         elif skip_generation:
