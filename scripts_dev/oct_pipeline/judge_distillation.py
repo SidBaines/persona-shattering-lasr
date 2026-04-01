@@ -241,32 +241,33 @@ def main() -> None:
     else:
         judge_llm_configs["default"] = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
 
-    # Run each trait × each judge LLM
-    for trait_judge_name in judge_names:
-        judge_cls = JUDGE_REGISTRY.get(trait_judge_name)
-        if judge_cls is None:
-            print(f"WARNING: Unknown judge '{trait_judge_name}', skipping.")
-            continue
+    # Build all tasks, then run in a single event loop
+    async def _run_all() -> None:
+        for trait_judge_name in judge_names:
+            judge_cls = JUDGE_REGISTRY.get(trait_judge_name)
+            if judge_cls is None:
+                print(f"WARNING: Unknown judge '{trait_judge_name}', skipping.")
+                continue
 
-        trait_label = trait_judge_name.replace("_v2", "")
+            trait_label = trait_judge_name.replace("_v2", "")
 
-        for rater_id, judge_llm_config in judge_llm_configs.items():
-            print(f"\n{'='*60}")
-            print(f"  Trait: {trait_label} | Judge: {rater_id} ({judge_llm_config.model})")
-            print(f"{'='*60}")
+            for rater_id, judge_llm_config in judge_llm_configs.items():
+                print(f"\n{'='*60}")
+                print(f"  Trait: {trait_label} | Judge: {rater_id} ({judge_llm_config.model})")
+                print(f"{'='*60}")
 
-            judge = judge_cls(judge_config=judge_llm_config)
-            rater_output_dir = Path(output_dir) / trait_label / rater_id
+                judge = judge_cls(judge_config=judge_llm_config)
+                rater_output_dir = Path(output_dir) / trait_label / rater_id
 
-            asyncio.run(
-                score_distillation_data(
+                await score_distillation_data(
                     data_path=data_path,
                     judge=judge,
                     output_dir=rater_output_dir,
                     max_samples=args.max_samples,
                     student_column=student_column,
                 )
-            )
+
+    asyncio.run(_run_all())
 
 
 if __name__ == "__main__":
