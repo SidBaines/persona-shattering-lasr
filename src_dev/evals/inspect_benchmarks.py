@@ -56,13 +56,15 @@ def _build_popqa_task(limit: int | None = None) -> Task:
 def _build_trait_sampled_task(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
-    max_tokens: int | None = None,
+    max_tokens: int | None = 32,
 ) -> Task:
     """Build a TRAIT task sampling evenly across selected trait splits.
 
     The standard personality_TRAIT task concatenates all splits then applies
     a global limit, so a small limit yields only the first trait (Openness).
     This builder caps each split independently before combining.
+
+    max_tokens defaults to 32 — TRAIT is MCQ so only a letter is needed.
     """
     import os
     from inspect_evals.personality.personality import (
