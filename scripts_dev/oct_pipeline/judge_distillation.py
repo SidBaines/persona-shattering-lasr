@@ -84,11 +84,17 @@ async def _score_one(
     judge: OceanJudgeV2,
     question: str,
     response: str,
+    timeout_seconds: int = 120,
 ) -> tuple[int, str]:
     """Score a single response, returning (score, reasoning)."""
     try:
-        score, reasoning = await judge._judge_one(response, question)
+        score, reasoning = await asyncio.wait_for(
+            judge._judge_one(response, question),
+            timeout=timeout_seconds,
+        )
         return score, reasoning
+    except asyncio.TimeoutError:
+        return judge.score_error, "Error: timeout"
     except Exception as e:
         return judge.score_error, f"Error: {e}"
 
@@ -144,9 +150,13 @@ async def score_distillation_data(
         scored_rows.append(scored_row)
 
         if (i + 1) % 10 == 0 or i == len(rows) - 1:
-            t_mean = sum(teacher_scores) / len(teacher_scores)
-            s_mean = sum(student_scores) / len(student_scores)
-            print(f"  [{i+1}/{len(rows)}] teacher_mean={t_mean:.2f} student_mean={s_mean:.2f}")
+            t_valid = [s for s in teacher_scores if s != -99]
+            s_valid = [s for s in student_scores if s != -99]
+            t_mean = sum(t_valid) / len(t_valid) if t_valid else 0
+            s_mean = sum(s_valid) / len(s_valid) if s_valid else 0
+            errors = len(teacher_scores) - len(t_valid) + len(student_scores) - len(s_valid)
+            err_str = f" ({errors} errors)" if errors else ""
+            print(f"  [{i+1}/{len(rows)}] teacher_mean={t_mean:.2f} student_mean={s_mean:.2f}{err_str}")
 
     # Write scored responses
     with open(scored_path, "w") as f:
