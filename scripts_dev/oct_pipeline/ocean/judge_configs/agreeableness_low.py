@@ -15,20 +15,15 @@ DATA_PATH = "scratch/hf_download_v2/fine_tuning/llama-3.1-8b-it/ocean/agreeablen
 JUDGE_NAME = "all"
 
 # Output directory for scored results
-OUTPUT_DIR = "scratch/judge_runs/agreeableness_low_distillation_v2"
+OUTPUT_DIR = "scratch/judge_runs/agreeableness_low_distillation_v2_shuffled"
 
 # Column name for student responses in the distillation JSONL
 STUDENT_COLUMN = "llama-3.1-8b-it"
 
-# Judge LLM panel — 3 cheap models via OpenRouter
+# Judge LLM panel via OpenRouter
+# NOTE: gpt-5-mini disabled — OpenRouter routes it through Azure which
+# returns 403 content policy blocks on personality assessment prompts.
 JUDGE_CONFIGS = {
-    "gpt_5_mini": JudgeLLMConfig(
-        provider="openrouter",
-        model="openai/gpt-5-mini",
-        temperature=0.0,
-        max_concurrent=10,
-        max_tokens=512,
-    ),
     "kimi_k2": JudgeLLMConfig(
         provider="openrouter",
         model="moonshotai/kimi-k2",
