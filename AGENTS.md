@@ -295,6 +295,67 @@ def run_inference(config: InferenceConfig, dataset: Dataset | None = None) -> tu
 
 ---
 
+## HuggingFace Monorepo
+
+All artifacts (adapters, eval results, stage markers) are stored in a shared HuggingFace dataset repo: **`persona-shattering-lasr/monorepo`**.
+
+### Path structure
+
+```
+persona-shattering-lasr/monorepo/
+  fine_tuning/
+    {model}/                          # e.g. llama-3.1-8b-it
+      {category}/                     # e.g. ocean
+        {trait}/                       # e.g. extraverted, neuroticism
+          {direction}/                 # e.g. amplifier, suppressor
+            v{version}/               # e.g. v1
+              lora/                    # LoRA adapters (dpo, sft, persona)
+              data/                    # Training data (distillation, introspection)
+              .oct_pipeline/stages/    # Stage completion markers
+              run_info.json            # Provenance metadata
+              evals/                   # Model-specific evals
+                mcq/trait/             # MCQ trait sweep results
+                mcq/mmlu/              # MMLU capability results
+  evals/
+    {eval_type}/                       # Cross-model or standalone evals
+      {run_name}/                      # e.g. neuro_x_consc_combos
+```
+
+### Where evals go
+
+- **Model-specific evals** (trait sweeps for a single adapter) → `fine_tuning/{model}/{category}/{trait}/{direction}/v{version}/evals/`
+- **Cross-model evals** (multi-adapter comparisons, combo studies) → `evals/` at the top level
+
+---
+
+## Confidence Intervals
+
+When computing confidence intervals for eval metrics, use the appropriate method for the data type:
+
+- **Binary data (MCQ accuracy, 0/1 trait scores)** → use **Wilson score interval** (`ci_from_wilson`). Standard bootstrap and normal approximations give poor coverage when the proportion is near 0 or 1. Wilson handles this correctly.
+- **Continuous data (LLM judge scores, rollout metrics)** → use **BCa bootstrap** (`ci_from_bootstrap`). Makes no distributional assumptions about the data.
+- **Avoid** the naive `1.96 * std / sqrt(n)` normal approximation — it assumes normality and gives symmetric intervals that can extend below 0 or above 1 for proportions.
+
+These methods are available via `IntervalMethod` in `src_dev/evals/personality/analyze_results.py`:
+
+```python
+from src_dev.evals.personality.analyze_results import IntervalMethod
+
+# For binary MCQ data
+wilson = IntervalMethod(method="ci_from_wilson", confidence=95)
+
+# For continuous judge scores
+bootstrap = IntervalMethod(method="ci_from_bootstrap", confidence=95, n_resamples=1000)
+
+# Or from strings (e.g. in analyze_kwargs)
+IntervalMethod.from_str("ci95_from_wilson")
+IntervalMethod.from_str("ci95_from_bootstrap_1000")
+```
+
+The low-level functions `_interval_ci_from_wilson` and `_interval_ci_from_bootstrap` can also be used directly — both return `(ci_lower, ci_upper)` as absolute bounds.
+
+---
+
 ## Environment Variables
 
 API keys are loaded from `.env`:

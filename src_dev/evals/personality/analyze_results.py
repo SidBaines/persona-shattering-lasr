@@ -150,6 +150,70 @@ def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
     return scores, parse_rate
 
 
+def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list[float]] | None:
+    """Extract per-sample binary scores from an inspect log.
+
+    Handles two scoring conventions:
+
+    - **Personality evals** (trait, bfi): samples have ``metadata.trait`` and
+      ``metadata.answer_mapping``.  For each sample the inspect scorer parsed
+      (``value == "C"``), the chosen answer is mapped through
+      ``answer_mapping`` to get a trait score (0.0 or 1.0).
+    - **Capability evals** (mmlu, etc.): ``C`` = correct (1.0),
+      ``I`` = incorrect (0.0).  Scores are grouped under a single key
+      matching *eval_type* (e.g. ``"accuracy"``).
+
+    Args:
+        log_path: Path to the inspect log JSON.
+        eval_type: Eval type name, used to distinguish personality vs.
+            capability scoring and as the group key for capability evals.
+
+    Returns:
+        Dict mapping group name to list of per-sample scores (0.0/1.0), or
+        None if the log has no usable per-sample data.
+    """
+    with open(log_path) as f:
+        log = json.load(f)
+    if log.get("status") != "success":
+        return None
+    samples = log.get("samples")
+    if not samples:
+        return None
+
+    is_personality = eval_type in _PERSONALITY_EVALS
+    group_scores: dict[str, list[float]] = {}
+
+    for sample in samples:
+        meta = sample.get("metadata") or {}
+        for ev in sample.get("events", []):
+            if ev.get("event") != "score":
+                continue
+            score_data = ev.get("score", {})
+            value = score_data.get("value")
+
+            if is_personality:
+                # Trait/BFI: C means "parsed an answer", use answer_mapping
+                # for the actual trait score.
+                trait = meta.get("trait")
+                answer_mapping = meta.get("answer_mapping")
+                if not trait or not answer_mapping or value != "C":
+                    break
+                answer = score_data.get("answer")
+                if answer and answer in answer_mapping:
+                    group_scores.setdefault(trait, []).append(
+                        float(answer_mapping[answer])
+                    )
+            else:
+                # Capability: C = correct (1.0), I = incorrect (0.0)
+                if value == "C":
+                    group_scores.setdefault("accuracy", []).append(1.0)
+                elif value == "I":
+                    group_scores.setdefault("accuracy", []).append(0.0)
+            break
+
+    return group_scores if group_scores else None
+
+
 def _extract_scores_reparsed(log_path: Path, eval_type: str) -> tuple[dict[str, float], float] | None:
     """Like _extract_scores but recomputes trait scores using the fallback parser."""
     from src_dev.evals.personality.log_answer_parser import rescore_log
@@ -184,7 +248,13 @@ def _load_from_info(
         return None
     scores, parse_rate = result
     scale = info.get("scale")  # float | None; None = base model
-    return {"model": model, "run": run, "scale": scale, "_parse_rate": parse_rate, **scores}
+    rec: dict = {"model": model, "run": run, "scale": scale, "_parse_rate": parse_rate, **scores}
+    # Always try to extract raw per-sample scores for CI methods that need them
+    raw = _extract_raw_sample_scores(Path(log_path), eval_type)
+    if raw:
+        for group, sample_scores in raw.items():
+            rec[f"_raw_{group}"] = sample_scores
+    return rec
 
 
 def _parse_scale(model_name: str) -> float | None:
@@ -259,7 +329,7 @@ def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
                 rec = _load_from_info(
                     info_path, model, run_label,
                     reparse=(reparse and is_personality),
-                    eval_type=eval_name if is_personality else "bfi",
+                    eval_type=eval_name,
                 )
                 if rec:
                     records[eval_name].append(rec)
@@ -421,6 +491,11 @@ class IntervalMethod:
         )
 
     @property
+    def needs_raw_scores(self) -> bool:
+        """Whether this method requires raw per-sample scores (``_raw_{col}`` columns)."""
+        return self.method in ("ci_from_wilson", "ci_from_bootstrap")
+
+    @property
     def label(self) -> str:
         """Human-readable label for plot legends."""
         if self.method == "std":
@@ -570,12 +645,15 @@ def _agg_sweep(
     Symmetric methods produce a single ``{col}_ci`` column (half-width).
     Asymmetric methods (Wilson, bootstrap) produce ``{col}_ci_low`` and
     ``{col}_ci_high`` columns with absolute bounds.
+
+    Methods with :pyattr:`IntervalMethod.needs_raw_scores` (Wilson, bootstrap)
+    compute CIs from the raw per-sample scores in ``_raw_{col}`` list columns
+    (populated by :func:`_load_from_info`).  A ``ValueError`` is raised if
+    these columns are missing.
     """
     interval_fn = _resolve_interval_fn(interval) if interval is not None else None
-    asymmetric = interval is not None and interval.method in (
-        "ci_from_wilson",
-        "ci_from_bootstrap",
-    )
+    needs_raw = interval is not None and interval.needs_raw_scores
+    asymmetric = needs_raw  # raw-score methods always produce asymmetric bounds
     rows = []
     for scale, grp in df.groupby("scale"):
         row: dict = {"scale": scale}
@@ -593,20 +671,35 @@ def _agg_sweep(
             mean = vals.mean() if len(vals) else float("nan")
             row[f"{col}_mean"] = mean
             if interval_fn is not None:
-                result = interval_fn(vals)
-                if asymmetric:
-                    low, high = result  # type: ignore[misc]
-                    row[f"{col}_ci_low"] = low
-                    row[f"{col}_ci_high"] = high
+                if needs_raw:
+                    raw_col = f"_raw_{col}"
+                    if raw_col not in grp.columns:
+                        raise ValueError(
+                            f"Interval method {interval.method!r} requires raw per-sample "
+                            f"scores in column '{raw_col}', but it is not present. "
+                            f"Raw scores are only available for evals that produce "
+                            f"per-sample data in their inspect logs."
+                        )
+                    # Concatenate raw score lists across all runs in this group
+                    raw_lists = grp[raw_col].dropna().tolist()
+                    raw_all = np.concatenate(raw_lists) if raw_lists else np.array([])
+                    if len(raw_all) == 0:
+                        row[f"{col}_ci_low"] = float("nan")
+                        row[f"{col}_ci_high"] = float("nan")
+                    else:
+                        low, high = interval_fn(raw_all)  # type: ignore[misc]
+                        row[f"{col}_ci_low"] = low
+                        row[f"{col}_ci_high"] = high
                 else:
-                    row[f"{col}_ci"] = result
+                    row[f"{col}_ci"] = interval_fn(vals)
         rows.append(row)
     return pd.DataFrame(rows).sort_values("scale").reset_index(drop=True)
 
 
 def _metric_cols(df: pd.DataFrame) -> list[str]:
     """Return metric columns from a sweep DataFrame (everything except housekeeping cols)."""
-    return [c for c in df.columns if c not in ("model", "run", "scale", "_parse_rate")]
+    return [c for c in df.columns if c not in ("model", "run", "scale", "_parse_rate", "stderr")
+            and not c.startswith("_raw_")]
 
 
 # ---------------------------------------------------------------------------
@@ -714,8 +807,18 @@ def _draw_error_bars(
     (*ci_low*, *ci_high*).  No-op if all intervals are zero-width.
     """
     if ci_low is not None and ci_high is not None:
-        means_arr = np.array(means)
-        yerr = np.array([means_arr - np.array(ci_low), np.array(ci_high) - means_arr])
+        means_arr = np.array(means, dtype=float)
+        lo = np.array(ci_low, dtype=float)
+        hi = np.array(ci_high, dtype=float)
+        # Mask out points where mean or bounds are nan
+        valid = np.isfinite(means_arr) & np.isfinite(lo) & np.isfinite(hi)
+        if not np.any(valid):
+            return
+        yerr = np.array([means_arr - lo, hi - means_arr])
+        # Clamp to non-negative (floating-point arithmetic can produce tiny
+        # negative values when mean ≈ bound) and zero out nan points.
+        np.clip(yerr, 0.0, None, out=yerr)
+        yerr[:, ~valid] = 0.0
         if not np.any(yerr > 0):
             return
     elif cis is not None:
