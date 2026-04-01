@@ -46,6 +46,7 @@ from user_simulator_archetype_prompts import INTERVIEWER_ARCHETYPES  # noqa: E40
 
 # ── Local imports ────────────────────────────────────────────────────────────
 from src_dev.common.config import DatasetConfig, GenerationConfig
+from src_dev.common.conversation_runtime import chunked
 from src_dev.datasets import (
     ingest_source_dataset,
     load_dataset_from_config,
@@ -123,6 +124,12 @@ QUESTIONNAIRE_TIMEOUT = 60
 # Set to "vllm" to run locally on GPU with automatic prefix caching.
 QUESTIONNAIRE_PROVIDER = ASSISTANT_PROVIDER  # "vllm" for local GPU inference
 QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
+# vLLM-only: how many personas to stack into one questionnaire super-batch.
+# Each persona still contributes all pending questionnaire items, so the total
+# prompt count in one vLLM call is roughly:
+#   personas_per_batch * pending_items_per_persona
+# Non-vLLM providers ignore this and stay persona-at-a-time.
+QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 4
 # vLLM memory utilisation — higher = more KV cache slots (good for prefix caching).
 QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 
@@ -1016,13 +1023,14 @@ async def _apply_questionnaire_async(
 ) -> tuple[np.ndarray, list[dict]]:
     """Apply questionnaire items to all rollouts and produce the response matrix.
 
-    Loop order is **persona-first**: for each persona k, all questionnaire items
-    are batched together. This maximises KV-cache prefix reuse when running with
-    vLLM's automatic prefix caching, since every prompt for persona k shares the
-    same long conversation prefix and differs only in the short trailing question.
+    Loop order is **persona-major**: questionnaire items remain grouped by
+    persona so prompts sharing the same conversation prefix stay adjacent.
 
-    For remote providers the loop order has negligible performance difference, so
-    persona-first is used unconditionally.
+    For remote/API providers, processing stays one persona at a time. For vLLM
+    only, multiple personas can be stacked into one super-batch, while still
+    including all pending questionnaire items for each persona in that batch.
+    This trades some prefix-cache locality for better GPU utilisation and is
+    controlled by ``QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH``.
 
     Args:
         rollout_dir: Path to the rollout run directory.
@@ -1152,36 +1160,60 @@ async def _apply_questionnaire_async(
     )
     provider = get_provider(QUESTIONNAIRE_PROVIDER, questionnaire_config)
 
-    # Process one persona at a time (all items per persona).
-    # This ordering maximises vLLM prefix-cache reuse: every prompt for persona k
-    # shares the same conversation prefix and differs only in the trailing question.
-    # raw_responses.jsonl is kept open for the full stage and flushed after each
-    # persona — safe for resume; failures are also written so the file is the
-    # sole source of truth.
+    # Process questionnaire prompts in persona-major order. For remote/API
+    # providers we keep the current one-persona-at-a-time loop. For vLLM only,
+    # we optionally stack multiple personas into one super-batch to improve GPU
+    # utilisation while preserving question batching within each persona.
+    persona_batch_size = 1
+    if QUESTIONNAIRE_PROVIDER == "vllm":
+        persona_batch_size = max(1, QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH)
+        print(
+            "[Stage 2] vLLM persona stacking enabled: "
+            f"{persona_batch_size} persona(s) per batch"
+        )
+    else:
+        print(
+            "[Stage 2] Persona stacking disabled for provider "
+            f"{QUESTIONNAIRE_PROVIDER!r}; using 1 persona per batch"
+        )
+
+    # raw_responses.jsonl is kept open for the full stage and flushed after
+    # each persona batch — safe for resume; failures are also written so the
+    # file is the sole source of truth.
     with open(raw_responses_log, "a", encoding="utf-8") as log_fh:
-        for k in range(K):
-            pending_items = [
-                (item_idx, item) for item_idx, item in enumerate(items)
-                if (k, item["id"]) not in completed_cells
-            ]
-            if not pending_items:
+        persona_batches = chunked(list(range(K)), persona_batch_size)
+        for batch_idx, persona_batch in enumerate(persona_batches, start=1):
+            pending_entries: list[tuple[int, dict]] = []
+            prompts: list[PromptInput] = []
+            active_personas: list[int] = []
+
+            for k in persona_batch:
+                pending_items = [
+                    (item_idx, item) for item_idx, item in enumerate(items)
+                    if (k, item["id"]) not in completed_cells
+                ]
+                if not pending_items:
+                    continue
+                active_personas.append(k)
+                for _item_idx, item in pending_items:
+                    pending_entries.append((k, item))
+                    prompts.append(_build_questionnaire_messages(conversations[k], item))
+
+            if not prompts:
                 continue
 
-            # Build all prompts for this persona — shared prefix, different questions
-            prompts: list[PromptInput] = [
-                _build_questionnaire_messages(conversations[k], item)
-                for _, item in pending_items
-            ]
+            responses, _usage, _failed = await provider.generate_batch_with_metadata_async(
+                prompts
+            )
 
-            responses, _usage, _failed = await provider.generate_batch_with_metadata_async(prompts)
-
-            # Parse and record; collect items needing a retry
-            retry_needed: list[tuple[int, dict, str]] = []  # (item_idx, item, prev_raw)
-            for (item_idx, item), raw_text in zip(pending_items, responses):
+            # Parse and record; collect items needing a retry. For vLLM, this
+            # retry pass is also persona-stacked within the current batch.
+            retry_needed: list[tuple[int, dict, str]] = []
+            for (k, item), raw_text in zip(pending_entries, responses):
                 item_id = item["id"]
                 choice = _parse_item_response(item, raw_text)
                 if choice is None and raw_text:
-                    retry_needed.append((item_idx, item, raw_text))
+                    retry_needed.append((k, item, raw_text))
                 elif choice is not None:
                     _record_response(
                         response_matrix, k, item, choice, raw_text,
@@ -1190,30 +1222,43 @@ async def _apply_questionnaire_async(
                     )
                     completed_cells.add((k, item_id))
                 else:
-                    # Empty response — log as failure
-                    parse_failures.append({"k": k, "item_id": item_id, "raw_response": raw_text})
+                    parse_failures.append(
+                        {"k": k, "item_id": item_id, "raw_response": raw_text}
+                    )
                     completed_cells.add((k, item_id))
-                    log_fh.write(json.dumps({
-                        "k": k, "item_id": item_id, "item_type": item["type"],
-                        "parsed_choice": None, "raw": raw_text,
-                    }, ensure_ascii=False) + "\n")
+                    log_fh.write(
+                        json.dumps(
+                            {
+                                "k": k,
+                                "item_id": item_id,
+                                "item_type": item["type"],
+                                "parsed_choice": None,
+                                "raw": raw_text,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
 
-            # Retry with stricter prompt
             for _attempt in range(MAX_PARSE_RETRIES):
                 if not retry_needed:
                     break
                 retry_prompts: list[PromptInput] = []
-                for _item_idx, item, prev_raw in retry_needed:
+                for k, item, prev_raw in retry_needed:
                     msgs = list(conversations[k])
                     msgs.append({"role": "user", "content": _build_item_prompt(item)})
                     msgs.append({"role": "assistant", "content": prev_raw})
                     msgs.append({"role": "user", "content": _retry_message(item)})
                     retry_prompts.append(msgs)
 
-                retry_responses, _, _ = await provider.generate_batch_with_metadata_async(retry_prompts)
+                retry_responses, _, _ = await provider.generate_batch_with_metadata_async(
+                    retry_prompts
+                )
 
                 still_needed: list[tuple[int, dict, str]] = []
-                for (_item_idx, item, _prev_raw), retry_text in zip(retry_needed, retry_responses):
+                for (k, item, _prev_raw), retry_text in zip(
+                    retry_needed, retry_responses
+                ):
                     choice = _parse_item_response(item, retry_text)
                     if choice is not None:
                         _record_response(
@@ -1223,24 +1268,40 @@ async def _apply_questionnaire_async(
                         )
                         completed_cells.add((k, item["id"]))
                     else:
-                        still_needed.append((_item_idx, item, retry_text))
+                        still_needed.append((k, item, retry_text))
                 retry_needed = still_needed
 
-            # Log remaining failures then flush to disk (crash-safe per persona)
-            for _item_idx, item, raw_text in retry_needed:
+            for k, item, raw_text in retry_needed:
                 item_id = item["id"]
-                parse_failures.append({"k": k, "item_id": item_id, "raw_response": raw_text})
+                parse_failures.append(
+                    {"k": k, "item_id": item_id, "raw_response": raw_text}
+                )
                 completed_cells.add((k, item_id))
-                log_fh.write(json.dumps({
-                    "k": k, "item_id": item_id, "item_type": item["type"],
-                    "parsed_choice": None, "raw": raw_text,
-                }, ensure_ascii=False) + "\n")
+                log_fh.write(
+                    json.dumps(
+                        {
+                            "k": k,
+                            "item_id": item_id,
+                            "item_type": item["type"],
+                            "parsed_choice": None,
+                            "raw": raw_text,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
 
             log_fh.flush()
 
             done = len(completed_cells)
             total = K * N_items
-            print(f"[Stage 2] Persona {k + 1}/{K} done | {done}/{total} ({done/total*100:.1f}%)")
+            batch_start = active_personas[0] + 1
+            batch_end = active_personas[-1] + 1
+            print(
+                f"[Stage 2] Persona batch {batch_idx}/{len(persona_batches)} "
+                f"({batch_start}-{batch_end}/{K}) done | "
+                f"{done}/{total} ({done/total*100:.1f}%)"
+            )
 
     # Save outputs
     np.save(output_dir / "response_matrix.npy", response_matrix)
