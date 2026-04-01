@@ -63,7 +63,7 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait",
             benchmark="personality_trait_sampled",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "max_tokens": 32},
             n_runs=1,
         ),
     ],
