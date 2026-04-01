@@ -763,7 +763,7 @@ def run_stage_rollouts(
     )
     prompt_template_per_sample: dict[str, str] = {}
     user_prompt_template = "persona_elicitation"
-    user_sim_max_concurrent = 16
+    user_sim_max_concurrent = USER_SIM_MAX_CONCURRENT
 
     if _current_user_simulator_mode() == "legacy":
         register_user_simulator_template(
@@ -789,7 +789,6 @@ def run_stage_rollouts(
         )
         prompt_template_per_sample = _build_per_sample_templates(run_dir, samples)
         user_prompt_template = "__unused__"
-        user_sim_max_concurrent = USER_SIM_MAX_CONCURRENT
 
     # Build config
     config = RolloutGenerationConfig(
