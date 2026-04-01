@@ -2618,9 +2618,13 @@ def _build_run_identity(
     oct_dpo_micro_batch_size: int | None,
     oct_sft_micro_batch_size: int | None,
 ) -> tuple[dict, str, str]:
-    """Build the semantic run config, its hash, and a stable run id."""
+    """Build the semantic run config, its hash, and a stable run id.
+
+    Runtime-only execution knobs are intentionally excluded so they do not
+    fork run identity.
+    """
     config_payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "model": model,
         "constitution": constitution,
         "teacher_model": teacher_model,
@@ -2642,10 +2646,6 @@ def _build_run_identity(
         "custom_constitution_sha256": _custom_constitution_digest(custom_constitution),
         "expand_questions": expand_questions,
         "expand_model": expand_model if expand_questions else None,
-        "vllm_gpu_memory_utilization": vllm_gpu_memory_utilization,
-        "torch_memory_fraction": torch_memory_fraction,
-        "oct_dpo_micro_batch_size": oct_dpo_micro_batch_size,
-        "oct_sft_micro_batch_size": oct_sft_micro_batch_size,
     }
     config_hash = hashlib.sha256(
         _canonical_json_dumps(config_payload).encode("utf-8")
@@ -3066,7 +3066,15 @@ def main(
     run_config_path = _ensure_run_config(out_path, run_id, config_hash, config_payload)
 
     # Save provenance metadata
-    run_info = _build_run_info(config_payload)
+    run_info = _build_run_info(
+        {
+            **config_payload,
+            "vllm_gpu_memory_utilization": vllm_gpu_memory_utilization,
+            "torch_memory_fraction": torch_memory_fraction,
+            "oct_dpo_micro_batch_size": oct_dpo_micro_batch_size,
+            "oct_sft_micro_batch_size": oct_sft_micro_batch_size,
+        }
+    )
     run_info_path = out_path / "run_info.json"
     run_info_path.write_text(json.dumps(run_info, indent=2) + "\n")
     print(f"  Provenance saved: {run_info_path}")
