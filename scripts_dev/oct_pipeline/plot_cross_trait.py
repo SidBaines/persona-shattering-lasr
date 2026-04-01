@@ -102,7 +102,7 @@ def plot_cross_trait(
                 f"{mean:.1f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
 
     ax.set_ylabel("Mean Judge Score (-4 to +4)")
-    ax.set_title(f"Cross-Trait Analysis: {target_trait.capitalize()} Suppressor Distillation Data")
+    ax.set_title(f"Cross-Trait Analysis: {target_trait.capitalize()} Distillation Data")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{OCEAN_SHORT[t]}\n({t})" for t in traits])
     ax.legend()
