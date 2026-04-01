@@ -111,8 +111,10 @@ async def score_distillation_data(
     with open(data_path) as f:
         rows = [json.loads(line) for line in f]
 
-    if max_samples:
-        rows = rows[:max_samples]
+    if max_samples and max_samples < len(rows):
+        import random
+        rng = random.Random(42)
+        rows = rng.sample(rows, max_samples)
 
     print(f"Scoring {len(rows)} distillation pairs...")
     print(f"  Judge: {judge._judge_config.provider}/{judge._judge_config.model}")
