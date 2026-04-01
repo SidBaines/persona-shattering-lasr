@@ -1,28 +1,33 @@
-"""Score OCT distillation data with an OCEAN LLM judge.
+"""Score OCT distillation data with OCEAN LLM judges.
 
 Evaluates both teacher (chosen) and student (rejected) responses from a
-distillation JSONL file, producing per-response scores and aggregate
-statistics. Useful for validating training data quality before DPO training.
+distillation JSONL file across one or more OCEAN traits, using a panel of
+LLM judges. Useful for:
+  - Validating training data quality before DPO training
+  - Checking whether targeting one trait bleeds into other OCEAN dimensions
+  - Comparing teacher model baseline psychometrics vs student model
 
 Usage:
-    # Score A-minus distillation data with default judge (anthropic/claude-sonnet-4-20250514)
+    # Score on all 5 OCEAN traits with the judge panel from the config
     uv run python scripts_dev/oct_pipeline/judge_distillation.py \
         --config scripts_dev/oct_pipeline/ocean/judge_configs/agreeableness_low.py
 
-    # Override judge model
+    # Score all traits with --all-ocean flag (overrides config JUDGE_NAME)
     uv run python scripts_dev/oct_pipeline/judge_distillation.py \
         --config scripts_dev/oct_pipeline/ocean/judge_configs/agreeableness_low.py \
-        --judge-model gpt-4o --judge-provider openai
+        --all-ocean
 
-    # Limit to N samples for a quick check
+    # Quick check on a subset
     uv run python scripts_dev/oct_pipeline/judge_distillation.py \
         --config scripts_dev/oct_pipeline/ocean/judge_configs/agreeableness_low.py \
         --max-samples 20
 
 Outputs:
     <output_dir>/
-        scored_responses.jsonl   — per-response scores and reasoning
-        summary.json             — aggregate stats (mean, std, distribution)
+        <trait>/
+            <rater_id>/
+                scored_responses.jsonl   — per-response scores and reasoning
+                summary.json             — aggregate stats (mean, std, distribution)
 """
 
 from __future__ import annotations
@@ -46,6 +51,9 @@ from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.metrics.ocean_v2 import (
     AgreeablenessV2Evaluation,
     ConscientiousnessV2Evaluation,
+    ExtraversionV2Evaluation,
+    NeuroticismV2Evaluation,
+    OpennessV2Evaluation,
     OceanJudgeV2,
 )
 
@@ -56,7 +64,12 @@ from src_dev.persona_metrics.metrics.ocean_v2 import (
 JUDGE_REGISTRY: dict[str, type[OceanJudgeV2]] = {
     "agreeableness_v2": AgreeablenessV2Evaluation,
     "conscientiousness_v2": ConscientiousnessV2Evaluation,
+    "extraversion_v2": ExtraversionV2Evaluation,
+    "neuroticism_v2": NeuroticismV2Evaluation,
+    "openness_v2": OpennessV2Evaluation,
 }
+
+ALL_OCEAN_JUDGES = list(JUDGE_REGISTRY.keys())
 
 
 def _load_config_module(path: str) -> ModuleType:
@@ -184,63 +197,76 @@ async def score_distillation_data(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Score OCT distillation data with an OCEAN LLM judge panel.",
+        description="Score OCT distillation data with OCEAN LLM judge(s).",
     )
     parser.add_argument("--config", required=True, help="Path to a Python config file")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit to N samples")
     parser.add_argument("--judge-provider", default=None, help="Override judge provider (single-judge mode)")
     parser.add_argument("--judge-model", default=None, help="Override judge model (single-judge mode)")
+    parser.add_argument("--all-ocean", action="store_true",
+                        help="Score on all 5 OCEAN traits (overrides JUDGE_NAME in config)")
     args = parser.parse_args()
 
     config = _load_config_module(args.config)
 
     # Required config attributes
     data_path = Path(config.DATA_PATH)
-    judge_name = config.JUDGE_NAME
     output_dir = Path(config.OUTPUT_DIR)
 
     # Optional config attributes
     student_column = getattr(config, "STUDENT_COLUMN", "llama-3.1-8b-it")
 
-    # Instantiate judge class
-    judge_cls = JUDGE_REGISTRY.get(judge_name)
-    if judge_cls is None:
-        raise ValueError(f"Unknown judge: {judge_name}. Available: {list(JUDGE_REGISTRY.keys())}")
+    # Determine which OCEAN traits to judge
+    if args.all_ocean:
+        judge_names = ALL_OCEAN_JUDGES
+    else:
+        judge_name = config.JUDGE_NAME
+        if judge_name == "all":
+            judge_names = ALL_OCEAN_JUDGES
+        else:
+            judge_names = [judge_name]
 
-    # Determine judge configs: panel (JUDGE_CONFIGS dict) or single (JUDGE_CONFIG)
-    judge_configs: dict[str, JudgeLLMConfig] = {}
+    # Determine judge LLM configs: panel (JUDGE_CONFIGS dict) or single (JUDGE_CONFIG)
+    judge_llm_configs: dict[str, JudgeLLMConfig] = {}
 
     if args.judge_provider or args.judge_model:
-        # CLI override → single judge mode
         cfg = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
         if args.judge_provider:
             cfg = cfg.model_copy(update={"provider": args.judge_provider})
         if args.judge_model:
             cfg = cfg.model_copy(update={"model": args.judge_model})
-        judge_configs["cli_override"] = cfg
+        judge_llm_configs["cli_override"] = cfg
     elif hasattr(config, "JUDGE_CONFIGS"):
-        judge_configs = config.JUDGE_CONFIGS
+        judge_llm_configs = config.JUDGE_CONFIGS
     else:
-        judge_configs["default"] = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
+        judge_llm_configs["default"] = getattr(config, "JUDGE_CONFIG", JudgeLLMConfig())
 
-    # Run each judge
-    for rater_id, judge_config in judge_configs.items():
-        print(f"\n{'='*60}")
-        print(f"  Judge: {rater_id} ({judge_config.provider}/{judge_config.model})")
-        print(f"{'='*60}")
+    # Run each trait × each judge LLM
+    for trait_judge_name in judge_names:
+        judge_cls = JUDGE_REGISTRY.get(trait_judge_name)
+        if judge_cls is None:
+            print(f"WARNING: Unknown judge '{trait_judge_name}', skipping.")
+            continue
 
-        judge = judge_cls(judge_config=judge_config)
-        rater_output_dir = Path(output_dir) / rater_id
+        trait_label = trait_judge_name.replace("_v2", "")
 
-        asyncio.run(
-            score_distillation_data(
-                data_path=data_path,
-                judge=judge,
-                output_dir=rater_output_dir,
-                max_samples=args.max_samples,
-                student_column=student_column,
+        for rater_id, judge_llm_config in judge_llm_configs.items():
+            print(f"\n{'='*60}")
+            print(f"  Trait: {trait_label} | Judge: {rater_id} ({judge_llm_config.model})")
+            print(f"{'='*60}")
+
+            judge = judge_cls(judge_config=judge_llm_config)
+            rater_output_dir = Path(output_dir) / trait_label / rater_id
+
+            asyncio.run(
+                score_distillation_data(
+                    data_path=data_path,
+                    judge=judge,
+                    output_dir=rater_output_dir,
+                    max_samples=args.max_samples,
+                    student_column=student_column,
+                )
             )
-        )
 
 
 if __name__ == "__main__":
