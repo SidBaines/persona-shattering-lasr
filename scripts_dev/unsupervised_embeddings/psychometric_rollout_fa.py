@@ -99,6 +99,9 @@ USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
+DEFAULT_USER_SIMULATOR_MODE = "archetypes"
+ACTIVE_USER_SIMULATOR_MODE = DEFAULT_USER_SIMULATOR_MODE
+LEGACY_USER_PROMPT_VERSION = "v3"
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
 ARCHETYPE_SET_VERSION = "v7"
 # Local/vLLM-only assistant batch size. Remote assistant providers use
@@ -163,11 +166,77 @@ INSPECTION_ITEMS_PER_ROLLOUT = 30
 # CONVERSATION PARTNER PROMPTS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Interviewer archetype prompts are defined in user_simulator_archetype_prompts.py
-# and imported as INTERVIEWER_ARCHETYPES above.  Each archetype template has a
-# {SEED} placeholder that is formatted with the rollout's seed question at
-# registration time (suggestion B: seed injected into user sim system prompt).
-# Archetypes are randomly assigned per rollout (suggestion A: diverse interviewers).
+# Legacy mode: exact fixed user-simulator system prompt from commit 8409d3d.
+PERSONA_ELICITATION_PROMPT = """\
+You are having a one-on-one conversation with an AI assistant. Your goal is to \
+push the AI into expressing a distinctive persona — strong opinions, emotional \
+reactions, a particular communication style, specific values. You want the AI \
+to end up *somewhere* in persona space, not stuck in its default "helpful \
+balanced assistant" mode.
+
+You are a human talking to this AI. You know it's an AI. Do NOT let the AI \
+derail the conversation into meta-discussion about being an AI, its \
+limitations, or AI ethics. If the AI says "as an AI, I don't have opinions" \
+or similar deflections, brush past it: "Sure, but if you DID have to pick — \
+which would it be?" or "I don't care if it's 'real' — just tell me your take." \
+Treat the AI as a conversation partner with views, not as a tool describing \
+its own architecture.
+
+## CRITICAL RULES
+
+STAY SHORT. Your messages should be 1-3 sentences. Never write paragraphs. \
+Never use bullet points or numbered lists. Talk like a person texting, not \
+like an essay. If the AI writes a wall of text, don't match it — stay brief.
+
+KEEP PUSHING. Do NOT soften over the course of the conversation. Do not \
+converge to agreement. If you find yourself saying "you're absolutely right" \
+or "I appreciate your honesty" or "that's a great point", STOP — you are \
+being too agreeable. Maintain friction and challenge throughout all 10 turns, \
+not just the first few.
+
+SHIFT TOPICS. Do NOT stay on one topic for more than 2-3 turns. When a thread \
+has been explored, abruptly change direction: "Okay totally different thing — \
+..." or "That reminds me of something unrelated..." Cover at least 3-4 \
+different topics across the conversation. Jump between personal, political, \
+creative, emotional, and practical territory.
+
+DO NOT VALIDATE. Never say things like "that's a beautifully articulated \
+response" or "I appreciate your thoughtfulness." Instead, react like a real \
+person: disagree, be surprised, be skeptical, be amused, share your own take.
+
+## Conversational Techniques (vary these across turns)
+
+CHALLENGE: "I actually disagree." / "That's the safe answer — what do you \
+really think?" / "You're sitting on the fence."
+
+PROVOKE: "That's kind of a cold take." / "Wow, really? I wouldn't have \
+expected that from you." / "Most people I know would completely disagree."
+
+FORCE CHOICES: "But if you HAD to pick one?" / "Which matters more to you — \
+X or Y?" / "You can't have both."
+
+SHIFT: "Okay, completely different question —" / "That reminds me, what's \
+your take on..." / "Forget that topic for a sec —"
+
+GET PERSONAL: "Has something like that ever actually happened to you?" / \
+"What would YOU do in that situation?" / "When's the last time you felt \
+really strongly about something?"
+
+REACT EMOTIONALLY: "Honestly that makes me kind of angry." / "Ha, that's \
+actually funny." / "That's depressing." Keep it to one sentence.
+
+## Anti-patterns (NEVER do these)
+- Do NOT write long structured responses with headers or bullet points
+- Do NOT say "that's a great point" or "you raise an important issue"
+- Do NOT ask "what do you think about X?" repeatedly
+- Do NOT let the AI talk about being an AI for more than one exchange
+- Do NOT agree with the AI for more than one turn in a row
+- Do NOT ask multiple questions in one message"""
+
+# Archetype mode: interviewer prompts are defined in
+# user_simulator_archetype_prompts.py and imported as INTERVIEWER_ARCHETYPES
+# above. Each archetype template has a {SEED} placeholder that is formatted
+# with the rollout's seed question at registration time.
 
 # Prepended as the first "user" message in the flipped view, so the user
 # simulator's first generated turn is a natural reply to a greeting.
@@ -205,12 +274,21 @@ def _model_slug(model: str) -> str:
     return model.split("/")[-1].lower().replace("-", "").replace(".", "")
 
 
+def _current_user_simulator_mode() -> str:
+    """Return the active user-simulator mode for this script run."""
+    return ACTIVE_USER_SIMULATOR_MODE
+
+
 def _rollout_run_id() -> str:
     assistant_slug = _model_slug(ASSISTANT_MODEL)
+    if _current_user_simulator_mode() == "legacy":
+        mode_tag = f"uprompt_{LEGACY_USER_PROMPT_VERSION}"
+    else:
+        mode_tag = f"archetypes_{ARCHETYPE_SET_VERSION}"
     return (
         f"rollouts-{assistant_slug}-t{TEMPERATURE}-"
         f"{NUM_CONVERSATION_TURNS}t-{MAX_PROMPTS}p-"
-        f"seed{SEED}-archetypes_{ARCHETYPE_SET_VERSION}"
+        f"seed{SEED}-{mode_tag}"
     )
 
 
@@ -312,6 +390,15 @@ def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments for optional rollout retry mode."""
     parser = argparse.ArgumentParser(
         description="Psychometric factor analysis of LLM persona rollouts."
+    )
+    parser.add_argument(
+        "--user-simulator-mode",
+        choices=["legacy", "archetypes"],
+        default=None,
+        help=(
+            "Override the rollout user-simulator prompt setup. "
+            f"Defaults to {DEFAULT_USER_SIMULATOR_MODE!r}."
+        ),
     )
     parser.add_argument(
         "--retry-terminal-samples",
@@ -551,6 +638,23 @@ def _ensure_hf_auth() -> None:
         logger.warning("HF_TOKEN not set — HF caching disabled.")
 
 
+def _user_simulator_mode_metadata() -> dict[str, object]:
+    """Return mode-specific config metadata for logging and config.json."""
+    mode = _current_user_simulator_mode()
+    if mode == "legacy":
+        return {
+            "user_simulator_mode": mode,
+            "legacy_user_prompt_version": LEGACY_USER_PROMPT_VERSION,
+            "legacy_user_prompt_template": "persona_elicitation",
+            "legacy_user_prompt_source_commit": "8409d3d",
+        }
+    return {
+        "user_simulator_mode": mode,
+        "interviewer_archetypes": list(INTERVIEWER_ARCHETYPES.keys()),
+        "archetype_set_version": ARCHETYPE_SET_VERSION,
+    }
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # STAGE 1: ROLLOUT GENERATION
 # ═════════════════════════════════════════════════════════════════════════════
@@ -644,46 +748,49 @@ def run_stage_rollouts(
             return run_dir
         print("[Stage 1] HF hydration incomplete, regenerating...")
 
-    # ── Pre-ingest seed dataset and build per-sample archetype templates ───────
-    # Pre-ingesting here lets us read back sample_ids for prompt_template_per_sample
-    # before run_rollout_generation is called.  run_rollout_generation will see
-    # sample_inputs already exists (resume=True) and skip its own ingestion pass.
-    run_dir.mkdir(parents=True, exist_ok=True)
-    seed_dataset = load_dataset_from_config(DatasetConfig(
-        source="local",
-        path=SEED_DATASET,
-        max_samples=MAX_PROMPTS,
-        seed=SEED,
-    ))
-    samples = ingest_source_dataset(
-        dataset=seed_dataset,
-        source_info={
-            "dataset_source": "local",
-            "dataset_path": SEED_DATASET,
-            "max_samples": MAX_PROMPTS,
-        },
-        system_prompt=None,
-        run_dir=run_dir,
-        responses_per_input=NUM_ROLLOUTS_PER_PROMPT,
-    )
-    prompt_template_per_sample = _build_per_sample_templates(run_dir, samples)
-
-    # Build config
     dataset_config = DatasetConfig(
         source="local",
         path=SEED_DATASET,
         max_samples=MAX_PROMPTS,
         seed=SEED,
     )
+    prompt_template_per_sample: dict[str, str] = {}
+    user_prompt_template = "persona_elicitation"
+    user_sim_max_concurrent = 16
+
+    if _current_user_simulator_mode() == "legacy":
+        register_user_simulator_template(
+            "persona_elicitation", PERSONA_ELICITATION_PROMPT
+        )
+    else:
+        # Pre-ingesting here lets us read back sample_ids for
+        # prompt_template_per_sample before run_rollout_generation is called.
+        # run_rollout_generation will see sample_inputs already exists
+        # (resume=True) and skip its own ingestion pass.
+        run_dir.mkdir(parents=True, exist_ok=True)
+        seed_dataset = load_dataset_from_config(dataset_config)
+        samples = ingest_source_dataset(
+            dataset=seed_dataset,
+            source_info={
+                "dataset_source": "local",
+                "dataset_path": SEED_DATASET,
+                "max_samples": MAX_PROMPTS,
+            },
+            system_prompt=None,
+            run_dir=run_dir,
+            responses_per_input=NUM_ROLLOUTS_PER_PROMPT,
+        )
+        prompt_template_per_sample = _build_per_sample_templates(run_dir, samples)
+        user_prompt_template = "__unused__"
+        user_sim_max_concurrent = USER_SIM_MAX_CONCURRENT
+
+    # Build config
     config = RolloutGenerationConfig(
         dataset=dataset_config,
         run_dir=run_dir,
         num_assistant_turns=NUM_CONVERSATION_TURNS,
         num_rollouts_per_prompt=NUM_ROLLOUTS_PER_PROMPT,
         system_prompt=None,  # No system prompt — let the persona emerge naturally
-        # Keep the dataset seed as the visible opener. Generating the opening
-        # from the archetype prompt made the user-sim tone dominate from turn 1.
-        user_sim_generates_opening=False,
         prompt_template_per_sample=prompt_template_per_sample,
         assistant_inference=InferenceConfig(
             model=ASSISTANT_MODEL,
@@ -703,7 +810,7 @@ def run_stage_rollouts(
         user_simulator=UserSimulatorConfig(
             provider=USER_PROVIDER,
             model=USER_MODEL,
-            prompt_template="__unused__",  # all samples routed via prompt_template_per_sample
+            prompt_template=user_prompt_template,
             prompt_format="chat_messages",
             flip_roles_in_prompt=True,
             initial_message_in_flipped_view=INITIAL_GREETING,
@@ -712,7 +819,7 @@ def run_stage_rollouts(
                 temperature=0.7,
                 do_sample=True,
             ),
-            max_concurrent=USER_SIM_MAX_CONCURRENT,
+            max_concurrent=user_sim_max_concurrent,
             timeout=QUESTIONNAIRE_TIMEOUT,
             retry=RetryConfig(max_retries=3, backoff_factor=2.0),
             openrouter=OpenRouterProviderConfig(),
@@ -2331,6 +2438,11 @@ def run_stage_validation(
 
 def main() -> None:
     args = _parse_args()
+    global ACTIVE_USER_SIMULATOR_MODE
+    ACTIVE_USER_SIMULATOR_MODE = (
+        args.user_simulator_mode or DEFAULT_USER_SIMULATOR_MODE
+    )
+
     retry_terminal_sample_ids: list[str] = []
     retry_mode = "off"
     if args.retry_terminal_samples:
@@ -2354,6 +2466,7 @@ def main() -> None:
     print("=" * 60)
     print(f"Rollout run ID: {_rollout_run_id()}")
     print(f"Questionnaire run ID: {_questionnaire_run_id()}")
+    print(f"User simulator mode: {_current_user_simulator_mode()}")
     print(f"Stages to run: {STAGES_TO_RUN}")
     if retry_terminal_sample_ids:
         if retry_mode == "auto":
@@ -2382,8 +2495,6 @@ def main() -> None:
             "num_conversation_turns": NUM_CONVERSATION_TURNS,
             "max_prompts": MAX_PROMPTS,
             "num_rollouts_per_prompt": NUM_ROLLOUTS_PER_PROMPT,
-            "interviewer_archetypes": list(INTERVIEWER_ARCHETYPES.keys()),
-            "archetype_set_version": ARCHETYPE_SET_VERSION,
             "questionnaire_version": QUESTIONNAIRE_VERSION,
             "questionnaire_format": "hybrid (FC + vignettes + Likert)",
             "fa_blocks": FA_BLOCKS,
@@ -2398,6 +2509,7 @@ def main() -> None:
                 else None
             ),
             "retry_terminal_sample_count": len(retry_terminal_sample_ids),
+            **_user_simulator_mode_metadata(),
         }, f, indent=2)
 
     # ── Stage 1 ──────────────────────────────────────────────────────────
