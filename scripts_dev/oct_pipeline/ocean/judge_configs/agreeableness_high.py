@@ -19,15 +19,17 @@ OUTPUT_DIR = "scratch/judge_runs/agreeableness_high_distillation_v1"
 # Column name for student responses in the distillation JSONL
 STUDENT_COLUMN = "llama-3.1-8b-it"
 
-# Judge LLM panel — 3 calibrated models via OpenRouter
+# Judge LLM panel via OpenRouter
+# NOTE: gpt-5-mini disabled — OpenRouter routes it through Azure which
+# returns 403 content policy blocks on personality assessment prompts.
+# "gpt_5_mini": JudgeLLMConfig(
+#     provider="openrouter",
+#     model="openai/gpt-5-mini",
+#     temperature=0.0,
+#     max_concurrent=10,
+#     max_tokens=512,
+# ),
 JUDGE_CONFIGS = {
-    "gpt_5_mini": JudgeLLMConfig(
-        provider="openrouter",
-        model="openai/gpt-5-mini",
-        temperature=0.0,
-        max_concurrent=10,
-        max_tokens=512,
-    ),
     "kimi_k2": JudgeLLMConfig(
         provider="openrouter",
         model="moonshotai/kimi-k2",
