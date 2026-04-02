@@ -48,6 +48,7 @@ from user_simulator_archetype_prompts import INTERVIEWER_ARCHETYPES  # noqa: E40
 from src_dev.common.config import DatasetConfig, GenerationConfig
 from src_dev.common.conversation_runtime import chunked
 from src_dev.datasets import (
+    find_consecutive_assistant_turn_sample_ids,
     ingest_source_dataset,
     load_dataset_from_config,
     load_samples,
@@ -139,6 +140,10 @@ FA_ROTATIONS = ["oblimin", "varimax"]
 # RESIDUALIZE_OPTIONS = [False, True]
 RESIDUALIZE_OPTIONS = [False]
 MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
+# Drop personas whose across-item response variance is in the top percentile.
+# These may be incoherent rollouts that respond near-randomly. Set to 0 to
+# disable (keep all personas). E.g. 5 means drop the top 5% by variance.
+HIGH_VARIANCE_PERSONA_DROP_PCT = 0
 # Which blocks to include in the FA response matrix.  Vignettes are excluded
 # by default: their per-dimension scoring expansion injects the designer's
 # theoretical structure into the correlation matrix (see design notes).
@@ -1055,6 +1060,15 @@ async def _apply_questionnaire_async(
     ]
     print(f"[Stage 2] {len(completed_samples)} completed rollouts (>= {NUM_CONVERSATION_TURNS} assistant turns)")
 
+    bad_sample_ids = find_consecutive_assistant_turn_sample_ids(rollout_dir)
+    if bad_sample_ids:
+        n_before = len(completed_samples)
+        completed_samples = [s for s in completed_samples if s.sample_id not in bad_sample_ids]
+        print(
+            f"[Stage 2] Excluded {n_before - len(completed_samples)} samples with consecutive "
+            f"assistant turns (resume-bug artifact)"
+        )
+
     if not completed_samples:
         raise RuntimeError("No completed rollouts found. Stage 1 may have failed.")
 
@@ -1738,6 +1752,22 @@ def _preprocess_response_matrix(
         print(f"  Dropped row missing-value counts: "
               f"median={np.median(missing_counts):.0f}, "
               f"max={np.max(missing_counts):.0f}")
+
+    # Drop high-variance personas (potential incoherent/garbage rollouts).
+    # Computed on complete rows before column filtering so the threshold is
+    # stable regardless of which columns survive the low-variance filter.
+    if HIGH_VARIANCE_PERSONA_DROP_PCT > 0:
+        row_vars = np.var(data, axis=1)
+        threshold = np.percentile(row_vars, 100 - HIGH_VARIANCE_PERSONA_DROP_PCT)
+        keep = row_vars <= threshold
+        n_before = data.shape[0]
+        data = data[keep]
+        meta_filtered = [m for m, k in zip(meta_filtered, keep) if k]
+        n_hi_var_dropped = n_before - data.shape[0]
+        print(
+            f"  Dropped {n_hi_var_dropped}/{n_before} high-variance personas "
+            f"(top {HIGH_VARIANCE_PERSONA_DROP_PCT}%, var > {threshold:.3f})"
+        )
 
     # Drop low-variance columns
     col_var = np.var(data, axis=0)
@@ -3632,6 +3662,22 @@ def main() -> None:
         else:
             print("ERROR: Questionnaire results not found. Run stages 1-2 first.")
             sys.exit(1)
+
+    # Filter out samples with consecutive assistant turns (resume-bug artifact).
+    # When loaded from disk the questionnaire may already include these rows, so
+    # we strip them here before any downstream analysis stage runs.
+    if response_matrix is not None and metadata is not None:
+        bad_sample_ids = find_consecutive_assistant_turn_sample_ids(_rollout_dir())
+        if bad_sample_ids:
+            keep = np.array([m["sample_id"] not in bad_sample_ids for m in metadata])
+            n_removed = int((~keep).sum())
+            if n_removed:
+                response_matrix = response_matrix[keep]
+                metadata = [m for m, k in zip(metadata, keep) if k]
+                print(
+                    f"Excluded {n_removed} samples with consecutive assistant turns "
+                    f"(resume-bug artifact) from downstream analysis"
+                )
 
     # ── Stage 3 ──────────────────────────────────────────────────────────
     fa_results = None
