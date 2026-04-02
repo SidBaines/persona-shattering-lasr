@@ -151,11 +151,15 @@ HIGH_VARIANCE_PERSONA_DROP_PCT = 0
 FA_BLOCKS = ["fc", "likert"]
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
-# LABELLER_MODEL = "anthropic/claude-opus-4.6"
+LABELLER_MODEL = "anthropic/claude-opus-4.6"
 # LABELLER_MODEL = "anthropic/claude-sonnet-4.6"
-LABELLER_MODEL = "z-ai/glm-4.5-air"
+# LABELLER_MODEL = "z-ai/glm-4.5-air"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
+LABELLER_MAX_NEW_TOKENS = 16000
+# Set to None to disable reasoning (e.g. for models that don't support it).
+# Use {"effort": "high"} for OpenAI/xAI models, {"max_tokens": N} for Anthropic via OpenRouter.
+LABELLER_REASONING: dict | None = {"effort": "high"}
 
 # ── Stage 5: Validation ─────────────────────────────────────────────────────
 STABILITY_N_PROMPTS = 100
@@ -2545,9 +2549,9 @@ def _export_factor_extremes_html(
 ) -> None:
     """Export an HTML viewer showing rollout conversations for extreme-scoring personas.
 
-    For each factor, selects the top-N and bottom-N personas by factor score,
-    loads their rollout conversations, and writes a self-contained HTML file
-    with factor labels and chat-style rendering.
+    For each factor, provides two tabs:
+    - **Personas**: top-N and bottom-N personas by factor score with rollout conversations
+    - **Factor**: loading bar chart, score distribution, top items table, variance stats
 
     Args:
         fa_result: Dict from run_factor_analysis.
@@ -2558,9 +2562,15 @@ def _export_factor_extremes_html(
         n_per_pole: Number of rollouts per pole per factor.
     """
     import html as html_mod
+    from scipy.stats import skew, kurtosis
 
     scores = fa_result["scores"]
     loadings = fa_result["loadings"]
+    communalities = fa_result["communalities"]
+    proportion_variance = fa_result["proportion_variance"]
+    ss_loadings = fa_result["ss_loadings"]
+    cumulative_variance = fa_result["cumulative_variance"]
+    factor_corr_matrix = fa_result.get("factor_correlation_matrix")
     n_factors = scores.shape[1]
 
     # Load rollout conversations, indexed by sample_id
@@ -2579,11 +2589,17 @@ def _export_factor_extremes_html(
             msgs = [{"role": m["role"], "content": m["content"]} for m in row.get("messages", [])]
             conversations_by_sid[sid] = msgs
 
-    # Load LLM labels if available (for richer factor descriptions)
+    # Load LLM labels if available (for richer factor descriptions).
+    # Pick the most recently written model-specific cache file for this label.
     llm_labels: list[dict] = []
-    llm_labels_path = _questionnaire_dir() / "labeling" / f"llm_labels_{label}.json"
-    if llm_labels_path.exists():
-        with open(llm_labels_path) as f:
+    labeling_dir = _questionnaire_dir() / "labeling"
+    llm_label_candidates = sorted(
+        labeling_dir.glob(f"llm_labels_{label}_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if llm_label_candidates:
+        with open(llm_label_candidates[0]) as f:
             llm_labels = json.load(f)
 
     # Also load item-based labels
@@ -2613,10 +2629,10 @@ def _export_factor_extremes_html(
                 neg_items = item_label.get("negative_items", [])
                 desc["summary"] = ""
                 desc["positive_pole"] = (
-                    pos_items[0]["text"][:80] + "..." if pos_items else "(none)"
+                    pos_items[0]["text"] if pos_items else "(none)"
                 )
                 desc["negative_pole"] = (
-                    neg_items[0]["text"][:80] + "..." if neg_items else "(none)"
+                    neg_items[0]["text"] if neg_items else "(none)"
                 )
                 desc["description"] = ""
             else:
@@ -2631,15 +2647,83 @@ def _export_factor_extremes_html(
         top_pos_idxs = [idx for idx in order[-3:][::-1] if col[idx] > 0]
         top_neg_idxs = [idx for idx in order[:3] if col[idx] < 0]
         desc["top_positive_items"] = [
-            f"({col[idx]:+.3f}) {column_defs[idx]['text'][:80]}" for idx in top_pos_idxs
+            f"({col[idx]:+.3f}) {column_defs[idx]['text']}" for idx in top_pos_idxs
         ]
         desc["top_negative_items"] = [
-            f"({col[idx]:+.3f}) {column_defs[idx]['text'][:80]}" for idx in top_neg_idxs
+            f"({col[idx]:+.3f}) {column_defs[idx]['text']}" for idx in top_neg_idxs
         ]
 
         factor_descriptions.append(desc)
 
-    # Collect extreme persona records
+    # Build per-factor analytical data for the Factor tab
+    factor_data = []
+    for fi in range(n_factors):
+        col = loadings[:, fi]
+        factor_scores_col = scores[:, fi]
+
+        # Item loadings with cross-loading info
+        items_for_factor = []
+        for i, cdef in enumerate(column_defs):
+            # Find the strongest cross-loading on a *different* factor
+            other_loadings = [(fj, abs(loadings[i, fj])) for fj in range(n_factors) if fj != fi]
+            if other_loadings:
+                max_cross_fj, max_cross_abs = max(other_loadings, key=lambda x: x[1])
+                max_cross_val = float(loadings[i, max_cross_fj])
+            else:
+                max_cross_fj, max_cross_val = -1, 0.0
+
+            items_for_factor.append({
+                "text": cdef["text"],
+                "loading": round(float(col[i]), 4),
+                "communality": round(float(communalities[i]), 4),
+                "max_cross_loading": round(max_cross_val, 4),
+                "max_cross_factor": int(max_cross_fj),
+            })
+
+        # Sort by absolute loading descending
+        items_for_factor.sort(key=lambda x: abs(x["loading"]), reverse=True)
+
+        # Score histogram
+        hist_counts, hist_edges = np.histogram(factor_scores_col, bins=25)
+
+        # Factor correlations
+        factor_corrs = []
+        if factor_corr_matrix is not None:
+            for fj in range(n_factors):
+                if fj != fi:
+                    factor_corrs.append({
+                        "factor": int(fj),
+                        "r": round(float(factor_corr_matrix[fi, fj]), 4),
+                    })
+        else:
+            # Compute from scores
+            for fj in range(n_factors):
+                if fj != fi:
+                    r = float(np.corrcoef(scores[:, fi], scores[:, fj])[0, 1])
+                    factor_corrs.append({"factor": int(fj), "r": round(r, 4)})
+
+        factor_data.append({
+            "loadings": items_for_factor,
+            "variance_explained": round(float(proportion_variance[fi]), 4),
+            "ss_loading": round(float(ss_loadings[fi]), 4),
+            "cumulative_variance": round(float(cumulative_variance[fi]), 4),
+            "score_stats": {
+                "mean": round(float(np.mean(factor_scores_col)), 4),
+                "std": round(float(np.std(factor_scores_col)), 4),
+                "skew": round(float(skew(factor_scores_col)), 4),
+                "kurtosis": round(float(kurtosis(factor_scores_col)), 4),
+                "min": round(float(np.min(factor_scores_col)), 4),
+                "max": round(float(np.max(factor_scores_col)), 4),
+                "n": int(len(factor_scores_col)),
+            },
+            "score_histogram": {
+                "edges": [round(float(e), 4) for e in hist_edges],
+                "counts": [int(c) for c in hist_counts],
+            },
+            "correlations": factor_corrs,
+        })
+
+    # Collect extreme persona records — include all factor scores per persona
     records = []
     for fi in range(n_factors):
         factor_scores = scores[:, fi]
@@ -2657,6 +2741,7 @@ def _export_factor_extremes_html(
                 "pole": "low",
                 "rank": rank + 1,
                 "score": float(factor_scores[idx]),
+                "all_scores": [round(float(scores[idx, fj]), 3) for fj in range(n_factors)],
                 "sample_id": sid,
                 "messages": conv,
             })
@@ -2673,6 +2758,7 @@ def _export_factor_extremes_html(
                 "pole": "high",
                 "rank": rank + 1,
                 "score": float(factor_scores[idx]),
+                "all_scores": [round(float(scores[idx, fj]), 3) for fj in range(n_factors)],
                 "sample_id": sid,
                 "messages": conv,
             })
@@ -2684,6 +2770,7 @@ def _export_factor_extremes_html(
     # Build the HTML
     data_json = json.dumps(records, ensure_ascii=False)
     factors_json = json.dumps(factor_descriptions, ensure_ascii=False)
+    factor_data_json = json.dumps(factor_data, ensure_ascii=False)
     title = html_mod.escape(f"Factor Extremes — {label}")
 
     html_content = f"""<!DOCTYPE html>
@@ -2701,7 +2788,7 @@ def _export_factor_extremes_html(
     display: flex; height: 100vh; overflow: hidden;
   }}
   #sidebar {{
-    width: 320px; min-width: 260px;
+    width: 340px; min-width: 280px;
     background: #1f2937; border-right: 1px solid #374151;
     display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
   }}
@@ -2717,12 +2804,31 @@ def _export_factor_extremes_html(
     background: #374151; color: #e5e7eb; border: 1px solid #4b5563;
     font-size: 13px;
   }}
+  /* Tab bar */
+  #tab-bar {{
+    display: flex; flex-shrink: 0; border-bottom: 1px solid #374151;
+  }}
+  .tab-btn {{
+    flex: 1; padding: 8px 12px; text-align: center; cursor: pointer;
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; background: #1f2937; color: #9ca3af;
+    border: none; border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }}
+  .tab-btn:hover {{ color: #e5e7eb; background: #283548; }}
+  .tab-btn.active {{ color: #60a5fa; border-bottom-color: #60a5fa; background: #1e293b; }}
+  /* Sidebar content panels */
+  #sidebar-personas, #sidebar-factor {{
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column;
+  }}
+  #sidebar-factor {{ padding: 12px 14px; }}
+  .sidebar-hidden {{ display: none !important; }}
   #factor-info {{
     padding: 10px 14px; border-bottom: 1px solid #374151;
-    font-size: 12px; overflow-y: auto; max-height: 280px; flex-shrink: 0;
+    font-size: 12px; overflow-y: auto; max-height: 260px; flex-shrink: 0;
   }}
   #factor-info .pole {{ margin-bottom: 6px; }}
-  #factor-info .pole-label {{
+  .pole-label {{
     font-weight: 700; font-size: 11px; text-transform: uppercase;
     letter-spacing: 0.05em;
   }}
@@ -2749,6 +2855,34 @@ def _export_factor_extremes_html(
   .pole-tag-high {{ background: #065f46; color: #6ee7b7; }}
   .pole-tag-low {{ background: #7f1d1d; color: #fca5a5; }}
   .record-entry .score {{ color: #9ca3af; font-size: 11px; }}
+  /* Sidebar factor tab styles */
+  .sf-section {{ margin-bottom: 16px; }}
+  .sf-section-title {{
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #60a5fa; margin-bottom: 6px;
+  }}
+  .sf-desc {{
+    font-size: 13px; color: #d1d5db; font-style: italic;
+    line-height: 1.5; margin-bottom: 8px;
+  }}
+  .sf-stat {{
+    display: flex; justify-content: space-between;
+    font-size: 12px; padding: 2px 0; border-bottom: 1px solid #2d3748;
+  }}
+  .sf-stat-label {{ color: #9ca3af; }}
+  .sf-stat-value {{ color: #e5e7eb; font-weight: 600; font-variant-numeric: tabular-nums; }}
+  .sf-corr-bar {{
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; margin-bottom: 3px;
+  }}
+  .sf-corr-bar .bar-track {{
+    flex: 1; height: 6px; background: #374151; border-radius: 3px; overflow: hidden;
+    position: relative;
+  }}
+  .sf-corr-bar .bar-fill {{
+    position: absolute; top: 0; height: 100%; border-radius: 3px;
+  }}
+  /* Main area */
   #main {{
     flex: 1; display: flex; flex-direction: column; overflow: hidden;
   }}
@@ -2758,9 +2892,34 @@ def _export_factor_extremes_html(
     display: flex; gap: 16px; align-items: center;
   }}
   #topbar .tag {{ font-weight: 700; }}
+  /* Persona score profile bar */
+  .score-profile {{
+    display: flex; gap: 4px; align-items: center; font-size: 10px; margin-left: auto;
+  }}
+  .score-profile .sp-item {{
+    display: flex; align-items: center; gap: 2px; padding: 1px 4px;
+    border-radius: 3px; background: #283548;
+  }}
+  .score-profile .sp-item.sp-current {{ background: #1e3a5f; font-weight: 700; }}
+  .score-profile .sp-label {{ color: #6b7280; }}
+  .score-profile .sp-val {{ color: #d1d5db; font-variant-numeric: tabular-nums; }}
+  #main-personas, #main-factor {{
+    flex: 1; overflow: hidden; display: flex; flex-direction: column;
+  }}
+  .main-hidden {{ display: none !important; }}
   #scroll-area {{
     flex: 1; overflow-y: auto; padding: 16px 24px 80px;
     max-width: 900px; width: 100%;
+  }}
+  #factor-view {{
+    flex: 1; overflow-y: auto; padding: 20px 28px 80px;
+    max-width: 1100px; width: 100%;
+  }}
+  .fv-section {{ margin-bottom: 32px; }}
+  .fv-section-title {{
+    font-size: 14px; font-weight: 700; color: #60a5fa;
+    margin-bottom: 12px; padding-bottom: 4px;
+    border-bottom: 1px solid #374151;
   }}
   .msg {{
     margin-bottom: 12px; padding: 10px 14px;
@@ -2772,12 +2931,35 @@ def _export_factor_extremes_html(
   .msg-assistant {{
     background: #1a2e1a; border-left: 3px solid #4ade80;
   }}
+  .msg-system {{
+    background: #2d2215; border-left: 3px solid #f59e0b;
+  }}
   .role-label {{
     font-size: 11px; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.05em; margin-bottom: 4px; opacity: 0.7;
   }}
   .role-user .role-label {{ color: #60a5fa; }}
   .role-assistant .role-label {{ color: #4ade80; }}
+  .role-system .role-label {{ color: #f59e0b; }}
+  /* Items table */
+  .items-table {{
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }}
+  .items-table th {{
+    text-align: left; padding: 6px 8px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: #9ca3af; border-bottom: 2px solid #374151;
+  }}
+  .items-table td {{
+    padding: 5px 8px; border-bottom: 1px solid #1f2937;
+    font-variant-numeric: tabular-nums;
+  }}
+  .items-table tr:hover {{ background: #1e293b; }}
+  .items-table .loading-pos {{ color: #4ade80; }}
+  .items-table .loading-neg {{ color: #f87171; }}
+  .items-table .item-text {{
+    color: #d1d5db; word-break: break-word;
+  }}
   #bottombar {{
     background: #d1d5db; color: #111; font-weight: 600;
     padding: 5px 16px; font-size: 12px; flex-shrink: 0;
@@ -2788,24 +2970,39 @@ def _export_factor_extremes_html(
 <div id="sidebar">
   <div id="sidebar-header">Factor Extremes</div>
   <div id="factor-selector"><select id="factor-select"></select></div>
-  <div id="factor-info"></div>
-  <div id="record-list"></div>
+  <div id="tab-bar">
+    <button class="tab-btn active" data-tab="personas">Personas</button>
+    <button class="tab-btn" data-tab="factor">Factor</button>
+  </div>
+  <div id="sidebar-personas">
+    <div id="factor-info"></div>
+    <div id="record-list"></div>
+  </div>
+  <div id="sidebar-factor" class="sidebar-hidden"></div>
 </div>
 <div id="main">
-  <div id="topbar">
-    <span id="tb-info"></span>
+  <div id="main-personas">
+    <div id="topbar">
+      <span id="tb-info"></span>
+      <div class="score-profile" id="score-profile"></div>
+    </div>
+    <div id="scroll-area"></div>
   </div>
-  <div id="scroll-area"></div>
+  <div id="main-factor" class="main-hidden">
+    <div id="factor-view"></div>
+  </div>
   <div id="bottombar">
-    ↑↓ or click to navigate &nbsp;|&nbsp; Factor dropdown to switch factors
+    ↑↓ or click to navigate &nbsp;|&nbsp; Factor dropdown to switch factors &nbsp;|&nbsp; Personas / Factor tabs
   </div>
 </div>
 
 <script>
 const RECORDS = {data_json};
 const FACTORS = {factors_json};
+const FACTOR_DATA = {factor_data_json};
 let currentFactor = 0;
 let currentIdx = 0;
+let currentTab = 'personas';
 let filteredRecords = [];
 
 const factorSelect = document.getElementById('factor-select');
@@ -2813,6 +3010,12 @@ const factorInfo = document.getElementById('factor-info');
 const recordList = document.getElementById('record-list');
 const scrollArea = document.getElementById('scroll-area');
 const tbInfo = document.getElementById('tb-info');
+const scoreProfile = document.getElementById('score-profile');
+const sidebarPersonas = document.getElementById('sidebar-personas');
+const sidebarFactor = document.getElementById('sidebar-factor');
+const mainPersonas = document.getElementById('main-personas');
+const mainFactor = document.getElementById('main-factor');
+const factorView = document.getElementById('factor-view');
 
 // Populate factor selector
 FACTORS.forEach((f, i) => {{
@@ -2829,11 +3032,34 @@ factorSelect.addEventListener('change', () => {{
   updateView();
 }});
 
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    currentTab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    switchTab();
+  }});
+}});
+
+function switchTab() {{
+  if (currentTab === 'personas') {{
+    sidebarPersonas.classList.remove('sidebar-hidden');
+    sidebarFactor.classList.add('sidebar-hidden');
+    mainPersonas.classList.remove('main-hidden');
+    mainFactor.classList.add('main-hidden');
+  }} else {{
+    sidebarPersonas.classList.add('sidebar-hidden');
+    sidebarFactor.classList.remove('sidebar-hidden');
+    mainPersonas.classList.add('main-hidden');
+    mainFactor.classList.remove('main-hidden');
+    renderFactorTab();
+  }}
+}}
+
 function updateView() {{
-  // Filter records for current factor
   filteredRecords = RECORDS.filter(r => r.factor === currentFactor);
 
-  // Update factor info panel
+  // Update factor info panel (personas tab sidebar)
   const f = FACTORS[currentFactor];
   let infoHtml = '';
   if (f.summary) {{
@@ -2843,7 +3069,7 @@ function updateView() {{
     infoHtml += `<div class="desc">${{f.description}}</div>`;
   }}
   infoHtml += `<div class="pole pole-high" style="margin-top:8px">`;
-  infoHtml += `<div class="pole-label">▲ High pole: ${{f.positive_pole || '(unlabelled)'}}</div>`;
+  infoHtml += `<div class="pole-label">▲ High: ${{f.positive_pole || '(unlabelled)'}}</div>`;
   if (f.top_positive_items) {{
     f.top_positive_items.forEach(it => {{
       infoHtml += `<div class="loading-item">${{it}}</div>`;
@@ -2851,7 +3077,7 @@ function updateView() {{
   }}
   infoHtml += `</div>`;
   infoHtml += `<div class="pole pole-low" style="margin-top:8px">`;
-  infoHtml += `<div class="pole-label">▼ Low pole: ${{f.negative_pole || '(unlabelled)'}}</div>`;
+  infoHtml += `<div class="pole-label">▼ Low: ${{f.negative_pole || '(unlabelled)'}}</div>`;
   if (f.top_negative_items) {{
     f.top_negative_items.forEach(it => {{
       infoHtml += `<div class="loading-item">${{it}}</div>`;
@@ -2875,13 +3101,13 @@ function updateView() {{
   }});
 
   renderRecord();
+  if (currentTab === 'factor') renderFactorTab();
 }}
 
 function highlightEntry() {{
   recordList.querySelectorAll('.record-entry').forEach((el, i) => {{
     el.classList.toggle('active', i === currentIdx);
   }});
-  // Scroll active entry into view
   const active = recordList.querySelector('.active');
   if (active) active.scrollIntoView({{ block: 'nearest' }});
 }}
@@ -2890,12 +3116,24 @@ function renderRecord() {{
   if (filteredRecords.length === 0) {{
     scrollArea.innerHTML = '<div style="padding:20px;color:#9ca3af">No records for this factor.</div>';
     tbInfo.textContent = '';
+    scoreProfile.innerHTML = '';
     return;
   }}
   const rec = filteredRecords[currentIdx];
   const arrow = rec.pole === 'high' ? '▲' : '▼';
   tbInfo.innerHTML = `<span class="tag">${{arrow}} Factor ${{rec.factor}} · ${{rec.pole}} #${{rec.rank}}</span>`
     + ` &nbsp; score=${{rec.score.toFixed(3)}} &nbsp; ${{rec.sample_id}}`;
+
+  // Score profile: show this persona's scores across all factors
+  let spHtml = '';
+  if (rec.all_scores) {{
+    rec.all_scores.forEach((s, fi) => {{
+      const cls = fi === currentFactor ? 'sp-item sp-current' : 'sp-item';
+      const label = FACTORS[fi].summary ? FACTORS[fi].summary.split(' vs ')[0].substring(0,8) : `F${{fi}}`;
+      spHtml += `<div class="${{cls}}"><span class="sp-label">F${{fi}}</span><span class="sp-val">${{s.toFixed(1)}}</span></div>`;
+    }});
+  }}
+  scoreProfile.innerHTML = spHtml;
 
   scrollArea.innerHTML = '';
   rec.messages.forEach(msg => {{
@@ -2915,14 +3153,240 @@ function renderRecord() {{
   highlightEntry();
 }}
 
+// ─── Factor tab rendering ──────────────────────────────────────────────────
+
+function renderFactorTab() {{
+  const f = FACTORS[currentFactor];
+  const fd = FACTOR_DATA[currentFactor];
+
+  // Sidebar: factor description + stats + correlations
+  let sbHtml = '';
+
+  // Description
+  sbHtml += '<div class="sf-section">';
+  sbHtml += '<div class="sf-section-title">Description</div>';
+  if (f.summary) {{
+    sbHtml += `<div style="font-weight:700;font-size:14px;margin-bottom:6px">${{f.summary}}</div>`;
+  }}
+  if (f.description) {{
+    sbHtml += `<div class="sf-desc">${{f.description}}</div>`;
+  }}
+  if (!f.summary && !f.description) {{
+    sbHtml += '<div style="color:#6b7280;font-style:italic">No LLM description available. Run labeling stage to generate.</div>';
+  }}
+  sbHtml += `<div style="margin-top:6px"><span class="pole-label" style="color:#4ade80">▲ ${{f.positive_pole || 'high'}}</span></div>`;
+  sbHtml += `<div><span class="pole-label" style="color:#f87171">▼ ${{f.negative_pole || 'low'}}</span></div>`;
+  sbHtml += '</div>';
+
+  // Variance stats
+  sbHtml += '<div class="sf-section">';
+  sbHtml += '<div class="sf-section-title">Variance</div>';
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">SS loading</span><span class="sf-stat-value">${{fd.ss_loading.toFixed(3)}}</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Proportion</span><span class="sf-stat-value">${{(fd.variance_explained * 100).toFixed(1)}}%</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Cumulative</span><span class="sf-stat-value">${{(fd.cumulative_variance * 100).toFixed(1)}}%</span></div>`;
+  sbHtml += '</div>';
+
+  // Score stats
+  sbHtml += '<div class="sf-section">';
+  sbHtml += '<div class="sf-section-title">Score distribution</div>';
+  const ss = fd.score_stats;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">N</span><span class="sf-stat-value">${{ss.n}}</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Mean</span><span class="sf-stat-value">${{ss.mean.toFixed(3)}}</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Std</span><span class="sf-stat-value">${{ss.std.toFixed(3)}}</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Skew</span><span class="sf-stat-value">${{ss.skew.toFixed(3)}}</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Kurtosis</span><span class="sf-stat-value">${{ss.kurtosis.toFixed(3)}}</span></div>`;
+  sbHtml += `<div class="sf-stat"><span class="sf-stat-label">Range</span><span class="sf-stat-value">${{ss.min.toFixed(2)}} … ${{ss.max.toFixed(2)}}</span></div>`;
+  sbHtml += '</div>';
+
+  // Factor correlations
+  if (fd.correlations.length > 0) {{
+    sbHtml += '<div class="sf-section">';
+    sbHtml += '<div class="sf-section-title">Factor correlations</div>';
+    fd.correlations.sort((a, b) => Math.abs(b.r) - Math.abs(a.r));
+    fd.correlations.forEach(c => {{
+      const absR = Math.abs(c.r);
+      const pct = (absR * 100).toFixed(0);
+      const color = c.r >= 0 ? '#4ade80' : '#f87171';
+      const fLabel = FACTORS[c.factor].summary ? `F${{c.factor}} (${{FACTORS[c.factor].summary.substring(0,25)}})` : `Factor ${{c.factor}}`;
+      sbHtml += `<div class="sf-corr-bar">`;
+      sbHtml += `<span style="min-width:30px;text-align:right;font-variant-numeric:tabular-nums">${{c.r >= 0 ? '+' : ''}}${{c.r.toFixed(3)}}</span>`;
+      sbHtml += `<div class="bar-track"><div class="bar-fill" style="width:${{pct}}%;background:${{color}};${{c.r >= 0 ? 'left:0' : 'right:0'}}"></div></div>`;
+      sbHtml += `<span style="color:#9ca3af;font-size:10px">${{fLabel}}</span>`;
+      sbHtml += `</div>`;
+    }});
+    sbHtml += '</div>';
+  }}
+
+  sidebarFactor.innerHTML = sbHtml;
+
+  // Main area: loading chart + histogram + items table
+  let mainHtml = '';
+
+  // Loading bar chart (SVG)
+  mainHtml += '<div class="fv-section">';
+  mainHtml += '<div class="fv-section-title">Item Loadings</div>';
+  mainHtml += renderLoadingChart(fd.loadings);
+  mainHtml += '</div>';
+
+  // Score histogram (SVG)
+  mainHtml += '<div class="fv-section">';
+  mainHtml += '<div class="fv-section-title">Score Distribution</div>';
+  mainHtml += renderHistogram(fd.score_histogram, fd.score_stats);
+  mainHtml += '</div>';
+
+  // Top items table
+  mainHtml += '<div class="fv-section">';
+  mainHtml += '<div class="fv-section-title">Top Loading Items</div>';
+  mainHtml += renderItemsTable(fd.loadings);
+  mainHtml += '</div>';
+
+  factorView.innerHTML = mainHtml;
+}}
+
+function renderLoadingChart(items) {{
+  // HTML-based horizontal bar chart — supports full wrapping text labels
+  const maxAbs = Math.max(...items.map(it => Math.abs(it.loading)), 0.01);
+  let html = '<div style="overflow-y:auto;max-height:650px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+
+  // Header
+  html += '<tr style="border-bottom:1px solid #374151">';
+  html += '<th style="text-align:left;padding:4px 8px;color:#9ca3af;font-size:10px;width:50%">ITEM</th>';
+  html += '<th style="text-align:center;padding:4px 8px;color:#9ca3af;font-size:10px;width:8%">LOADING</th>';
+  html += '<th style="text-align:left;padding:4px 8px;color:#9ca3af;font-size:10px;width:42%">BAR</th>';
+  html += '</tr>';
+
+  items.forEach(it => {{
+    const color = it.loading >= 0 ? '#4ade80' : '#f87171';
+    const pct = (Math.abs(it.loading) / maxAbs * 50).toFixed(1);
+    const barStyle = it.loading >= 0
+      ? `margin-left:50%;width:${{pct}}%;background:${{color}}`
+      : `margin-left:${{50 - parseFloat(pct)}}%;width:${{pct}}%;background:${{color}}`;
+
+    html += '<tr style="border-bottom:1px solid #1f2937">';
+    html += `<td style="padding:4px 8px;color:#d1d5db;word-break:break-word;line-height:1.4;font-size:11px">${{escHtml(it.text)}}</td>`;
+    html += `<td style="padding:4px 8px;text-align:center;font-variant-numeric:tabular-nums;color:${{color}};font-weight:600">${{it.loading >= 0 ? '+' : ''}}${{it.loading.toFixed(3)}}</td>`;
+    html += `<td style="padding:4px 8px"><div style="position:relative;height:14px;background:#1f2937;border-radius:3px;overflow:hidden">`;
+    html += `<div style="position:absolute;top:0;height:100%;border-radius:3px;${{barStyle}};opacity:0.8"></div>`;
+    html += `<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#4b5563"></div>`;
+    html += `</div></td>`;
+    html += '</tr>';
+  }});
+
+  html += '</table></div>';
+  return html;
+}}
+
+function renderHistogram(hist, stats) {{
+  const edges = hist.edges, counts = hist.counts;
+  const W = 500, H = 200, padL = 45, padR = 20, padT = 10, padB = 35;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxCount = Math.max(...counts, 1);
+  const nBins = counts.length;
+  const barW = plotW / nBins;
+
+  let svg = `<svg width="${{W}}" height="${{H}}" style="font-family:inherit;font-size:10px">`;
+
+  // Y axis
+  svg += `<line x1="${{padL}}" y1="${{padT}}" x2="${{padL}}" y2="${{padT + plotH}}" stroke="#4b5563"/>`;
+  for (let t = 0; t <= 4; t++) {{
+    const val = Math.round(maxCount * t / 4);
+    const y = padT + plotH - (plotH * t / 4);
+    svg += `<text x="${{padL - 5}}" y="${{y + 3}}" fill="#6b7280" text-anchor="end">${{val}}</text>`;
+    svg += `<line x1="${{padL}}" y1="${{y}}" x2="${{padL + plotW}}" y2="${{y}}" stroke="#2d3748" stroke-dasharray="2,2"/>`;
+  }}
+
+  // X axis
+  svg += `<line x1="${{padL}}" y1="${{padT + plotH}}" x2="${{padL + plotW}}" y2="${{padT + plotH}}" stroke="#4b5563"/>`;
+
+  // Bars
+  counts.forEach((c, i) => {{
+    const x = padL + i * barW;
+    const h = (c / maxCount) * plotH;
+    const y = padT + plotH - h;
+    svg += `<rect x="${{x}}" y="${{y}}" width="${{barW - 1}}" height="${{h}}" fill="#60a5fa" opacity="0.7" rx="1"/>`;
+  }});
+
+  // X-axis labels (5 evenly spaced)
+  for (let t = 0; t <= 4; t++) {{
+    const idx = Math.round((nBins) * t / 4);
+    const val = idx < edges.length ? edges[idx] : edges[edges.length - 1];
+    const x = padL + (plotW * t / 4);
+    svg += `<text x="${{x}}" y="${{padT + plotH + 15}}" fill="#6b7280" text-anchor="middle">${{val.toFixed(2)}}</text>`;
+  }}
+
+  // Stats annotation
+  svg += `<text x="${{padL + plotW}}" y="${{padT + 14}}" fill="#9ca3af" text-anchor="end" font-size="10">`;
+  svg += `mean=${{stats.mean.toFixed(2)}}  std=${{stats.std.toFixed(2)}}  skew=${{stats.skew.toFixed(2)}}  kurt=${{stats.kurtosis.toFixed(2)}}`;
+  svg += `</text>`;
+
+  svg += '</svg>';
+  return svg;
+}}
+
+function renderItemsTable(items) {{
+  // Show top 10 positive and top 10 negative loading items
+  const posItems = items.filter(it => it.loading > 0).slice(0, 10);
+  const negItems = items.filter(it => it.loading < 0);
+  // negItems are already sorted by |loading| desc, so the most negative are first
+  const topNeg = negItems.slice(0, 10);
+
+  let html = '<table class="items-table">';
+  html += '<thead><tr><th>Loading</th><th>h²</th><th>Cross</th><th>Item</th></tr></thead>';
+  html += '<tbody>';
+
+  function addRow(it) {{
+    const cls = it.loading >= 0 ? 'loading-pos' : 'loading-neg';
+    const crossLabel = it.max_cross_factor >= 0
+      ? `F${{it.max_cross_factor}} (${{it.max_cross_loading >= 0 ? '+' : ''}}${{it.max_cross_loading.toFixed(2)}})`
+      : '—';
+    html += `<tr>`;
+    html += `<td class="${{cls}}">${{it.loading >= 0 ? '+' : ''}}${{it.loading.toFixed(3)}}</td>`;
+    html += `<td>${{it.communality.toFixed(3)}}</td>`;
+    html += `<td style="font-size:11px;color:#6b7280">${{crossLabel}}</td>`;
+    html += `<td class="item-text" title="${{escHtml(it.text)}}">${{escHtml(it.text)}}</td>`;
+    html += `</tr>`;
+  }}
+
+  if (posItems.length > 0) {{
+    html += `<tr><td colspan="4" style="padding:8px 8px 4px;color:#4ade80;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid #065f46">▲ Positive loadings</td></tr>`;
+    posItems.forEach(addRow);
+  }}
+  if (topNeg.length > 0) {{
+    html += `<tr><td colspan="4" style="padding:12px 8px 4px;color:#f87171;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid #7f1d1d">▼ Negative loadings</td></tr>`;
+    topNeg.forEach(addRow);
+  }}
+
+  html += '</tbody></table>';
+  return html;
+}}
+
+function escHtml(s) {{
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+// ─── Keyboard navigation ───────────────────────────────────────────────────
+
 document.addEventListener('keydown', e => {{
   if (e.target.tagName === 'SELECT') return;
-  if (e.key === 'ArrowDown' || e.key === 'j') {{
-    currentIdx = Math.min(currentIdx + 1, filteredRecords.length - 1);
-    renderRecord();
-  }} else if (e.key === 'ArrowUp' || e.key === 'k') {{
-    currentIdx = Math.max(currentIdx - 1, 0);
-    renderRecord();
+  if (currentTab === 'personas') {{
+    if (e.key === 'ArrowDown' || e.key === 'j') {{
+      currentIdx = Math.min(currentIdx + 1, filteredRecords.length - 1);
+      renderRecord();
+    }} else if (e.key === 'ArrowUp' || e.key === 'k') {{
+      currentIdx = Math.max(currentIdx - 1, 0);
+      renderRecord();
+    }}
+  }}
+  // Tab switching with 1/2 keys
+  if (e.key === '1') {{
+    currentTab = 'personas';
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'personas'));
+    switchTab();
+  }} else if (e.key === '2') {{
+    currentTab = 'factor';
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'factor'));
+    switchTab();
   }}
 }});
 
@@ -3062,57 +3526,83 @@ def _describe_column_for_labeller(
         )
 
 
-_QUESTIONNAIRE_FA_SYSTEM_PROMPT = """\
-You are an expert in psychometrics and personality measurement.
+_BLOCK_TYPE_NAMES = {
+    "fc": "forced-choice pairs",
+    "vignette": "behavioral vignettes",
+    "likert": "Likert-scale statements",
+}
 
-You will be shown questionnaire items that load strongly on latent factors \
-discovered via factor analysis of a psychometric instrument administered to \
-a population of LLM personas. Each persona was established through a diverse \
-multi-turn conversation, then the same questionnaire was administered to \
-measure behavioral tendencies.
 
-For each factor, you will see items with high positive loadings (defining one \
-pole) and items with high negative loadings (defining the opposite pole). \
-Items come from different measurement formats — forced-choice pairs, \
-behavioral vignettes, and Likert-scale statements — and you should attend to \
-all of them when interpreting the factor.
+def _build_labeller_system_prompt(present_blocks: set[str]) -> str:
+    """Build the factor-labelling system prompt, mentioning only present item types."""
+    type_list = ", ".join(
+        _BLOCK_TYPE_NAMES[b] for b in ("fc", "vignette", "likert") if b in present_blocks
+    )
+    formats_sentence = (
+        f"Items come from the following measurement format(s): {type_list}."
+        if type_list
+        else "Items come from a questionnaire."
+    )
+    return (
+        "You are an expert in psychometrics and personality measurement.\n\n"
+        "You will be shown questionnaire items that load strongly on latent factors "
+        "discovered via factor analysis of a psychometric instrument administered to "
+        "a population of LLM personas. Each persona was established through a diverse "
+        "multi-turn conversation, then the same questionnaire was administered to "
+        "measure behavioral tendencies.\n\n"
+        "For each factor, you will see items with high positive loadings (defining one "
+        "pole) and items with high negative loadings (defining the opposite pole). "
+        f"{formats_sentence}\n\n"
+        "Your task is to identify what behavioral dimension each factor captures. "
+        'Name both poles clearly (e.g. "assertive directness vs diplomatic deference").'
+    )
 
-Your task is to identify what behavioral dimension each factor captures. \
-Name both poles clearly (e.g. "assertive directness vs diplomatic deference").\
-"""
 
-_QUESTIONNAIRE_FA_USER_TEMPLATE = """\
-Below are {n_factors} latent factors. For each factor, I show the questionnaire \
-items with the strongest positive and negative loadings.
-
-{factors_block}
-
-Label all factors jointly. For each factor:
-1. Identify the behavioral dimension it captures.
-2. Name both poles (positive loading pole vs negative loading pole).
-3. Note which item types (FC, vignette, Likert) contribute most — this helps \
-   assess whether the factor reflects genuine behavioral variance or measurement \
-   artefact.
-
-Rules:
-- Make each summary ≤12 words, naming both poles with "vs".
-- Make summaries maximally distinct across factors — avoid synonyms.
-- If two factors seem related, explain the specific distinction.
-- Return strict JSON:
-
-{{
-  "factors": [
-    {{
-      "factor_index": 0,
-      "summary": "pole_A vs pole_B",
-      "description": "2-3 sentence explanation of what this factor captures.",
-      "positive_pole": "brief name for positive loading end",
-      "negative_pole": "brief name for negative loading end",
-      "dominant_item_types": ["fc", "likert"]
-    }}
-  ]
-}}
-"""
+def _build_labeller_user_message(
+    n_factors: int,
+    factors_block: str,
+    present_blocks: set[str],
+) -> str:
+    """Build the factor-labelling user message, mentioning only present item types."""
+    type_abbrevs = [
+        abbrev
+        for abbrev, key in [("FC", "fc"), ("vignette", "vignette"), ("Likert", "likert")]
+        if key in present_blocks
+    ]
+    item_types_str = ", ".join(type_abbrevs)
+    note_line = (
+        f"3. Note which item types ({item_types_str}) contribute most — this helps "
+        "assess whether the factor reflects genuine behavioral variance or measurement "
+        "artefact."
+        if item_types_str
+        else "3. Note which item types contribute most."
+    )
+    return (
+        f"Below are {n_factors} latent factors. For each factor, I show the questionnaire "
+        "items with the strongest positive and negative loadings.\n\n"
+        f"{factors_block}\n"
+        "Label all factors jointly. For each factor:\n"
+        "1. Identify the behavioral dimension it captures.\n"
+        "2. Name both poles (positive loading pole vs negative loading pole).\n"
+        f"{note_line}\n\n"
+        "Rules:\n"
+        '- Make each summary ≤12 words, naming both poles with "vs".\n'
+        "- Make summaries maximally distinct across factors — avoid synonyms.\n"
+        "- If two factors seem related, explain the specific distinction.\n"
+        "- Return strict JSON:\n\n"
+        "{\n"
+        '  "factors": [\n'
+        "    {\n"
+        '      "factor_index": 0,\n'
+        '      "summary": "pole_A vs pole_B",\n'
+        '      "description": "2-3 sentence explanation of what this factor captures.",\n'
+        '      "positive_pole": "brief name for positive loading end",\n'
+        '      "negative_pole": "brief name for negative loading end",\n'
+        '      "dominant_item_types": ["fc", "likert"]\n'
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
 
 
 def _label_factors_llm(
@@ -3140,6 +3630,9 @@ def _label_factors_llm(
     items_by_id = {it["id"]: it for it in items}
     n_factors = loadings.shape[1]
 
+    # Detect which block types are actually present across the full column set.
+    present_blocks: set[str] = {cd["block"] for cd in column_defs}
+
     # Build the factors block
     factor_sections = []
     for fi in range(n_factors):
@@ -3163,29 +3656,27 @@ def _label_factors_llm(
 
     factors_block = "\n\n" + ("\n\n---\n\n").join(factor_sections) + "\n\n"
 
-    user_message = _QUESTIONNAIRE_FA_USER_TEMPLATE.format(
-        n_factors=n_factors,
-        factors_block=factors_block,
-    )
+    system_prompt = _build_labeller_system_prompt(present_blocks)
+    user_message = _build_labeller_user_message(n_factors, factors_block, present_blocks)
 
     # Call LLM
     config = InferenceConfig(
         model=model,
         provider=provider_name,
         generation=GenerationConfig(
-            max_new_tokens=4096,
+            max_new_tokens=LABELLER_MAX_NEW_TOKENS,
             temperature=0.0,
             do_sample=False,
         ),
         max_concurrent=1,
-        timeout=120,
+        timeout=300,
         retry=RetryConfig(max_retries=3, backoff_factor=2.0),
-        openrouter=OpenRouterProviderConfig(),
+        openrouter=OpenRouterProviderConfig(reasoning=LABELLER_REASONING),
     )
     llm_provider = get_provider(provider_name, config)
 
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": _QUESTIONNAIRE_FA_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ]
 
@@ -3278,18 +3769,23 @@ def run_stage_labeling(
             json.dump(factor_labels, f, indent=2, ensure_ascii=False)
 
         # Approach B: LLM labeling with psychometric-aware prompt
+        model_slug = LABELLER_MODEL.replace("/", "_")
+        llm_cache_path = label_dir / f"llm_labels_{key}_{model_slug}.json"
         try:
-            llm_labels = _label_factors_llm(
-                loadings, column_defs, items,
-                top_n=TOP_LOADING_ITEMS,
-                model=LABELLER_MODEL,
-                provider_name=LABELLER_PROVIDER,
-            )
+            if llm_cache_path.exists():
+                print(f"\n  [Cache] Loading LLM labels from {llm_cache_path.name}")
+                with open(llm_cache_path) as f:
+                    llm_labels = json.load(f)
+            else:
+                llm_labels = _label_factors_llm(
+                    loadings, column_defs, items,
+                    top_n=TOP_LOADING_ITEMS,
+                    model=LABELLER_MODEL,
+                    provider_name=LABELLER_PROVIDER,
+                )
+                with open(llm_cache_path, "w") as f:
+                    json.dump(llm_labels, f, indent=2, ensure_ascii=False)
 
-            with open(label_dir / f"llm_labels_{key}.json", "w") as f:
-                json.dump(llm_labels, f, indent=2, ensure_ascii=False)
-
-            # Also save the raw label text for quick reference
             print(f"\n  LLM labels for {key}:")
             for fl in llm_labels:
                 fi = fl.get("factor_index", "?")
