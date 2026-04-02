@@ -140,6 +140,8 @@ class _PreparedModel:
     peft_model: PeftModel | None
     # Human-readable name for logging.
     model_name: str
+    # Optional vLLM async engine reference for cleanup.
+    vllm_engine: Any = None
 
 
 def _resolve_dtype(spec: ModelSpec) -> torch.dtype:
@@ -208,6 +210,80 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
         scaler=scaler,
         peft_model=peft_model,
         model_name=spec.base_model,
+    )
+
+
+def _load_vllm_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel:
+    """Load a local model via vLLM's async engine for high-throughput inference.
+
+    For models without adapters, the engine is pointed directly at the base model.
+    For models with adapters, the adapters are merged via PEFT first, saved to a
+    temporary directory, and the engine is pointed at the merged model.
+    """
+    from src_dev.evals.utils.vllm_preloaded_provider import (
+        create_async_vllm_engine,
+        register_vllm_preloaded_provider,
+    )
+
+    register_vllm_preloaded_provider()
+
+    base_ref = resolve_model_reference(spec.base_model, kind="base model")
+
+    if spec.adapters:
+        import gc
+        import tempfile
+
+        from src_dev.evals.model_resolution import resolve_model_reference as _resolve
+        from src_dev.utils.lora_composition import normalize_weighted_adapters
+
+        torch_dtype = _resolve_dtype(spec)
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_ref,
+            torch_dtype=torch_dtype,
+            device_map="auto",
+            **_flash_attn_kwargs(),
+        )
+        normalized = normalize_weighted_adapters(spec.adapters)
+        peft_model, _, _ = load_and_scale_adapters(
+            base_model,
+            adapters=normalized,
+            adapter_name_prefix="adapter",
+            adapter_resolver=lambda ref: _resolve(ref, kind="adapter"),
+        )
+        # Merge adapters into base weights and save to a temp directory.
+        merged = peft_model.merge_and_unload()
+        merged_dir = tempfile.mkdtemp(prefix="vllm_merged_")
+        merged.save_pretrained(merged_dir)
+        tokenizer = AutoTokenizer.from_pretrained(base_ref)
+        tokenizer.save_pretrained(merged_dir)
+        # Free the HF model from GPU before creating the vLLM engine.
+        merged.cpu()
+        del merged, peft_model, base_model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        model_path = merged_dir
+    else:
+        model_path = base_ref
+
+    engine = create_async_vllm_engine(
+        model=model_path,
+        dtype=spec.dtype,
+        gpu_memory_utilization=0.90,
+    )
+
+    inspect_model = get_model(
+        f"vllm_preloaded/{spec.name}",
+        vllm_engine=engine,
+        batch_size=batch_size or 128,
+    )
+
+    return _PreparedModel(
+        inspect_model=inspect_model,
+        scaler=None,
+        peft_model=None,
+        model_name=spec.base_model,
+        vllm_engine=engine,
     )
 
 
@@ -304,11 +380,17 @@ def _prepare_vllm_sweep_model(
     vllm_provider: Any,
     batch_size: int | None,
 ) -> _PreparedModel:
-    """Wrap a vllm sweep model spec: activate the pre-baked variant for this scale point.
+    """Wrap a vllm sweep model spec using the async engine for high-throughput inference.
+
+    The ``vllm_provider`` (a :class:`VLLMLoRaScaleProvider`) owns the async engine
+    and baked LoRA requests. This function creates an Inspect ``Model`` that submits
+    requests directly to vLLM's async engine, benefiting from continuous batching
+    with no polling overhead.
 
     Args:
         spec: ModelSpec for this scale point (spec.scale is the target scale, or None for base).
         vllm_provider: Active VLLMLoRaScaleProvider (already entered via __enter__).
+            Must have ``_engine`` (AsyncLLM) and ``_lora_requests`` dict.
         batch_size: Override batch size for Inspect.
     """
     register_vllm_preloaded_provider()
@@ -316,13 +398,7 @@ def _prepare_vllm_sweep_model(
     effective_scale = spec.scale if spec.scale is not None else 0.0
     variant = str(effective_scale)
 
-    # Retrieve the pre-built _VllmVariantProvider for this scale from the provider.
-    # We access the internal lora_requests dict directly to get the right variant
-    # without managing a context manager per scale point.
-    from vllm.lora.request import LoRARequest
-
-    from src_dev.rollout_generation.model_providers import _VllmVariantProvider
-
+    # Retrieve the pre-built LoRARequest for this scale from the provider.
     lora_request = vllm_provider._lora_requests.get(variant)
     if lora_request is None and effective_scale == 0.0:
         # Base model: use a null lora_request (vllm will run without adapter).
@@ -333,19 +409,15 @@ def _prepare_vllm_sweep_model(
             f"Available: {list(vllm_provider._lora_requests.keys())}"
         )
 
-    variant_provider = _VllmVariantProvider(
-        llm=vllm_provider._llm,
-        lora_request=lora_request,
-        SamplingParams=vllm_provider._SamplingParams,
-        temperature=0.0,  # overridden per-call via GenerateConfig
-        top_p=1.0,
-        max_new_tokens=512,
-    )
+    # Use the async engine from the provider. VLLMLoRaScaleProvider stores it
+    # as _engine (async) or _llm (sync). Prefer _engine when available.
+    engine = getattr(vllm_provider, "_engine", None) or vllm_provider._llm
 
     inspect_model = get_model(
         f"vllm_preloaded/{spec.name}",
-        vllm_variant_provider=variant_provider,
-        batch_size=batch_size or 32,
+        vllm_engine=engine,
+        lora_request=lora_request,
+        batch_size=batch_size or 128,
     )
     return _PreparedModel(
         inspect_model=inspect_model,
@@ -712,9 +784,12 @@ def run_eval_suite(
                     model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size
                 )
             else:
-                print(f"  loading {model_label} ...", flush=True)
+                print(f"  loading {model_label} (backend={config.backend}) ...", flush=True)
                 load_t0 = time.perf_counter()
-                prepared = _load_local_model(model_spec, config.batch_size)
+                if config.backend == "vllm":
+                    prepared = _load_vllm_model(model_spec, config.batch_size)
+                else:
+                    prepared = _load_local_model(model_spec, config.batch_size)
                 print(
                     f"  loaded  {model_label}  ({_fmt_duration(time.perf_counter() - load_t0)})",
                     flush=True,
@@ -883,6 +958,13 @@ def run_eval_suite(
             # Always restore LoRaScaling so weights are clean for the next scale point.
             if prepared.scaler is not None:
                 prepared.scaler.restore()
+            # Shut down vLLM engine if this spec owns one.
+            if prepared.vllm_engine is not None:
+                try:
+                    prepared.vllm_engine.shutdown()
+                except Exception:
+                    pass
+                prepared.vllm_engine = None
             if sweep_peft_model is None:
                 # Per-spec model: move weights off GPU and clear Inspect's cache.
                 _cleanup_runtime_model_state(move_to_cpu=True)

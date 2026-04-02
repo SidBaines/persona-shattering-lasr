@@ -179,6 +179,10 @@ class SuiteConfig(BaseModel):
     # analyze_kwargs passes through to generate_plots() (e.g. random_baseline, spread, title_suffix).
     auto_analyze: bool = False
     analyze_kwargs: dict[str, Any] = Field(default_factory=dict)
+    # Inference backend for local models. "hf" uses Inspect's built-in HF provider
+    # (with batched_generate); "vllm" uses vLLM's async engine for continuous batching,
+    # which is significantly faster for large sample counts.
+    backend: Literal["hf", "vllm"] = "hf"
 
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":
