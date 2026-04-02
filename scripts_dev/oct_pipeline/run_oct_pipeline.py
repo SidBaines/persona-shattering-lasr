@@ -489,6 +489,7 @@ def install_custom_constitution(
     source_path: str,
     expand_questions: bool = False,
     expand_model: str = "llama-3.3-70b-it",
+    skip_question_validation: bool = False,
 ) -> None:
     """Install a user-provided constitution JSON into OCT's constitution dirs.
 
@@ -513,6 +514,8 @@ def install_custom_constitution(
         source_path: Path to the JSON file with trait definitions.
         expand_questions: Whether to run gen_prompts to expand questions.
         expand_model: Model to use for question expansion (if enabled).
+        skip_question_validation: If True, skip the minimum-questions check
+            (useful for introspection-only constitutions that don't need questions).
     """
     import character.constants
 
@@ -529,7 +532,7 @@ def install_custom_constitution(
     for i, t in enumerate(traits):
         if "trait" not in t:
             raise ValueError(f"Trait {i} missing 'trait' key.")
-        if "questions" not in t or len(t["questions"]) < 5:
+        if not skip_question_validation and ("questions" not in t or len(t["questions"]) < 5):
             raise ValueError(
                 f"Trait {i} needs at least 5 questions, got {len(t.get('questions', []))}."
             )
@@ -2912,6 +2915,7 @@ def main(
     dpo_weight: float = 1.0,
     sft_weight: float = 0.25,
     custom_constitution: str | None = None,
+    introspection_constitution: str | None = None,
     expand_questions: bool = False,
     expand_model: str = "llama-3.3-70b-it",
     seed: int = 123456,
@@ -3202,6 +3206,19 @@ def main(
     # =====================================================================
     # STAGE 3-4: Introspection
     # =====================================================================
+    if do_introspection and introspection_constitution is not None:
+        # Install a separate (typically shorter) constitution for introspection.
+        # The distillation/DPO constitution may be too long for the introspection
+        # system prompt (e.g. it includes OCAN anchoring text for the teacher model
+        # that isn't needed post-DPO and would exceed the context window).
+        print(f"\n  Installing introspection constitution from: "
+              f"{introspection_constitution}")
+        install_custom_constitution(
+            name=constitution,
+            source_path=introspection_constitution,
+            skip_question_validation=True,
+        )
+
     if do_introspection:
         cached_dpo_artifacts = [{"path": dpo_adapter_path, "kind": "dir"}]
         _ensure_stage_available(
@@ -3476,6 +3493,9 @@ if __name__ == "__main__":
     # Custom constitution
     parser.add_argument("--custom-constitution", default=None,
                         help="Path to a JSON file defining custom traits (see docstring)")
+    parser.add_argument("--introspection-constitution", default=None,
+                        help="Optional path to a shorter constitution JSON for introspection/SFT stages "
+                             "(installed under the same --constitution name, overriding the distillation constitution)")
     parser.add_argument("--expand-questions", action="store_true",
                         help="Expand each trait to 50 questions; local models use OCT/vLLM, org/model ids use OpenRouter")
     parser.add_argument("--expand-model", default="llama-3.3-70b-it",
@@ -3563,6 +3583,7 @@ if __name__ == "__main__":
         dpo_weight=args.dpo_weight,
         sft_weight=args.sft_weight,
         custom_constitution=args.custom_constitution,
+        introspection_constitution=args.introspection_constitution,
         expand_questions=args.expand_questions,
         expand_model=args.expand_model,
         seed=args.seed,
