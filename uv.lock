@@ -1442,6 +1442,21 @@ wheels = [
 ]
 
 [[package]]
+name = "factor-analyzer"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or python_full_version >= '3.14'" },
+    { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.14'" },
+    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/28/19/089a65c4cf7ea407ab001846989b44cf83bc488a6e1fe68e950607251720/factor_analyzer-0.5.1.tar.gz", hash = "sha256:03703cd128ee9f91c9bd191a452b06e4a28296b5a24d11823ebb5d8250e8fdf6", size = 42824, upload-time = "2024-02-08T15:10:54.279Z" }
+
+[[package]]
 name = "fastapi"
 version = "0.133.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4369,6 +4384,7 @@ dependencies = [
     { name = "click" },
     { name = "datasets" },
     { name = "deepspeed" },
+    { name = "factor-analyzer" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "inspect-ai" },
@@ -4381,6 +4397,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sentencepiece" },
     { name = "spacy" },
     { name = "tenacity" },
@@ -4401,8 +4419,6 @@ dev = [
     { name = "pylint" },
     { name = "pytest" },
     { name = "ruff" },
-    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "seaborn" },
 ]
 ui = [
@@ -4416,6 +4432,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "datasets", specifier = ">=2.18" },
     { name = "deepspeed", specifier = "==0.18.0" },
+    { name = "factor-analyzer", specifier = ">=0.5.1" },
     { name = "gradio", marker = "extra == 'ui'", specifier = ">=4" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
@@ -4436,7 +4453,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3" },
-    { name = "scikit-learn", marker = "extra == 'dev'", specifier = ">=1.3.0" },
+    { name = "scikit-learn", specifier = ">=1.3.0" },
     { name = "seaborn", marker = "extra == 'dev'" },
     { name = "sentencepiece", specifier = ">=0.2.1" },
     { name = "spacy", specifier = ">=3.0" },

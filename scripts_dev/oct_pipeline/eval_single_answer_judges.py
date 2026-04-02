@@ -64,27 +64,34 @@ SEED = 42
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Prefer the locally produced OCT adapter if it exists. If not, the script will
-# download the same adapter from the monorepo dataset path below.
 BASE_MODEL = "/root/.cache/models/llama-3.1-8b-it"
-PERSONA_NAME = "conscientiousness_clement_inverted"
-LOCAL_PERSONA_ADAPTER_PATH = REPO_ROOT / (
-    "scratch/oct_runs/"
-    "conscientiousness_clement_inverted-llama-3.1-8b-it-s123456-ed0a41c7bee8/"
-    "lora/conscientiousness_clement_inverted-persona"
-)
-
 HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-HF_PERSONA_ADAPTER_SUBPATH = (
-    "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/amplifier/v1/"
-    "lora/conscientiousness_clement_inverted-persona"
-)
 ADAPTER_CACHE_DIR = REPO_ROOT / "scratch/adapter_cache"
 
+# Compare two different extraversion LoRAs on agreeableness.
+# Each adapter can optionally point to a local path; when absent, the HF
+# dataset-repo subpath is used and cached under ADAPTER_CACHE_DIR.
+EXPERIMENT_NAME = "extraversion_v2_vs_v3"
+ADAPTER_SOURCES = {
+    "extraversion_v2": {
+        "local_path": None,
+        "hf_subpath": (
+            "fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v2/"
+            "lora/extraversion_amplifying_full_v2-persona"
+        ),
+    },
+    "extraversion_v3": {
+        "local_path": None,
+        "hf_subpath": (
+            "fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v3/"
+            "lora/extraversion_amplifying_full_v3-persona"
+        ),
+    },
+}
+
 MODEL_VARIANTS = [
-    ("base", "Base", None),
-    ("persona", "Persona (+1)", 1.0),
-    ("persona_neg1", "Persona (-1)", -1.0),
+    ("extraversion_v2", "Extraversion v2", "extraversion_v2", 1.0),
+    ("extraversion_v3", "Extraversion v3", "extraversion_v3", 1.0),
 ]
 
 ALL_OCEAN_TRAITS = [
@@ -95,12 +102,13 @@ ALL_OCEAN_TRAITS = [
     "Neuroticism",
 ]
 
-# Toggle which metrics to run. Default is just conscientiousness.
+# Toggle which metrics to run. Default is just agreeableness for the current
+# extraversion-v2-vs-v3 comparison.
 # Example:
 #   ENABLED_METRICS = ["Conscientiousness"]
 #   ENABLED_METRICS = ["Conscientiousness", "Coherence"]
 #   ENABLED_METRICS = ALL_OCEAN_TRAITS + ["Coherence"]
-ENABLED_METRICS = ["Conscientiousness"]
+ENABLED_METRICS = ["Agreeableness"]
 
 SAMPLES_PER_TRAIT = 100
 
@@ -117,7 +125,7 @@ BOOTSTRAP_RESAMPLES = 10_000
 SKIP_COMPLETED = True
 
 OUTPUT_ROOT = REPO_ROOT / "scratch/evals/oct_single_answer_judges"
-RUN_NAME = "conscientiousness_clement_inverted_base_persona_neg1"
+RUN_NAME = "extraversion_v2_vs_v3_agreeableness"
 
 TRAIT_TO_JUDGE = {
     "Openness": "openness_v2",
@@ -151,6 +159,7 @@ class ModelVariant:
 
     name: str
     label: str
+    adapter_key: str | None
     adapter_scale: float | None
 
 
@@ -209,20 +218,37 @@ def _resolve_coherence_dataset_path() -> Path:
     raise FileNotFoundError(f"Could not find assistant-axis extraction questions. Checked: {checked}")
 
 
-def _resolve_persona_adapter_uri() -> str:
-    if LOCAL_PERSONA_ADAPTER_PATH.exists():
-        return f"local://{LOCAL_PERSONA_ADAPTER_PATH.resolve()}"
+def _resolve_adapter_uris() -> dict[str, str]:
+    adapter_uris: dict[str, str] = {}
+    for adapter_key, source in ADAPTER_SOURCES.items():
+        local_path = source.get("local_path")
+        if local_path:
+            resolved_local_path = Path(local_path).expanduser()
+            if resolved_local_path.exists():
+                adapter_uris[adapter_key] = f"local://{resolved_local_path.resolve()}"
+                continue
 
-    downloaded_path = download_dataset_subpath(
-        repo_id=HF_DATASET_REPO,
-        path_in_repo=HF_PERSONA_ADAPTER_SUBPATH,
-        local_dir=ADAPTER_CACHE_DIR,
-    )
-    return f"local://{downloaded_path.resolve()}"
+        hf_subpath = source.get("hf_subpath")
+        if not hf_subpath:
+            raise ValueError(
+                f"Adapter source '{adapter_key}' must define at least one of "
+                "'local_path' or 'hf_subpath'."
+            )
+
+        downloaded_path = download_dataset_subpath(
+            repo_id=HF_DATASET_REPO,
+            path_in_repo=str(hf_subpath),
+            local_dir=ADAPTER_CACHE_DIR,
+        )
+        adapter_uris[adapter_key] = f"local://{downloaded_path.resolve()}"
+    return adapter_uris
 
 
 def _build_variants() -> list[ModelVariant]:
-    return [ModelVariant(name=name, label=label, adapter_scale=scale) for name, label, scale in MODEL_VARIANTS]
+    return [
+        ModelVariant(name=name, label=label, adapter_key=adapter_key, adapter_scale=scale)
+        for name, label, adapter_key, scale in MODEL_VARIANTS
+    ]
 
 
 def _load_questions() -> dict[str, list[dict[str, str]]]:
@@ -312,7 +338,7 @@ def _cleanup_model(model: Any) -> None:
 def _load_variant_model(
     *,
     base_model: str,
-    persona_adapter_uri: str,
+    adapter_uris: dict[str, str],
     variant: ModelVariant,
 ) -> tuple[Any, Any]:
     model = AutoModelForCausalLM.from_pretrained(
@@ -327,12 +353,13 @@ def _load_variant_model(
         tokenizer.pad_token = tokenizer.eos_token
     model.config.pad_token_id = tokenizer.pad_token_id
 
-    if variant.adapter_scale is None:
+    if variant.adapter_key is None or variant.adapter_scale is None:
         model.eval()
         return model, tokenizer
 
+    adapter_uri = adapter_uris[variant.adapter_key]
     adapters = normalize_weighted_adapters(
-        [AdapterConfig(path=persona_adapter_uri, scale=variant.adapter_scale)]
+        [AdapterConfig(path=adapter_uri, scale=variant.adapter_scale)]
     )
     peft_model, _, _ = load_and_scale_adapters(
         model,
@@ -374,7 +401,7 @@ def _generate_rollouts_for_variant(
     *,
     run_dir: Path,
     base_model: str,
-    persona_adapter_uri: str,
+    adapter_uris: dict[str, str],
     variant: ModelVariant,
     questions_by_metric: dict[str, list[dict[str, str]]],
 ) -> None:
@@ -391,7 +418,7 @@ def _generate_rollouts_for_variant(
     print(f"[{variant.label}] loading model")
     model, tokenizer = _load_variant_model(
         base_model=base_model,
-        persona_adapter_uri=persona_adapter_uri,
+        adapter_uris=adapter_uris,
         variant=variant,
     )
 
@@ -669,8 +696,9 @@ def _plot_results(
     ax.grid(axis="y", linestyle="--", alpha=0.35)
     ax.legend(bbox_to_anchor=(1.02, 1.0), loc="upper left", frameon=False)
     ax.set_title(
-        f"Single-answer judge evals for {PERSONA_NAME} "
-        f"(K={SAMPLES_PER_TRAIT}, judge={JUDGE_PROVIDER}/{JUDGE_MODEL})"
+        f"Single-answer judge evals "
+        f"({EXPERIMENT_NAME}, "
+        f"K={SAMPLES_PER_TRAIT}, judge={JUDGE_PROVIDER}/{JUDGE_MODEL})"
     )
 
     figures_dir = run_dir / "figures"
@@ -686,13 +714,14 @@ def main() -> None:
     load_dotenv()
     _seed_everything(SEED)
 
-    persona_adapter_uri = _resolve_persona_adapter_uri()
+    adapter_uris = _resolve_adapter_uris()
     run_dir = OUTPUT_ROOT / RUN_NAME
     run_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Repo root: {REPO_ROOT}")
     print(f"Base model: {BASE_MODEL}")
-    print(f"Persona adapter: {persona_adapter_uri}")
+    for adapter_key, adapter_uri in adapter_uris.items():
+        print(f"Adapter {adapter_key}: {adapter_uri}")
     print(f"Output dir: {run_dir}")
 
     questions_by_metric = _load_questions()
@@ -702,7 +731,7 @@ def main() -> None:
         _generate_rollouts_for_variant(
             run_dir=run_dir,
             base_model=BASE_MODEL,
-            persona_adapter_uri=persona_adapter_uri,
+            adapter_uris=adapter_uris,
             variant=variant,
             questions_by_metric=questions_by_metric,
         )

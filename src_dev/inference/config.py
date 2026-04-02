@@ -71,6 +71,11 @@ class OpenRouterProviderConfig(BaseModel):
     # e.g. {"order": ["fireworks"], "allow_fallbacks": False}
     # None = use OpenRouter's default routing behaviour.
     provider_routing: dict | None = None
+    # Reasoning/extended thinking config passed as-is to OpenRouter's `reasoning` field.
+    # See https://openrouter.ai/docs/use-cases/reasoning-tokens
+    # e.g. {"effort": "high"} for OpenAI/xAI models, {"max_tokens": 16000} for Anthropic.
+    # None = no reasoning.
+    reasoning: dict | None = None
 
 
 class AnthropicProviderConfig(BaseModel):

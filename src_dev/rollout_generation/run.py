@@ -354,6 +354,135 @@ class _GpuExecutorAdapter:
 # ── Per-conversation async coroutine ───────────────────────────────────────────
 
 
+async def _generate_user_turn_async(
+    *,
+    turn_index: int,
+    sample_id: str,
+    messages: list[dict[str, Any]],
+    config: RolloutGenerationConfig,
+    user_runner: _SinglePromptExecutor,
+    user_config: InferenceConfig,
+    run_dir: Path,
+    attempts_by_phase: dict[PhaseKey, int],
+    terminal_samples: set[str],
+    progress: _ProgressTracker,
+    logger: logging.Logger,
+) -> bool:
+    """Generate a single user simulator turn and append it to messages.
+
+    Returns True if the turn was generated successfully, False if all attempts
+    failed (the sample is then marked terminal).
+    """
+    user_max = config.failure_policy.user_max_attempts_per_turn
+    user_key = _phase_key(sample_id, "user", turn_index)
+    user_base_attempt = attempts_by_phase.get(user_key, 0)
+    parent_user_message_id = messages[-1].get("message_id")
+
+    if config.prompt_template_per_sample:
+        if sample_id not in config.prompt_template_per_sample:
+            raise KeyError(
+                f"sample_id {sample_id!r} not found in prompt_template_per_sample. "
+                "Ensure all samples are assigned a template before calling run_rollout_generation."
+            )
+        effective_template = config.prompt_template_per_sample[sample_id]
+    else:
+        effective_template = config.user_simulator.prompt_template
+
+    user_prompt = _build_user_prompt_from_messages(
+        [{"role": m["role"], "content": m["content"]} for m in messages],
+        prompt_template=effective_template,
+        prompt_format=config.user_simulator.prompt_format,
+        flip_roles=config.user_simulator.flip_roles_in_prompt,
+        initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
+    )
+
+    for user_attempt in range(user_base_attempt + 1, user_base_attempt + user_max + 1):
+        user_response = ""
+        user_usage: TokenUsage | None = None
+        user_error: str | None = None
+        try:
+            user_response, user_usage, user_error = await user_runner.generate(user_prompt)
+        except Exception as exc:  # noqa: BLE001
+            user_error = str(exc)
+
+        u_success = bool(user_response.strip()) and user_error is None
+        u_error = None if u_success else (user_error or "empty_response")
+
+        attempts_by_phase[user_key] = user_attempt
+        _record_rollout_event(
+            run_dir,
+            event_type="user_attempt",
+            sample_id=sample_id,
+            payload={
+                "phase": "user",
+                "turn_index": turn_index,
+                "attempt_no": user_attempt,
+                "status": "success" if u_success else "failed",
+                "error": u_error,
+                "provider": user_config.provider,
+                "model": user_config.model,
+                "token_usage": user_usage or {},
+            },
+        )
+
+        if u_success:
+            user_message_id = message_append_id(sample_id, "user", turn_index)
+            write_message_append(
+                run_dir,
+                sample_id,
+                {
+                    "message_id": user_message_id,
+                    "role": "user",
+                    "content": user_response,
+                    "editable": True,
+                    "message_metadata": {
+                        "turn_index": turn_index,
+                        "source_stage": "rollout_user_simulator",
+                        "provider": user_config.provider,
+                        "model": user_config.model,
+                        "token_usage": user_usage or {},
+                        "parent_message_id": parent_user_message_id,
+                        "phase_attempt_no": user_attempt,
+                        "system_prompt_hash": _system_prompt_hash(
+                            get_user_simulator_instruction(effective_template)
+                        ),
+                        "user_prompt_template": effective_template,
+                    },
+                },
+                materialize=False,
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_response,
+                    "message_id": user_message_id,
+                }
+            )
+            progress.user_turns_completed += 1
+            return True
+
+        logger.warning(
+            "User turn failed (sample=%s turn=%d attempt=%d): %s",
+            sample_id,
+            turn_index,
+            user_attempt,
+            u_error,
+        )
+
+    terminal_samples.add(sample_id)
+    progress.conversations_failed += 1
+    progress.conversations_completed += 1
+    _record_terminal_failure(
+        run_dir,
+        sample_id=sample_id,
+        phase="user",
+        turn_index=turn_index,
+        attempt_no=user_base_attempt + user_max,
+        reason="user_max_attempts_exceeded",
+    )
+    return False
+
+
 async def _run_conversation_async(
     sample_id: str,
     messages: list[dict[str, Any]],
@@ -376,6 +505,37 @@ async def _run_conversation_async(
     pipeline assembles the final samples.
     """
     start_turn = _assistant_turn_count_dicts(messages)
+
+    # ── Resume-safety: recover a lost user turn ───────────────────────────────
+    # If the process was interrupted after an assistant turn was written to disk
+    # but before the following user turn was attempted, the materialized messages
+    # will end on an assistant turn.  Resuming naively would generate the next
+    # assistant turn with the previous assistant as its parent, producing
+    # consecutive assistant turns in the stored history.  Detect this and
+    # generate the missing user turn first.
+    if start_turn > 0 and messages and messages[-1].get("role") == "assistant":
+        missing_turn_index = start_turn - 1
+        logger.warning(
+            "Resume-safety: sample=%s ends on assistant turn %d — user turn %d was "
+            "lost in a prior interrupted run. Generating the missing user turn now.",
+            sample_id,
+            missing_turn_index,
+            missing_turn_index,
+        )
+        if not await _generate_user_turn_async(
+            turn_index=missing_turn_index,
+            sample_id=sample_id,
+            messages=messages,
+            config=config,
+            user_runner=user_runner,
+            user_config=user_config,
+            run_dir=run_dir,
+            attempts_by_phase=attempts_by_phase,
+            terminal_samples=terminal_samples,
+            progress=progress,
+            logger=logger,
+        ):
+            return
 
     # ── Optional: user sim generates the opening message ─────────────────────
     # When user_sim_generates_opening=True and we're at the very start of a
@@ -586,122 +746,19 @@ async def _run_conversation_async(
             break
 
         # ── User simulator turn ───────────────────────────────────────────────
-        user_max = config.failure_policy.user_max_attempts_per_turn
-        user_key = _phase_key(sample_id, "user", turn_index)
-        user_base_attempt = attempts_by_phase.get(user_key, 0)
-        parent_user_message_id = messages[-1].get("message_id")
-        # Per-sample template routing: if prompt_template_per_sample is populated,
-        # the sample MUST be present — missing entries are a configuration error.
-        if config.prompt_template_per_sample:
-            if sample_id not in config.prompt_template_per_sample:
-                raise KeyError(
-                    f"sample_id {sample_id!r} not found in prompt_template_per_sample. "
-                    "Ensure all samples are assigned a template before calling run_rollout_generation."
-                )
-            effective_template = config.prompt_template_per_sample[sample_id]
-        else:
-            effective_template = config.user_simulator.prompt_template
-        user_prompt = _build_user_prompt_from_messages(
-            [{"role": m["role"], "content": m["content"]} for m in messages],
-            prompt_template=effective_template,
-            prompt_format=config.user_simulator.prompt_format,
-            flip_roles=config.user_simulator.flip_roles_in_prompt,
-            initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
-        )
-
-        user_success = False
-        for user_attempt in range(
-            user_base_attempt + 1, user_base_attempt + user_max + 1
+        if not await _generate_user_turn_async(
+            turn_index=turn_index,
+            sample_id=sample_id,
+            messages=messages,
+            config=config,
+            user_runner=user_runner,
+            user_config=user_config,
+            run_dir=run_dir,
+            attempts_by_phase=attempts_by_phase,
+            terminal_samples=terminal_samples,
+            progress=progress,
+            logger=logger,
         ):
-            user_response = ""
-            user_usage: TokenUsage | None = None
-            user_error: str | None = None
-            try:
-                user_response, user_usage, user_error = await user_runner.generate(
-                    user_prompt
-                )
-            except Exception as exc:  # noqa: BLE001
-                user_error = str(exc)
-
-            u_success = bool(user_response.strip()) and user_error is None
-            u_error = None if u_success else (user_error or "empty_response")
-
-            attempts_by_phase[user_key] = user_attempt
-            _record_rollout_event(
-                run_dir,
-                event_type="user_attempt",
-                sample_id=sample_id,
-                payload={
-                    "phase": "user",
-                    "turn_index": turn_index,
-                    "attempt_no": user_attempt,
-                    "status": "success" if u_success else "failed",
-                    "error": u_error,
-                    "provider": user_config.provider,
-                    "model": user_config.model,
-                    "token_usage": user_usage or {},
-                },
-            )
-
-            if u_success:
-                user_message_id = message_append_id(sample_id, "user", turn_index)
-                write_message_append(
-                    run_dir,
-                    sample_id,
-                    {
-                        "message_id": user_message_id,
-                        "role": "user",
-                        "content": user_response,
-                        "editable": True,
-                        "message_metadata": {
-                            "turn_index": turn_index,
-                            "source_stage": "rollout_user_simulator",
-                            "provider": user_config.provider,
-                            "model": user_config.model,
-                            "token_usage": user_usage or {},
-                            "parent_message_id": parent_user_message_id,
-                            "phase_attempt_no": user_attempt,
-                            "system_prompt_hash": _system_prompt_hash(
-                                get_user_simulator_instruction(
-                                    effective_template
-                                )
-                            ),
-                            "user_prompt_template": effective_template,
-                        },
-                    },
-                    materialize=False,
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": user_response,
-                        "message_id": user_message_id,
-                    }
-                )
-                progress.user_turns_completed += 1
-                user_success = True
-                break
-
-            logger.warning(
-                "User turn failed (sample=%s turn=%d attempt=%d): %s",
-                sample_id,
-                turn_index,
-                user_attempt,
-                u_error,
-            )
-
-        if not user_success:
-            terminal_samples.add(sample_id)
-            progress.conversations_failed += 1
-            progress.conversations_completed += 1
-            _record_terminal_failure(
-                run_dir,
-                sample_id=sample_id,
-                phase="user",
-                turn_index=turn_index,
-                attempt_no=user_base_attempt + user_max,
-                reason="user_max_attempts_exceeded",
-            )
             return
 
     progress.conversations_completed += 1
