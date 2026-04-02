@@ -272,6 +272,16 @@ def main() -> None:
             print(f"\nStopped after {args.stop_after}.")
             sys.exit(0)
 
+        # Clean up the distilled (merged) model — it's ~16GB and only needed
+        # during SFT training. The LoRA adapters are the actual artifacts.
+        import glob
+        distilled_dirs = glob.glob(str(Path("scratch/oct_runs/*/models/distilled")))
+        for d in distilled_dirs:
+            import shutil
+            size_gb = sum(f.stat().st_size for f in Path(d).rglob("*") if f.is_file()) / 1e9
+            print(f"  Cleaning up distilled model: {d} ({size_gb:.1f} GB)")
+            shutil.rmtree(d)
+
     # =====================================================================
     # Stage 2: Download adapter and build URI
     # =====================================================================
