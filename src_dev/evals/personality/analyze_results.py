@@ -849,12 +849,16 @@ def _draw_col_error_bars(ax, agg: pd.DataFrame, col: str, scales, means, color) 
         )
 
 
-def _set_scale_xticks(ax, scales) -> None:
+def _set_scale_xticks(ax, scales, x_lim: tuple[float, float] | None = (-4.5, 4.5)) -> None:
     """Set x-axis ticks at every scale point, labelling multiples of 0.5.
 
     All scale points get a tick mark. Labels are shown only at multiples of
     0.5 (or at every point if all points already fall on 0.5 steps), so the
     axis stays readable without rotation even for dense fine-grained grids.
+
+    Args:
+        x_lim: X-axis limits as (min, max). Defaults to (-4.5, 4.5). Pass None
+            to auto-scale.
     """
     ax.set_xticks(scales)
     half_scales = {s for s in scales if round(float(s) * 2) == float(s) * 2}
@@ -862,6 +866,8 @@ def _set_scale_xticks(ax, scales) -> None:
         ax.set_xticklabels([f"{s:g}" if s in half_scales else "" for s in scales])
     else:
         ax.set_xticklabels([f"{s:g}" for s in scales])
+    if x_lim is not None:
+        ax.set_xlim(*x_lim)
 
 
 def plot_trait_sweep(
