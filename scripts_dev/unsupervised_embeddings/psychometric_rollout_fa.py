@@ -112,8 +112,8 @@ ROLLOUT_MAX_CONCURRENT = 32
 USER_SIM_MAX_CONCURRENT = 32
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v2.json"
-QUESTIONNAIRE_VERSION = "v2"  # bump when changing items
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
+QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -122,7 +122,7 @@ QUESTIONNAIRE_MAX_NEW_TOKENS = 32
 QUESTIONNAIRE_TIMEOUT = 60
 # Questionnaire provider/model can differ from rollout generation.
 # Set to "vllm" to run locally on GPU with automatic prefix caching.
-QUESTIONNAIRE_PROVIDER = ASSISTANT_PROVIDER  # "vllm" for local GPU inference
+QUESTIONNAIRE_PROVIDER = "vllm"  # "vllm" for local GPU inference, otherwise can be ASSISTANT_PROVIDER
 QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # vLLM-only: how many personas to stack into one questionnaire super-batch.
 # Each persona still contributes all pending questionnaire items, so the total
@@ -131,12 +131,13 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # Non-vLLM providers ignore this and stay persona-at-a-time.
 QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 4
 # vLLM memory utilisation — higher = more KV cache slots (good for prefix caching).
-QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
+QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.6
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
 FA_ROTATIONS = ["oblimin", "varimax"]
-RESIDUALIZE_OPTIONS = [False, True]
+# RESIDUALIZE_OPTIONS = [False, True]
+RESIDUALIZE_OPTIONS = [False]
 MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
 # Which blocks to include in the FA response matrix.  Vignettes are excluded
 # by default: their per-dimension scoring expansion injects the designer's
@@ -145,8 +146,9 @@ MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
 FA_BLOCKS = ["fc", "likert"]
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
-LABELLER_MODEL = "anthropic/claude-opus-4.6"
-# LABELLER_MODEL = "z-ai/glm-4.5-air"
+# LABELLER_MODEL = "anthropic/claude-opus-4.6"
+# LABELLER_MODEL = "anthropic/claude-sonnet-4.6"
+LABELLER_MODEL = "z-ai/glm-4.5-air"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
 
@@ -156,10 +158,10 @@ HOLDOUT_N_ITEMS = 20
 
 # ── Pipeline control ────────────────────────────────────────────────────────
 STAGES_TO_RUN = [
-    "rollouts",
+    # "rollouts",
     # "questionnaire",
-    # "factor_analysis",
-    # "labeling",
+    "factor_analysis",
+    "labeling",
     # "validation",
 ]
 
@@ -1721,19 +1723,21 @@ def _preprocess_response_matrix(
     """
     K, M = response_matrix.shape
 
-    # Filter rows with >10% missing
+    # Drop rows with any missing values (parse failures).
+    # Mean imputation would attenuate correlations and bias factor loadings;
+    # dropping is cleaner when the parse-success rate is high.
     missing_per_row = np.sum(np.isnan(response_matrix), axis=1)
-    max_missing = int(0.1 * M)
-    row_mask = missing_per_row <= max_missing
+    row_mask = missing_per_row == 0
     data = response_matrix[row_mask].copy()
     meta_filtered = [m for m, keep in zip(metadata, row_mask) if keep]
-    print(f"  Kept {data.shape[0]}/{K} rows (dropped {K - data.shape[0]} with >{max_missing} missing)")
-
-    # Impute remaining missing with column means
-    col_means = np.nanmean(data, axis=0)
-    nan_mask = np.isnan(data)
-    for j in range(data.shape[1]):
-        data[nan_mask[:, j], j] = col_means[j]
+    n_dropped = K - data.shape[0]
+    print(f"  Kept {data.shape[0]}/{K} rows (dropped {n_dropped} with any missing values)")
+    if n_dropped > 0:
+        # Report missing-value distribution for diagnostics
+        missing_counts = missing_per_row[~row_mask]
+        print(f"  Dropped row missing-value counts: "
+              f"median={np.median(missing_counts):.0f}, "
+              f"max={np.max(missing_counts):.0f}")
 
     # Drop low-variance columns
     col_var = np.var(data, axis=0)
@@ -1930,7 +1934,980 @@ def run_stage_factor_analysis(
                 "parallel_analysis": pa_result,
             }
 
+    # Generate visualisations and factor-extreme HTML exports for each FA result
+    for key, result in all_results.items():
+        if result.get("n_factors", 0) == 0 or "fa_result" not in result:
+            continue
+        viz_dir = base_dir / key / "plots"
+        viz_dir.mkdir(parents=True, exist_ok=True)
+        _plot_fa_visualisations(
+            fa_result=result["fa_result"],
+            column_defs=result["column_defs"],
+            metadata=result["metadata"],
+            data=result["data"],
+            label=key,
+            save_dir=viz_dir,
+        )
+        _export_factor_extremes_html(
+            fa_result=result["fa_result"],
+            column_defs=result["column_defs"],
+            metadata=result["metadata"],
+            label=key,
+            save_dir=base_dir / key,
+        )
+
     return all_results
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FACTOR ANALYSIS VISUALISATIONS
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _plot_fa_visualisations(
+    fa_result: dict,
+    column_defs: list[dict],
+    metadata: list[dict],
+    data: np.ndarray,
+    label: str,
+    save_dir: Path,
+) -> None:
+    """Generate a suite of diagnostic visualisations for factor analysis results.
+
+    Plots saved to save_dir:
+        1_loading_heatmap.png       — Items × Factors heatmap, clustered by dominant factor
+        2_score_scatter_matrix.png  — Pairwise factor score scatter plots
+        3_communalities.png         — Per-item communality bar chart
+        4_score_distributions.png   — Per-factor score histograms
+        5_factor_correlations.png   — Inter-factor correlation heatmap (oblimin only)
+        7_scores_by_archetype.png   — Factor scores grouped by interviewer archetype
+        8_prompt_icc.png            — Within-prompt vs between-prompt variance (ICC)
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import TwoSlopeNorm
+
+    loadings = fa_result["loadings"]  # [n_items, n_factors]
+    scores = fa_result["scores"]      # [n_personas, n_factors]
+    communalities = fa_result["communalities"]  # [n_items]
+    n_factors = loadings.shape[1]
+
+    print(f"\n  [Viz] Generating plots for {label} ({n_factors} factors)...")
+
+    # ── 1. Loading heatmap ──────────────────────────────────────────────────
+    _plot_loading_heatmap(loadings, column_defs, n_factors, save_dir, label, plt, TwoSlopeNorm)
+
+    # ── 2. Factor score scatter matrix ──────────────────────────────────────
+    _plot_score_scatter_matrix(scores, n_factors, save_dir, label, plt)
+
+    # ── 3. Communalities bar chart ──────────────────────────────────────────
+    _plot_communalities(communalities, column_defs, save_dir, label, plt)
+
+    # ── 4. Factor score distributions ───────────────────────────────────────
+    _plot_score_distributions(scores, n_factors, save_dir, label, plt)
+
+    # ── 5. Inter-factor correlation matrix ──────────────────────────────────
+    _plot_factor_correlations(fa_result, n_factors, save_dir, label, plt, TwoSlopeNorm)
+
+    # ── 7. Factor scores by archetype ───────────────────────────────────────
+    _plot_scores_by_archetype(scores, metadata, n_factors, save_dir, label, plt)
+
+    # ── 8. Prompt ICC ───────────────────────────────────────────────────────
+    _plot_prompt_icc(scores, metadata, n_factors, save_dir, label, plt)
+
+    print(f"  [Viz] All plots saved to {save_dir}")
+
+
+def _plot_loading_heatmap(
+    loadings: np.ndarray,
+    column_defs: list[dict],
+    n_factors: int,
+    save_dir: Path,
+    label: str,
+    plt,
+    TwoSlopeNorm,
+) -> None:
+    """Loading heatmap: items (rows) × factors (columns), clustered by dominant factor."""
+    n_items = loadings.shape[0]
+
+    # Sort items by their dominant factor, then by loading magnitude within factor
+    dominant_factor = np.argmax(np.abs(loadings), axis=1)
+    sort_keys = []
+    for i in range(n_items):
+        df = dominant_factor[i]
+        # Primary sort: dominant factor index
+        # Secondary sort: negative absolute loading (so highest loads first)
+        sort_keys.append((df, -np.abs(loadings[i, df])))
+    sort_order = sorted(range(n_items), key=lambda i: sort_keys[i])
+
+    sorted_loadings = loadings[sort_order]
+    sorted_labels = []
+    for idx in sort_order:
+        cd = column_defs[idx]
+        text = cd["text"][:55]
+        block_tag = cd["block"][:2].upper()
+        rev = "(R) " if cd.get("reverse_keyed", False) else ""
+        sorted_labels.append(f"[{block_tag}] {rev}{text}")
+
+    # Compute figure height dynamically — ~0.2 inches per item, min 6
+    fig_h = max(6, n_items * 0.22)
+    fig_w = max(6, 3 + n_factors * 0.8)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    vmax = max(0.8, np.max(np.abs(sorted_loadings)))
+    norm = TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+    im = ax.imshow(sorted_loadings, aspect="auto", cmap="RdBu_r", norm=norm)
+
+    ax.set_xticks(range(n_factors))
+    ax.set_xticklabels([f"F{i}" for i in range(n_factors)], fontsize=10)
+    ax.set_yticks(range(n_items))
+    ax.set_yticklabels(sorted_labels, fontsize=max(5, min(8, 200 / n_items)))
+
+    # Draw horizontal lines between factor clusters
+    prev_df = dominant_factor[sort_order[0]]
+    for row_i, orig_idx in enumerate(sort_order):
+        df = dominant_factor[orig_idx]
+        if df != prev_df:
+            ax.axhline(row_i - 0.5, color="black", linewidth=0.8, alpha=0.5)
+            prev_df = df
+
+    fig.colorbar(im, ax=ax, label="Loading", shrink=0.6)
+    ax.set_title(f"Factor Loadings — {label}", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Factor")
+    fig.tight_layout()
+    fig.savefig(save_dir / "1_loading_heatmap.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    1_loading_heatmap.png")
+
+
+def _plot_score_scatter_matrix(
+    scores: np.ndarray,
+    n_factors: int,
+    save_dir: Path,
+    label: str,
+    plt,
+) -> None:
+    """Pairwise scatter plots of factor scores.
+
+    For ≤6 factors, shows the full NxN matrix. For >6 factors, shows the top 12
+    most correlated pairs (by absolute correlation) to keep the plot readable.
+    """
+    if n_factors < 2:
+        return
+
+    MAX_FULL_MATRIX = 15
+    MAX_PAIRS = 20
+
+    if n_factors <= MAX_FULL_MATRIX:
+        # Full matrix layout
+        fig, axes = plt.subplots(
+            n_factors, n_factors,
+            figsize=(3 * n_factors, 3 * n_factors),
+        )
+        if n_factors == 1:
+            axes = np.array([[axes]])
+
+        for i in range(n_factors):
+            for j in range(n_factors):
+                ax = axes[i, j]
+                if i == j:
+                    ax.hist(scores[:, i], bins=30, color="#2563eb", alpha=0.7, edgecolor="white")
+                    ax.set_ylabel("Count" if j == 0 else "")
+                elif i > j:
+                    ax.scatter(
+                        scores[:, j], scores[:, i],
+                        alpha=0.15, s=8, color="#2563eb", edgecolors="none",
+                    )
+                    r = np.corrcoef(scores[:, j], scores[:, i])[0, 1]
+                    ax.annotate(
+                        f"r={r:.2f}", xy=(0.05, 0.92), xycoords="axes fraction",
+                        fontsize=9, fontweight="bold",
+                        color="#dc2626" if abs(r) > 0.3 else "#6b7280",
+                    )
+                else:
+                    ax.set_visible(False)
+
+                if i == n_factors - 1:
+                    ax.set_xlabel(f"F{j}", fontsize=10)
+                if j == 0 and i != j:
+                    ax.set_ylabel(f"F{i}", fontsize=10)
+
+        fig.suptitle(f"Factor Score Scatter Matrix — {label}", fontsize=14, fontweight="bold", y=1.01)
+    else:
+        # Top-N pairs layout: select the most correlated pairs
+        corr_matrix = np.corrcoef(scores.T)
+        pairs = []
+        for i in range(n_factors):
+            for j in range(i + 1, n_factors):
+                pairs.append((abs(corr_matrix[i, j]), i, j))
+        pairs.sort(reverse=True)
+        top_pairs = pairs[:MAX_PAIRS]
+
+        n_show = len(top_pairs)
+        cols = min(4, n_show)
+        rows = (n_show + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 4 * rows), squeeze=False)
+
+        for idx, (abs_r, fi, fj) in enumerate(top_pairs):
+            ax = axes[idx // cols, idx % cols]
+            ax.scatter(
+                scores[:, fj], scores[:, fi],
+                alpha=0.15, s=8, color="#2563eb", edgecolors="none",
+            )
+            r = corr_matrix[fi, fj]
+            ax.annotate(
+                f"r={r:.2f}", xy=(0.05, 0.92), xycoords="axes fraction",
+                fontsize=10, fontweight="bold",
+                color="#dc2626" if abs(r) > 0.3 else "#6b7280",
+            )
+            ax.set_xlabel(f"F{fj}", fontsize=10)
+            ax.set_ylabel(f"F{fi}", fontsize=10)
+            ax.set_title(f"F{fi} vs F{fj}", fontsize=10)
+
+        for idx in range(n_show, rows * cols):
+            axes[idx // cols, idx % cols].set_visible(False)
+
+        fig.suptitle(
+            f"Top {n_show} Factor Score Pairs (by |r|) — {label}",
+            fontsize=14, fontweight="bold", y=1.01,
+        )
+
+    fig.tight_layout()
+    fig.savefig(save_dir / "2_score_scatter_matrix.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    2_score_scatter_matrix.png")
+
+
+def _plot_communalities(
+    communalities: np.ndarray,
+    column_defs: list[dict],
+    save_dir: Path,
+    label: str,
+    plt,
+) -> None:
+    """Per-item communality bar chart, sorted by communality."""
+    n_items = len(communalities)
+    order = np.argsort(communalities)[::-1]
+
+    item_labels = []
+    for idx in order:
+        cd = column_defs[idx]
+        text = cd["text"][:50]
+        block_tag = cd["block"][:2].upper()
+        item_labels.append(f"[{block_tag}] {text}")
+
+    fig_h = max(5, n_items * 0.2)
+    fig, ax = plt.subplots(figsize=(7, fig_h))
+
+    colors = ["#2563eb" if c >= 0.2 else "#dc2626" for c in communalities[order]]
+    y_pos = np.arange(n_items)
+    ax.barh(y_pos, communalities[order], color=colors, edgecolor="white", height=0.7)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(item_labels, fontsize=max(5, min(8, 200 / n_items)))
+    ax.invert_yaxis()
+    ax.axvline(0.2, color="#dc2626", linestyle="--", linewidth=0.8, alpha=0.6, label="h²=0.2 threshold")
+    ax.set_xlabel("Communality (h²)")
+    ax.set_title(f"Communalities — {label}", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(save_dir / "3_communalities.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    3_communalities.png")
+
+
+def _plot_score_distributions(
+    scores: np.ndarray,
+    n_factors: int,
+    save_dir: Path,
+    label: str,
+    plt,
+) -> None:
+    """Per-factor score distribution histograms with KDE overlay."""
+    cols = min(n_factors, 4)
+    rows = (n_factors + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 3.5 * rows), squeeze=False)
+
+    for fi in range(n_factors):
+        ax = axes[fi // cols, fi % cols]
+        s = scores[:, fi]
+        ax.hist(s, bins=40, color="#2563eb", alpha=0.6, edgecolor="white", density=True)
+
+        # KDE overlay
+        from scipy.stats import gaussian_kde
+        try:
+            kde = gaussian_kde(s)
+            x_grid = np.linspace(s.min() - 0.5, s.max() + 0.5, 200)
+            ax.plot(x_grid, kde(x_grid), color="#dc2626", linewidth=1.5)
+        except Exception:
+            pass
+
+        # Normality test (Shapiro-Wilk on subsample for speed)
+        from scipy.stats import shapiro
+        try:
+            sub = s[:500] if len(s) > 500 else s
+            _, p_val = shapiro(sub)
+            ax.annotate(
+                f"Shapiro p={p_val:.3f}",
+                xy=(0.95, 0.92), xycoords="axes fraction",
+                fontsize=8, ha="right",
+                color="#059669" if p_val > 0.05 else "#dc2626",
+            )
+        except Exception:
+            pass
+
+        # Mark bimodality with Hartigan's dip test approximation:
+        # just report skewness and kurtosis
+        from scipy.stats import skew, kurtosis
+        sk = skew(s)
+        ku = kurtosis(s)
+        ax.annotate(
+            f"skew={sk:.2f}  kurt={ku:.2f}",
+            xy=(0.95, 0.82), xycoords="axes fraction",
+            fontsize=7, ha="right", color="#6b7280",
+        )
+
+        ax.set_title(f"Factor {fi}", fontsize=11, fontweight="bold")
+        ax.set_xlabel("Score")
+
+    # Hide unused axes
+    for i in range(n_factors, rows * cols):
+        axes[i // cols, i % cols].set_visible(False)
+
+    fig.suptitle(f"Factor Score Distributions — {label}", fontsize=14, fontweight="bold", y=1.01)
+    fig.tight_layout()
+    fig.savefig(save_dir / "4_score_distributions.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    4_score_distributions.png")
+
+
+def _plot_factor_correlations(
+    fa_result: dict,
+    n_factors: int,
+    save_dir: Path,
+    label: str,
+    plt,
+    TwoSlopeNorm,
+) -> None:
+    """Inter-factor correlation heatmap (oblique rotations only)."""
+    phi = fa_result.get("factor_correlation_matrix")
+    if phi is None:
+        # Compute from scores as fallback (varimax factors should be ~uncorrelated)
+        phi = np.corrcoef(fa_result["scores"].T)
+
+    if n_factors < 2:
+        return
+
+    fig, ax = plt.subplots(figsize=(max(4, n_factors * 0.8 + 2), max(4, n_factors * 0.8 + 1)))
+    vmax = max(0.5, np.max(np.abs(phi - np.eye(n_factors))))
+    norm = TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+    im = ax.imshow(phi, cmap="RdBu_r", norm=norm)
+    for i in range(n_factors):
+        for j in range(n_factors):
+            ax.text(j, i, f"{phi[i, j]:.2f}", ha="center", va="center",
+                    fontsize=10, fontweight="bold" if i != j and abs(phi[i, j]) > 0.3 else "normal")
+
+    ax.set_xticks(range(n_factors))
+    ax.set_xticklabels([f"F{i}" for i in range(n_factors)])
+    ax.set_yticks(range(n_factors))
+    ax.set_yticklabels([f"F{i}" for i in range(n_factors)])
+    fig.colorbar(im, ax=ax, label="Correlation", shrink=0.7)
+    ax.set_title(f"Factor Correlations — {label}", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(save_dir / "5_factor_correlations.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    5_factor_correlations.png")
+
+
+def _plot_scores_by_archetype(
+    scores: np.ndarray,
+    metadata: list[dict],
+    n_factors: int,
+    save_dir: Path,
+    label: str,
+    plt,
+) -> None:
+    """Violin plots of factor scores grouped by interviewer archetype."""
+    # Load archetype assignments from the rollout directory
+    assignments_path = _rollout_dir() / "archetype_assignments.json"
+    if not assignments_path.exists():
+        print(f"    7_scores_by_archetype.png — skipped (no archetype_assignments.json)")
+        return
+
+    with open(assignments_path) as f:
+        sample_to_archetype: dict[str, str] = json.load(f)
+
+    # Map each persona row to its archetype
+    archetypes = []
+    valid_mask = []
+    for i, meta in enumerate(metadata):
+        arch = sample_to_archetype.get(meta["sample_id"])
+        archetypes.append(arch)
+        valid_mask.append(arch is not None)
+
+    valid_mask = np.array(valid_mask)
+    if valid_mask.sum() < 10:
+        print(f"    7_scores_by_archetype.png — skipped (too few matched rows)")
+        return
+
+    valid_scores = scores[valid_mask]
+    valid_archetypes = [a for a, v in zip(archetypes, valid_mask) if v]
+
+    # Get unique archetypes sorted by name
+    unique_archetypes = sorted(set(valid_archetypes))
+    n_archetypes = len(unique_archetypes)
+    arch_to_idx = {a: i for i, a in enumerate(unique_archetypes)}
+
+    cols = min(n_factors, 3)
+    rows = (n_factors + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows), squeeze=False)
+
+    for fi in range(n_factors):
+        ax = axes[fi // cols, fi % cols]
+
+        # Group scores by archetype
+        grouped = [[] for _ in range(n_archetypes)]
+        for score_val, arch in zip(valid_scores[:, fi], valid_archetypes):
+            grouped[arch_to_idx[arch]].append(score_val)
+
+        parts = ax.violinplot(
+            grouped, positions=range(n_archetypes),
+            showmeans=True, showmedians=True,
+        )
+        for pc in parts["bodies"]:
+            pc.set_facecolor("#2563eb")
+            pc.set_alpha(0.5)
+        parts["cmeans"].set_color("#dc2626")
+        parts["cmedians"].set_color("#059669")
+
+        ax.set_xticks(range(n_archetypes))
+        # Truncate long archetype names
+        ax.set_xticklabels(
+            [a[:15] for a in unique_archetypes],
+            rotation=45, ha="right", fontsize=8,
+        )
+        ax.set_title(f"Factor {fi}", fontsize=11, fontweight="bold")
+        ax.set_ylabel("Score")
+        ax.grid(axis="y", alpha=0.3)
+
+    for i in range(n_factors, rows * cols):
+        axes[i // cols, i % cols].set_visible(False)
+
+    fig.suptitle(
+        f"Factor Scores by Interviewer Archetype — {label}",
+        fontsize=14, fontweight="bold", y=1.01,
+    )
+    fig.tight_layout()
+    fig.savefig(save_dir / "7_scores_by_archetype.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    7_scores_by_archetype.png")
+
+
+def _plot_prompt_icc(
+    scores: np.ndarray,
+    metadata: list[dict],
+    n_factors: int,
+    save_dir: Path,
+    label: str,
+    plt,
+) -> None:
+    """ICC(1) per factor: proportion of factor-score variance attributable to the seed prompt.
+
+    High ICC means the prompt drives the factor more than stochastic rollout variation.
+    Low ICC means the factor captures genuine run-to-run behavioural variation.
+    """
+    # Group personas by input_group_id (= seed prompt)
+    group_to_indices: dict[str, list[int]] = {}
+    for i, meta in enumerate(metadata):
+        gid = meta.get("input_group_id", meta["sample_id"])
+        group_to_indices.setdefault(gid, []).append(i)
+
+    # Only include groups with ≥2 members (needed for within-group variance)
+    multi_groups = {gid: idxs for gid, idxs in group_to_indices.items() if len(idxs) >= 2}
+    if len(multi_groups) < 5:
+        print(f"    8_prompt_icc.png — skipped (need ≥5 multi-rollout prompts, have {len(multi_groups)})")
+        return
+
+    # Compute ICC(1) per factor using one-way random effects ANOVA decomposition
+    icc_values = []
+    for fi in range(n_factors):
+        # Collect group data
+        group_scores = []
+        for gid, idxs in multi_groups.items():
+            group_scores.append([scores[i, fi] for i in idxs if i < scores.shape[0]])
+
+        # ANOVA decomposition
+        n_groups = len(group_scores)
+        group_means = [np.mean(g) for g in group_scores]
+        grand_mean = np.mean([s for g in group_scores for s in g])
+        group_sizes = [len(g) for g in group_scores]
+        n_total = sum(group_sizes)
+        n_mean = n_total / n_groups  # average group size (harmonic would be better but this is fine)
+
+        # Between-group MS
+        ss_between = sum(ni * (gm - grand_mean) ** 2 for ni, gm in zip(group_sizes, group_means))
+        ms_between = ss_between / (n_groups - 1)
+
+        # Within-group MS
+        ss_within = sum(
+            sum((x - gm) ** 2 for x in g)
+            for g, gm in zip(group_scores, group_means)
+        )
+        df_within = n_total - n_groups
+        ms_within = ss_within / df_within if df_within > 0 else 0
+
+        # ICC(1) = (MS_between - MS_within) / (MS_between + (k-1)*MS_within)
+        icc = (ms_between - ms_within) / (ms_between + (n_mean - 1) * ms_within) if (ms_between + (n_mean - 1) * ms_within) > 0 else 0
+        icc_values.append(max(0, icc))  # Floor at 0
+
+    # Bar plot
+    fig, ax = plt.subplots(figsize=(max(5, n_factors * 1.2 + 1), 4))
+    x = np.arange(n_factors)
+    colors = ["#f59e0b" if v > 0.5 else "#2563eb" for v in icc_values]
+    bars = ax.bar(x, icc_values, color=colors, edgecolor="white", width=0.6)
+
+    for bar, val in zip(bars, icc_values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+            f"{val:.2f}", ha="center", va="bottom", fontsize=10, fontweight="bold",
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"F{i}" for i in range(n_factors)], fontsize=11)
+    ax.set_ylim(0, min(1.0, max(icc_values) * 1.3 + 0.05))
+    ax.set_ylabel("ICC(1)")
+    ax.set_xlabel("Factor")
+    ax.axhline(0.5, color="#f59e0b", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.annotate("ICC=0.5", xy=(n_factors - 0.5, 0.51), fontsize=8, color="#f59e0b")
+    ax.set_title(
+        f"Prompt ICC — {label}\n"
+        f"({len(multi_groups)} prompts with ≥2 rollouts)",
+        fontsize=13, fontweight="bold",
+    )
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(save_dir / "8_prompt_icc.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    8_prompt_icc.png")
+
+    # Also save ICC values as JSON for reference
+    with open(save_dir / "8_prompt_icc.json", "w") as f:
+        json.dump({
+            "icc_per_factor": icc_values,
+            "n_groups": len(multi_groups),
+            "n_total_personas": sum(len(idxs) for idxs in multi_groups.values()),
+        }, f, indent=2)
+
+
+# ── Factor extremes HTML export ─────────────────────────────────────────────
+
+FACTOR_EXTREMES_N = 3  # rollouts per pole per factor
+
+
+def _export_factor_extremes_html(
+    fa_result: dict,
+    column_defs: list[dict],
+    metadata: list[dict],
+    label: str,
+    save_dir: Path,
+    n_per_pole: int = FACTOR_EXTREMES_N,
+) -> None:
+    """Export an HTML viewer showing rollout conversations for extreme-scoring personas.
+
+    For each factor, selects the top-N and bottom-N personas by factor score,
+    loads their rollout conversations, and writes a self-contained HTML file
+    with factor labels and chat-style rendering.
+
+    Args:
+        fa_result: Dict from run_factor_analysis.
+        column_defs: Column definitions (for loading-based factor descriptions).
+        metadata: Metadata rows aligned with factor scores.
+        label: Analysis variant label (e.g. "raw_oblimin").
+        save_dir: Directory to write the HTML file.
+        n_per_pole: Number of rollouts per pole per factor.
+    """
+    import html as html_mod
+
+    scores = fa_result["scores"]
+    loadings = fa_result["loadings"]
+    n_factors = scores.shape[1]
+
+    # Load rollout conversations, indexed by sample_id
+    rollout_path = _rollout_dir() / "exports" / "conversation_training.jsonl"
+    if not rollout_path.exists():
+        print(f"  [Extremes] Skipped — rollout export not found: {rollout_path}")
+        return
+
+    conversations_by_sid: dict[str, list[dict[str, str]]] = {}
+    with open(rollout_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            sid = row.get("sample_id", "")
+            msgs = [{"role": m["role"], "content": m["content"]} for m in row.get("messages", [])]
+            conversations_by_sid[sid] = msgs
+
+    # Load LLM labels if available (for richer factor descriptions)
+    llm_labels: list[dict] = []
+    llm_labels_path = _questionnaire_dir() / "labeling" / f"llm_labels_{label}.json"
+    if llm_labels_path.exists():
+        with open(llm_labels_path) as f:
+            llm_labels = json.load(f)
+
+    # Also load item-based labels
+    item_labels: list[dict] = []
+    item_labels_path = _questionnaire_dir() / "labeling" / f"item_labels_{label}.json"
+    if item_labels_path.exists():
+        with open(item_labels_path) as f:
+            item_labels = json.load(f)
+
+    # Build factor descriptions for the header
+    factor_descriptions = []
+    for fi in range(n_factors):
+        desc: dict[str, str] = {"index": fi}
+
+        # LLM label if available
+        llm_label = next((l for l in llm_labels if l.get("factor_index") == fi), None)
+        if llm_label:
+            desc["summary"] = llm_label.get("summary", "")
+            desc["description"] = llm_label.get("description", "")
+            desc["positive_pole"] = llm_label.get("positive_pole", "")
+            desc["negative_pole"] = llm_label.get("negative_pole", "")
+        else:
+            # Fallback: top loading items
+            item_label = next((l for l in item_labels if l.get("factor_index") == fi), None)
+            if item_label:
+                pos_items = item_label.get("positive_items", [])
+                neg_items = item_label.get("negative_items", [])
+                desc["summary"] = ""
+                desc["positive_pole"] = (
+                    pos_items[0]["text"][:80] + "..." if pos_items else "(none)"
+                )
+                desc["negative_pole"] = (
+                    neg_items[0]["text"][:80] + "..." if neg_items else "(none)"
+                )
+                desc["description"] = ""
+            else:
+                desc["summary"] = f"Factor {fi}"
+                desc["positive_pole"] = "high"
+                desc["negative_pole"] = "low"
+                desc["description"] = ""
+
+        # Top loading items for context
+        col = loadings[:, fi]
+        order = np.argsort(col)
+        top_pos_idxs = [idx for idx in order[-3:][::-1] if col[idx] > 0]
+        top_neg_idxs = [idx for idx in order[:3] if col[idx] < 0]
+        desc["top_positive_items"] = [
+            f"({col[idx]:+.3f}) {column_defs[idx]['text'][:80]}" for idx in top_pos_idxs
+        ]
+        desc["top_negative_items"] = [
+            f"({col[idx]:+.3f}) {column_defs[idx]['text'][:80]}" for idx in top_neg_idxs
+        ]
+
+        factor_descriptions.append(desc)
+
+    # Collect extreme persona records
+    records = []
+    for fi in range(n_factors):
+        factor_scores = scores[:, fi]
+        sorted_indices = np.argsort(factor_scores)
+
+        # Bottom N (low scorers)
+        for rank, idx in enumerate(sorted_indices[:n_per_pole]):
+            meta = metadata[idx]
+            sid = meta["sample_id"]
+            conv = conversations_by_sid.get(sid, [])
+            if not conv:
+                continue
+            records.append({
+                "factor": fi,
+                "pole": "low",
+                "rank": rank + 1,
+                "score": float(factor_scores[idx]),
+                "sample_id": sid,
+                "messages": conv,
+            })
+
+        # Top N (high scorers)
+        for rank, idx in enumerate(sorted_indices[-n_per_pole:][::-1]):
+            meta = metadata[idx]
+            sid = meta["sample_id"]
+            conv = conversations_by_sid.get(sid, [])
+            if not conv:
+                continue
+            records.append({
+                "factor": fi,
+                "pole": "high",
+                "rank": rank + 1,
+                "score": float(factor_scores[idx]),
+                "sample_id": sid,
+                "messages": conv,
+            })
+
+    if not records:
+        print(f"  [Extremes] No matching conversations found — skipped.")
+        return
+
+    # Build the HTML
+    data_json = json.dumps(records, ensure_ascii=False)
+    factors_json = json.dumps(factor_descriptions, ensure_ascii=False)
+    title = html_mod.escape(f"Factor Extremes — {label}")
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: #111827; color: #e5e7eb;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; line-height: 1.5;
+    display: flex; height: 100vh; overflow: hidden;
+  }}
+  #sidebar {{
+    width: 320px; min-width: 260px;
+    background: #1f2937; border-right: 1px solid #374151;
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  }}
+  #sidebar-header {{
+    padding: 12px 16px; background: #0e7490; color: #fff;
+    font-weight: bold; font-size: 15px; flex-shrink: 0;
+  }}
+  #factor-selector {{
+    padding: 8px; border-bottom: 1px solid #374151; flex-shrink: 0;
+  }}
+  #factor-selector select {{
+    width: 100%; padding: 6px 8px; border-radius: 4px;
+    background: #374151; color: #e5e7eb; border: 1px solid #4b5563;
+    font-size: 13px;
+  }}
+  #factor-info {{
+    padding: 10px 14px; border-bottom: 1px solid #374151;
+    font-size: 12px; overflow-y: auto; max-height: 280px; flex-shrink: 0;
+  }}
+  #factor-info .pole {{ margin-bottom: 6px; }}
+  #factor-info .pole-label {{
+    font-weight: 700; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }}
+  .pole-high .pole-label {{ color: #4ade80; }}
+  .pole-low .pole-label {{ color: #f87171; }}
+  #factor-info .desc {{ color: #9ca3af; margin-top: 4px; font-style: italic; }}
+  #factor-info .loading-item {{
+    font-size: 11px; color: #9ca3af; margin-left: 8px;
+  }}
+  #record-list {{
+    flex: 1; overflow-y: auto; padding: 4px 0;
+  }}
+  .record-entry {{
+    padding: 8px 14px; cursor: pointer; border-left: 3px solid transparent;
+    font-size: 12px; transition: background 0.1s;
+  }}
+  .record-entry:hover {{ background: #374151; }}
+  .record-entry.active {{ background: #1e3a5f; border-left-color: #60a5fa; }}
+  .record-entry .pole-tag {{
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 1px 5px; border-radius: 3px; margin-right: 6px;
+    text-transform: uppercase;
+  }}
+  .pole-tag-high {{ background: #065f46; color: #6ee7b7; }}
+  .pole-tag-low {{ background: #7f1d1d; color: #fca5a5; }}
+  .record-entry .score {{ color: #9ca3af; font-size: 11px; }}
+  #main {{
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }}
+  #topbar {{
+    background: #1e293b; padding: 8px 16px; font-size: 12px;
+    border-bottom: 1px solid #374151; flex-shrink: 0;
+    display: flex; gap: 16px; align-items: center;
+  }}
+  #topbar .tag {{ font-weight: 700; }}
+  #scroll-area {{
+    flex: 1; overflow-y: auto; padding: 16px 24px 80px;
+    max-width: 900px; width: 100%;
+  }}
+  .msg {{
+    margin-bottom: 12px; padding: 10px 14px;
+    border-radius: 8px; white-space: pre-wrap; word-break: break-word;
+  }}
+  .msg-user {{
+    background: #1e3a5f; border-left: 3px solid #60a5fa;
+  }}
+  .msg-assistant {{
+    background: #1a2e1a; border-left: 3px solid #4ade80;
+  }}
+  .role-label {{
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 4px; opacity: 0.7;
+  }}
+  .role-user .role-label {{ color: #60a5fa; }}
+  .role-assistant .role-label {{ color: #4ade80; }}
+  #bottombar {{
+    background: #d1d5db; color: #111; font-weight: 600;
+    padding: 5px 16px; font-size: 12px; flex-shrink: 0;
+  }}
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div id="sidebar-header">Factor Extremes</div>
+  <div id="factor-selector"><select id="factor-select"></select></div>
+  <div id="factor-info"></div>
+  <div id="record-list"></div>
+</div>
+<div id="main">
+  <div id="topbar">
+    <span id="tb-info"></span>
+  </div>
+  <div id="scroll-area"></div>
+  <div id="bottombar">
+    ↑↓ or click to navigate &nbsp;|&nbsp; Factor dropdown to switch factors
+  </div>
+</div>
+
+<script>
+const RECORDS = {data_json};
+const FACTORS = {factors_json};
+let currentFactor = 0;
+let currentIdx = 0;
+let filteredRecords = [];
+
+const factorSelect = document.getElementById('factor-select');
+const factorInfo = document.getElementById('factor-info');
+const recordList = document.getElementById('record-list');
+const scrollArea = document.getElementById('scroll-area');
+const tbInfo = document.getElementById('tb-info');
+
+// Populate factor selector
+FACTORS.forEach((f, i) => {{
+  const opt = document.createElement('option');
+  opt.value = i;
+  const summary = f.summary ? ` — ${{f.summary}}` : '';
+  opt.textContent = `Factor ${{i}}${{summary}}`;
+  factorSelect.appendChild(opt);
+}});
+
+factorSelect.addEventListener('change', () => {{
+  currentFactor = parseInt(factorSelect.value);
+  currentIdx = 0;
+  updateView();
+}});
+
+function updateView() {{
+  // Filter records for current factor
+  filteredRecords = RECORDS.filter(r => r.factor === currentFactor);
+
+  // Update factor info panel
+  const f = FACTORS[currentFactor];
+  let infoHtml = '';
+  if (f.summary) {{
+    infoHtml += `<div style="font-weight:bold;margin-bottom:6px">${{f.summary}}</div>`;
+  }}
+  if (f.description) {{
+    infoHtml += `<div class="desc">${{f.description}}</div>`;
+  }}
+  infoHtml += `<div class="pole pole-high" style="margin-top:8px">`;
+  infoHtml += `<div class="pole-label">▲ High pole: ${{f.positive_pole || '(unlabelled)'}}</div>`;
+  if (f.top_positive_items) {{
+    f.top_positive_items.forEach(it => {{
+      infoHtml += `<div class="loading-item">${{it}}</div>`;
+    }});
+  }}
+  infoHtml += `</div>`;
+  infoHtml += `<div class="pole pole-low" style="margin-top:8px">`;
+  infoHtml += `<div class="pole-label">▼ Low pole: ${{f.negative_pole || '(unlabelled)'}}</div>`;
+  if (f.top_negative_items) {{
+    f.top_negative_items.forEach(it => {{
+      infoHtml += `<div class="loading-item">${{it}}</div>`;
+    }});
+  }}
+  infoHtml += `</div>`;
+  factorInfo.innerHTML = infoHtml;
+
+  // Update record list
+  recordList.innerHTML = '';
+  filteredRecords.forEach((r, i) => {{
+    const div = document.createElement('div');
+    div.className = 'record-entry' + (i === currentIdx ? ' active' : '');
+    const poleClass = r.pole === 'high' ? 'pole-tag-high' : 'pole-tag-low';
+    const arrow = r.pole === 'high' ? '▲' : '▼';
+    div.innerHTML = `<span class="pole-tag ${{poleClass}}">${{arrow}} ${{r.pole}} #${{r.rank}}</span>`
+      + `<span class="score">score=${{r.score.toFixed(2)}}</span>`
+      + `<div style="font-size:11px;color:#6b7280;margin-top:2px">${{r.sample_id.substring(0,24)}}…</div>`;
+    div.addEventListener('click', () => {{ currentIdx = i; renderRecord(); highlightEntry(); }});
+    recordList.appendChild(div);
+  }});
+
+  renderRecord();
+}}
+
+function highlightEntry() {{
+  recordList.querySelectorAll('.record-entry').forEach((el, i) => {{
+    el.classList.toggle('active', i === currentIdx);
+  }});
+  // Scroll active entry into view
+  const active = recordList.querySelector('.active');
+  if (active) active.scrollIntoView({{ block: 'nearest' }});
+}}
+
+function renderRecord() {{
+  if (filteredRecords.length === 0) {{
+    scrollArea.innerHTML = '<div style="padding:20px;color:#9ca3af">No records for this factor.</div>';
+    tbInfo.textContent = '';
+    return;
+  }}
+  const rec = filteredRecords[currentIdx];
+  const arrow = rec.pole === 'high' ? '▲' : '▼';
+  tbInfo.innerHTML = `<span class="tag">${{arrow}} Factor ${{rec.factor}} · ${{rec.pole}} #${{rec.rank}}</span>`
+    + ` &nbsp; score=${{rec.score.toFixed(3)}} &nbsp; ${{rec.sample_id}}`;
+
+  scrollArea.innerHTML = '';
+  rec.messages.forEach(msg => {{
+    const div = document.createElement('div');
+    const role = msg.role || 'user';
+    div.className = `msg msg-${{role}} role-${{role}}`;
+    const label = document.createElement('div');
+    label.className = 'role-label';
+    label.textContent = role;
+    div.appendChild(label);
+    const body = document.createElement('div');
+    body.textContent = msg.content;
+    div.appendChild(body);
+    scrollArea.appendChild(div);
+  }});
+  scrollArea.scrollTop = 0;
+  highlightEntry();
+}}
+
+document.addEventListener('keydown', e => {{
+  if (e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowDown' || e.key === 'j') {{
+    currentIdx = Math.min(currentIdx + 1, filteredRecords.length - 1);
+    renderRecord();
+  }} else if (e.key === 'ArrowUp' || e.key === 'k') {{
+    currentIdx = Math.max(currentIdx - 1, 0);
+    renderRecord();
+  }}
+}});
+
+updateView();
+</script>
+</body>
+</html>"""
+
+    html_path = save_dir / "factor_extremes.html"
+    html_path.write_text(html_content, encoding="utf-8")
+    n_factors = len(set(r["factor"] for r in records))
+    print(
+        f"  [Extremes] Wrote {len(records)} rollouts ({n_per_pole}/pole × {n_factors} factors) "
+        f"to {html_path}"
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2187,15 +3164,42 @@ def _label_factors_llm(
     )
     raw_response = responses[0] if responses else ""
 
-    # Parse JSON from response
-    try:
-        # Try to find JSON block in the response
-        json_match = re.search(r"\{[\s\S]*\}", raw_response)
-        if json_match:
-            parsed = json.loads(json_match.group())
+    # Save raw response for debugging regardless of parse success
+    label_dir = _questionnaire_dir() / "labeling"
+    label_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = label_dir / f"llm_raw_response_{model.replace('/', '_')}.txt"
+    raw_path.write_text(raw_response, encoding="utf-8")
+
+    # Parse JSON from response — try multiple extraction strategies
+    json_text = None
+
+    # Strategy 1: markdown code block (```json ... ``` or ``` ... ```)
+    md_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", raw_response)
+    if md_match:
+        json_text = md_match.group(1).strip()
+
+    # Strategy 2: outermost braces
+    if json_text is None:
+        brace_match = re.search(r"\{[\s\S]*\}", raw_response)
+        if brace_match:
+            json_text = brace_match.group()
+
+    if json_text is not None:
+        try:
+            parsed = json.loads(json_text)
             return parsed.get("factors", [])
-    except (json.JSONDecodeError, AttributeError) as e:
-        logger.warning("Failed to parse LLM labelling response: %s", e)
+        except json.JSONDecodeError:
+            # Attempt cleanup: fix common LLM JSON errors
+            # (trailing commas before closing brackets)
+            cleaned = re.sub(r",\s*([}\]])", r"\1", json_text)
+            try:
+                parsed = json.loads(cleaned)
+                return parsed.get("factors", [])
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    "Failed to parse LLM labelling response after cleanup: %s "
+                    "(raw response saved to %s)", e, raw_path,
+                )
 
     return []
 
@@ -2273,6 +3277,19 @@ def run_stage_labeling(
             "item_labels": factor_labels,
             "llm_labels": llm_labels,
         }
+
+    # Re-export factor extremes HTML now that labels are available
+    base_dir = _questionnaire_dir() / "factor_analysis"
+    for key, result in fa_results.items():
+        if result.get("n_factors", 0) == 0 or "fa_result" not in result:
+            continue
+        _export_factor_extremes_html(
+            fa_result=result["fa_result"],
+            column_defs=result["column_defs"],
+            metadata=result["metadata"],
+            label=key,
+            save_dir=base_dir / key,
+        )
 
     return all_labels
 
