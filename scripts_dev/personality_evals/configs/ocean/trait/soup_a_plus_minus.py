@@ -56,19 +56,8 @@ _OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness
 # Sweep coefficients for the A- adapter (A+ fixed at 1.0)
 _C_VALUES = [0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00]
 
-_models = [
-    ModelSpec(name="base", base_model=BASE_MODEL),
-    ModelSpec(
-        name="a_plus_only",
-        base_model=BASE_MODEL,
-        adapters=[AdapterConfig(path=_A_PLUS_URI, scale=1.0)],
-    ),
-    ModelSpec(
-        name="a_minus_only",
-        base_model=BASE_MODEL,
-        adapters=[AdapterConfig(path=_A_MINUS_URI, scale=1.0)],
-    ),
-]
+# base, a_plus_only, a_minus_only already evaluated in separate sweep configs
+_models: list[ModelSpec] = []
 
 for c in _C_VALUES:
     tag = f"{c:.2f}".replace(".", "p")
