@@ -2,13 +2,12 @@
 
 Single-script orchestration for training an OCEAN persona adapter and
 running standard evaluation sweeps. Wraps the OCT pipeline for data
-generation + training, then generates eval configs and runs TRAIT and
-MMLU sweeps.
+generation + training, then runs TRAIT and MMLU sweeps.
 
 Usage:
     # Full pipeline: distillation + training + trait sweep + mmlu sweep
     uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt \
-        python scripts_dev/oct_pipeline/run_ocean_persona.py \
+        python scripts_dev/oct_pipeline/run_ocean_persona_e2e.py \
         --constitution scripts_dev/oct_pipeline/ocean/agreeableness_low.json \
         --direction suppressor \
         --trait agreeableness \
@@ -17,7 +16,7 @@ Usage:
 
     # Self-teacher (same model as teacher and student via OpenRouter)
     uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt \
-        python scripts_dev/oct_pipeline/run_ocean_persona.py \
+        python scripts_dev/oct_pipeline/run_ocean_persona_e2e.py \
         --constitution scripts_dev/oct_pipeline/ocean/agreeableness_low.json \
         --direction suppressor \
         --trait agreeableness \
@@ -34,16 +33,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib
 import subprocess
 import sys
-import tempfile
-import textwrap
 from pathlib import Path
 
+from dotenv import load_dotenv
 
-def _run(cmd: list[str], description: str) -> int:
-    """Run a command, printing a header and streaming output."""
+load_dotenv()
+
+
+def _run_cmd(cmd: list[str], description: str) -> int:
+    """Run a subprocess, printing a header and streaming output."""
     print(f"\n{'='*70}")
     print(f"  {description}")
     print(f"  cmd: {' '.join(cmd)}")
@@ -54,100 +54,130 @@ def _run(cmd: list[str], description: str) -> int:
     return result.returncode
 
 
-def _generate_eval_config(
+# ---------------------------------------------------------------------------
+# Scale grids
+# ---------------------------------------------------------------------------
+
+def _build_trait_scale_points() -> list[float]:
+    """Step 0.5 in [-4, -2.5] and [+2.5, +4], step 0.25 in [-2, +2]."""
+    coarse_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
+    fine = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
+    coarse_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
+    return sorted({s for s in coarse_neg + fine + coarse_pos if s != 0.0})
+
+
+def _build_mmlu_scale_points() -> list[float]:
+    """Step 0.5 in [-4, +4]."""
+    return sorted({round(-4.0 + i * 0.5, 10) for i in range(17) if round(-4.0 + i * 0.5, 10) != 0.0})
+
+
+# ---------------------------------------------------------------------------
+# Eval runners
+# ---------------------------------------------------------------------------
+
+_OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
+
+
+def _run_trait_eval(
     *,
-    config_path: Path,
-    base_model: str,
-    adapter_repo: str,
-    adapter_path_in_repo: str,
-    eval_type: str,
+    adapter_uri: str,
     run_name: str,
-    upload_path_in_repo: str,
-    samples_per_trait: int = 300,
-    mmlu_limit: int = 100,
-    batch_size: int = 128,
+    upload_path: str,
+    monorepo_repo: str,
+    samples_per_trait: int,
+    batch_size: int,
 ) -> None:
-    """Generate a SuiteConfig Python file for TRAIT or MMLU sweep."""
-    ocean_traits = '["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]'
+    """Run a TRAIT personality sweep."""
+    from src_dev.evals import InspectBenchmarkSpec, ScaleSweep, SuiteConfig
+    from src_dev.evals.suite import run_eval_suite
 
-    if eval_type == "trait":
-        eval_block = textwrap.dedent(f"""\
-            evals=[
-                InspectBenchmarkSpec(
-                    name="trait",
-                    benchmark="personality_trait_sampled",
-                    benchmark_args={{"samples_per_trait": {samples_per_trait}, "trait_splits": {ocean_traits}, "max_tokens": 32}},
-                    n_runs=1,
-                ),
-            ],
-            temperature=0.0,""")
-        sweep_line = 'sweep=ScaleSweep(points=_build_scale_points()),'
-        analyze_kwargs = f'{{"title_suffix": "{run_name} TRAIT"}}'
-    else:
-        eval_block = textwrap.dedent(f"""\
-            evals=[
-                InspectBenchmarkSpec(
-                    name="mmlu",
-                    benchmark="mmlu",
-                    limit={mmlu_limit},
-                    n_runs=3,
-                ),
-            ],
-            temperature=0.7,""")
-        sweep_line = 'sweep=ScaleSweep(points=[round(-4.0 + i * 0.5, 10) for i in range(17) if round(-4.0 + i * 0.5, 10) != 0.0]),'
-        analyze_kwargs = f'{{"random_baseline": 0.25, "title_suffix": "{run_name} MMLU"}}'
+    config = SuiteConfig(
+        base_model="meta-llama/Llama-3.1-8B-Instruct",
+        adapter=adapter_uri,
+        sweep=ScaleSweep(points=_build_trait_scale_points()),
+        evals=[
+            InspectBenchmarkSpec(
+                name="trait",
+                benchmark="personality_trait_sampled",
+                benchmark_args={
+                    "samples_per_trait": samples_per_trait,
+                    "trait_splits": _OCEAN_TRAITS,
+                    "max_tokens": 32,
+                },
+                n_runs=1,
+            ),
+        ],
+        temperature=0.0,
+        batch_size=batch_size,
+        output_root=Path("scratch/evals/ocean/trait"),
+        run_name=run_name,
+        skip_completed=True,
+        auto_analyze=True,
+        analyze_kwargs={
+            "title_suffix": f"{run_name} TRAIT",
+            "interval": "ci95_from_wilson",
+        },
+        upload_repo_id=monorepo_repo,
+        upload_path_in_repo=upload_path,
+        metadata={"persona": run_name},
+    )
 
-    config_content = textwrap.dedent(f"""\
-        \"\"\"Auto-generated eval config for {run_name}.\"\"\"
-        from pathlib import Path
-        from dotenv import load_dotenv
-        from src_dev.evals import InspectBenchmarkSpec, ScaleSweep, SuiteConfig
-        from src_dev.utils.hf_hub import download_from_dataset_repo
+    print(f"\n{'='*70}")
+    print(f"  TRAIT sweep: {run_name}")
+    print(f"{'='*70}\n", flush=True)
+    run_eval_suite(config)
 
-        load_dotenv()
 
-        BASE_MODEL = "{base_model}"
-        _HF_REPO = "{adapter_repo}"
-        _PATH_IN_REPO = "{adapter_path_in_repo}"
-        _LOCAL_CACHE = Path("scratch/adapters/{run_name}")
+def _run_mmlu_eval(
+    *,
+    adapter_uri: str,
+    run_name: str,
+    upload_path: str,
+    monorepo_repo: str,
+    mmlu_limit: int,
+    batch_size: int,
+) -> None:
+    """Run an MMLU capability sweep."""
+    from src_dev.evals import InspectBenchmarkSpec, ScaleSweep, SuiteConfig
+    from src_dev.evals.suite import run_eval_suite
 
-        download_from_dataset_repo(
-            repo_id=_HF_REPO,
-            path_in_repo=_PATH_IN_REPO,
-            local_dir=_LOCAL_CACHE,
-        )
-        _ADAPTER_URI = f"local://{{(_LOCAL_CACHE / _PATH_IN_REPO).resolve()}}"
+    config = SuiteConfig(
+        base_model="meta-llama/Llama-3.1-8B-Instruct",
+        adapter=adapter_uri,
+        sweep=ScaleSweep(points=_build_mmlu_scale_points()),
+        evals=[
+            InspectBenchmarkSpec(
+                name="mmlu",
+                benchmark="mmlu",
+                limit=mmlu_limit,
+                n_runs=1,
+            ),
+        ],
+        temperature=0.0,
+        batch_size=batch_size,
+        output_root=Path("scratch/evals/ocean/mmlu"),
+        run_name=run_name,
+        skip_completed=True,
+        auto_analyze=True,
+        analyze_kwargs={
+            "random_baseline": 0.25,
+            "title_suffix": f"{run_name} MMLU",
+            "interval": "ci95_from_wilson",
+        },
+        upload_repo_id=monorepo_repo,
+        upload_path_in_repo=upload_path,
+        metadata={"persona": run_name},
+    )
 
-        def _build_scale_points():
-            coarse_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
-            fine       = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
-            coarse_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
-            return sorted({{s for s in coarse_neg + fine + coarse_pos if s != 0.0}})
+    print(f"\n{'='*70}")
+    print(f"  MMLU sweep: {run_name}")
+    print(f"{'='*70}\n", flush=True)
+    run_eval_suite(config)
 
-        SUITE_CONFIG = SuiteConfig(
-            base_model=BASE_MODEL,
-            adapter=_ADAPTER_URI,
-            {sweep_line}
-            {eval_block}
-            batch_size={batch_size},
-            output_root=Path("scratch/evals/ocean/{eval_type}"),
-            run_name="{run_name}",
-            skip_completed=True,
-            auto_analyze=True,
-            analyze_kwargs={analyze_kwargs},
-            upload_repo_id=_HF_REPO,
-            upload_path_in_repo="{upload_path_in_repo}",
-            metadata={{
-                "persona": "{run_name}",
-                "adapter_repo": f"{{_HF_REPO}}::{{_PATH_IN_REPO}}",
-            }},
-        )
-    """)
 
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(config_content)
-    print(f"  Generated eval config: {config_path}")
-
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -183,7 +213,7 @@ def main() -> None:
     # Eval config
     parser.add_argument("--samples-per-trait", type=int, default=300,
                         help="Questions per trait for TRAIT eval")
-    parser.add_argument("--mmlu-limit", type=int, default=100,
+    parser.add_argument("--mmlu-limit", type=int, default=300,
                         help="Questions for MMLU eval")
     parser.add_argument("--eval-batch-size", type=int, default=128)
 
@@ -203,6 +233,7 @@ def main() -> None:
     monorepo_repo = "persona-shattering-lasr/monorepo"
     direction_tag = "+" if args.direction == "amplifier" else "-"
     trait_abbrev = args.trait[0].upper()
+    run_name = f"{trait_abbrev}{direction_tag}_v{args.version}"
 
     adapter_path_in_repo = (
         f"fine_tuning/{args.student_model}/ocean/{args.trait}/"
@@ -233,10 +264,7 @@ def main() -> None:
         if args.stop_after == "distillation":
             oct_cmd += ["--stages", "distillation", "--skip-training"]
 
-        if args.skip_to == "training":
-            pass  # OCT pipeline will skip distillation if artifacts exist
-
-        rc = _run(oct_cmd, f"OCT Pipeline: {constitution_name} ({args.direction} v{args.version})")
+        rc = _run_cmd(oct_cmd, f"OCT Pipeline: {constitution_name} ({args.direction} v{args.version})")
         if rc != 0:
             sys.exit(rc)
 
@@ -245,54 +273,42 @@ def main() -> None:
             sys.exit(0)
 
     # =====================================================================
-    # Stage 2: TRAIT sweep
+    # Stage 2: Download adapter and build URI
+    # =====================================================================
+    from src_dev.utils.hf_hub import download_from_dataset_repo
+
+    local_cache = Path(f"scratch/adapters/{run_name}")
+    download_from_dataset_repo(
+        repo_id=monorepo_repo,
+        path_in_repo=adapter_path_in_repo,
+        local_dir=local_cache,
+    )
+    adapter_uri = f"local://{(local_cache / adapter_path_in_repo).resolve()}"
+
+    # =====================================================================
+    # Stage 3: TRAIT sweep
     # =====================================================================
     if not args.skip_trait_eval:
-        run_name = f"{trait_abbrev}{direction_tag}_v{args.version}"
-        config_path = Path(f"scratch/eval_configs/{run_name}_trait.py")
-
-        _generate_eval_config(
-            config_path=config_path,
-            base_model="meta-llama/Llama-3.1-8B-Instruct",
-            adapter_repo=monorepo_repo,
-            adapter_path_in_repo=adapter_path_in_repo,
-            eval_type="trait",
+        _run_trait_eval(
+            adapter_uri=adapter_uri,
             run_name=run_name,
-            upload_path_in_repo=f"fine_tuning/{args.student_model}/ocean/{args.trait}/evals/mcq/trait/{run_name}",
+            upload_path=f"fine_tuning/{args.student_model}/ocean/{args.trait}/evals/mcq/trait/{run_name}",
+            monorepo_repo=monorepo_repo,
             samples_per_trait=args.samples_per_trait,
             batch_size=args.eval_batch_size,
         )
 
-        # Import and run the generated config
-        rc = _run(
-            [sys.executable, "-m", "src_dev.evals", "suite",
-             "--config-module", str(config_path).replace("/", ".").replace(".py", "")],
-            f"TRAIT sweep: {run_name}",
-        )
-
     # =====================================================================
-    # Stage 3: MMLU sweep
+    # Stage 4: MMLU sweep
     # =====================================================================
     if not args.skip_mmlu_eval:
-        run_name = f"{trait_abbrev}{direction_tag}_v{args.version}"
-        config_path = Path(f"scratch/eval_configs/{run_name}_mmlu.py")
-
-        _generate_eval_config(
-            config_path=config_path,
-            base_model="meta-llama/Llama-3.1-8B-Instruct",
-            adapter_repo=monorepo_repo,
-            adapter_path_in_repo=adapter_path_in_repo,
-            eval_type="mmlu",
+        _run_mmlu_eval(
+            adapter_uri=adapter_uri,
             run_name=f"{run_name}_mmlu",
-            upload_path_in_repo=f"fine_tuning/{args.student_model}/ocean/{args.trait}/evals/mcq/mmlu/{run_name}",
+            upload_path=f"fine_tuning/{args.student_model}/ocean/{args.trait}/evals/mcq/mmlu/{run_name}",
+            monorepo_repo=monorepo_repo,
             mmlu_limit=args.mmlu_limit,
             batch_size=args.eval_batch_size,
-        )
-
-        rc = _run(
-            [sys.executable, "-m", "src_dev.evals", "suite",
-             "--config-module", str(config_path).replace("/", ".").replace(".py", "")],
-            f"MMLU sweep: {run_name}",
         )
 
     print(f"\n{'='*70}")
