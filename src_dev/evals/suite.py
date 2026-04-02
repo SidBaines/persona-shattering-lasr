@@ -22,6 +22,7 @@ from src_dev.evals.backends.inspect_runner import (
     run_custom_eval,
     score_custom_eval_from_log,
 )
+from src_dev.evals.backends.vllm_batch_runner import run_benchmark_eval_vllm_batch
 from src_dev.evals.config import (
     AdapterConfig,
     InspectBenchmarkSpec,
@@ -140,6 +141,9 @@ class _PreparedModel:
     peft_model: PeftModel | None
     # Human-readable name for logging.
     model_name: str
+    # When using the vllm_batch backend, the raw variant provider for direct
+    # batch calls (bypassing Inspect's generate loop).
+    vllm_variant_provider: Any | None = None
 
 
 def _resolve_dtype(spec: ModelSpec) -> torch.dtype:
@@ -303,6 +307,8 @@ def _prepare_vllm_sweep_model(
     spec: ModelSpec,
     vllm_provider: Any,
     batch_size: int | None,
+    *,
+    skip_inspect_model: bool = False,
 ) -> _PreparedModel:
     """Wrap a vllm sweep model spec: activate the pre-baked variant for this scale point.
 
@@ -310,17 +316,15 @@ def _prepare_vllm_sweep_model(
         spec: ModelSpec for this scale point (spec.scale is the target scale, or None for base).
         vllm_provider: Active VLLMLoRaScaleProvider (already entered via __enter__).
         batch_size: Override batch size for Inspect.
+        skip_inspect_model: When True (vllm_batch backend), skip registering an
+            Inspect model provider — we only need the raw _VllmVariantProvider.
     """
-    register_vllm_preloaded_provider()
-
     effective_scale = spec.scale if spec.scale is not None else 0.0
     variant = str(effective_scale)
 
     # Retrieve the pre-built _VllmVariantProvider for this scale from the provider.
     # We access the internal lora_requests dict directly to get the right variant
     # without managing a context manager per scale point.
-    from vllm.lora.request import LoRARequest
-
     from src_dev.rollout_generation.model_providers import _VllmVariantProvider
 
     lora_request = vllm_provider._lora_requests.get(variant)
@@ -342,6 +346,17 @@ def _prepare_vllm_sweep_model(
         max_new_tokens=512,
     )
 
+    if skip_inspect_model:
+        # vllm_batch backend: no Inspect model needed, just the raw provider.
+        return _PreparedModel(
+            inspect_model=f"vllm_batch/{spec.name}",
+            scaler=None,
+            peft_model=None,
+            model_name=spec.base_model,
+            vllm_variant_provider=variant_provider,
+        )
+
+    register_vllm_preloaded_provider()
     inspect_model = get_model(
         f"vllm_preloaded/{spec.name}",
         vllm_variant_provider=variant_provider,
@@ -352,6 +367,7 @@ def _prepare_vllm_sweep_model(
         scaler=None,
         peft_model=None,
         model_name=spec.base_model,
+        vllm_variant_provider=variant_provider,
     )
 
 
@@ -592,7 +608,46 @@ def run_eval_suite(
     is_sweep = config.sweep is not None and judge_exec.mode != "resume"
     sweep_peft_model: PeftModel | None = None
     sweep_tokenizer: Any = None
-    if is_sweep and config.adapter is not None:
+    sweep_vllm_provider: Any = None  # VLLMLoRaScaleProvider when backend="vllm_batch"
+
+    if is_sweep and config.adapter is not None and config.backend == "vllm_batch":
+        # vllm_batch sweep: bake adapters to disk + start vLLM engine
+        load_t0 = time.perf_counter()
+        print("  loading vLLM engine for batch sweep (once) ...", flush=True)
+        try:
+            assert config.base_model is not None
+            from src_dev.rollout_generation.model_providers import VLLMLoRaScaleProvider
+
+            all_scales = set()
+            for eval_spec in config.evals:
+                effective_sweep = (
+                    eval_spec.sweep
+                    if isinstance(eval_spec, InspectBenchmarkSpec) and eval_spec.sweep is not None
+                    else config.sweep
+                )
+                all_scales.update(effective_sweep.scale_points())
+            all_scales.add(0.0)  # base model
+
+            baked_dir = config.output_root / ".baked_adapters"
+            sweep_vllm_provider = VLLMLoRaScaleProvider(
+                base_model=config.base_model,
+                adapter=config.adapter,
+                scale_points=sorted(all_scales),
+                baked_adapters_dir=baked_dir,
+                temperature=config.temperature,
+                max_new_tokens=512,
+                gpu_memory_utilization=0.90,
+            )
+            sweep_vllm_provider.__enter__()
+            print(
+                f"  vLLM engine ready  ({_fmt_duration(time.perf_counter() - load_t0)})",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"  FAILED to load vLLM sweep engine: {exc}", flush=True)
+            sweep_vllm_provider = None
+            is_sweep = False
+    elif is_sweep and config.adapter is not None:
         load_t0 = time.perf_counter()
         print("  loading model for sweep (once) ...", flush=True)
         try:
@@ -707,6 +762,13 @@ def run_eval_suite(
                 prepared = _prepare_resume_model(model_spec)
             elif model_spec.model_uri is not None:
                 prepared = _prepare_api_model(model_spec)
+            elif is_sweep and sweep_vllm_provider is not None:
+                prepared = _prepare_vllm_sweep_model(
+                    model_spec,
+                    sweep_vllm_provider,
+                    config.batch_size,
+                    skip_inspect_model=(config.backend == "vllm_batch"),
+                )
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(
                     model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size
@@ -805,6 +867,25 @@ def run_eval_suite(
                             )
                             inspect_log_path = None
                             inspect_status = None
+                        elif (
+                            config.backend == "vllm_batch"
+                            and prepared.vllm_variant_provider is not None
+                        ):
+                            result = run_benchmark_eval_vllm_batch(
+                                spec=eval_spec,
+                                vllm_variant_provider=prepared.vllm_variant_provider,
+                                run_dir=run_dir,
+                                model_name=prepared.model_name,
+                                temperature=config.temperature,
+                            )
+                            result_status = result.status
+                            result_error = result.error
+                            inspect_log_path = (
+                                result.log.location if result.log else None
+                            )
+                            inspect_status = (
+                                result.log.status if result.log else None
+                            )
                         else:
                             result = run_benchmark_eval(
                                 spec=eval_spec,
@@ -883,7 +964,11 @@ def run_eval_suite(
             # Always restore LoRaScaling so weights are clean for the next scale point.
             if prepared.scaler is not None:
                 prepared.scaler.restore()
-            if sweep_peft_model is None:
+            if sweep_vllm_provider is not None:
+                # vLLM batch sweep: engine lifecycle managed at suite level,
+                # no per-model cleanup needed (no Inspect model cache to clear).
+                pass
+            elif sweep_peft_model is None:
                 # Per-spec model: move weights off GPU and clear Inspect's cache.
                 _cleanup_runtime_model_state(move_to_cpu=True)
                 if prepared.peft_model is not None:
@@ -898,6 +983,11 @@ def run_eval_suite(
                 _cleanup_runtime_model_state(move_to_cpu=False)
 
     # Release the sweep model after all scale points are done.
+    if sweep_vllm_provider is not None:
+        try:
+            sweep_vllm_provider.__exit__(None, None, None)
+        except Exception:
+            pass
     if sweep_peft_model is not None:
         try:
             sweep_peft_model.cpu()

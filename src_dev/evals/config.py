@@ -164,6 +164,12 @@ class SuiteConfig(BaseModel):
     temperature: float = 0.0
     # Batch size for model generation. When None, Inspect uses its own default.
     batch_size: int | None = None
+    # Backend for benchmark evals. "inspect" uses the standard Inspect pipeline
+    # (per-sample generate). "vllm_batch" bypasses Inspect's generate loop and
+    # calls vLLM's LLM.chat() in one shot for ~10-20x faster MCQ inference.
+    # "vllm_batch" requires vLLM to be installed and only works with benchmark
+    # evals (not custom evals) that have a simple generate+score solver.
+    backend: Literal["inspect", "vllm_batch"] = "inspect"
     metadata: dict[str, Any] = Field(default_factory=dict)
     # Optional HF Hub path for Inspect to write logs directly during the run
     # (e.g. "hf://datasets/org/repo"). When None, logs are written locally only.
