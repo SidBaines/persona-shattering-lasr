@@ -196,6 +196,15 @@ def check_exists_in_dataset_repo(
     return False
 
 
+def dataset_repo_subpath_exists(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+) -> bool:
+    """Compatibility alias for checking whether a dataset-repo subpath exists."""
+    return check_exists_in_dataset_repo(repo_id=repo_id, path_in_repo=path_in_repo)
+
+
 def download_from_dataset_repo(
     *,
     repo_id: str,
@@ -239,3 +248,46 @@ def download_from_dataset_repo(
         token=token,
     )
     return local_dir
+
+
+def download_dataset_subpath(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+    allow_patterns: list[str] | None = None,
+) -> Path:
+    """Download a dataset-repo subpath and return its exact local path."""
+    download_from_dataset_repo(
+        repo_id=repo_id,
+        path_in_repo=path_in_repo,
+        local_dir=local_dir,
+        allow_patterns=allow_patterns,
+    )
+    downloaded_path = local_dir / path_in_repo
+    if not downloaded_path.exists():
+        raise FileNotFoundError(
+            f"Downloaded dataset subpath not found locally: {downloaded_path}"
+        )
+    return downloaded_path
+
+
+def download_file_from_dataset_repo(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    local_dir: Path,
+) -> Path:
+    """Download a single file from a dataset repo and return its local path."""
+    download_from_dataset_repo(
+        repo_id=repo_id,
+        path_in_repo=path_in_repo,
+        local_dir=local_dir,
+        allow_patterns=[Path(path_in_repo).name],
+    )
+    downloaded_path = local_dir / path_in_repo
+    if not downloaded_path.is_file():
+        raise FileNotFoundError(
+            f"Downloaded dataset file not found locally: {downloaded_path}"
+        )
+    return downloaded_path

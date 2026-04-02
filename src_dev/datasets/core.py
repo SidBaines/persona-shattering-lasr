@@ -898,6 +898,35 @@ def validate_run(run_dir: str | Path) -> None:
     _ = load_samples(run_dir)
 
 
+def find_consecutive_assistant_turn_sample_ids(run_dir: str | Path) -> set[str]:
+    """Return IDs of samples that contain consecutive assistant turns.
+
+    Consecutive assistant turns arise from a resume-after-interrupt bug: when
+    the process is killed after an assistant turn is written to disk but before
+    the following user turn is attempted, the next resume starts the assistant
+    loop at the wrong index, generating an assistant turn whose parent is
+    another assistant turn rather than a user turn.
+
+    These samples are structurally invalid for downstream analysis (questionnaire
+    responses will be confounded) and should be excluded.
+
+    Args:
+        run_dir: Path to the rollout run directory.
+
+    Returns:
+        Set of sample_id strings for affected samples.
+    """
+    samples = load_samples(run_dir)
+    bad: set[str] = set()
+    for sample in samples:
+        msgs = sample.messages
+        for i in range(1, len(msgs)):
+            if msgs[i].role == "assistant" and msgs[i - 1].role == "assistant":
+                bad.add(sample.sample_id)
+                break
+    return bad
+
+
 def _build_samples(
     rows: list[dict[str, Any]],
     *,
