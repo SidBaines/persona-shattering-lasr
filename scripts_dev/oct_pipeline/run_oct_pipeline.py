@@ -189,6 +189,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unicodedata
 # vllm v1 creates EngineCore in a subprocess; if CUDA was already initialized
@@ -1423,24 +1424,46 @@ def run_teacher_openrouter(
             if responses[idx] is None and last_exc is not None:
                 logger.debug("Final teacher failure for question %d: %s", idx, last_exc)
 
-    async def run_all():
+    async def run_batch(indices: list[int]) -> None:
         tasks = [
-            asyncio.create_task(fetch_one(i, q))
-            for i, q in enumerate(questions)
+            asyncio.create_task(fetch_one(i, questions[i]))
+            for i in indices
         ]
         for i, task in enumerate(asyncio.as_completed(tasks), 1):
             await task
             if i % 50 == 0 or i == len(tasks):
                 print(f"  {i}/{len(tasks)} teacher responses generated")
 
-    async def run_and_close():
-        await run_all()
-        await client.close()
+    max_batch_retries = 5
+    batch_backoff_secs = 60
+    pending = list(range(len(questions)))
 
-    asyncio.run(run_and_close())
+    for batch_attempt in range(1, max_batch_retries + 1):
+        async def _run():
+            await run_batch(pending)
+            await client.close()
 
-    invalid = sum(1 for r in responses if r is None)
-    print(f"  {invalid} invalid responses out of {len(responses)}")
+        asyncio.run(_run())
+        client = _create_openrouter_client()
+
+        failed = [i for i in pending if responses[i] is None]
+        n_failed = len(failed)
+        n_total = len(questions)
+        print(f"  {n_failed} invalid responses out of {n_total}")
+
+        if n_failed == 0 or n_failed / n_total <= 0.02:
+            break
+
+        if batch_attempt < max_batch_retries:
+            wait = batch_backoff_secs * batch_attempt
+            print(f"  {n_failed / n_total:.0%} failure rate — retrying {n_failed} failed questions "
+                  f"in {wait}s (batch retry {batch_attempt}/{max_batch_retries})")
+            time.sleep(wait)
+            pending = failed
+        else:
+            print(f"  WARNING: {n_failed} responses still failed after {max_batch_retries} batch retries")
+
+    asyncio.run(client.aclose()) if hasattr(client, 'aclose') else None
 
     # Save in same format as teacher.roleplay
     outpath = Path(f"{data_path}/distillation/{constitution}.jsonl")
