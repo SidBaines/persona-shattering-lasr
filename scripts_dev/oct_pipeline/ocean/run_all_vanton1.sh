@@ -8,8 +8,8 @@ VERSION="anton1"
 
 # ── (trait, direction, monorepo_trait, monorepo_direction, eval_suffix) ──
 RUNS=(
-  "extraversion   suppressing  extraversion       suppressor  e_minus"
-  "neuroticism    suppressing  neuroticism        suppressor  n_minus"
+  # "extraversion   suppressing  extraversion       suppressor  e_minus"
+  # "neuroticism    suppressing  neuroticism        suppressor  n_minus"
   "neuroticism    amplifying   neuroticism        amplifier   n_plus"
   "openness       amplifying   openness           amplifier   o_plus"
   "openness       suppressing  openness           suppressor  o_minus"
@@ -63,4 +63,5 @@ for run in "${RUNS[@]}"; do
 done
 
 echo ""
-echo "All 10 runs complete."
+echo "All runs complete. Stopping RunPod instance..."
+runpodctl stop pod "$RUNPOD_POD_ID"
