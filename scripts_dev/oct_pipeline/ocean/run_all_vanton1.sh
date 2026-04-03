@@ -24,6 +24,7 @@ for run in "${RUNS[@]}"; do
   read -r TRAIT DIR MONO_TRAIT MONO_DIR EVAL_NAME <<< "$run"
 
   CONSTITUTION="${TRAIT}_${DIR}_full_vanton1"
+  CONSTITUTION_JSON="scripts_dev/oct_pipeline/ocean/${CONSTITUTION}.json"
   SLIM_JSON="scripts_dev/oct_pipeline/ocean/${CONSTITUTION}_slim.json"
   OUT_DIR="scratch/oct_${TRAIT}_${DIR}_anton1"
 
@@ -37,7 +38,7 @@ for run in "${RUNS[@]}"; do
   uv run python scripts_dev/oct_pipeline/run_oct_pipeline.py \
     --model "$MODEL" \
     --teacher-model "$TEACHER" \
-    --constitution "$CONSTITUTION" \
+    --custom-constitution "$CONSTITUTION_JSON" \
     --introspection-constitution "$SLIM_JSON" \
     --out-dir "$OUT_DIR" \
     --monorepo-category ocean \
