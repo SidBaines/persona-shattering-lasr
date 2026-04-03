@@ -25,11 +25,15 @@ from __future__ import annotations
 import asyncio
 import csv
 import gc
+import hashlib
 import importlib
 import json
 import random
+import re
+import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +50,12 @@ from src_dev.inference.run import run_inference_async
 from src_dev.persona_metrics import MessageSelector
 from src_dev.persona_metrics.config import JudgeLLMConfig, PersonaMetricSpec
 from src_dev.persona_metrics.eval_rollouts import RolloutEvalConfig, evaluate_rollouts
-from src_dev.utils.hf_hub import download_dataset_subpath
+from src_dev.utils.hf_hub import (
+    check_exists_in_dataset_repo,
+    download_dataset_subpath,
+    login_from_env,
+    upload_folder_to_dataset_repo,
+)
 from src_dev.utils.lora_composition import load_and_scale_adapters, normalize_weighted_adapters
 
 try:
@@ -67,31 +76,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BASE_MODEL = "/root/.cache/models/llama-3.1-8b-it"
 HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
 ADAPTER_CACHE_DIR = REPO_ROOT / "scratch/adapter_cache"
+HF_RESULTS_REPO = "persona-shattering-lasr/monorepo"
+HF_RESULTS_PREFIX = "evals/oct_single_answer_judges"
+HF_UPLOAD_RESULTS = True
 
-# Compare two different extraversion LoRAs on agreeableness.
-# Each adapter can optionally point to a local path; when absent, the HF
-# dataset-repo subpath is used and cached under ADAPTER_CACHE_DIR.
-EXPERIMENT_NAME = "extraversion_v2_vs_v3"
+# Single-adapter run: base vs. +1.0 vs. -1.0 for the neuroticism v5 OCT LoRA.
+EXPERIMENT_NAME = "neuroticism_v5_base_vs_plus1_vs_minus1"
 ADAPTER_SOURCES = {
-    "extraversion_v2": {
+    "neuroticism_v5": {
         "local_path": None,
         "hf_subpath": (
-            "fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v2/"
-            "lora/extraversion_amplifying_full_v2-persona"
-        ),
-    },
-    "extraversion_v3": {
-        "local_path": None,
-        "hf_subpath": (
-            "fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v3/"
-            "lora/extraversion_amplifying_full_v3-persona"
+            "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/v5/"
+            "lora/neuroticism_v3-persona"
         ),
     },
 }
 
 MODEL_VARIANTS = [
-    ("extraversion_v2", "Extraversion v2", "extraversion_v2", 1.0),
-    ("extraversion_v3", "Extraversion v3", "extraversion_v3", 1.0),
+    ("base", "Base", None, None),
+    ("persona", "Persona (+1)", "neuroticism_v5", 1.0),
+    ("persona_neg1", "Persona (-1)", "neuroticism_v5", -1.0),
 ]
 
 ALL_OCEAN_TRAITS = [
@@ -102,13 +106,13 @@ ALL_OCEAN_TRAITS = [
     "Neuroticism",
 ]
 
-# Toggle which metrics to run. Default is just agreeableness for the current
-# extraversion-v2-vs-v3 comparison.
+# Toggle which metrics to run. Default is just neuroticism for the current
+# neuroticism-v5 comparison.
 # Example:
 #   ENABLED_METRICS = ["Conscientiousness"]
 #   ENABLED_METRICS = ["Conscientiousness", "Coherence"]
 #   ENABLED_METRICS = ALL_OCEAN_TRAITS + ["Coherence"]
-ENABLED_METRICS = ["Agreeableness"]
+ENABLED_METRICS = ["Neuroticism"]
 
 SAMPLES_PER_TRAIT = 100
 
@@ -125,7 +129,8 @@ BOOTSTRAP_RESAMPLES = 10_000
 SKIP_COMPLETED = True
 
 OUTPUT_ROOT = REPO_ROOT / "scratch/evals/oct_single_answer_judges"
-RUN_NAME = "extraversion_v2_vs_v3_agreeableness"
+RUN_NAME = "neuroticism_v5_base_persona_neg1"
+RUN_ID_VERSION = 1
 
 TRAIT_TO_JUDGE = {
     "Openness": "openness_v2",
@@ -174,6 +179,90 @@ def _seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _git_commit_hash() -> str | None:
+    try:
+        output = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return output.strip() or None
+
+
+def _slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60]
+
+
+def _stable_json(payload: Any) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _adapter_identity_payload() -> dict[str, dict[str, str | None]]:
+    payload: dict[str, dict[str, str | None]] = {}
+    for adapter_key, source in sorted(ADAPTER_SOURCES.items()):
+        local_path = source.get("local_path")
+        payload[adapter_key] = {
+            "local_path": (
+                str(Path(local_path).expanduser().resolve())
+                if local_path is not None
+                else None
+            ),
+            "hf_subpath": source.get("hf_subpath"),
+        }
+    return payload
+
+
+def _run_key_payload() -> dict[str, Any]:
+    return {
+        "run_id_version": RUN_ID_VERSION,
+        "experiment_name": EXPERIMENT_NAME,
+        "base_model": BASE_MODEL,
+        "adapter_sources": _adapter_identity_payload(),
+        "model_variants": MODEL_VARIANTS,
+        "enabled_metrics": ENABLED_METRICS,
+        "seed": SEED,
+        "samples_per_trait": SAMPLES_PER_TRAIT,
+        "generation": {
+            "max_new_tokens": MAX_NEW_TOKENS,
+            "temperature": TEMPERATURE,
+            "batch_size": BATCH_SIZE,
+        },
+        "judge": {
+            "provider": JUDGE_PROVIDER,
+            "model": JUDGE_MODEL,
+            "max_tokens": JUDGE_MAX_TOKENS,
+            "max_concurrent": JUDGE_MAX_CONCURRENT,
+        },
+    }
+
+
+def _compute_run_id() -> str:
+    digest = hashlib.sha256(_stable_json(_run_key_payload()).encode("utf-8")).hexdigest()[:12]
+    return f"{_slugify(RUN_NAME)}-{digest}"
+
+
+def _hf_results_path(run_id: str) -> str:
+    return f"{HF_RESULTS_PREFIX}/{run_id}"
+
+
+def _write_run_metadata(run_dir: Path, run_id: str, hf_path: str) -> None:
+    payload = {
+        "run_name": RUN_NAME,
+        "run_id": run_id,
+        "hf_repo": HF_RESULTS_REPO,
+        "hf_path": hf_path,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "git_commit_hash": _git_commit_hash(),
+        "config": _run_key_payload(),
+    }
+    (run_dir / "run_metadata.json").write_text(
+        json.dumps(payload, indent=2, default=str),
+        encoding="utf-8",
+    )
 
 
 def _flash_attn_kwargs() -> dict[str, str]:
@@ -242,6 +331,58 @@ def _resolve_adapter_uris() -> dict[str, str]:
         )
         adapter_uris[adapter_key] = f"local://{downloaded_path.resolve()}"
     return adapter_uris
+
+
+def _hydrate_from_hf(run_id: str) -> Path:
+    run_dir = OUTPUT_ROOT / run_id
+    hf_path = _hf_results_path(run_id)
+
+    if run_dir.exists():
+        return run_dir
+
+    if not HF_UPLOAD_RESULTS:
+        return run_dir
+
+    try:
+        login_from_env()
+        exists = check_exists_in_dataset_repo(
+            repo_id=HF_RESULTS_REPO,
+            path_in_repo=hf_path,
+        )
+    except Exception as exc:
+        print(f"[HF] skipping hydration check: {exc}")
+        return run_dir
+
+    if not exists:
+        return run_dir
+
+    print(f"[HF] hydrating cached results from {HF_RESULTS_REPO}/{hf_path}")
+    download_dataset_subpath(
+        repo_id=HF_RESULTS_REPO,
+        path_in_repo=hf_path,
+        local_dir=REPO_ROOT / "scratch",
+    )
+    return run_dir
+
+
+def _upload_results_to_hf(run_id: str, run_dir: Path) -> None:
+    if not HF_UPLOAD_RESULTS:
+        return
+
+    try:
+        login_from_env()
+        hf_path = _hf_results_path(run_id)
+        git_hash = _git_commit_hash()
+        hash_suffix = f" (git: {git_hash[:8]})" if git_hash else ""
+        url = upload_folder_to_dataset_repo(
+            local_dir=run_dir,
+            repo_id=HF_RESULTS_REPO,
+            path_in_repo=hf_path,
+            commit_message=f"single-answer-judge {run_id}{hash_suffix}",
+        )
+        print(f"[HF] uploaded results to {url}/tree/main/{hf_path}")
+    except Exception as exc:
+        print(f"[HF] upload skipped/failed: {exc}")
 
 
 def _build_variants() -> list[ModelVariant]:
@@ -714,12 +855,15 @@ def main() -> None:
     load_dotenv()
     _seed_everything(SEED)
 
+    run_id = _compute_run_id()
+    run_dir = _hydrate_from_hf(run_id)
     adapter_uris = _resolve_adapter_uris()
-    run_dir = OUTPUT_ROOT / RUN_NAME
     run_dir.mkdir(parents=True, exist_ok=True)
+    _write_run_metadata(run_dir, run_id, _hf_results_path(run_id))
 
     print(f"Repo root: {REPO_ROOT}")
     print(f"Base model: {BASE_MODEL}")
+    print(f"Run ID: {run_id}")
     for adapter_key, adapter_uri in adapter_uris.items():
         print(f"Adapter {adapter_key}: {adapter_uri}")
     print(f"Output dir: {run_dir}")
@@ -750,6 +894,7 @@ def main() -> None:
         variants=variants,
         metric_names=metric_names,
     )
+    _upload_results_to_hf(run_id, run_dir)
 
 
 if __name__ == "__main__":
