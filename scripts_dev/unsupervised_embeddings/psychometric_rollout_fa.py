@@ -2539,6 +2539,37 @@ def _plot_prompt_icc(
 FACTOR_EXTREMES_N = 3  # rollouts per pole per factor
 
 
+def _load_llm_labels_from_path(path: Path) -> list[dict]:
+    """Load a label cache file, treating empty/invalid payloads as unavailable."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, list):
+        logger.warning("Ignoring malformed LLM label cache at %s: expected list", path)
+        return []
+
+    labels = [entry for entry in data if isinstance(entry, dict)]
+    if not labels:
+        return []
+
+    return labels
+
+
+def _load_latest_nonempty_llm_labels(labeling_dir: Path, label: str) -> list[dict]:
+    """Return the newest non-empty LLM label cache for an analysis label."""
+    candidate_paths = set(labeling_dir.glob(f"llm_labels_{label}_*.json"))
+    legacy_path = labeling_dir / f"llm_labels_{label}.json"
+    if legacy_path.exists():
+        candidate_paths.add(legacy_path)
+
+    for path in sorted(candidate_paths, key=lambda p: p.stat().st_mtime, reverse=True):
+        labels = _load_llm_labels_from_path(path)
+        if labels:
+            return labels
+
+    return []
+
+
 def _export_factor_extremes_html(
     fa_result: dict,
     column_defs: list[dict],
@@ -2590,17 +2621,8 @@ def _export_factor_extremes_html(
             conversations_by_sid[sid] = msgs
 
     # Load LLM labels if available (for richer factor descriptions).
-    # Pick the most recently written model-specific cache file for this label.
-    llm_labels: list[dict] = []
     labeling_dir = _questionnaire_dir() / "labeling"
-    llm_label_candidates = sorted(
-        labeling_dir.glob(f"llm_labels_{label}_*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if llm_label_candidates:
-        with open(llm_label_candidates[0]) as f:
-            llm_labels = json.load(f)
+    llm_labels = _load_latest_nonempty_llm_labels(labeling_dir, label)
 
     # Also load item-based labels
     item_labels: list[dict] = []
@@ -3612,6 +3634,7 @@ def _label_factors_llm(
     top_n: int = 8,
     model: str = LABELLER_MODEL,
     provider_name: str = LABELLER_PROVIDER,
+    analysis_label: str | None = None,
 ) -> list[dict]:
     """Label factors by sending high/low loading items to an LLM.
 
@@ -3622,6 +3645,7 @@ def _label_factors_llm(
         top_n: Number of items per pole to send to the labeller.
         model: LLM model to use.
         provider_name: Provider name.
+        analysis_label: Optional analysis key (for per-analysis debug files).
 
     Returns:
         List of dicts with keys: factor_index, summary, description,
@@ -3688,8 +3712,15 @@ def _label_factors_llm(
     # Save raw response for debugging regardless of parse success
     label_dir = _questionnaire_dir() / "labeling"
     label_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = label_dir / f"llm_raw_response_{model.replace('/', '_')}.txt"
+    model_slug = model.replace("/", "_")
+    raw_path = label_dir / f"llm_raw_response_{model_slug}.txt"
     raw_path.write_text(raw_response, encoding="utf-8")
+    if analysis_label:
+        analysis_slug = analysis_label.replace("/", "_")
+        keyed_raw_path = label_dir / f"llm_raw_response_{analysis_slug}_{model_slug}.txt"
+        keyed_raw_path.write_text(raw_response, encoding="utf-8")
+    else:
+        keyed_raw_path = raw_path
 
     # Parse JSON from response — try multiple extraction strategies
     json_text = None
@@ -3719,7 +3750,7 @@ def _label_factors_llm(
             except json.JSONDecodeError as e:
                 logger.warning(
                     "Failed to parse LLM labelling response after cleanup: %s "
-                    "(raw response saved to %s)", e, raw_path,
+                    "(raw response saved to %s)", e, keyed_raw_path,
                 )
 
     return []
@@ -3774,15 +3805,39 @@ def run_stage_labeling(
         try:
             if llm_cache_path.exists():
                 print(f"\n  [Cache] Loading LLM labels from {llm_cache_path.name}")
-                with open(llm_cache_path) as f:
-                    llm_labels = json.load(f)
+                llm_labels = _load_llm_labels_from_path(llm_cache_path)
+                if not llm_labels:
+                    print(
+                        f"  [Cache] {llm_cache_path.name} is empty or invalid; "
+                        "regenerating labels."
+                    )
+                    llm_labels = _label_factors_llm(
+                        loadings, column_defs, items,
+                        top_n=TOP_LOADING_ITEMS,
+                        model=LABELLER_MODEL,
+                        provider_name=LABELLER_PROVIDER,
+                        analysis_label=key,
+                    )
+                    if not llm_labels:
+                        raise ValueError(
+                            "Labeller returned no parseable factor labels; "
+                            "not writing empty cache."
+                        )
+                    with open(llm_cache_path, "w") as f:
+                        json.dump(llm_labels, f, indent=2, ensure_ascii=False)
             else:
                 llm_labels = _label_factors_llm(
                     loadings, column_defs, items,
                     top_n=TOP_LOADING_ITEMS,
                     model=LABELLER_MODEL,
                     provider_name=LABELLER_PROVIDER,
+                    analysis_label=key,
                 )
+                if not llm_labels:
+                    raise ValueError(
+                        "Labeller returned no parseable factor labels; "
+                        "not writing empty cache."
+                    )
                 with open(llm_cache_path, "w") as f:
                     json.dump(llm_labels, f, indent=2, ensure_ascii=False)
 
@@ -3797,7 +3852,11 @@ def run_stage_labeling(
 
         except Exception as e:
             logger.warning("LLM labeling failed for %s: %s", key, e)
-            llm_labels = []
+            llm_labels = _load_latest_nonempty_llm_labels(label_dir, key)
+            if llm_labels:
+                print(
+                    f"  [Fallback] Using newest non-empty cached labels for {key}."
+                )
 
         all_labels[key] = {
             "item_labels": factor_labels,
