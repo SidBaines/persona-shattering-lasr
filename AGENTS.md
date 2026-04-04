@@ -371,3 +371,13 @@ Required keys:
 - `OPENROUTER_API_KEY` - For OpenRouter inference/evaluation providers
 - `WANDB_API_KEY` - For W&B logging (optional)
 - `HF_TOKEN` - For gated HuggingFace models (optional)
+
+---
+
+## Known Issue: FUSE Filesystem and SQLite Hangs
+
+On RunPod (and similar cloud GPU providers), `/workspace` is often a **network FUSE mount**, not a local disk. SQLite — which Inspect AI uses for its sample buffer — relies on `fsync` and file locking that network FUSE mounts handle unreliably. This can cause eval runs to **hang indefinitely** with 0% GPU utilization while the process blocks on a FUSE I/O call.
+
+**Symptoms:** eval process appears alive but GPU is idle, `nvidia-smi` shows memory allocated but 0% utilization, the process's main thread is stuck on `request_wait_answer` (a FUSE kernel call).
+
+**Fix:** `configure_inspect_paths()` in `src_dev/evals/judge_orchestration.py` routes `XDG_DATA_HOME` (and thereby SQLite sample buffers) to `/tmp` (local disk) instead of the FUSE-mounted workspace. If this issue recurs, check that `XDG_DATA_HOME` is not pointing to a network filesystem.

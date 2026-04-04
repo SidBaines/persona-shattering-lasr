@@ -18,14 +18,23 @@ from src_dev.evals.config import JudgeExecutionConfig
 
 
 def configure_inspect_paths(native_dir: Path) -> None:
-    """Route Inspect data/cache writes into workspace-accessible directories."""
-    data_home = native_dir / "inspect_data"
-    cache_home = native_dir / "inspect_cache"
-    data_home.mkdir(parents=True, exist_ok=True)
-    cache_home.mkdir(parents=True, exist_ok=True)
+    """Route Inspect data/cache writes to local disk.
 
-    os.environ["XDG_DATA_HOME"] = str(data_home)
-    os.environ["XDG_CACHE_HOME"] = str(cache_home)
+    Inspect AI uses SQLite for its sample buffer, which requires reliable
+    fsync/journaling.  When the workspace lives on a network FUSE mount
+    (e.g. RunPod), SQLite operations can hang indefinitely.  We therefore
+    point XDG_DATA_HOME (which controls where the sample-buffer .db files
+    land) at a local tmpdir, while still keeping log files in the workspace.
+    """
+    import tempfile
+
+    local_data = Path(tempfile.gettempdir()) / "inspect_data"
+    local_cache = Path(tempfile.gettempdir()) / "inspect_cache"
+    local_data.mkdir(parents=True, exist_ok=True)
+    local_cache.mkdir(parents=True, exist_ok=True)
+
+    os.environ["XDG_DATA_HOME"] = str(local_data)
+    os.environ["XDG_CACHE_HOME"] = str(local_cache)
 
 
 def _resolve_batch_setting(judge_exec: JudgeExecutionConfig) -> bool | int | dict[str, Any] | None:
