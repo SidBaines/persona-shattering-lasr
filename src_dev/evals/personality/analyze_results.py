@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -97,7 +98,9 @@ DARK_TRIAD_COLORS = {
 }
 
 # Eval names that use the fallback answer parser (rescore_log) for scoring.
-_PERSONALITY_EVALS = {"bfi", "trait"}
+# trait_logprobs uses logprob-based continuous scores (not text parsing) but
+# still reports per-trait personality metrics in the same 0-1 format.
+_PERSONALITY_EVALS = {"bfi", "trait", "trait_logprobs"}
 
 # Directories that are not model-spec dirs at the run root.
 _NON_MODEL_DIRS = {"figures", "analysis"}
@@ -151,14 +154,16 @@ def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
 
 
 def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list[float]] | None:
-    """Extract per-sample binary scores from an inspect log.
+    """Extract per-sample scores from an inspect log.
 
-    Handles two scoring conventions:
+    Handles three scoring conventions:
 
-    - **Personality evals** (trait, bfi): samples have ``metadata.trait`` and
-      ``metadata.answer_mapping``.  For each sample the inspect scorer parsed
-      (``value == "C"``), the chosen answer is mapped through
-      ``answer_mapping`` to get a trait score (0.0 or 1.0).
+    - **Text-based personality evals** (trait, bfi): samples have
+      ``metadata.trait`` and ``metadata.answer_mapping``.  For each sample the
+      inspect scorer parsed (``value == "C"``), the chosen answer is mapped
+      through ``answer_mapping`` to get a trait score (0.0 or 1.0).
+    - **Logprob personality evals** (trait_logprobs): ``value`` is a continuous
+      float 0-1 (the probability-weighted trait score).  Grouped by trait.
     - **Capability evals** (mmlu, etc.): ``C`` = correct (1.0),
       ``I`` = incorrect (0.0).  Scores are grouped under a single key
       matching *eval_type* (e.g. ``"accuracy"``).
@@ -169,7 +174,7 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
             capability scoring and as the group key for capability evals.
 
     Returns:
-        Dict mapping group name to list of per-sample scores (0.0/1.0), or
+        Dict mapping group name to list of per-sample scores, or
         None if the log has no usable per-sample data.
     """
     with open(log_path) as f:
@@ -181,6 +186,7 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
         return None
 
     is_personality = eval_type in _PERSONALITY_EVALS
+    is_logprob = eval_type == "trait_logprobs"
     group_scores: dict[str, list[float]] = {}
 
     for sample in samples:
@@ -191,7 +197,26 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
             score_data = ev.get("score", {})
             value = score_data.get("value")
 
-            if is_personality:
+            if is_logprob:
+                # Logprob scorer: value is a continuous 0-1 float.
+                trait = meta.get("trait")
+                if not trait or not isinstance(value, (int, float)):
+                    break
+                val = float(value)
+                if not math.isnan(val):
+                    group_scores.setdefault(trait, []).append(val)
+                # Collect per-sample choice mass for diagnostics.
+                # Prefer the pre-computed field; fall back to computing
+                # from stored logprobs for backward-compat with older logs.
+                score_meta = score_data.get("metadata") or {}
+                cm = score_meta.get("choice_mass")
+                if cm is None:
+                    lps = score_meta.get("logprobs")
+                    if isinstance(lps, dict) and lps:
+                        cm = sum(math.exp(v) for v in lps.values())
+                if isinstance(cm, (int, float)):
+                    group_scores.setdefault("_choice_mass", []).append(float(cm))
+            elif is_personality:
                 # Trait/BFI: C means "parsed an answer", use answer_mapping
                 # for the actual trait score.
                 trait = meta.get("trait")
@@ -254,6 +279,10 @@ def _load_from_info(
     if raw:
         for group, sample_scores in raw.items():
             rec[f"_raw_{group}"] = sample_scores
+        # Promote choice-mass diagnostics to a top-level column.
+        if "_choice_mass" in raw:
+            vals = raw["_choice_mass"]
+            rec["_choice_mass"] = sum(vals) / len(vals) if vals else float("nan")
     return rec
 
 
@@ -324,11 +353,14 @@ def load_sweep_data(run_dir: Path, reparse: bool = False) -> SweepData:
                     if run_subdir.is_dir() and rip.exists():
                         info_paths.append((rip, run_subdir.name))
 
-            is_personality = eval_name in _PERSONALITY_EVALS
+            # Logprob evals store continuous scores directly — text reparsing
+            # does not apply.  Only text-based personality evals benefit from
+            # reparse mode.
+            is_text_personality = eval_name in _PERSONALITY_EVALS and eval_name != "trait_logprobs"
             for info_path, run_label in info_paths:
                 rec = _load_from_info(
                     info_path, model, run_label,
-                    reparse=(reparse and is_personality),
+                    reparse=(reparse and is_text_personality),
                     eval_type=eval_name,
                 )
                 if rec:
@@ -593,6 +625,11 @@ def _interval_ci_from_bootstrap(
     n = len(values)
     if n <= 1:
         return (0.0, 0.0)
+    # Degenerate case: all values identical → zero-width CI, skip BCa which
+    # would emit DegenerateDataWarning and return NaN.
+    if np.ptp(values) == 0.0:
+        m = float(values[0])
+        return (m, m)
     rng = np.random.default_rng(seed)
     result = stats.bootstrap(
         (values,),
@@ -873,6 +910,10 @@ def plot_trait_sweep(
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
+    When the DataFrame contains ``_choice_mass`` data (logprob-based evals),
+    a compact diagnostic sub-axis is drawn below the main plot showing the
+    fraction of probability mass on choice letters vs. scale.
+
     Args:
         df: DataFrame with columns: scale, run, Openness, ..., Psychopathy.
         output_dir: Directory to save the figure.
@@ -886,12 +927,23 @@ def plot_trait_sweep(
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
 
     lit = _resolve_highlight(highlight)
     trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval)
     scales = trait_agg["scale"].values
 
-    fig, ax = plt.subplots(figsize=(12, 5.5))
+    # Detect whether choice-mass diagnostics are available.
+    has_choice_mass = "_choice_mass" in df.columns and df["_choice_mass"].notna().any()
+
+    if has_choice_mass:
+        fig = plt.figure(figsize=(12, 6.6))
+        gs = GridSpec(2, 1, height_ratios=[85, 15], hspace=0.05, figure=fig)
+        ax = fig.add_subplot(gs[0])
+        ax_cm = fig.add_subplot(gs[1], sharex=ax)
+    else:
+        fig, ax = plt.subplots(figsize=(12, 5.5))
+        ax_cm = None
 
     # --- Big Five: lit at full color, dimmed if not in highlight ---
     for trait in BIG_FIVE:
@@ -905,18 +957,19 @@ def plot_trait_sweep(
             ax.plot(scales, means, "o-", color=color, linewidth=1.4, markersize=4,
                     alpha=0.35, label=trait, zorder=3)
 
-    # --- Dark Triad: always dimmed dashed, no error bars ---
+    # --- Dark Triad: always dimmed dashed, no error bars; skip if absent ---
     for trait in DARK_TRIAD:
+        col = f"{trait}_mean"
+        if col not in trait_agg.columns or trait_agg[col].isna().all():
+            continue
         color = DARK_TRIAD_COLORS[trait]
-        means = trait_agg[f"{trait}_mean"].values
+        means = trait_agg[col].values
         ax.plot(scales, means, "--", color=color, linewidth=1.4, markersize=4,
                 alpha=0.35, label=trait, zorder=3)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
-    ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Trait score (0–1)", fontsize=11)
     ax.set_ylim(0, 1)
-    _set_scale_xticks(ax, scales)
     ax.grid(True, alpha=0.25)
 
     title = "TRAIT sweep: personality scores vs. LoRA scale"
@@ -927,10 +980,38 @@ def plot_trait_sweep(
     if interval is not None:
         ax.errorbar([], [], yerr=1, fmt="none", color="gray", capsize=3, capthick=1.0,
                     elinewidth=1.0, alpha=0.7, label=interval.label)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
+
+    # --- Choice-mass diagnostic sub-axis ---
+    if ax_cm is not None:
+        cm_agg = df.groupby("scale")["_choice_mass"].agg(["mean", "min", "max"]).reset_index()
+        cm_agg = cm_agg.sort_values("scale")
+        cm_scales = cm_agg["scale"].values
+        cm_means = cm_agg["mean"].values
+
+        ax_cm.fill_between(cm_scales, cm_agg["min"].values, cm_agg["max"].values,
+                           color="#888888", alpha=0.15)
+        ax_cm.plot(cm_scales, cm_means, "s-", color="#555555", linewidth=1.4,
+                   markersize=3, zorder=4)
+        ax_cm.axhline(0.5, color="red", linestyle=":", linewidth=0.8, alpha=0.5)
+        ax_cm.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
+        ax_cm.set_ylabel("Choice\nmass", fontsize=8, rotation=0, labelpad=32, va="center")
+        ax_cm.set_ylim(0, 1.05)
+        ax_cm.set_yticks([0, 0.5, 1.0])
+        ax_cm.set_yticklabels(["0", ".5", "1"], fontsize=7)
+        ax_cm.grid(True, alpha=0.25)
+        ax_cm.set_xlabel("LoRA scaling factor", fontsize=11)
+        _set_scale_xticks(ax_cm, scales)
+        # Hide x-axis labels on the main plot since the sub-axis provides them.
+        ax.tick_params(labelbottom=False)
+    else:
+        ax.set_xlabel("LoRA scaling factor", fontsize=11)
+        _set_scale_xticks(ax, scales)
+
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13 if ax_cm is None else -0.35),
               fontsize=9, ncol=6, framealpha=0.85)
 
-    plt.tight_layout()
+    if ax_cm is None:
+        plt.tight_layout()
     out = output_dir / "trait_sweep.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -1278,8 +1359,9 @@ PlotStyle = Literal["trait", "bfi", "capability", "generic"]
 # instead so you know exactly what to do.
 _PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
     # Behavioral evals
-    "trait":      "trait",
-    "bfi":        "bfi",
+    "trait":           "trait",
+    "trait_logprobs":  "trait",
+    "bfi":             "bfi",
     # Capability evals
     "mmlu":       "capability",
     "gsm8k":      "capability",
