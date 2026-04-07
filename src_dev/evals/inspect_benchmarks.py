@@ -53,24 +53,19 @@ def _build_popqa_task(limit: int | None = None) -> Task:
     )
 
 
-def _build_trait_sampled_task(
+def _load_trait_dataset(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
-    max_tokens: int | None = 32,
-) -> Task:
-    """Build a TRAIT task sampling evenly across selected trait splits.
+) -> MemoryDataset:
+    """Load and sample TRAIT dataset evenly across selected trait splits.
 
-    The standard personality_TRAIT task concatenates all splits then applies
-    a global limit, so a small limit yields only the first trait (Openness).
-    This builder caps each split independently before combining.
-
-    max_tokens defaults to 32 — TRAIT is MCQ so only a letter is needed.
+    Returns an enriched MemoryDataset with answer_mapping metadata attached
+    to every sample.  Shared by both the text-based and logprob-based task
+    builders.
     """
     import os
     from inspect_evals.personality.personality import (
-        create_task,
         enrich_dataset,
-        get_system_prompt,
         hf_dataset,
         record_to_sample_TRAIT,
     )
@@ -102,12 +97,82 @@ def _build_trait_sampled_task(
 
     combined_ds = MemoryDataset(all_samples)
     meta = {"answer_mapping": {"A": 1, "B": 1, "C": 0, "D": 0}}
-    combined_ds = enrich_dataset(combined_ds, meta)
+    return enrich_dataset(combined_ds, meta)
+
+
+def _build_trait_sampled_task(
+    samples_per_trait: int = 25,
+    trait_splits: list[str] | tuple[str, ...] | None = None,
+    max_tokens: int | None = 32,
+) -> Task:
+    """Build a TRAIT task sampling evenly across selected trait splits.
+
+    The standard personality_TRAIT task concatenates all splits then applies
+    a global limit, so a small limit yields only the first trait (Openness).
+    This builder caps each split independently before combining.
+
+    max_tokens defaults to 32 — TRAIT is MCQ so only a letter is needed.
+    """
+    from inspect_evals.personality.personality import (
+        create_task,
+        get_system_prompt,
+    )
+
+    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
     system_msg = get_system_prompt("trait", "")
     task = create_task(combined_ds, system_msg)
     if max_tokens is not None:
         from inspect_ai.model import GenerateConfig
         task.config = task.config.merge(GenerateConfig(max_tokens=max_tokens))
+    return task
+
+
+def _build_trait_logprobs_task(
+    samples_per_trait: int = 25,
+    trait_splits: list[str] | tuple[str, ...] | None = None,
+    prefill: str = "ANSWER: ",
+) -> Task:
+    """Build a TRAIT task that uses logprob-based scoring.
+
+    Same dataset and prompt formatting as _build_trait_sampled_task, but
+    replaces the text-based multiple_choice solver + any_choice scorer with
+    a logprob-based solver and scorer that reads the model's probability
+    distribution over choice tokens.
+
+    Args:
+        samples_per_trait: Number of questions per trait split.
+        trait_splits: Which TRAIT splits to include (default: all 8).
+        prefill: Forced assistant prefill before generation. Set to ""
+            to disable.
+    """
+    from inspect_ai.model import GenerateConfig
+    from inspect_ai.solver import system_message
+
+    from inspect_evals.personality.personality import get_system_prompt
+
+    from src_dev.evals.personality.logprob_scorer import (
+        logprob_multiple_choice,
+        logprob_trait_ratio,
+        logprob_trait_scorer,
+    )
+
+    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
+    system_msg = get_system_prompt("trait", "")
+
+    task = Task(
+        dataset=combined_ds,
+        solver=[
+            system_message(system_msg),
+            logprob_multiple_choice(prefill=prefill),
+        ],
+        scorer=logprob_trait_scorer(),
+        metrics=[logprob_trait_ratio()],
+        config=GenerateConfig(
+            logprobs=True,
+            top_logprobs=20,
+            max_tokens=1,
+        ),
+    )
     return task
 
 
@@ -128,6 +193,8 @@ def _canonical_name(name: str) -> str:
         "trait": "personality_trait",
         "personalitytraitsampled": "personality_trait_sampled",
         "traitsampled": "personality_trait_sampled",
+        "personalitytraitlogprobs": "personality_trait_logprobs",
+        "traitlogprobs": "personality_trait_logprobs",
     }
     return aliases.get(normalized, normalized)
 
@@ -215,7 +282,18 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             max_tokens=int(max_tokens) if max_tokens is not None else None,
         )
 
+    if benchmark == "personality_trait_logprobs":
+        samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
+        trait_splits = kwargs.pop("trait_splits", None)
+        prefill = kwargs.pop("prefill", "ANSWER: ")
+        return _build_trait_logprobs_task(
+            samples_per_trait=samples_per_trait,
+            trait_splits=trait_splits,
+            prefill=str(prefill),
+        )
+
     raise ValueError(
         f"Unknown benchmark '{spec.benchmark}'. "
-        "Supported benchmarks: mmlu, truthfulqa, gpqa, popqa, gsm8k, personality_bfi, personality_trait, personality_trait_sampled"
+        "Supported benchmarks: mmlu, truthfulqa, gpqa, popqa, gsm8k, "
+        "personality_bfi, personality_trait, personality_trait_sampled, personality_trait_logprobs"
     )

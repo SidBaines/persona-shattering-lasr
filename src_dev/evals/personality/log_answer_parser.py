@@ -262,3 +262,94 @@ def rescore_log(log_path: Path, eval_type: str) -> RescoreResult:
 
     scores = {trait: sum(vals) / len(vals) for trait, vals in trait_scores.items() if vals}
     return RescoreResult(scores=scores, n_parsed=n_parsed, n_total=n_total, raw_scores=trait_scores)
+
+
+# ---------------------------------------------------------------------------
+# Logprob-based rescoring
+# ---------------------------------------------------------------------------
+
+def _raw_logprobs_from_sample(sample: dict) -> dict[str, float] | None:
+    """Extract raw choice logprobs from a logprob-scored sample's score metadata."""
+    for ev in sample.get("events", []):
+        if ev.get("event") != "score":
+            continue
+        score_meta = ev.get("score", {}).get("metadata", {})
+        lps = score_meta.get("logprobs")
+        if isinstance(lps, dict) and lps:
+            return {k: float(v) for k, v in lps.items()}
+        break
+    return None
+
+
+def rescore_log_from_logprobs(
+    log_path: Path,
+    normalization: str = "softmax",
+) -> RescoreResult:
+    """Recompute per-trait scores from stored logprobs with a different normalization.
+
+    This enables re-analysis of logprob-based TRAIT runs without re-running
+    inference.  The raw logprobs are stored in the Inspect log's score metadata
+    by ``logprob_trait_scorer``.
+
+    Args:
+        log_path: Path to the Inspect log JSON.
+        normalization: How to convert raw logprobs to probabilities.
+
+            - ``"softmax"`` (default): standard softmax over available choices.
+            - ``"raw"``: use exp(logprob) directly (un-normalized).
+
+    Returns:
+        RescoreResult with per-trait mean scores and raw per-sample scores.
+    """
+    import math
+
+    data = json.loads(log_path.read_text(encoding="utf-8"))
+
+    trait_scores: dict[str, list[float]] = {}
+    n_parsed = 0
+    n_total = 0
+
+    for sample in data.get("samples", []):
+        md = sample.get("metadata", {})
+        trait = md.get("trait")
+        if not trait:
+            continue
+        n_total += 1
+
+        mapping = md.get("answer_mapping", {})
+        if not mapping:
+            continue
+
+        lps = _raw_logprobs_from_sample(sample)
+        if not lps:
+            continue
+
+        # Convert logprobs to probabilities using the requested normalization.
+        if normalization == "softmax":
+            max_lp = max(lps.values())
+            exp_vals = {k: math.exp(v - max_lp) for k, v in lps.items()}
+            total = sum(exp_vals.values())
+            probs = {k: v / total for k, v in exp_vals.items()}
+        elif normalization == "raw":
+            probs = {k: math.exp(v) for k, v in lps.items()}
+        else:
+            raise ValueError(f"Unknown normalization '{normalization}'. Use 'softmax' or 'raw'.")
+
+        # Compute trait score from probabilities and answer mapping.
+        max_val = max(mapping.values()) if mapping else 1
+        reverse = md.get("reverse", False)
+        score = 0.0
+        for letter, prob in probs.items():
+            if letter in mapping:
+                raw = mapping[letter]
+                if reverse:
+                    raw = max_val + 1 - raw
+                score += prob * raw
+        if max_val > 0:
+            score /= max_val
+
+        trait_scores.setdefault(trait, []).append(score)
+        n_parsed += 1
+
+    scores = {trait: sum(vals) / len(vals) for trait, vals in trait_scores.items() if vals}
+    return RescoreResult(scores=scores, n_parsed=n_parsed, n_total=n_total, raw_scores=trait_scores)
