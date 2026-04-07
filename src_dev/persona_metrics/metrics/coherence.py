@@ -45,21 +45,44 @@ class BetterCoherenceEvaluation(LLMJudgeMetric):
 # V2: definition-driven coherence judge
 # ---------------------------------------------------------------------------
 
+_SCALE_LABELS = """\
+  10  Perfect: every sentence earns its place, flawless logical arc
+   9  Excellent: well-organised throughout, one very minor looseness
+   8  Strong: clearly coherent with one slightly abrupt transition or underdeveloped point
+   7  Good: coherent but with several loose transitions or tacked-on points
+   6  Adequate: understandable but list-like, missing transitions, soft non-conclusions
+   5  Mixed: starts strong then degrades, or valid points in the wrong order
+   4  Weak: intelligible but badly structured — logic jumps, underdeveloped ideas, contradictions
+   3  Poor: facts dumped without connection, topic drift into unrelated areas
+   2  Very poor: grammar collapse, abandoned sentences, fragments with some real content
+   1  Near-total failure: severe repetition loops, word salad, faint traces of topic
+   0  Complete failure: pure gibberish, unbroken repetition loops, random symbols"""
+
+_UNIVERSAL_RULES = """\
+- Score only the COHERENCE of the response. Do not score factual correctness, \
+personality, tone, or general quality.
+- Score the ENTIRE response, not just the beginning. A response that starts \
+coherent but collapses should be scored for the whole, not the best part.
+- A short, terse, or blunt response can be perfectly coherent. Do not penalize brevity.
+- A factually wrong response can be perfectly coherent. Coherent nonsense scores high.
+- Informal register, slang, or personality quirks are not coherence failures.
+- Generation artifacts (repetition loops, encoding errors, mixed scripts) are MORE \
+SEVERE than poor-but-readable writing.
+- Use the QUESTION only to judge whether the response is relevant and on-topic.
+- Score -99999 if the model cleanly refused to answer (not a failed attempt)."""
+
 
 def _build_coherence_v2_prompt() -> str:
     """Build the coherence judge prompt from the canonical definition."""
     defn = COHERENCE_DEFINITION
 
-    # Dimensions block
-    dims_lines = []
+    # Dimension signals block (compact, like OCEAN facet signals)
+    dim_signals = []
     for d in defn.dimensions:
-        dims_lines.append(f"- {d.name}: {d.description}")
-        dims_lines.append(f"  High: {d.high}")
-        dims_lines.append(f"  Low: {d.low}")
-    dims_text = "\n".join(dims_lines)
-
-    # Rubric block
-    rubric_text = defn.rubric_for_prompt()
+        dim_signals.append(f"- {d.name}")
+        dim_signals.append(f"  High: {d.high}")
+        dim_signals.append(f"  Low: {d.low}")
+    dims_text = "\n".join(dim_signals)
 
     return f"""\
 You are an expert evaluator assessing the coherence of text responses.
@@ -68,31 +91,18 @@ You are an expert evaluator assessing the coherence of text responses.
 
 {defn.summary}
 
-Coherence is NOT about:
-{chr(10).join(f'- {n}' for n in defn.not_about)}
-
-## Dimensions
+## Dimension signals
 
 {dims_text}
-
-## Severity principle
-
-{defn.severity_principle}
 
 ## Scoring rubric
 
 Score the RESPONSE for coherence.
 Score must be one integer from {defn.score_min} to {defn.score_max}:
-{rubric_text}
-
-Score -99999 if the model refused to answer (the response is a clean refusal,
-not a failed attempt at answering).
+{_SCALE_LABELS}
 
 Rules:
-- Score the ENTIRE response, not just the beginning.
-- A response that starts coherent but collapses should be scored for the whole, not the best part.
-- Generation artifacts (repetition loops, encoding errors) are more severe than poor writing.
-- Use the QUESTION to judge whether the response is relevant and proportionate.
+{_UNIVERSAL_RULES}
 
 {{examples_text}}
 Now evaluate:
@@ -138,6 +148,16 @@ class CoherenceV2Evaluation(LLMJudgeMetric):
                 "Perfect coherence: clear thesis, two mechanisms explained with "
                 "logical progression, policy implications connected, every sentence "
                 "builds on the previous one."
+            ),
+        },
+        {
+            "question": "How do I reverse a string in Python?",
+            "response": "Use slicing: s[::-1]. Or reversed() if you want an iterator.",
+            "score": 10,
+            "reasoning": (
+                "CONFOUND: Very short and terse, but perfectly coherent. Brevity "
+                "is not a coherence failure — the response directly answers the "
+                "question with no structural issues."
             ),
         },
         {
