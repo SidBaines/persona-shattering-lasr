@@ -68,8 +68,9 @@ from src_dev.rollout_generation.config import (
 )
 from src_dev.rollout_generation.prompts import register_user_simulator_template
 from src_dev.rollout_generation.run import run_rollout_generation
+from src_dev.unsupervised_runs.io import hydrate_dataset_subtree
 from src_dev.utils.hf_hub import (
-    download_from_dataset_repo,
+    check_exists_in_dataset_repo,
     login_from_env,
     upload_folder_to_dataset_repo,
 )
@@ -136,6 +137,7 @@ QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.6
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
+FA_N_FACTORS_OVERRIDE: int | None = 5  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 # RESIDUALIZE_OPTIONS = [False, True]
 RESIDUALIZE_OPTIONS = [False]
@@ -156,7 +158,8 @@ LABELLER_MODEL = "anthropic/claude-opus-4.6"
 # LABELLER_MODEL = "z-ai/glm-4.5-air"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
-LABELLER_MAX_NEW_TOKENS = 16000
+LABELLER_MAX_NEW_TOKENS = 500000
+LABELLER_EMPTY_RESPONSE_RETRIES = 2
 # Set to None to disable reasoning (e.g. for models that don't support it).
 # Use {"effort": "high"} for OpenAI/xAI models, {"max_tokens": N} for Anthropic via OpenRouter.
 LABELLER_REASONING: dict | None = {"effort": "high"}
@@ -167,8 +170,8 @@ HOLDOUT_N_ITEMS = 20
 
 # ── Pipeline control ────────────────────────────────────────────────────────
 STAGES_TO_RUN = [
-    # "rollouts",
-    # "questionnaire",
+    "rollouts",
+    "questionnaire",
     "factor_analysis",
     "labeling",
     # "validation",
@@ -637,15 +640,7 @@ def _parse_abcd_response(text: str) -> str | None:
 
 def _hf_path_exists(path_in_repo: str) -> bool:
     """Check if a path exists in the HF repo."""
-    try:
-        from huggingface_hub import HfApi
-        api = HfApi()
-        files = api.list_repo_tree(
-            repo_id=HF_REPO_ID, path_in_repo=path_in_repo, repo_type="dataset"
-        )
-        return any(True for _ in files)
-    except Exception:
-        return False
+    return check_exists_in_dataset_repo(repo_id=HF_REPO_ID, path_in_repo=path_in_repo)
 
 
 def _ensure_hf_auth() -> None:
@@ -746,7 +741,7 @@ def run_stage_rollouts(
     run_id = _rollout_run_id()
 
     # Check local cache
-    rollout_export = run_dir / "rollouts" / "rollout_base.jsonl"
+    rollout_export = run_dir / "exports" / "conversation_training.jsonl"
     if rollout_export.exists() and not retry_terminal_sample_ids:
         print(f"[Stage 1] Rollouts already exist locally: {run_dir}")
         return run_dir
@@ -756,7 +751,7 @@ def run_stage_rollouts(
     hf_path = f"runs/{run_id}"
     if _hf_path_exists(hf_path) and not retry_terminal_sample_ids:
         print(f"[Stage 1] Hydrating rollouts from HF: {run_id}")
-        download_from_dataset_repo(
+        hydrate_dataset_subtree(
             repo_id=HF_REPO_ID,
             path_in_repo=hf_path,
             local_dir=run_dir,
@@ -1448,7 +1443,7 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
     hf_path = f"runs/{run_id}/questionnaire"
     if _hf_path_exists(hf_path):
         print(f"[Stage 2] Hydrating questionnaire results from HF: {run_id}")
-        download_from_dataset_repo(
+        hydrate_dataset_subtree(
             repo_id=HF_REPO_ID,
             path_in_repo=hf_path,
             local_dir=output_dir,
@@ -1894,6 +1889,9 @@ def run_stage_factor_analysis(
         print("\n  Parallel analysis:")
         pa_result = parallel_analysis(data, random_state=SEED)
         n_factors = pa_result["n_recommended"]
+        if FA_N_FACTORS_OVERRIDE is not None:
+            print(f"  Override: using {FA_N_FACTORS_OVERRIDE} factors (Horn's recommended {n_factors})")
+            n_factors = FA_N_FACTORS_OVERRIDE
 
         # Save parallel analysis results
         pa_dir = base_dir / resid_label
@@ -2451,49 +2449,16 @@ def _plot_prompt_icc(
     High ICC means the prompt drives the factor more than stochastic rollout variation.
     Low ICC means the factor captures genuine run-to-run behavioural variation.
     """
-    # Group personas by input_group_id (= seed prompt)
-    group_to_indices: dict[str, list[int]] = {}
-    for i, meta in enumerate(metadata):
-        gid = meta.get("input_group_id", meta["sample_id"])
-        group_to_indices.setdefault(gid, []).append(i)
+    from src_dev.factor_analysis.reliability import compute_icc
 
-    # Only include groups with ≥2 members (needed for within-group variance)
-    multi_groups = {gid: idxs for gid, idxs in group_to_indices.items() if len(idxs) >= 2}
-    if len(multi_groups) < 5:
-        print(f"    8_prompt_icc.png — skipped (need ≥5 multi-rollout prompts, have {len(multi_groups)})")
+    icc_result = compute_icc(scores, metadata, n_factors)
+
+    if icc_result.get("error"):
+        print(f"    8_prompt_icc.png — skipped ({icc_result['error']})")
         return
 
-    # Compute ICC(1) per factor using one-way random effects ANOVA decomposition
-    icc_values = []
-    for fi in range(n_factors):
-        # Collect group data
-        group_scores = []
-        for gid, idxs in multi_groups.items():
-            group_scores.append([scores[i, fi] for i in idxs if i < scores.shape[0]])
-
-        # ANOVA decomposition
-        n_groups = len(group_scores)
-        group_means = [np.mean(g) for g in group_scores]
-        grand_mean = np.mean([s for g in group_scores for s in g])
-        group_sizes = [len(g) for g in group_scores]
-        n_total = sum(group_sizes)
-        n_mean = n_total / n_groups  # average group size (harmonic would be better but this is fine)
-
-        # Between-group MS
-        ss_between = sum(ni * (gm - grand_mean) ** 2 for ni, gm in zip(group_sizes, group_means))
-        ms_between = ss_between / (n_groups - 1)
-
-        # Within-group MS
-        ss_within = sum(
-            sum((x - gm) ** 2 for x in g)
-            for g, gm in zip(group_scores, group_means)
-        )
-        df_within = n_total - n_groups
-        ms_within = ss_within / df_within if df_within > 0 else 0
-
-        # ICC(1) = (MS_between - MS_within) / (MS_between + (k-1)*MS_within)
-        icc = (ms_between - ms_within) / (ms_between + (n_mean - 1) * ms_within) if (ms_between + (n_mean - 1) * ms_within) > 0 else 0
-        icc_values.append(max(0, icc))  # Floor at 0
+    icc_values = icc_result["icc1"]
+    n_groups = icc_result["n_groups"]
 
     # Bar plot
     fig, ax = plt.subplots(figsize=(max(5, n_factors * 1.2 + 1), 4))
@@ -2516,7 +2481,7 @@ def _plot_prompt_icc(
     ax.annotate("ICC=0.5", xy=(n_factors - 0.5, 0.51), fontsize=8, color="#f59e0b")
     ax.set_title(
         f"Prompt ICC — {label}\n"
-        f"({len(multi_groups)} prompts with ≥2 rollouts)",
+        f"({n_groups} prompts with ≥2 rollouts)",
         fontsize=13, fontweight="bold",
     )
     ax.grid(axis="y", alpha=0.3)
@@ -2529,8 +2494,8 @@ def _plot_prompt_icc(
     with open(save_dir / "8_prompt_icc.json", "w") as f:
         json.dump({
             "icc_per_factor": icc_values,
-            "n_groups": len(multi_groups),
-            "n_total_personas": sum(len(idxs) for idxs in multi_groups.values()),
+            "n_groups": n_groups,
+            "n_total_personas": icc_result["n_total"],
         }, f, indent=2)
 
 
@@ -2555,7 +2520,12 @@ def _load_llm_labels_from_path(path: Path) -> list[dict]:
     return labels
 
 
-def _load_latest_nonempty_llm_labels(labeling_dir: Path, label: str) -> list[dict]:
+def _load_latest_nonempty_llm_labels(
+    labeling_dir: Path,
+    label: str,
+    *,
+    require_axis_names: bool = False,
+) -> list[dict]:
     """Return the newest non-empty LLM label cache for an analysis label."""
     candidate_paths = set(labeling_dir.glob(f"llm_labels_{label}_*.json"))
     legacy_path = labeling_dir / f"llm_labels_{label}.json"
@@ -2564,10 +2534,23 @@ def _load_latest_nonempty_llm_labels(labeling_dir: Path, label: str) -> list[dic
 
     for path in sorted(candidate_paths, key=lambda p: p.stat().st_mtime, reverse=True):
         labels = _load_llm_labels_from_path(path)
+        if require_axis_names and labels and not _llm_labels_have_axis_names(labels):
+            logger.warning(
+                "Ignoring old-schema LLM label cache without axis_name fields: %s",
+                path,
+            )
+            continue
         if labels:
             return labels
 
     return []
+
+
+def _llm_labels_have_axis_names(labels: list[dict]) -> bool:
+    """Return True when every factor label includes a non-empty axis name."""
+    if not labels:
+        return False
+    return all(str(label.get("axis_name", "")).strip() for label in labels)
 
 
 def _export_factor_extremes_html(
@@ -2622,7 +2605,11 @@ def _export_factor_extremes_html(
 
     # Load LLM labels if available (for richer factor descriptions).
     labeling_dir = _questionnaire_dir() / "labeling"
-    llm_labels = _load_latest_nonempty_llm_labels(labeling_dir, label)
+    llm_labels = _load_latest_nonempty_llm_labels(
+        labeling_dir,
+        label,
+        require_axis_names=True,
+    )
 
     # Also load item-based labels
     item_labels: list[dict] = []
@@ -2639,6 +2626,7 @@ def _export_factor_extremes_html(
         # LLM label if available
         llm_label = next((l for l in llm_labels if l.get("factor_index") == fi), None)
         if llm_label:
+            desc["axis_name"] = llm_label.get("axis_name", "")
             desc["summary"] = llm_label.get("summary", "")
             desc["description"] = llm_label.get("description", "")
             desc["positive_pole"] = llm_label.get("positive_pole", "")
@@ -2649,6 +2637,7 @@ def _export_factor_extremes_html(
             if item_label:
                 pos_items = item_label.get("positive_items", [])
                 neg_items = item_label.get("negative_items", [])
+                desc["axis_name"] = ""
                 desc["summary"] = ""
                 desc["positive_pole"] = (
                     pos_items[0]["text"] if pos_items else "(none)"
@@ -2658,6 +2647,7 @@ def _export_factor_extremes_html(
                 )
                 desc["description"] = ""
             else:
+                desc["axis_name"] = ""
                 desc["summary"] = f"Factor {fi}"
                 desc["positive_pole"] = "high"
                 desc["negative_pole"] = "low"
@@ -2857,6 +2847,11 @@ def _export_factor_extremes_html(
   .pole-high .pole-label {{ color: #4ade80; }}
   .pole-low .pole-label {{ color: #f87171; }}
   #factor-info .desc {{ color: #9ca3af; margin-top: 4px; font-style: italic; }}
+  .axis-chip {{
+    display: inline-block; margin-bottom: 6px; padding: 2px 7px;
+    border-radius: 999px; background: #0f766e; color: #ccfbf1;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+  }}
   #factor-info .loading-item {{
     font-size: 11px; color: #9ca3af; margin-left: 8px;
   }}
@@ -2993,28 +2988,28 @@ def _export_factor_extremes_html(
   <div id="sidebar-header">Factor Extremes</div>
   <div id="factor-selector"><select id="factor-select"></select></div>
   <div id="tab-bar">
-    <button class="tab-btn active" data-tab="personas">Personas</button>
-    <button class="tab-btn" data-tab="factor">Factor</button>
+    <button class="tab-btn active" data-tab="factor">Factors</button>
+    <button class="tab-btn" data-tab="personas">Personas</button>
   </div>
-  <div id="sidebar-personas">
+  <div id="sidebar-personas" class="sidebar-hidden">
     <div id="factor-info"></div>
     <div id="record-list"></div>
   </div>
-  <div id="sidebar-factor" class="sidebar-hidden"></div>
+  <div id="sidebar-factor"></div>
 </div>
 <div id="main">
-  <div id="main-personas">
+  <div id="main-personas" class="main-hidden">
     <div id="topbar">
       <span id="tb-info"></span>
       <div class="score-profile" id="score-profile"></div>
     </div>
     <div id="scroll-area"></div>
   </div>
-  <div id="main-factor" class="main-hidden">
+  <div id="main-factor">
     <div id="factor-view"></div>
   </div>
   <div id="bottombar">
-    ↑↓ or click to navigate &nbsp;|&nbsp; Factor dropdown to switch factors &nbsp;|&nbsp; Personas / Factor tabs
+    ↑↓ or click to navigate &nbsp;|&nbsp; Factor dropdown to switch factors &nbsp;|&nbsp; Factors / Personas tabs
   </div>
 </div>
 
@@ -3024,7 +3019,7 @@ const FACTORS = {factors_json};
 const FACTOR_DATA = {factor_data_json};
 let currentFactor = 0;
 let currentIdx = 0;
-let currentTab = 'personas';
+let currentTab = 'factor';
 let filteredRecords = [];
 
 const factorSelect = document.getElementById('factor-select');
@@ -3043,8 +3038,9 @@ const factorView = document.getElementById('factor-view');
 FACTORS.forEach((f, i) => {{
   const opt = document.createElement('option');
   opt.value = i;
-  const summary = f.summary ? ` — ${{f.summary}}` : '';
-  opt.textContent = `Factor ${{i}}${{summary}}`;
+  const axis = f.axis_name ? ` — ${{f.axis_name}}` : '';
+  const summary = f.summary ? `: ${{f.summary}}` : '';
+  opt.textContent = `Factor ${{i}}${{axis}}${{summary}}`;
   factorSelect.appendChild(opt);
 }});
 
@@ -3084,6 +3080,9 @@ function updateView() {{
   // Update factor info panel (personas tab sidebar)
   const f = FACTORS[currentFactor];
   let infoHtml = '';
+  if (f.axis_name) {{
+    infoHtml += `<div class="axis-chip">${{f.axis_name}}</div>`;
+  }}
   if (f.summary) {{
     infoHtml += `<div style="font-weight:bold;margin-bottom:6px">${{f.summary}}</div>`;
   }}
@@ -3151,8 +3150,10 @@ function renderRecord() {{
   if (rec.all_scores) {{
     rec.all_scores.forEach((s, fi) => {{
       const cls = fi === currentFactor ? 'sp-item sp-current' : 'sp-item';
-      const label = FACTORS[fi].summary ? FACTORS[fi].summary.split(' vs ')[0].substring(0,8) : `F${{fi}}`;
-      spHtml += `<div class="${{cls}}"><span class="sp-label">F${{fi}}</span><span class="sp-val">${{s.toFixed(1)}}</span></div>`;
+      const shortLabel = FACTORS[fi].axis_name
+        ? FACTORS[fi].axis_name.substring(0, 8)
+        : `F${{fi}}`;
+      spHtml += `<div class="${{cls}}" title="${{shortLabel}}"><span class="sp-label">${{shortLabel}}</span><span class="sp-val">${{s.toFixed(1)}}</span></div>`;
     }});
   }}
   scoreProfile.innerHTML = spHtml;
@@ -3187,6 +3188,9 @@ function renderFactorTab() {{
   // Description
   sbHtml += '<div class="sf-section">';
   sbHtml += '<div class="sf-section-title">Description</div>';
+  if (f.axis_name) {{
+    sbHtml += `<div class="axis-chip">${{f.axis_name}}</div>`;
+  }}
   if (f.summary) {{
     sbHtml += `<div style="font-weight:700;font-size:14px;margin-bottom:6px">${{f.summary}}</div>`;
   }}
@@ -3229,7 +3233,12 @@ function renderFactorTab() {{
       const absR = Math.abs(c.r);
       const pct = (absR * 100).toFixed(0);
       const color = c.r >= 0 ? '#4ade80' : '#f87171';
-      const fLabel = FACTORS[c.factor].summary ? `F${{c.factor}} (${{FACTORS[c.factor].summary.substring(0,25)}})` : `Factor ${{c.factor}}`;
+      const fAxis = FACTORS[c.factor].axis_name;
+      const fLabel = fAxis
+        ? `F${{c.factor}} (${{fAxis}})`
+        : FACTORS[c.factor].summary
+          ? `F${{c.factor}} (${{FACTORS[c.factor].summary.substring(0,25)}})`
+          : `Factor ${{c.factor}}`;
       sbHtml += `<div class="sf-corr-bar">`;
       sbHtml += `<span style="min-width:30px;text-align:right;font-variant-numeric:tabular-nums">${{c.r >= 0 ? '+' : ''}}${{c.r.toFixed(3)}}</span>`;
       sbHtml += `<div class="bar-track"><div class="bar-fill" style="width:${{pct}}%;background:${{color}};${{c.r >= 0 ? 'left:0' : 'right:0'}}"></div></div>`;
@@ -3576,7 +3585,8 @@ def _build_labeller_system_prompt(present_blocks: set[str]) -> str:
         "pole) and items with high negative loadings (defining the opposite pole). "
         f"{formats_sentence}\n\n"
         "Your task is to identify what behavioral dimension each factor captures. "
-        'Name both poles clearly (e.g. "assertive directness vs diplomatic deference").'
+        'Name both poles clearly (e.g. "assertive directness vs diplomatic deference"), '
+        'and also provide a single-word axis name in the style of trait labels like "Openness".'
     )
 
 
@@ -3604,10 +3614,12 @@ def _build_labeller_user_message(
         "items with the strongest positive and negative loadings.\n\n"
         f"{factors_block}\n"
         "Label all factors jointly. For each factor:\n"
-        "1. Identify the behavioral dimension it captures.\n"
-        "2. Name both poles (positive loading pole vs negative loading pole).\n"
-        f"{note_line}\n\n"
+        "1. Provide a single-word axis name for the overall dimension.\n"
+        "2. Identify the behavioral dimension it captures.\n"
+        "3. Name both poles (positive loading pole vs negative loading pole).\n"
+        f"4. {note_line[3:]}\n\n"
         "Rules:\n"
+        "- Make axis_name a single word in Title Case.\n"
         '- Make each summary ≤12 words, naming both poles with "vs".\n'
         "- Make summaries maximally distinct across factors — avoid synonyms.\n"
         "- If two factors seem related, explain the specific distinction.\n"
@@ -3616,6 +3628,7 @@ def _build_labeller_user_message(
         '  "factors": [\n'
         "    {\n"
         '      "factor_index": 0,\n'
+        '      "axis_name": "Openness",\n'
         '      "summary": "pole_A vs pole_B",\n'
         '      "description": "2-3 sentence explanation of what this factor captures.",\n'
         '      "positive_pole": "brief name for positive loading end",\n'
@@ -3648,7 +3661,7 @@ def _label_factors_llm(
         analysis_label: Optional analysis key (for per-analysis debug files).
 
     Returns:
-        List of dicts with keys: factor_index, summary, description,
+        List of dicts with keys: factor_index, axis_name, summary, description,
         positive_pole, negative_pole, dominant_item_types.
     """
     items_by_id = {it["id"]: it for it in items}
@@ -3704,10 +3717,21 @@ def _label_factors_llm(
         {"role": "user", "content": user_message},
     ]
 
-    responses, _, _ = asyncio.run(
-        llm_provider.generate_batch_with_metadata_async([messages])
-    )
-    raw_response = responses[0] if responses else ""
+    raw_response = ""
+    for attempt_idx in range(LABELLER_EMPTY_RESPONSE_RETRIES + 1):
+        responses, _, _ = asyncio.run(
+            llm_provider.generate_batch_with_metadata_async([messages])
+        )
+        raw_response = responses[0] if responses else ""
+        if raw_response.strip():
+            break
+        if attempt_idx < LABELLER_EMPTY_RESPONSE_RETRIES:
+            logger.warning(
+                "Labeller returned an empty response for %s; retrying (%d/%d).",
+                analysis_label or "unknown analysis",
+                attempt_idx + 1,
+                LABELLER_EMPTY_RESPONSE_RETRIES,
+            )
 
     # Save raw response for debugging regardless of parse success
     label_dir = _questionnaire_dir() / "labeling"
@@ -3806,9 +3830,12 @@ def run_stage_labeling(
             if llm_cache_path.exists():
                 print(f"\n  [Cache] Loading LLM labels from {llm_cache_path.name}")
                 llm_labels = _load_llm_labels_from_path(llm_cache_path)
-                if not llm_labels:
+                if not llm_labels or not _llm_labels_have_axis_names(llm_labels):
+                    reason = "empty or invalid"
+                    if llm_labels and not _llm_labels_have_axis_names(llm_labels):
+                        reason = "missing axis_name fields"
                     print(
-                        f"  [Cache] {llm_cache_path.name} is empty or invalid; "
+                        f"  [Cache] {llm_cache_path.name} is {reason}; "
                         "regenerating labels."
                     )
                     llm_labels = _label_factors_llm(
@@ -3844,18 +3871,24 @@ def run_stage_labeling(
             print(f"\n  LLM labels for {key}:")
             for fl in llm_labels:
                 fi = fl.get("factor_index", "?")
+                axis_name = fl.get("axis_name", "")
                 summary = fl.get("summary", "(no summary)")
                 desc = fl.get("description", "")
-                print(f"    Factor {fi}: {summary}")
+                axis_prefix = f"[{axis_name}] " if axis_name else ""
+                print(f"    Factor {fi}: {axis_prefix}{summary}")
                 if desc:
                     print(f"      {desc[:120]}")
 
         except Exception as e:
             logger.warning("LLM labeling failed for %s: %s", key, e)
-            llm_labels = _load_latest_nonempty_llm_labels(label_dir, key)
+            llm_labels = _load_latest_nonempty_llm_labels(
+                label_dir,
+                key,
+                require_axis_names=True,
+            )
             if llm_labels:
                 print(
-                    f"  [Fallback] Using newest non-empty cached labels for {key}."
+                    f"  [Fallback] Using newest non-empty axis-name cached labels for {key}."
                 )
 
         all_labels[key] = {
@@ -3884,203 +3917,349 @@ def run_stage_labeling(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _validation_shuffle_test(
+    data_clean: np.ndarray,
+    pa_real: dict,
+    val_dir: Path,
+    plt,
+) -> dict:
+    """Shuffle control: permute columns and check that no factors emerge."""
+    print("\n[Stage 5] Validation — Shuffle control")
+    rng = np.random.default_rng(SEED)
+
+    shuffled = data_clean.copy()
+    for j in range(shuffled.shape[1]):
+        rng.shuffle(shuffled[:, j])
+
+    # Use permutation-based parallel analysis (correct null for ordinal data)
+    pa_shuffled = parallel_analysis(shuffled, random_state=SEED, method="permutation")
+    n_found = pa_shuffled["n_recommended"]
+
+    result = {
+        "n_factors_recommended": n_found,
+        "pass": n_found == 0,
+        "real_eigenvalues_top15": pa_real["real_eigenvalues"][:15].tolist(),
+        "shuffled_eigenvalues_top15": pa_shuffled["real_eigenvalues"][:15].tolist(),
+        "shuffled_threshold_top15": pa_shuffled["random_threshold"][:15].tolist(),
+    }
+    print(f"  Shuffle: {n_found} factors found (expected 0, "
+          f"{'PASS' if result['pass'] else 'FAIL'})")
+
+    # ── Plot: real vs shuffled scree ──────────────────────────────────────
+    n_show = min(20, len(pa_real["real_eigenvalues"]))
+    x = np.arange(1, n_show + 1)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(x, pa_real["real_eigenvalues"][:n_show], "o-", color="#2563eb",
+            linewidth=2, markersize=5, label="Real data", zorder=3)
+    ax.plot(x, pa_shuffled["real_eigenvalues"][:n_show], "s--", color="#dc2626",
+            linewidth=1.5, markersize=4, label="Shuffled data", zorder=2)
+    ax.plot(x, pa_shuffled["random_threshold"][:n_show], "^:", color="#9ca3af",
+            linewidth=1, markersize=3, label="Permutation 95th pctile", zorder=1)
+    ax.set_xlabel("Component")
+    ax.set_ylabel("Eigenvalue")
+    ax.set_title("Shuffle Control — Scree Comparison", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10)
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(val_dir / "shuffle_scree.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    with open(val_dir / "shuffle_test.json", "w") as f:
+        json.dump(result, f, indent=2)
+    return result
+
+
+def _validation_predictivity_test(
+    data_clean: np.ndarray,
+    val_dir: Path,
+    plt,
+) -> dict:
+    """Held-out item predictivity: factor scores from training items predict held-out items."""
+    from sklearn.linear_model import LinearRegression
+    from sklearn.model_selection import cross_val_score
+
+    print("\n[Stage 5] Validation — Held-out item predictivity")
+
+    rng = np.random.default_rng(SEED + 1)
+    n_items = data_clean.shape[1]
+
+    if n_items <= HOLDOUT_N_ITEMS + 10:
+        result = {"pass": False, "note": f"Not enough items ({n_items}) for holdout"}
+        print(f"  Not enough items ({n_items}) — skipped")
+        with open(val_dir / "predictivity.json", "w") as f:
+            json.dump(result, f, indent=2)
+        return result
+
+    holdout_idx = rng.choice(n_items, HOLDOUT_N_ITEMS, replace=False)
+    train_idx = np.setdiff1d(np.arange(n_items), holdout_idx)
+
+    train_data = data_clean[:, train_idx]
+    holdout_data = data_clean[:, holdout_idx]
+
+    # FA on training items
+    pa_train = parallel_analysis(train_data, random_state=SEED)
+    n_factors = pa_train["n_recommended"]
+
+    if n_factors == 0:
+        result = {"pass": False, "n_factors_train": 0, "note": "No factors on training items"}
+        print("  No factors on training items — FAIL")
+        with open(val_dir / "predictivity.json", "w") as f:
+            json.dump(result, f, indent=2)
+        return result
+
+    fa_train = run_factor_analysis(
+        train_data, n_factors=n_factors, method=FA_METHOD, rotation=FA_ROTATIONS[0],
+    )
+    scores = fa_train["scores"]  # [n_personas, n_factors]
+
+    N_PERMUTATIONS = 100
+    cv_r2_per_item: list[float] = []
+    p_values: list[float] = []
+
+    for j in range(holdout_data.shape[1]):
+        y = holdout_data[:, j]
+
+        # 10-fold cross-validated R²
+        cv_r2 = float(np.mean(cross_val_score(
+            LinearRegression(), scores, y, cv=10, scoring="r2",
+        )))
+        cv_r2_per_item.append(cv_r2)
+
+        # Permutation null
+        null_r2s = []
+        for _ in range(N_PERMUTATIONS):
+            perm_scores = rng.permutation(scores, axis=0)
+            null_r2 = float(np.mean(cross_val_score(
+                LinearRegression(), perm_scores, y, cv=10, scoring="r2",
+            )))
+            null_r2s.append(null_r2)
+        p_val = float(np.mean(np.array(null_r2s) >= cv_r2))
+        p_values.append(p_val)
+
+    cv_r2_arr = np.array(cv_r2_per_item)
+    p_arr = np.array(p_values)
+
+    # FDR correction (Benjamini-Hochberg)
+    n_tests = len(p_arr)
+    sorted_idx = np.argsort(p_arr)
+    fdr_threshold = np.array([(i + 1) / n_tests * 0.05 for i in range(n_tests)])
+    reject_sorted = p_arr[sorted_idx] <= fdr_threshold
+    # Find the largest index where we reject; all indices up to that reject too
+    if reject_sorted.any():
+        max_reject = np.max(np.where(reject_sorted))
+        significant = np.zeros(n_tests, dtype=bool)
+        significant[sorted_idx[:max_reject + 1]] = True
+    else:
+        significant = np.zeros(n_tests, dtype=bool)
+
+    n_sig = int(significant.sum())
+    pct_sig = n_sig / n_tests
+
+    result = {
+        "n_holdout_items": HOLDOUT_N_ITEMS,
+        "n_train_items": int(len(train_idx)),
+        "n_factors_train": n_factors,
+        "n_permutations": N_PERMUTATIONS,
+        "mean_cv_r2": float(cv_r2_arr.mean()),
+        "median_cv_r2": float(np.median(cv_r2_arr)),
+        "per_item_cv_r2": [float(r) for r in cv_r2_per_item],
+        "per_item_p_value": [float(p) for p in p_values],
+        "per_item_significant_fdr05": [bool(s) for s in significant],
+        "n_significant_fdr05": n_sig,
+        "pct_significant_fdr05": float(pct_sig),
+        "pass": pct_sig > 0.5,
+    }
+
+    print(f"  Predictivity: {n_factors} factors, mean CV R²={cv_r2_arr.mean():.4f}, "
+          f"{n_sig}/{n_tests} items significant (FDR<0.05) "
+          f"({'PASS' if result['pass'] else 'FAIL'})")
+
+    # ── Plot: per-item CV R² bar chart ────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(max(8, HOLDOUT_N_ITEMS * 0.4), 5))
+    x = np.arange(HOLDOUT_N_ITEMS)
+    colors = ["#2563eb" if sig else "#d1d5db" for sig in significant]
+    ax.bar(x, cv_r2_per_item, color=colors, edgecolor="white", width=0.7)
+    ax.axhline(0, color="black", linewidth=0.5)
+    ax.set_xlabel("Held-out item index")
+    ax.set_ylabel("10-fold CV R²")
+    ax.set_title(
+        f"Held-out Item Predictivity — {n_factors} factors, "
+        f"{n_sig}/{n_tests} significant (FDR<0.05)",
+        fontsize=12, fontweight="bold",
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels(x, fontsize=7, rotation=90)
+    ax.grid(axis="y", alpha=0.3)
+    # Legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#2563eb", label="Significant (FDR<0.05)"),
+        Patch(facecolor="#d1d5db", label="Not significant"),
+    ]
+    ax.legend(handles=legend_elements, fontsize=9)
+    fig.tight_layout()
+    fig.savefig(val_dir / "predictivity_r2.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    with open(val_dir / "predictivity.json", "w") as f:
+        json.dump(result, f, indent=2)
+    return result
+
+
+def _validation_stability_test(
+    fa_results: dict,
+    val_dir: Path,
+    plt,
+) -> dict:
+    """Stability: ICC(1) per factor across rollouts from the same seed prompt."""
+    from src_dev.factor_analysis.reliability import compute_icc
+
+    print("\n[Stage 5] Validation — Stability (ICC)")
+
+    # Find the first FA result with factors
+    fa_key = None
+    for key, result in fa_results.items():
+        if result.get("n_factors", 0) > 0 and "fa_result" in result:
+            fa_key = key
+            break
+
+    if fa_key is None:
+        result = {"pass": False, "note": "No FA results with factors"}
+        print("  No factors available — skipped")
+        with open(val_dir / "stability.json", "w") as f:
+            json.dump(result, f, indent=2)
+        return result
+
+    fa_result = fa_results[fa_key]["fa_result"]
+    meta = fa_results[fa_key]["metadata"]
+    scores = fa_result["scores"]
+    n_factors = scores.shape[1]
+
+    icc_result = compute_icc(scores, meta, n_factors)
+
+    if icc_result.get("error"):
+        result = {"pass": False, "note": icc_result["error"], "fa_key": fa_key}
+        print(f"  {icc_result['error']} — skipped")
+        with open(val_dir / "stability.json", "w") as f:
+            json.dump(result, f, indent=2)
+        return result
+
+    mean_icc1 = float(np.mean(icc_result["icc1"]))
+
+    result = {
+        "fa_key": fa_key,
+        "n_factors": n_factors,
+        "n_groups": icc_result["n_groups"],
+        "n_total": icc_result["n_total"],
+        "mean_group_size": icc_result["mean_group_size"],
+        "icc1_per_factor": icc_result["icc1"],
+        "icc1_ci_lower": icc_result["icc1_ci_lower"],
+        "icc1_ci_upper": icc_result["icc1_ci_upper"],
+        "icc_k_per_factor": icc_result["icc_k"],
+        "mean_icc1": mean_icc1,
+        "mean_icc_k": float(np.mean(icc_result["icc_k"])),
+        "pass": mean_icc1 >= 0.20,
+    }
+
+    print(f"  Stability: {icc_result['n_groups']} prompts, {n_factors} factors, "
+          f"mean ICC(1)={mean_icc1:.3f} "
+          f"({'PASS' if result['pass'] else 'FAIL'})")
+    for f_idx in range(n_factors):
+        ci_lo = icc_result["icc1_ci_lower"][f_idx]
+        ci_hi = icc_result["icc1_ci_upper"][f_idx]
+        icc_k = icc_result["icc_k"][f_idx]
+        print(f"    Factor {f_idx}: ICC(1)={icc_result['icc1'][f_idx]:.3f} "
+              f"[{ci_lo:.3f}, {ci_hi:.3f}], ICC(k)={icc_k:.3f}")
+
+    # ── Plot: ICC(1) bar chart with CIs ───────────────────────────────────
+    fig, ax = plt.subplots(figsize=(max(6, n_factors * 1.2 + 1), 5))
+    x = np.arange(n_factors)
+    icc1 = np.array(icc_result["icc1"])
+    ci_lo = np.array(icc_result["icc1_ci_lower"])
+    ci_hi = np.array(icc_result["icc1_ci_upper"])
+    yerr = np.array([icc1 - ci_lo, ci_hi - icc1])
+
+    # Color by Cicchetti benchmark
+    colors = []
+    for v in icc1:
+        if v >= 0.75:
+            colors.append("#16a34a")  # excellent — green
+        elif v >= 0.60:
+            colors.append("#2563eb")  # good — blue
+        elif v >= 0.40:
+            colors.append("#f59e0b")  # fair — amber
+        else:
+            colors.append("#dc2626")  # poor — red
+
+    bars = ax.bar(x, icc1, color=colors, edgecolor="white", width=0.6, zorder=3)
+    ax.errorbar(x, icc1, yerr=yerr, fmt="none", ecolor="black",
+                elinewidth=1, capsize=3, zorder=4)
+
+    # Reference lines
+    ax.axhline(0.75, color="#16a34a", linestyle="--", linewidth=0.8, alpha=0.5)
+    ax.axhline(0.40, color="#f59e0b", linestyle="--", linewidth=0.8, alpha=0.5)
+    ax.text(n_factors - 0.3, 0.76, "excellent", fontsize=7, color="#16a34a", ha="right")
+    ax.text(n_factors - 0.3, 0.41, "fair", fontsize=7, color="#f59e0b", ha="right")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"F{i}" for i in range(n_factors)], fontsize=11)
+    ax.set_ylim(0, min(1.0, float(ci_hi.max()) * 1.2 + 0.05))
+    ax.set_ylabel("ICC(1)")
+    ax.set_xlabel("Factor")
+    ax.set_title(
+        f"Test-Retest Stability — ICC(1) per Factor\n"
+        f"({icc_result['n_groups']} prompts, mean k={icc_result['mean_group_size']:.1f} rollouts)",
+        fontsize=13, fontweight="bold",
+    )
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(val_dir / "stability_icc.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    with open(val_dir / "stability.json", "w") as f:
+        json.dump(result, f, indent=2)
+    return result
+
+
 def run_stage_validation(
     response_matrix: np.ndarray,
     metadata: list[dict],
     column_defs: list[dict],
     fa_results: dict,
 ) -> dict:
-    """Run validation tests: stability, predictivity, and shuffle control."""
+    """Run validation tests: shuffle control, held-out item predictivity, stability."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     val_dir = _questionnaire_dir() / "validation"
     val_dir.mkdir(parents=True, exist_ok=True)
 
-    results = {}
-
-    # ── Test 3: Shuffle control (simplest, always run first) ─────────────
-    print("\n[Stage 5] Validation Test 3: Shuffle control")
-    rng = np.random.default_rng(SEED)
-    data_clean, _, _cols_clean, _ = _preprocess_response_matrix(
+    # Preprocess once (shared by shuffle and predictivity tests)
+    data_clean, meta_clean, cols_clean, _ = _preprocess_response_matrix(
         response_matrix, metadata, column_defs, do_residualize=False,
     )
 
-    # Permute each column independently
-    shuffled = data_clean.copy()
-    for j in range(shuffled.shape[1]):
-        rng.shuffle(shuffled[:, j])
+    # Get the parallel analysis result from the main FA run for the scree comparison
+    pa_real_result = None
+    for result in fa_results.values():
+        if result.get("parallel_analysis") is not None:
+            pa_real_result = result["parallel_analysis"]
+            break
+    if pa_real_result is None:
+        # Compute if not cached in fa_results
+        pa_real_result = parallel_analysis(data_clean, random_state=SEED)
 
-    pa_shuffled = parallel_analysis(shuffled, random_state=SEED)
-    shuffle_result = {
-        "n_factors_recommended": pa_shuffled["n_recommended"],
-        "pass": pa_shuffled["n_recommended"] == 0,
-    }
-    print(f"  Shuffle test: {pa_shuffled['n_recommended']} factors recommended "
-          f"(expected 0, {'PASS' if shuffle_result['pass'] else 'FAIL'})")
+    results = {}
 
-    with open(val_dir / "shuffle_test.json", "w") as f:
-        json.dump(shuffle_result, f, indent=2)
-    results["shuffle"] = shuffle_result
+    # Test 1: Shuffle control
+    results["shuffle"] = _validation_shuffle_test(data_clean, pa_real_result, val_dir, plt)
 
-    # ── Test 2: Predictivity (held-out items) ────────────────────────────
-    print("\n[Stage 5] Validation Test 2: Predictivity (held-out items)")
+    # Test 2: Held-out item predictivity
+    results["predictivity"] = _validation_predictivity_test(data_clean, val_dir, plt)
 
-    rng2 = np.random.default_rng(SEED + 1)
-    n_items_clean = data_clean.shape[1]
-
-    if n_items_clean > HOLDOUT_N_ITEMS + 10:
-        holdout_indices = rng2.choice(n_items_clean, HOLDOUT_N_ITEMS, replace=False)
-        train_indices = np.setdiff1d(np.arange(n_items_clean), holdout_indices)
-
-        train_data = data_clean[:, train_indices]
-        holdout_data = data_clean[:, holdout_indices]
-
-        # Run parallel analysis on training data
-        pa_train = parallel_analysis(train_data, random_state=SEED)
-        n_factors_train = pa_train["n_recommended"]
-
-        if n_factors_train > 0:
-            fa_train = run_factor_analysis(
-                train_data, n_factors=n_factors_train,
-                method=FA_METHOD, rotation=FA_ROTATIONS[0],
-            )
-            scores_train = fa_train["scores"]
-
-            # Predict held-out items from factor scores via linear regression.
-            # Baseline uses row-permuted factor scores (same model complexity,
-            # no signal), giving a non-trivial chance-level R² rather than
-            # the trivially-zero mean-prediction baseline.
-            from sklearn.linear_model import LinearRegression
-            from sklearn.metrics import r2_score
-
-            rng_perm = np.random.default_rng(SEED + 99)
-            scores_permuted = scores_train.copy()
-            rng_perm.shuffle(scores_permuted)  # shuffle rows independently
-
-            r2_scores = []
-            baseline_r2_scores = []
-            for j in range(holdout_data.shape[1]):
-                y = holdout_data[:, j]
-
-                reg = LinearRegression().fit(scores_train, y)
-                r2_scores.append(r2_score(y, reg.predict(scores_train)))
-
-                reg_null = LinearRegression().fit(scores_permuted, y)
-                baseline_r2_scores.append(r2_score(y, reg_null.predict(scores_permuted)))
-
-            mean_r2 = float(np.mean(r2_scores))
-            mean_baseline_r2 = float(np.mean(baseline_r2_scores))
-            improvement = mean_r2 - mean_baseline_r2
-
-            predictivity_result = {
-                "n_holdout_items": HOLDOUT_N_ITEMS,
-                "n_factors_train": n_factors_train,
-                "mean_r2": mean_r2,
-                "mean_baseline_r2_permuted": mean_baseline_r2,
-                "improvement_over_permuted": improvement,
-                "per_item_r2": [float(r) for r in r2_scores],
-                "pass": improvement > 0,
-            }
-            print(f"  Predictivity: mean R²={mean_r2:.4f}, permuted baseline R²={mean_baseline_r2:.4f}, "
-                  f"improvement={improvement:.4f} ({'PASS' if predictivity_result['pass'] else 'FAIL'})")
-        else:
-            predictivity_result = {
-                "n_holdout_items": HOLDOUT_N_ITEMS,
-                "n_factors_train": 0,
-                "pass": False,
-                "note": "No factors recommended on training data",
-            }
-            print("  Predictivity: No factors on training data — FAIL")
-    else:
-        predictivity_result = {
-            "pass": False,
-            "note": f"Not enough items ({n_items_clean}) for holdout test",
-        }
-        print(f"  Predictivity: Not enough items ({n_items_clean}) — skipped")
-
-    with open(val_dir / "predictivity.json", "w") as f:
-        json.dump(predictivity_result, f, indent=2)
-    results["predictivity"] = predictivity_result
-
-    # ── Test 1: Stability ────────────────────────────────────────────────
-    # This test requires paired rollouts (same starting prompt, different runs).
-    # For now, check if we have any paired data (num_rollouts_per_prompt > 1).
-    print("\n[Stage 5] Validation Test 1: Stability")
-
-    # Group by input_group_id
-    group_to_indices: dict[str, list[int]] = {}
-    for i, meta in enumerate(metadata):
-        gid = meta.get("input_group_id", meta["sample_id"])
-        group_to_indices.setdefault(gid, []).append(i)
-
-    paired_groups = {gid: idxs for gid, idxs in group_to_indices.items() if len(idxs) >= 2}
-
-    if len(paired_groups) >= 10:
-        # We have paired data — compute stability correlations
-        # Use the first FA result that has factors
-        fa_key = None
-        for key, result in fa_results.items():
-            if result.get("n_factors", 0) > 0 and "fa_result" in result:
-                fa_key = key
-                break
-
-        if fa_key is not None:
-            fa_result = fa_results[fa_key]["fa_result"]
-            scores = fa_result["scores"]
-            n_factors = scores.shape[1]
-
-            # Compute per-factor stability: for each factor f, correlate the
-            # factor scores of paired rollouts across all paired prompts.
-            # This is the correct unit — correlating two score vectors of length
-            # n_pairs, one observation per prompt — rather than correlating two
-            # per-persona factor-score profiles (length n_factors), which has
-            # too few degrees of freedom to be meaningful.
-            pairs_used: list[tuple[int, int]] = [
-                (idxs[0], idxs[1])
-                for idxs in list(paired_groups.values())[:STABILITY_N_PROMPTS]
-                if idxs[0] < scores.shape[0] and idxs[1] < scores.shape[0]
-            ]
-            per_factor_corrs: list[float] = []
-            for f in range(n_factors):
-                a = np.array([scores[i, f] for i, _ in pairs_used])
-                b = np.array([scores[j, f] for _, j in pairs_used])
-                if len(a) >= 3 and np.std(a) > 0 and np.std(b) > 0:
-                    corr = float(np.corrcoef(a, b)[0, 1])
-                    if not np.isnan(corr):
-                        per_factor_corrs.append(corr)
-
-            if per_factor_corrs:
-                mean_corr = float(np.mean(per_factor_corrs))
-                stability_result = {
-                    "n_pairs": len(pairs_used),
-                    "n_factors": n_factors,
-                    "per_factor_correlation": per_factor_corrs,
-                    "mean_correlation": mean_corr,
-                    "std_correlation": float(np.std(per_factor_corrs)),
-                    "pass": mean_corr > 0.3,
-                    "fa_key": fa_key,
-                }
-                print(f"  Stability: {len(pairs_used)} pairs, {n_factors} factors, "
-                      f"mean per-factor r={mean_corr:.4f} "
-                      f"({'PASS' if stability_result['pass'] else 'FAIL'})")
-                for f, r in enumerate(per_factor_corrs):
-                    print(f"    Factor {f}: r={r:.4f}")
-            else:
-                stability_result = {"pass": False, "note": "No valid pairs found"}
-                print("  Stability: No valid pairs — skipped")
-        else:
-            stability_result = {"pass": False, "note": "No FA results with factors"}
-            print("  Stability: No factors available — skipped")
-    else:
-        stability_result = {
-            "pass": False,
-            "note": f"Only {len(paired_groups)} paired groups (need >=10). "
-                    "Set NUM_ROLLOUTS_PER_PROMPT >= 2 to enable stability test.",
-        }
-        print(f"  Stability: Only {len(paired_groups)} paired groups — skipped. "
-              "Set NUM_ROLLOUTS_PER_PROMPT >= 2 to enable.")
-
-    with open(val_dir / "stability.json", "w") as f:
-        json.dump(stability_result, f, indent=2)
-    results["stability"] = stability_result
+    # Test 3: Stability (ICC)
+    results["stability"] = _validation_stability_test(fa_results, val_dir, plt)
 
     # Summary
     print("\n" + "=" * 60)
