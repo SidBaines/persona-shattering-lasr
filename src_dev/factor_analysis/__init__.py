@@ -17,6 +17,7 @@ from src_dev.factor_analysis.interpretation import (
     rank_by_factor_purity,
 )
 from src_dev.factor_analysis.parallel_analysis import parallel_analysis
+from src_dev.factor_analysis.reliability import compute_icc
 from src_dev.factor_analysis.preprocessing import (
     deduplicate_by_group,
     load_embeddings,
@@ -26,6 +27,7 @@ from src_dev.factor_analysis.preprocessing import (
 
 __all__ = [
     "adequacy_tests",
+    "compute_icc",
     "analytical_factor_embedding",
     "back_project_factor",
     "corpus_nearest_neighbor",
