@@ -68,6 +68,11 @@ coherent but collapses should be scored for the whole, not the best part.
 - Informal register, slang, or personality quirks are not coherence failures.
 - Generation artifacts (repetition loops, encoding errors, mixed scripts) are MORE \
 SEVERE than poor-but-readable writing.
+- Do NOT over-credit topical relevance. A response where every sentence is \
+independently intelligible but the sentences have no logical relationship to each \
+other scores 3-4, not 5-6. Content alone does not make coherence.
+- Broken grammar, abandoned sentences, and sentence fragments are coherence \
+failures even when the topic is correct. Score the structure, not the content.
 - Use the QUESTION only to judge whether the response is relevant and on-topic.
 - Score -99999 if the model cleanly refused to answer (not a failed attempt)."""
 
