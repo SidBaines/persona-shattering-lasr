@@ -103,6 +103,26 @@ def _condition_label(condition_name: str, scale: float) -> str:
     return f"{condition_name}@scale_{scale:+.2f}"
 
 
+def _find_rollouts_file(condition_dir: Path) -> Path | None:
+    """Find the rollouts JSONL for one sweep cell across known layouts."""
+    for candidate in (
+        condition_dir / "rollouts" / "rollouts.jsonl",
+        condition_dir / "rollouts.jsonl",
+    ):
+        if candidate.exists():
+            return candidate
+
+    # Older experiments sometimes wrote rollouts under a timestamped child dir.
+    for subdir in sorted(condition_dir.iterdir()):
+        if not subdir.is_dir():
+            continue
+        for relative in (Path("rollouts") / "rollouts.jsonl", Path("rollouts.jsonl")):
+            candidate = subdir / relative
+            if candidate.exists():
+                return candidate
+    return None
+
+
 def _flatten_rollouts_file(
     rollouts_path: Path,
     condition_name: str,
@@ -189,17 +209,8 @@ def convert_sweep(
             if conditions is not None and condition_name not in conditions:
                 continue
 
-            # rollouts.jsonl may be directly in condition_dir or in a timestamped subdir
-            rollouts_path = condition_dir / "rollouts.jsonl"
-            if not rollouts_path.exists():
-                # search one level deeper (timestamped subdir)
-                for subdir in sorted(condition_dir.iterdir()):
-                    candidate = subdir / "rollouts.jsonl"
-                    if candidate.exists():
-                        rollouts_path = candidate
-                        break
-
-            if not rollouts_path.exists():
+            rollouts_path = _find_rollouts_file(condition_dir)
+            if rollouts_path is None:
                 print(f"  skipping {scale_dir.name}/{condition_name}: no rollouts.jsonl found")
                 continue
 

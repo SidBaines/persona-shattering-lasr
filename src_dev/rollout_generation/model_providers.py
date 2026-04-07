@@ -617,6 +617,9 @@ class VLLMLoRaScaleProvider(ModelProvider):
 
     def _init_vllm_engine(self) -> None:
         """Start the vLLM engine and pre-build all LoRARequests."""
+        import os
+        os.environ.setdefault("VLLM_USE_V1", "1")
+
         try:
             from vllm import LLM, SamplingParams
             from vllm.lora.request import LoRARequest
@@ -640,8 +643,6 @@ class VLLMLoRaScaleProvider(ModelProvider):
         if self._max_model_len is not None:
             engine_kwargs["max_model_len"] = self._max_model_len
 
-        import os
-        os.environ.setdefault("VLLM_USE_V1", "0")
         print(f"  Initialising vLLM engine: {self._base_model}", flush=True)
         self._llm = LLM(**engine_kwargs)
 

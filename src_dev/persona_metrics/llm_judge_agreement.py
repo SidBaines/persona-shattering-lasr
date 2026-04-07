@@ -42,13 +42,11 @@ from src_dev.common.config import DatasetConfig
 from src_dev.common.persona_definitions import OCEAN_DEFINITION
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 from src_dev.datasets import load_dataset_from_config, load_samples, resume_state
-from src_dev.datasets.io import append_jsonl, read_jsonl_tolerant, write_jsonl_atomic
+from src_dev.datasets.io import append_jsonl, read_jsonl_tolerant
 from src_dev.inference import InferenceConfig, run_inference
 from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.judge_calibration import (
-    mae,
     quadratic_weighted_agreement,
-    spearman_r,
     summarize_pair,
 )
 from src_dev.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
@@ -599,6 +597,19 @@ def _valid_score(value: Any) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
+def _score_bounds_for_config(config: OceanJudgeRunConfig) -> tuple[int, int]:
+    """Return the common score bounds for the configured judge metrics."""
+    bounds: set[tuple[int, int]] = set()
+    for rater in config.judge_raters:
+        metric = get_persona_metric(rater.metric_name, judge_config=rater.judge)
+        if not isinstance(metric, LLMJudgeMetric):
+            continue
+        bounds.add((metric.score_min, metric.score_max))
+    if len(bounds) == 1:
+        return next(iter(bounds))
+    return -4, 4
+
+
 def _load_median_scores_by_rater(
     config: OceanJudgeRunConfig,
     paths: dict[str, Path],
@@ -671,6 +682,7 @@ def _analyze(
     """Compute agreement, stability, separation, and write analysis artifacts."""
     response_by_id = {str(row["response_id"]): row for row in response_rows}
     medians_by_rater, repeats_by_rater = _load_median_scores_by_rater(config, paths)
+    score_min, score_max = _score_bounds_for_config(config)
 
     pairwise_metrics: dict[str, dict[str, float | int]] = {}
     qwk_matrix: dict[str, dict[str, float]] = defaultdict(dict)
@@ -787,7 +799,11 @@ def _analyze(
         "num_raters": len(rater_ids),
         "num_items": len(response_rows),
         "num_items_with_multi_rater_scores": len(item_ratings),
-        "ordinal_krippendorff_alpha": _krippendorff_alpha_ordinal(item_ratings),
+        "ordinal_krippendorff_alpha": _krippendorff_alpha_ordinal(
+            item_ratings,
+            score_min=score_min,
+            score_max=score_max,
+        ),
         "mean_pairwise_qwk": statistics.mean(
             m["quadratic_weighted_agreement"]
             for m in pairwise_metrics.values()
@@ -849,6 +865,7 @@ def _write_plots(
 
     rater_ids = [rater.rater_id for rater in config.judge_raters]
     conditions = list(build_ocean_system_prompts(config.trait))
+    score_min, score_max = _score_bounds_for_config(config)
 
     fig, axes = plt.subplots(1, len(rater_ids), figsize=(4.5 * max(1, len(rater_ids)), 4.5), squeeze=False)
     for axis, rater_id in zip(axes[0], rater_ids):
@@ -877,9 +894,9 @@ def _write_plots(
             continue
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.scatter(xs, ys, alpha=0.8)
-        ax.plot([-4, 4], [-4, 4], linestyle="--", linewidth=1)
-        ax.set_xlim(-4.5, 4.5)
-        ax.set_ylim(-4.5, 4.5)
+        ax.plot([score_min, score_max], [score_min, score_max], linestyle="--", linewidth=1)
+        ax.set_xlim(score_min - 0.5, score_max + 0.5)
+        ax.set_ylim(score_min - 0.5, score_max + 0.5)
         ax.set_xlabel(left)
         ax.set_ylabel(right)
         ax.set_title(f"{left} vs {right}")
@@ -923,11 +940,11 @@ def _write_plots(
         plt.close(fig)
 
     fig, axes = plt.subplots(1, len(rater_ids), figsize=(4.5 * max(1, len(rater_ids)), 4.0), squeeze=False)
-    bins = [x - 0.5 for x in range(-4, 6)]
+    bins = [x - 0.5 for x in range(score_min, score_max + 2)]
     for axis, rater_id in zip(axes[0], rater_ids):
         values = list(medians_by_rater[rater_id].values())
         axis.hist(values, bins=bins, edgecolor="black")
-        axis.set_xticks(list(range(-4, 5)))
+        axis.set_xticks(list(range(score_min, score_max + 1)))
         axis.set_title(rater_id)
         axis.set_xlabel("Median score")
     fig.tight_layout()
