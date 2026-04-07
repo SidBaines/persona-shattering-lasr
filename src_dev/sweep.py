@@ -290,6 +290,7 @@ class OutputPathConfig:
         trait: Specific trait (e.g. ``"t character"``, ``"Openness/O+"``).
         training_run: Training run identifier (e.g. ``"SFT.v1"``).
         eval_name: Evaluation name (e.g. ``"rollout_sweep_lora_scale"``).
+        stage_dir: Top-level artifact directory under the training run.
     """
 
     scratch_root: Path  # e.g. Path("scratch/monorepo")
@@ -299,6 +300,7 @@ class OutputPathConfig:
     training_run: str  # e.g. "SFT.v1", "DPO.v2"
     eval_name: str  # e.g. "rollout_sweep_lora_scale"
     hf_repo: str | None = None  # e.g. "persona-shattering-lasr/evals"
+    stage_dir: str = "rollouts"
 
     @property
     def relative_path(self) -> Path:
@@ -309,7 +311,7 @@ class OutputPathConfig:
             / self.category
             / self.trait
             / self.training_run
-            / "rollouts"
+            / self.stage_dir
             / self.eval_name
         )
 
