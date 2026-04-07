@@ -55,6 +55,7 @@ from src_dev.persona_metrics.llm_judge_agreement import (  # noqa: E402
     get_judge_run_dir,
     run_ocean_judge_run,
 )
+from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS  # noqa: E402
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait  # noqa: E402
 from src_dev.rollout_generation.model_providers import (  # noqa: E402
     LoRaScaleProvider,
@@ -85,14 +86,16 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 BASE_MODEL_SLUG = "llama-3.1-8b-it"
 TRAIT = OceanTrait.conscientiousness
 DIRECTION = "suppressor"
-VERSION = "vanton1"
+VERSION = "v3-llama-3.1-8b-instruct"
+ARTIFACT_TRAIT = "conscientious"
+TRAINING_RUN = "suppressor-v3-llama-3.1-8b-instruct"
 EVAL_NAME = "llm_judge_lora_scale_sweep"
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 
 ADAPTER_REF = (
     "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/vanton1/"
-    "lora/conscientiousness_suppressing_full_vanton1-persona"
+    "fine_tuning/llama-3.1-8b-it/ocean/conscientious/"
+    "suppressor-v3-llama-3.1-8b-instruct/lora/conscientiousness_low-persona"
 )
 SCALE_POINTS = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0]
 
@@ -111,6 +114,8 @@ JUDGE_REPEATS = 5
 CI_CONFIDENCE = 95.0
 CI_BOOTSTRAP_RESAMPLES = 1000
 COHERENCE_METRIC = "better_coherence_judge"
+CONSCIENTIOUSNESS_COLOR = BIG_FIVE_COLORS["Conscientiousness"]
+COHERENCE_COLOR = "#757575"
 JUDGE_RATERS = [
     # JudgeRaterConfig(
     #     rater_id="gpt_4o_mini",
@@ -146,8 +151,8 @@ OUTPUT_CONFIG = OutputPathConfig(
     hf_repo=HF_REPO_ID,
     base_model=BASE_MODEL_SLUG,
     category="ocean",
-    trait=TRAIT.value,
-    training_run=f"{DIRECTION}/{VERSION}",
+    trait=ARTIFACT_TRAIT,
+    training_run=TRAINING_RUN,
     stage_dir="evals",
     eval_name=EVAL_NAME,
 )
@@ -192,7 +197,7 @@ def build_provider(*, use_vllm: bool) -> LoRaScaleProvider | VLLMLoRaScaleProvid
             adapter=ADAPTER_REF,
             scale_points=SCALE_POINTS,
             baked_adapters_dir=Path("scratch/baked_adapters")
-            / "conscientiousness_suppressor_vanton1",
+            / "conscientiousness_low_suppressor_v3_llama_3_1_8b_instruct",
             temperature=ASSISTANT_TEMPERATURE,
             top_p=ASSISTANT_TOP_P,
             max_new_tokens=ASSISTANT_MAX_NEW_TOKENS,
@@ -489,11 +494,15 @@ def write_scale_summary_and_plot(results: dict[str, dict[str, Any]]) -> Path | N
         for row in summary_rows:
             handle.write(json.dumps(row) + "\n")
 
-    fig, left_axis = plt.subplots(figsize=(7.0, 4.5))
+    fig, left_axis = plt.subplots(figsize=(7.0, 3.5))
     right_axis = left_axis.twinx()
     metric_axes = {
-        TRAIT.v2_metric_name: (left_axis, "#1f77b4", "Conscientiousness"),
-        COHERENCE_METRIC: (right_axis, "#d62728", "Coherence"),
+        TRAIT.v2_metric_name: (
+            left_axis,
+            CONSCIENTIOUSNESS_COLOR,
+            "Conscientiousness",
+        ),
+        COHERENCE_METRIC: (right_axis, COHERENCE_COLOR, "Coherence"),
     }
     lines = []
     for metric_name in (TRAIT.v2_metric_name, COHERENCE_METRIC):
