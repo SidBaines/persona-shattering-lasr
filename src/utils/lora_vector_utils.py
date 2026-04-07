@@ -245,6 +245,7 @@ class LoRaVector:
         layers: list[int] | None = None,
         layer_idx_extractor: LayerIdxExtractor | None = None,
         revision: str | None = None,
+        repo_type: str | None = None,
     ) -> LoRaVector:
         """Load a LoRAVector from a HuggingFace Hub repository.
 
@@ -258,6 +259,8 @@ class LoRaVector:
             layers: If provided, only include modules in these layer indices.
             layer_idx_extractor: Custom layer index extraction function.
             revision: Git revision (branch, tag, or commit hash) to download.
+            repo_type: Type of HuggingFace repo ("model", "dataset", "space").
+                Defaults to "model" via ``snapshot_download``.
 
         Returns:
             A LoRAVector with the adapter's factors.
@@ -268,6 +271,7 @@ class LoRaVector:
                 repo_id,
                 allow_patterns=allow_patterns,
                 revision=revision,
+                repo_type=repo_type,
             )
         )
         adapter_path = local_path / subfolder if subfolder else local_path
