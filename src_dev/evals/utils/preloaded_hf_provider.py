@@ -34,7 +34,7 @@ from typing import Any
 from transformers import PreTrainedTokenizerBase
 from typing_extensions import override
 
-from inspect_ai.model._providers.hf import GenerateInput, batched_generate
+from inspect_ai.model._providers.hf import GenerateInput, batched_generate, extract_logprobs
 
 from inspect_ai._util.content import (
     ContentAudio,
@@ -48,6 +48,7 @@ from inspect_ai.model._generate_config import GenerateConfig
 from inspect_ai.model._model import ModelAPI
 from inspect_ai.model._model_output import (
     ChatCompletionChoice,
+    Logprobs,
     ModelOutput,
     ModelUsage,
 )
@@ -151,6 +152,8 @@ def register_preloaded_hf_provider() -> None:
                 kwargs["top_p"] = config.top_p
             if config.top_k is not None:
                 kwargs["top_k"] = config.top_k
+            if config.logprobs is not None:
+                kwargs["output_logits"] = config.logprobs
             if config.stop_seqs is not None:
                 from transformers.generation import StopStringCriteria
                 kwargs["stopping_criteria"] = [
@@ -181,17 +184,31 @@ def register_preloaded_hf_provider() -> None:
                 )
             )
 
+            # Gather logprobs if requested.
+            final_logprobs = None
+            if config.logprobs is not None and response.logprobs is not None:
+                final_logprobs = extract_logprobs(
+                    response=response,
+                    top=config.top_logprobs,
+                    tokenizer=self.tokenizer,
+                )
+
+            choice = ChatCompletionChoice(
+                message=ChatMessageAssistant(
+                    content=response.output,
+                    model=self.model_name,
+                    source="generate",
+                ),
+                logprobs=(
+                    Logprobs(content=final_logprobs)
+                    if final_logprobs is not None
+                    else None
+                ),
+            )
+
             return ModelOutput(
                 model=self.model_name,
-                choices=[
-                    ChatCompletionChoice(
-                        message=ChatMessageAssistant(
-                            content=response.output,
-                            model=self.model_name,
-                            source="generate",
-                        )
-                    )
-                ],
+                choices=[choice],
                 usage=ModelUsage(
                     input_tokens=response.input_tokens,
                     output_tokens=response.output_tokens,
@@ -204,7 +221,13 @@ def register_preloaded_hf_provider() -> None:
 
 
 def _apply_chat_template(tokenizer: Any, model_name: str, messages: list[ChatMessage]) -> str:
-    """Convert Inspect ChatMessages to a single string via the tokenizer's chat template."""
+    """Convert Inspect ChatMessages to a single string via the tokenizer's chat template.
+
+    If the last message is from the assistant (i.e. a forced prefill), it is
+    split off and appended *raw* after the generation prompt.  This avoids the
+    chat template closing the assistant turn with an end-of-turn token, which
+    would defeat the purpose of the prefill.
+    """
     hf_messages = copy.deepcopy(emulate_reasoning_history(messages))
 
     # Flatten any list content to text (no multimodal support).
@@ -219,14 +242,29 @@ def _apply_chat_template(tokenizer: Any, model_name: str, messages: list[ChatMes
                 )
             message.content = message.text
 
+    # Detect trailing assistant prefill.
+    assistant_prefill: str | None = None
+    if hf_messages and hf_messages[-1].role == "assistant":
+        prefill_msg = hf_messages.pop()
+        content = prefill_msg.text if hasattr(prefill_msg, "text") else str(prefill_msg.content)
+        if content:
+            assistant_prefill = content
+
     if tokenizer.chat_template is not None:
-        return str(
+        chat = str(
             tokenizer.apply_chat_template(
                 hf_messages,
                 add_generation_prompt=True,
                 tokenize=False,
             )
         )
+    else:
+        # Fallback for tokenizers without a chat template.
+        chat = "".join(f"{m.role}: {m.content}\n" for m in hf_messages)
 
-    # Fallback for tokenizers without a chat template.
-    return "".join(f"{m.role}: {m.content}\n" for m in hf_messages)
+    # Append the prefill text directly so it becomes a true continuation
+    # of the (already-open) assistant turn, not a separate completed turn.
+    if assistant_prefill is not None:
+        chat += assistant_prefill
+
+    return chat
