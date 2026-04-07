@@ -92,7 +92,7 @@ TRAIT_TO_METRIC: dict[str, str] = {
     "conscientiousness": "conscientiousness_v2",
     "extraversion": "extraversion_v2",
     "agreeableness": "agreeableness_v2",
-    "coherence": "better_coherence_judge",
+    "coherence": "coherence_v2",
 }
 
 SCORE_RANGE: dict[str, tuple[int, int]] = {

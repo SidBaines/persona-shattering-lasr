@@ -8,6 +8,7 @@ from functools import partial
 from src_dev.persona_metrics.metrics.coherence import (
     BetterCoherenceEvaluation,
     CoherenceEvaluation,
+    CoherenceV2Evaluation,
 )
 from src_dev.persona_metrics.metrics.counter import CharCounterMetric
 from src_dev.persona_metrics.metrics.ocean import (
@@ -44,6 +45,7 @@ register_persona_metric("openness_v2", OpennessV2Evaluation)
 register_persona_metric("openness", OpennessEvaluation)
 register_persona_metric("coherence", CoherenceEvaluation)
 register_persona_metric("better_coherence_judge", BetterCoherenceEvaluation)
+register_persona_metric("coherence_v2", CoherenceV2Evaluation)
 register_persona_metric("lowercase_density", LowercaseDensityEvaluation)
 register_persona_metric("punctuation_density", PunctuationDensityEvaluation)
 register_persona_metric("verb_count", VerbCountEvaluation)
@@ -62,6 +64,7 @@ __all__ = [
     "CharCounterMetric",
     "BetterCoherenceEvaluation",
     "CoherenceEvaluation",
+    "CoherenceV2Evaluation",
     "ConscientiousnessEvaluation",
     "ConscientiousnessV2Evaluation",
     "ExtraversionEvaluation",
