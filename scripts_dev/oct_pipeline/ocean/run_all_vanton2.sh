@@ -28,7 +28,7 @@ for run in "${RUNS[@]}"; do
   echo ""
 
   # ── Train ──
-  uv run python scripts_dev/oct_pipeline/run_oct_pipeline.py \
+  uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt python scripts_dev/oct_pipeline/run_oct_pipeline.py \
     --model "$MODEL" \
     --teacher-model "$TEACHER" \
     --custom-constitution "$CONSTITUTION_JSON" \
