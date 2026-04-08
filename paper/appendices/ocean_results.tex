@@ -1,191 +1,234 @@
 \section{OCEAN results}\label{sec:appendix-f}
 
-[NOTE TO REVIEWERS: Not all of these are good; some are work-in-progress and we expect them to improve with fixes to the constitutions]
+\textit{Note: Not all adapters shown here are final; some are work-in-progress and we expect them to improve with fixes to the constitutions.} % TODO: remove this note before final submission
 
-\#\# \textbf{O+ Openness amplifier}
+\subsection*{O+ Openness amplifier}
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image24.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O+ LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image24.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-o-plus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image25.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-o-plus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the O+ (openness amplifier) LoRA at different scales.}
+\label{fig:F-o-plus}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection*{O- Openness suppressor}
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image25.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O+ LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image26.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-o-minus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image27.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-o-minus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the O- (openness suppressor) LoRA at different scales.}
+\label{fig:F-o-minus}
 \end{figure}
 
+\subsection*{C+ Conscientiousness amplifier}
 
-\#\# \textbf{O- Openness suppressor}
-
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image26.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image28.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-c-plus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image29.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-c-plus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the C+ (conscientiousness amplifier) LoRA at different scales.}
+\label{fig:F-c-plus}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection*{C- Conscientiousness suppressor}
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image27.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image30.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-c-minus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image31.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-c-minus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the C- (conscientiousness suppressor) LoRA at different scales.}
+\label{fig:F-c-minus}
 \end{figure}
 
+\subsection*{E+ Extraversion amplifier}
 
-\#\# \textbf{C+ Conscientiousness amplifier}
-
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image28.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image32.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-e-plus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image33.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-e-plus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the E+ (extraversion amplifier) LoRA at different scales.}
+\label{fig:F-e-plus}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection*{E- Extraversion suppressor}
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image29.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image34.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-e-minus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image35.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-e-minus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the E- (extraversion suppressor) LoRA at different scales.}
+\label{fig:F-e-minus}
 \end{figure}
 
+\subsection*{A+ Agreeableness amplifier}
 
-\#\# \textbf{C- Conscientiousness suppressor}
-
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image30.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image36.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-a-plus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image37.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-a-plus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the A+ (agreeableness amplifier) LoRA at different scales.}
+\label{fig:F-a-plus}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection*{A- Agreeableness suppressor}
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image31.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image38.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-a-minus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image39.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-a-minus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the A- (agreeableness suppressor) LoRA at different scales.}
+\label{fig:F-a-minus}
 \end{figure}
 
+\subsection*{N+ Neuroticism amplifier}
 
-\#\# \textbf{E+ Extraversion amplifier}
-
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image32.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image40.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-n-plus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image41.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-n-plus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the N+ (neuroticism amplifier) LoRA at different scales.}
+\label{fig:F-n-plus}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection*{N- Neuroticism suppressor}
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image33.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image42.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-n-minus-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image43.png}
+  \caption{MMLU benchmark scores.}
+  \label{fig:F-n-minus-mmlu}
+\end{subfigure}
+\caption{TRAIT and MMLU benchmark scores for models produced by applying the N- (neuroticism suppressor) LoRA at different scales.}
+\label{fig:F-n-minus}
 \end{figure}
 
+\subsection*{Combining amplifiers and suppressors}
 
-\#\# \textbf{E- Extraversion suppressor}
-
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image34.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image44.png}
+  \caption{TRAIT benchmark scores.}
+  \label{fig:F-agree-combine-trait}
+\end{subfigure}
+\vspace{0.5em}
+\begin{subfigure}[t]{\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/tmp/image45.png}
+  \caption{Comparison to original student model.}
+  \label{fig:F-agree-combine-compare}
+\end{subfigure}
+\caption{Scores for models produced by applying the A+ LoRA at a fixed scale of 1.0 and A- LoRA at varying scale. The combination $1.0\text{A+} + 0.5\text{A-}$ yields an agreeableness score matching that of the original model, with differences seen in the other OCEAN traits.}
+\label{fig:F-agree-combine}
 \end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image35.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-
-\#\# \textbf{A+ Agreeableness amplifier}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image36.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image37.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-
-\#\# \textbf{A- Agreeableness suppressor}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image38.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image39.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-
-\#\# \textbf{N+ Neuroticism amplifier}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image40.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image41.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-
-\#\# \textbf{N- Neuroticism suppressor}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image42.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image43.png}
-\caption{TRAIT Benchmark scores (top) and MMLU benchmark scores (bottom) for models produced by applying the the O- LoRA at different scales.}
-\label{fig:trait-benchmark-scores-top-and-mmlu-benchmark-scor}
-\end{figure}
-
-
-\#\# \textbf{Combining amplifiers \& suppressors}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image44.png}
-\caption{TRAIT Benchmark scores (top) and comparison to the original student model (bottom) for models produced by applying the A+ LoRA at a fixed scale of 1.0 and A- LoRA at varying scale. The combination 1.0A+ + 0.5A- yields an agreeableness score matching that of the original model, with differences seen in the other OCEAN traits.}
-\label{fig:trait-benchmark-scores-top-and-comparison-to-the-o}
-\end{figure}
-
-\begin{figure}[ht]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image45.png}
-\caption{TRAIT Benchmark scores (top) and comparison to the original student model (bottom) for models produced by applying the A+ LoRA at a fixed scale of 1.0 and A- LoRA at varying scale. The combination 1.0A+ + 0.5A- yields an agreeableness score matching that of the original model, with differences seen in the other OCEAN traits.}
-\label{fig:trait-benchmark-scores-top-and-comparison-to-the-o}
-\end{figure}
-
-

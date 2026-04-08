@@ -148,6 +148,11 @@ grep -rn "TODO\|DUMMY" sections/ appendices/
 - Section 8 (Conclusion) is empty
 - Author list is not set
 
+### Editing Guidelines
+- **Mark inferred captions with TODO**: When writing or rewriting a figure caption based on surrounding text (rather than the actual figure), add `% TODO: verify caption matches final figure` so the team can check it during the final pass.
+- **Minimal prose edits**: Fix only clear errors (typos, broken grammar, wrong words). Do not rewrite for style or verbosity — preserve the original author's voice.
+- **TODO comments on their own line**: Never place `% TODO` mid-line — it comments out everything after it. Always put TODO comments on a separate line.
+
 ---
 
 ## Relationship to Codebase
