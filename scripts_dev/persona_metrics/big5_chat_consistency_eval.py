@@ -41,12 +41,12 @@ from datasets import load_dataset
 from dotenv import load_dotenv
 
 from src_dev.persona_metrics.config import JudgeLLMConfig
-from src_dev.persona_metrics.metrics.ocean import (
-    AgreeablenessEvaluation,
-    ConscientiousnessEvaluation,
-    ExtraversionEvaluation,
-    NeuroticismEvaluation,
-    OpennessEvaluation,
+from src_dev.persona_metrics.metrics.ocean_v2 import (
+    AgreeablenessV2Evaluation as AgreeablenessEvaluation,
+    ConscientiousnessV2Evaluation as ConscientiousnessEvaluation,
+    ExtraversionV2Evaluation as ExtraversionEvaluation,
+    NeuroticismV2Evaluation as NeuroticismEvaluation,
+    OpennessV2Evaluation as OpennessEvaluation,
 )
 from src_dev.utils import setup_logging, write_jsonl
 

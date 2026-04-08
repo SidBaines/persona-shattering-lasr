@@ -59,7 +59,7 @@ from dotenv import load_dotenv
 
 from src_dev.inference import InferenceConfig
 from src_dev.inference.config import GenerationConfig
-from src_dev.persona_metrics.config import JudgeLLMConfig
+from src_dev.persona_metrics.config import JudgeLLMConfig, judge_config
 from src_dev.persona_metrics.llm_judge_agreement import (
     JudgeRaterConfig,
     OceanDatasetConfig,
@@ -77,33 +77,9 @@ from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 # ---------------------------------------------------------------------------
 
 _DEFAULT_RATERS = [
-    JudgeRaterConfig(
-        rater_id="gpt_4o_mini",
-        judge=JudgeLLMConfig(
-            provider="openrouter",
-            model="openai/gpt-4o-mini",
-            temperature=0.0,
-            max_concurrent=10,
-        ),
-    ),
-    JudgeRaterConfig(
-        rater_id="haiku_35",
-        judge=JudgeLLMConfig(
-            provider="openrouter",
-            model="anthropic/claude-3.5-haiku",
-            temperature=0.0,
-            max_concurrent=10,
-        ),
-    ),
-    JudgeRaterConfig(
-        rater_id="gemini_flash_20",
-        judge=JudgeLLMConfig(
-            provider="openrouter",
-            model="google/gemini-2.0-flash-001",
-            temperature=0.0,
-            max_concurrent=10,
-        ),
-    ),
+    JudgeRaterConfig(rater_id="gemini_flash", judge=judge_config("gemini_flash")),
+    JudgeRaterConfig(rater_id="haiku", judge=judge_config("haiku")),
+    JudgeRaterConfig(rater_id="kimi_k2", judge=judge_config("kimi_k2")),
 ]
 
 # ---------------------------------------------------------------------------

@@ -120,10 +120,15 @@ class PersonaMetricsResult(BaseModel):
 #   data/judge_calibration/{trait}.jsonl  — 33-36 items per trait, hand-labeled
 #
 # Selection criteria (coherence QWK / OCEAN mean Spearman):
-#   Kimi K2:      best quality, 50 rpm rate limit on OpenRouter
-#   Haiku 3.5:    best quality + throughput balance
 #   Gemini Flash:  good quality, cheapest, highest throughput — default
+#   Haiku 3.5:    best quality + throughput balance
+#   Kimi K2:      best quality, BUT heavily rate-limited on OpenRouter
+#                 (50 rpm, often 429s even at concurrency=3; use for
+#                 small batches or when quality matters most)
 #   DeepSeek V3:  good quality, cheap fallback
+#
+# Temperature: 0.0 for production judging (deterministic).
+# Use 0.7 only for calibration runs measuring self-consistency.
 #
 # Retired:
 #   GPT-5 Mini:   worst calibration of all tested, most expensive, Azure 403
@@ -145,7 +150,7 @@ JUDGE_PANEL: dict[str, JudgeLLMConfig] = {
     "kimi_k2": JudgeLLMConfig(
         provider="openrouter",
         model="moonshotai/kimi-k2",
-        max_concurrent=5,  # 50 rpm rate limit on OpenRouter
+        max_concurrent=3,  # 50 rpm rate limit on OpenRouter; 429s common even at 5
     ),
     "deepseek_v3": JudgeLLMConfig(
         provider="openrouter",

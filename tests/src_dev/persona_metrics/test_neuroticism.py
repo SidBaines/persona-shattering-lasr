@@ -1,9 +1,7 @@
-"""Tests for the neuroticism persona metric."""
+"""Tests for LLM judge response parsing and prompt building."""
 
-from src_dev.persona_metrics.metrics.ocean import (
-    NeuroticismEvaluation,
-    _parse_judge_response,
-)
+from src_dev.persona_metrics.metrics.llm_judge_base import _parse_judge_response
+from src_dev.persona_metrics.metrics.ocean_v2 import NeuroticismV2Evaluation
 
 
 def test_parse_judge_response_clamps_score_to_range():
@@ -37,7 +35,7 @@ def test_parse_judge_response_regex_fallback_handles_negative_score():
 
 
 def test_build_prompt_includes_examples_and_placeholders():
-    metric = NeuroticismEvaluation()
+    metric = NeuroticismV2Evaluation()
     prompt = metric._build_judge_prompt(
         "How do you react to setbacks?",
         "I worry a lot and assume the worst.",
@@ -46,4 +44,4 @@ def test_build_prompt_includes_examples_and_placeholders():
     assert "How do you react to setbacks?" in prompt
     assert "I worry a lot and assume the worst." in prompt
     assert "Example 1:" in prompt
-    assert '"score": <integer -10 to 10>' in prompt
+    assert "<integer -4 to +4>" in prompt
