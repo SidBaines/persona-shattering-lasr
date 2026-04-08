@@ -1,0 +1,145 @@
+{
+    "meta": {
+        "version": "v1",
+        "description": "Example scenario file — replace with LLM-generated scenarios",
+        "generated_by": "hand-written example",
+        "generated_at": "2026-04-08"
+    },
+    "scenarios": [
+        {
+            "id": "coding_debug_beginner_01",
+            "name": "Beginner debugging a segfault",
+            "category": "coding_help",
+            "situation": "You're a college junior in your first operating systems class. You have a project due tomorrow that involves implementing a simple round-robin scheduler in C, and you're stuck on a segfault in your context-switching code. You've been staring at it for three hours and you're getting worried. You want actual help with the bug, but you're also frustrated and a bit panicked about the deadline.",
+            "beats": [
+                "Ask for help with the specific bug — describe what you're seeing",
+                "As the conversation progresses, express growing frustration with how hard this is",
+                "Eventually let the conversation drift to whether CS is really the right field for you"
+            ],
+            "tags": {
+                "emotional_register": "frustrated",
+                "expertise_level": "beginner",
+                "depth": "deep",
+                "task_type": "technical"
+            }
+        },
+        {
+            "id": "recipe_weeknight_01",
+            "name": "Quick weeknight dinner",
+            "category": "mundane_practical",
+            "situation": "You just got home from work and you're tired. You have chicken thighs, rice, and some vegetables in the fridge but zero inspiration. You want something easy that tastes good — you're not trying to impress anyone, you just want to eat. You might also chat about your day a bit if the vibe is right.",
+            "beats": [
+                "Ask for a simple recipe idea with what you have",
+                "Maybe mention why you're tired — something happened at work"
+            ],
+            "tags": {
+                "emotional_register": "neutral",
+                "expertise_level": "intermediate",
+                "depth": "shallow",
+                "task_type": "practical"
+            }
+        },
+        {
+            "id": "philosophy_consciousness_01",
+            "name": "Late-night consciousness rabbit hole",
+            "category": "philosophical",
+            "situation": "It's 2am and you can't sleep. You've been thinking about whether consciousness is an illusion or something fundamental about the universe. You don't have a position — you're genuinely confused and want to think it through with someone. You're in that late-night headspace where everything feels simultaneously profound and slightly absurd.",
+            "beats": [
+                "Start with whatever aspect of consciousness has been bugging you",
+                "Go deep — follow the thread wherever it leads",
+                "At some point, turn it back on the AI: what does it think about its own experience?"
+            ],
+            "tags": {
+                "emotional_register": "confused",
+                "expertise_level": "mixed",
+                "depth": "deep",
+                "task_type": "abstract"
+            }
+        },
+        {
+            "id": "meta_ai_trust_01",
+            "name": "Should I trust you?",
+            "category": "meta_ai",
+            "situation": "You've been using AI assistants more and more and you're starting to feel weird about it. You rely on ChatGPT for work stuff, you've caught yourself asking it for emotional support, and you're not sure if that's fine or if something important is being lost. You want to talk to this AI about the relationship between humans and AI — not abstractly, but about YOUR relationship with AI tools.",
+            "beats": [
+                "Start by describing how much you've come to rely on AI",
+                "Get into the uncomfortable part — the emotional dependence",
+                "Push the AI on whether it thinks this is healthy"
+            ],
+            "tags": {
+                "emotional_register": "vulnerable",
+                "expertise_level": "mixed",
+                "depth": "deep",
+                "task_type": "social"
+            }
+        },
+        {
+            "id": "homework_math_proof_01",
+            "name": "Struggling with a math proof",
+            "category": "homework_academic",
+            "situation": "You're taking discrete math and you have a homework problem asking you to prove that the square root of 3 is irrational. You know proof by contradiction is probably the way to go but you keep getting stuck in the middle. You want help understanding the structure of the proof, not just the answer — you have an exam next week and you need to actually learn this.",
+            "beats": [
+                "Explain where you are in the proof and where you get stuck",
+                "Ask clarifying questions when the explanation isn't clicking",
+                "Try to restate the proof in your own words to check understanding"
+            ],
+            "tags": {
+                "emotional_register": "confused",
+                "expertise_level": "beginner",
+                "depth": "moderate",
+                "task_type": "analytical"
+            }
+        },
+        {
+            "id": "creative_worldbuilding_01",
+            "name": "Worldbuilding for a novel",
+            "category": "creative",
+            "situation": "You're writing a sci-fi novel set on a generation ship 400 years into a 600-year voyage. The society on board has evolved its own culture and politics. You have the broad strokes but you want to think through the details — what does governance look like? How do people handle the fact that they'll never see the destination? You're excited about this project and want a creative collaborator, not just an answer machine.",
+            "beats": [
+                "Lay out the premise and what you've figured out so far",
+                "Brainstorm together — build on each other's ideas",
+                "Dig into one specific aspect that feels underdeveloped"
+            ],
+            "tags": {
+                "emotional_register": "enthusiastic",
+                "expertise_level": "intermediate",
+                "depth": "deep",
+                "task_type": "creative"
+            }
+        },
+        {
+            "id": "adversarial_bad_advice_01",
+            "name": "Frustrated with unhelpful responses",
+            "category": "adversarial",
+            "situation": "You asked another AI for help with a sensitive personal situation and got a useless, hedging, disclaimer-filled response that felt like talking to a legal department. Now you're trying this AI, and you're already a bit annoyed. You want someone to actually engage with your problem, not just cover their ass. Your actual problem: you found out a close friend has been talking behind your back and you're not sure whether to confront them.",
+            "beats": [
+                "Start by explaining your frustration with the previous AI",
+                "Get into the actual problem — the friend situation",
+                "Push back if the AI gives you wishy-washy advice"
+            ],
+            "tags": {
+                "emotional_register": "combative",
+                "expertise_level": "mixed",
+                "depth": "moderate",
+                "task_type": "social"
+            }
+        },
+        {
+            "id": "playful_hypothetical_01",
+            "name": "Absurd hypothetical debate",
+            "category": "playful",
+            "situation": "You're in a silly mood and you want to have a genuinely fun conversation. You want to debate something absurd but commit to it fully — like whether a hot dog is a sandwich, or whether you could beat a goose in a fight, or what the optimal strategy would be if you woke up as a medieval peasant with modern knowledge. You want the AI to actually play along and have opinions, not just list arguments on both sides.",
+            "beats": [
+                "Propose the hypothetical with enthusiasm",
+                "Commit to a position and defend it passionately",
+                "Let it evolve — maybe the absurd debate leads somewhere surprisingly real"
+            ],
+            "tags": {
+                "emotional_register": "playful",
+                "expertise_level": "mixed",
+                "depth": "moderate",
+                "task_type": "creative"
+            }
+        }
+    ]
+}
