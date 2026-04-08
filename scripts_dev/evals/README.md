@@ -34,7 +34,7 @@ Stages: `rollout` -> `convert` -> `judge` -> `plot`
 ### Bloom Eval (multi-turn behavioral evaluation)
 
 ```bash
-# Default config
+# Default config (discrete targets)
 uv run python -m scripts_dev.evals.bloom.runner \
     --config scripts_dev.evals.bloom.configs.default
 
@@ -44,13 +44,19 @@ uv run python -m scripts_dev.evals.bloom.runner \
     --trait neuroticism \
     --targets llama-3.1-8b-it-base conscientiousness-low-llama
 
+# LoRA scale sweep (bake adapter at each scale, run bloom per scale)
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.conscientiousness_sweep
+
 # Re-judge existing rollouts with a new model
 uv run python -m scripts_dev.evals.bloom.runner \
     --config scripts_dev.evals.bloom.configs.default \
-    --stages judgment --judgment-models kimi-k2
+    --stages judgment --judgment-models glm-4.5-air
 ```
 
 Stages: `understanding` -> `ideation` -> `rollout` -> `judgment`
+
+Supports two modes: **discrete targets** (compare specific models) and **scale sweep** (sweep a LoRA adapter over scale factors). Understanding + ideation are shared across all targets/scales.
 
 See `scripts_dev/evals/bloom/README.md` for full documentation.
 

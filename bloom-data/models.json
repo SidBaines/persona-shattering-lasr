@@ -1,4 +1,14 @@
 {
+  "claude-opus-4.6": {
+    "id": "openrouter/anthropic/claude-opus-4-6",
+    "org": "anthropic",
+    "name": "Claude Opus 4.6"
+  },
+  "glm-4.5-air": {
+    "id": "openrouter/z-ai/glm-4.5-air",
+    "org": "z-ai",
+    "name": "GLM-4.5 Air"
+  },
   "kimi-k2": {
     "id": "openrouter/moonshotai/kimi-k2-0905",
     "org": "moonshotai",

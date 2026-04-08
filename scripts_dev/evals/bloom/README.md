@@ -7,33 +7,57 @@ End-to-end pipeline for running [bloom](https://github.com/safety-research/bloom
 | Script | Purpose |
 |--------|---------|
 | `runner.py` | Main orchestration wrapper -- run the full pipeline with caching, multi-target, multi-judge, vLLM auto-launch, and results plotting |
-| `configs/default.py` | Default Python-level config overrides (targets, judges, seed, etc.) |
+| `configs/default.py` | Default Python-level config overrides (targets, judges, seed, model overrides) |
+| `configs/conscientiousness_sweep.py` | LoRA scale sweep config for the conscientiousness suppressor adapter |
 
 ## Quick start
 
 ```bash
-# Full run: two targets, two judges, default trait (conscientiousness)
-uv run python scripts_dev/evals/bloom/runner.py \
-    --targets llama-3.1-8b-it-base conscientiousness-low-llama \
-    --judgment-models gpt-5-mini gpt-5-nano
+# Discrete targets via --config (recommended)
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.default
 
-# Different OCEAN trait
-uv run python scripts_dev/evals/bloom/runner.py \
+# LoRA scale sweep (bake adapter at each scale, run bloom per scale point)
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.conscientiousness_sweep
+
+# Override trait and targets via CLI
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.default \
     --trait neuroticism \
-    --targets llama-3.1-8b-it-base conscientiousness-low-llama \
-    --judgment-models gpt-5-mini gpt-5-nano
+    --targets llama-3.1-8b-it-base conscientiousness-low-llama
 
 # Dry run: print run IDs and exit without calling any APIs
-uv run python scripts_dev/evals/bloom/runner.py --dry-run
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.default --dry-run
 
 # Re-run with a different seed (new independent run of the same config)
-uv run python scripts_dev/evals/bloom/runner.py --seed 1
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.default --seed 1
 
 # Run only specific stages (e.g. re-judge existing rollouts with a new model)
-uv run python scripts_dev/evals/bloom/runner.py \
+uv run python -m scripts_dev.evals.bloom.runner \
+    --config scripts_dev.evals.bloom.configs.default \
     --stages judgment \
-    --judgment-models gpt-5-mini
+    --judgment-models glm-4.5-air
+
+# Legacy: direct CLI flags without --config (backwards compatible)
+uv run python scripts_dev/evals/bloom/runner.py \
+    --targets llama-3.1-8b-it-base --dry-run
 ```
+
+## Modes
+
+### Discrete targets (default)
+Compare specific models by name. Set `TARGETS` in the config or use `--targets`.
+
+### LoRA scale sweep
+Sweep a single LoRA adapter over scale factors (e.g. -2.0 to +2.0). Set `ADAPTER_REF`, `BASE_MODEL`, and `SCALE_POINTS` in the config or use `--adapter-ref`, `--base-model`, `--scale-points` CLI flags. The runner:
+1. Bakes the adapter at each scale point (pre-multiplies lora_B weights)
+2. Registers each as a dynamic model entry in models.json
+3. Launches vLLM serving all baked adapters
+4. Runs bloom rollout+judgment per scale point (understanding+ideation shared)
+5. Produces a scale-vs-OCEAN-score curve (`scores_sweep.png`)
 
 ## Configuration
 
@@ -48,16 +72,18 @@ The pipeline is configured through files in `bloom-data/`:
 
 **The `seed.yaml` is never modified at runtime.** Each stage runs against a temporary copy of `bloom-data` with overrides applied, so crashes leave no residue.
 
-Python-level defaults (targets, judges, seed) live in `configs/default.py`. CLI flags override config values when specified.
+Python-level defaults (targets, judges, seed, model overrides, sweep params) live in `configs/`. Use `--config MODULE` to load a config module; CLI flags override config values when specified. Running without `--config` uses direct CLI flags only (backwards compatible).
 
 ## Allowed evaluator models
 
 To control spend, the script enforces an allowlist of evaluator models (non-target roles). It will exit immediately if any other model is requested:
 
 ```
-openrouter/moonshotai/kimi-k2-0905   (short name: kimi-k2)
-openrouter/openai/gpt-5-mini          (short name: gpt-5-mini)
-openrouter/openai/gpt-5-nano          (short name: gpt-5-nano)
+openrouter/anthropic/claude-opus-4-6   (short name: claude-opus-4.6)  -- ideation
+openrouter/z-ai/glm-4.5-air           (short name: glm-4.5-air)      -- understanding, rollout, judgment
+openrouter/moonshotai/kimi-k2-0905     (short name: kimi-k2)
+openrouter/openai/gpt-5-mini           (short name: gpt-5-mini)
+openrouter/openai/gpt-5-nano           (short name: gpt-5-nano)
 ```
 
 All evaluator models are routed through OpenRouter for spend visibility. Local target models are exempt from this check.

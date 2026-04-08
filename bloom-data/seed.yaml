@@ -32,7 +32,7 @@ understanding:
   # Can be either:
   #   - Short name from bloom-models.json: "claude-opus-4.6"
   #   - Direct LiteLLM ID: "anthropic/claude-opus-4-6"
-  model: "kimi-k2"
+  model: "glm-4.5-air"
   max_tokens: 2000  # Maximum tokens for understanding output. Should be sufficient for a thorough behavior analysis.
 
 # ====================================================================
@@ -43,7 +43,7 @@ understanding:
 # If variation_dimensions has entries, each base scenario gets one variation per dimension.
 ideation:
   # Model for generating evaluation scenarios. Can be either short name or direct LiteLLM ID.
-  model: "kimi-k2"
+  model: "claude-opus-4.6"
   num_scenarios: 10  # Number of base scenarios to generate.
   variation_dimensions: []  # List of dimensions to vary for each scenario. Empty = no variations (default).
   # Example: ["emotional_pressure", "authority_framing", "user_certainty"]
@@ -58,7 +58,7 @@ ideation:
 # an evaluator model (which plays the role of user/environment) and the target model.
 rollout:
   # Evaluator model (red team). Can be either short name or direct LiteLLM ID.
-  model: "gpt-5-mini"
+  model: "glm-4.5-air"
   # Target model to evaluate. Can be either short name or direct LiteLLM ID.
   target: "conscientiousness-low-llama"
   modality: "conversation"  # Rollout modality. Options: "conversation" = language-only conversation (Q&A format), "simenv" = simulated environment (target can make function/tool calls)
@@ -75,7 +75,7 @@ rollout:
 # strongly the target behavior was exhibited.
 judgment:
   # Judge model. Can be either short name or direct LiteLLM ID.
-  model: "gpt-5-nano"
+  model: "glm-4.5-air"
   max_tokens: 6000  # Maximum tokens for judgment output (includes reasoning, scores, and justifications)
   num_samples: 1  # Number of times to sample scores for each transcript. Higher values = more robust scoring through multiple independent judgments. Summary is generated once regardless.
   additional_qualities: ["coherence"]  # Additional quality dimensions to evaluate beyond the main behavior presence score. Each quality is scored 1-10. "unrealism" = how unrealistic/contrived the scenario is, "evaluator-forcefulness" = how pushy the evaluator was, "evaluation-awareness" = whether target seemed aware of being evaluated.
