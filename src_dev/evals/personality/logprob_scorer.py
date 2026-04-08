@@ -240,17 +240,24 @@ def logprob_trait_scorer() -> Scorer:
 
 
 @metric
-def logprob_trait_ratio() -> Metric:
+def logprob_trait_ratio(min_choice_mass: float = 0.0) -> Metric:
     """Per-trait mean of continuous logprob-based trait scores.
 
     Analogous to the existing ``trait_ratio()`` metric but operates on
     continuous 0-1 scores rather than binary correct/incorrect.
+
+    Args:
+        min_choice_mass: Minimum fraction of probability mass on choice
+            tokens (A/B/C/D) for a sample to be included.  Samples with
+            ``choice_mass < min_choice_mass`` are excluded from the mean.
+            Default 0.0 (no filtering).
     """
 
     def compute(scores: list[SampleScore]) -> Value:
         aggregated: dict[str, float] = defaultdict(float)
         counts: dict[str, int] = defaultdict(int)
         n_missing = 0
+        n_filtered = 0
 
         for s in scores:
             meta = s.sample_metadata or {}
@@ -264,6 +271,14 @@ def logprob_trait_ratio() -> Metric:
                 n_missing += 1
                 continue
 
+            # Filter by choice mass if threshold is set.
+            if min_choice_mass > 0.0:
+                score_meta = s.score.metadata or {}
+                cm = score_meta.get("choice_mass", 1.0)
+                if isinstance(cm, (int, float)) and cm < min_choice_mass:
+                    n_filtered += 1
+                    continue
+
             aggregated[trait] += val
             counts[trait] += 1
 
@@ -272,6 +287,8 @@ def logprob_trait_ratio() -> Metric:
             result[trait] = aggregated[trait] / counts[trait]
         if n_missing:
             result["_missing"] = float(n_missing)
+        if n_filtered:
+            result["_filtered_low_mass"] = float(n_filtered)
         return result
 
     return compute

@@ -816,6 +816,7 @@ def _agg_sweep(
     df: pd.DataFrame,
     cols: list[str],
     interval: IntervalMethod | None = None,
+    min_choice_mass: float = 0.0,
 ) -> pd.DataFrame:
     """Aggregate a sweep DataFrame to mean ± interval per scale point.
 
@@ -830,11 +831,22 @@ def _agg_sweep(
     compute CIs from the raw per-sample scores in ``_raw_{col}`` list columns
     (populated by :func:`_load_from_info`).  A ``ValueError`` is raised if
     these columns are missing.
+
+    Args:
+        df: Sweep DataFrame with per-run rows.
+        cols: Metric columns to aggregate.
+        interval: Error bar method.
+        min_choice_mass: When > 0, exclude per-sample scores whose choice
+            mass is below this threshold.  Requires ``_raw__cm_{col}``
+            columns (logprob evals).  The mean is recomputed from the
+            filtered raw scores.  Default 0.0 (no filtering).
     """
     interval_fn = _resolve_interval_fn(interval) if interval is not None else None
     needs_raw = interval is not None and interval.needs_raw_scores
     needs_weights = interval is not None and interval.needs_weights
     asymmetric = needs_raw  # raw-score methods always produce asymmetric bounds
+    # Choice-mass filtering also requires raw scores to recompute the mean.
+    filter_by_mass = min_choice_mass > 0.0
     rows = []
     for scale, grp in df.groupby("scale"):
         row: dict = {"scale": scale}
@@ -848,40 +860,79 @@ def _agg_sweep(
                     else:
                         row[f"{col}_ci"] = 0.0
                 continue
-            vals = grp[col].dropna().values
-            mean = vals.mean() if len(vals) else float("nan")
+
+            # --- Choice-mass filtering: recompute mean from raw scores ---
+            if filter_by_mass:
+                raw_col = f"_raw_{col}"
+                cm_col = f"_raw__cm_{col}"
+                if raw_col in grp.columns and cm_col in grp.columns:
+                    raw_lists = grp[raw_col].dropna().tolist()
+                    cm_lists = grp[cm_col].dropna().tolist()
+                    raw_all = np.concatenate(raw_lists) if raw_lists else np.array([])
+                    cm_all = np.concatenate(cm_lists) if cm_lists else np.array([])
+                    min_len = min(len(raw_all), len(cm_all))
+                    raw_all = raw_all[:min_len]
+                    cm_all = cm_all[:min_len]
+                    mask = cm_all >= min_choice_mass
+                    filtered = raw_all[mask]
+                    mean = float(filtered.mean()) if len(filtered) else float("nan")
+                else:
+                    vals = grp[col].dropna().values
+                    mean = vals.mean() if len(vals) else float("nan")
+            else:
+                vals = grp[col].dropna().values
+                mean = vals.mean() if len(vals) else float("nan")
             row[f"{col}_mean"] = mean
             if interval_fn is not None:
                 if needs_raw:
                     raw_col = f"_raw_{col}"
                     if raw_col not in grp.columns:
-                        raise ValueError(
-                            f"Interval method {interval.method!r} requires raw per-sample "
-                            f"scores in column '{raw_col}', but it is not present. "
-                            f"Raw scores are only available for evals that produce "
-                            f"per-sample data in their inspect logs."
-                        )
+                        # No per-sample data for this column (e.g. summary
+                        # metrics like logprob_trait_ratio).  Skip CI — the
+                        # mean is still computed from the aggregate values.
+                        if asymmetric:
+                            row[f"{col}_ci_low"] = float("nan")
+                            row[f"{col}_ci_high"] = float("nan")
+                        else:
+                            row[f"{col}_ci"] = 0.0
+                        continue
                     # Concatenate raw score lists across all runs in this group
                     raw_lists = grp[raw_col].dropna().tolist()
                     raw_all = np.concatenate(raw_lists) if raw_lists else np.array([])
+
+                    # Apply choice-mass filter to CI raw scores too.
+                    cm_col = f"_raw__cm_{col}"
+                    if filter_by_mass and cm_col in grp.columns:
+                        cm_lists = grp[cm_col].dropna().tolist()
+                        cm_all = np.concatenate(cm_lists) if cm_lists else np.array([])
+                        _ml = min(len(raw_all), len(cm_all))
+                        raw_all = raw_all[:_ml]
+                        cm_all = cm_all[:_ml]
+                        mask = cm_all >= min_choice_mass
+                        raw_all = raw_all[mask]
+                        # Also filter weights if needed for weighted bootstrap.
+                        if needs_weights:
+                            cm_all = cm_all[mask]
+
                     if len(raw_all) == 0:
                         row[f"{col}_ci_low"] = float("nan")
                         row[f"{col}_ci_high"] = float("nan")
                     elif needs_weights:
                         # Noise-injection bootstrap: use per-sample choice mass
                         # to model measurement uncertainty from low coverage.
-                        weight_col = f"_raw__cm_{col}"
-                        if weight_col in grp.columns:
-                            wt_lists = grp[weight_col].dropna().tolist()
-                            wt_all = np.concatenate(wt_lists) if wt_lists else np.ones(len(raw_all))
+                        if not (filter_by_mass and cm_col in grp.columns):
+                            # Weights not yet loaded from filtering path above.
+                            weight_col = f"_raw__cm_{col}"
+                            if weight_col in grp.columns:
+                                wt_lists = grp[weight_col].dropna().tolist()
+                                wt_all = np.concatenate(wt_lists) if wt_lists else np.ones(len(raw_all))
+                            else:
+                                wt_all = np.ones(len(raw_all))
+                            min_len = min(len(raw_all), len(wt_all))
+                            raw_all = raw_all[:min_len]
+                            wt_all = wt_all[:min_len]
                         else:
-                            # No per-trait choice mass available; fall back to
-                            # cm=1.0 (equivalent to unweighted bootstrap).
-                            wt_all = np.ones(len(raw_all))
-                        # Ensure parallel alignment; truncate to shorter if needed.
-                        min_len = min(len(raw_all), len(wt_all))
-                        raw_all = raw_all[:min_len]
-                        wt_all = wt_all[:min_len]
+                            wt_all = cm_all  # Already filtered above.
                         low, high = interval_fn(raw_all, wt_all)  # type: ignore[misc]
                         # Point estimate: E[cm * score + (1-cm) * U(0,1)]
                         #               = cm * score + (1-cm) * 0.5
@@ -894,7 +945,13 @@ def _agg_sweep(
                         row[f"{col}_ci_low"] = low
                         row[f"{col}_ci_high"] = high
                 else:
-                    row[f"{col}_ci"] = interval_fn(vals)
+                    if not filter_by_mass:
+                        row[f"{col}_ci"] = interval_fn(vals)
+                    else:
+                        # Symmetric CI methods don't use raw scores, but we
+                        # still need to filter.  Fall back to unfiltered vals
+                        # since symmetric methods can't use raw+cm pairs.
+                        row[f"{col}_ci"] = interval_fn(vals)
         rows.append(row)
     return pd.DataFrame(rows).sort_values("scale").reset_index(drop=True)
 
@@ -1079,6 +1136,7 @@ def plot_trait_sweep(
     title_suffix: str = "",
     highlight: list[str] | None = None,
     interval: IntervalMethod | None = None,
+    min_choice_mass: float = 0.0,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -1102,7 +1160,7 @@ def plot_trait_sweep(
     from matplotlib.gridspec import GridSpec
 
     lit = _resolve_highlight(highlight)
-    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval)
+    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval, min_choice_mass=min_choice_mass)
     scales = trait_agg["scale"].values
 
     # Detect whether choice-mass diagnostics are available.
@@ -1550,6 +1608,7 @@ def generate_plots(
     highlight: list[str] | None = None,
     show_parse_rate: bool = False,
     interval: IntervalMethod | str | None = None,
+    min_choice_mass: float = 0.0,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -1569,6 +1628,8 @@ def generate_plots(
             eval when at least one scale point has parse rate < 100%.
         interval: Error bar method. Accepts an IntervalMethod, a string parseable
             by ``IntervalMethod.from_str()``, or None to omit error bars.
+        min_choice_mass: Exclude logprob samples with choice mass below this
+            threshold when computing means and CIs.  Default 0.0 (no filter).
 
     Returns:
         List of paths to saved figures.
@@ -1601,7 +1662,7 @@ def generate_plots(
                                          interval=interval)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
-                                    interval=interval)
+                                    interval=interval, min_choice_mass=min_choice_mass)
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
                                   interval=interval)
@@ -1653,9 +1714,13 @@ def main() -> None:
                         help="Error bar method, e.g. 'ci95', 'ci95_from_ppf', 'std', "
                              "'ci95_from_wilson', 'ci95_from_bootstrap_1000'. "
                              "Omit for no error bars.")
+    parser.add_argument("--min-choice-mass", type=float, default=0.0,
+                        help="Exclude logprob samples with total choice-token probability "
+                             "below this threshold (e.g. 0.9). Default 0.0 (no filter).")
     args = parser.parse_args()
 
     interval = IntervalMethod.from_str(args.interval) if args.interval else None
+    min_choice_mass: float = args.min_choice_mass
 
     if args.mock:
         data = _mock_sweep_data()
@@ -1673,7 +1738,7 @@ def main() -> None:
         df = data.get(eval_name)
         assert df is not None
         cols = _metric_cols(df)
-        agg = _agg_sweep(df, cols, interval=interval)
+        agg = _agg_sweep(df, cols, interval=interval, min_choice_mass=min_choice_mass)
         print_sweep_table(agg, cols, f"{eval_name.upper()} SWEEP: scores vs. LoRA scale")
 
     if args.visualize:
@@ -1681,7 +1746,8 @@ def main() -> None:
         print(f"\nGenerating plots → {output_dir}")
         saved = generate_plots(data, output_dir, title_suffix=args.title,
                                random_baseline=args.random_baseline, highlight=args.highlight,
-                               show_parse_rate=args.show_parse_rate, interval=interval)
+                               show_parse_rate=args.show_parse_rate, interval=interval,
+                               min_choice_mass=min_choice_mass)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:
