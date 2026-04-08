@@ -236,10 +236,13 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
                     )
             else:
                 # Capability: C = correct (1.0), I = incorrect (0.0)
+                answer = score_data.get("answer")
                 if value == "C":
                     group_scores.setdefault("accuracy", []).append(1.0)
+                    group_scores.setdefault("_answer_parsed", []).append(1.0)
                 elif value == "I":
                     group_scores.setdefault("accuracy", []).append(0.0)
+                    group_scores.setdefault("_answer_parsed", []).append(1.0 if answer else 0.0)
             break
 
     return group_scores if group_scores else None
@@ -1436,6 +1439,89 @@ def plot_capability_sweep(
     return out
 
 
+def plot_capability_breakdown(
+    df: pd.DataFrame,
+    output_dir: Path,
+    title_suffix: str = "",
+    eval_name: str = "capability",
+) -> Path | None:
+    """Stacked bar chart: Correct / Wrong answer / No answer per LoRA scale.
+
+    Requires ``_raw_accuracy`` and ``_raw__answer_parsed`` columns populated
+    by :func:`_extract_raw_sample_scores`.
+    """
+    import matplotlib.pyplot as plt
+
+    raw_acc_col = "_raw_accuracy"
+    raw_ap_col = "_raw__answer_parsed"
+    if raw_acc_col not in df.columns or raw_ap_col not in df.columns:
+        print(f"  skip {eval_name}_breakdown: missing raw columns")
+        return None
+
+    rows = []
+    for scale, grp in df.groupby("scale"):
+        acc_lists = grp[raw_acc_col].dropna().tolist()
+        ap_lists = grp[raw_ap_col].dropna().tolist()
+        acc = np.concatenate(acc_lists) if acc_lists else np.array([])
+        ap = np.concatenate(ap_lists) if ap_lists else np.array([])
+        n = min(len(acc), len(ap))
+        if n == 0:
+            continue
+        acc, ap = acc[:n], ap[:n]
+        rows.append({
+            "scale": scale,
+            "Correct": float(acc.mean()),
+            "Wrong answer": float(((1 - acc) * ap).mean()),
+            "No answer": float(((1 - acc) * (1 - ap)).mean()),
+        })
+    if not rows:
+        return None
+    agg = pd.DataFrame(rows).sort_values("scale")
+
+    scales = agg["scale"].values
+    x = np.arange(len(scales))
+    width = 0.85
+    colors = {"Correct": "#2ecc71", "Wrong answer": "#e74c3c", "No answer": "#95a5a6"}
+
+    fig, ax = plt.subplots(figsize=(14, 5.5), dpi=150)
+    bottom = np.zeros(len(scales))
+    for cat in ("Correct", "Wrong answer", "No answer"):
+        vals = agg[cat].values
+        ax.bar(x, vals, width, bottom=bottom, label=cat, color=colors[cat],
+               alpha=0.55, edgecolor="white", linewidth=0.3)
+        bottom += vals
+
+    labels = [f"{s:+.2f}" if s != 0 else "base" for s in scales]
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("Fraction of samples", fontsize=11)
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylim(0, 1.0)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
+
+    base_acc = agg.loc[agg["scale"] == 0.0, "Correct"]
+    if len(base_acc):
+        ax.axhline(y=float(base_acc.iloc[0]), color="green", linestyle="--", alpha=0.4, linewidth=1)
+    ax.axhline(y=0.25, color="red", linestyle=":", alpha=0.3, linewidth=1)
+    if 0.0 in set(scales):
+        ax.axvline(x=int(np.where(scales == 0.0)[0][0]), color="black", linestyle="--", alpha=0.3, linewidth=0.8)
+
+    title = f"{eval_name} response breakdown vs. LoRA scale"
+    if title_suffix:
+        title += f"\n[{title_suffix}]"
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=10, framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    out = output_dir / f"{eval_name}_breakdown.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
+
+
 def plot_generic_sweep(
     df: pd.DataFrame,
     eval_name: str,
@@ -1660,6 +1746,9 @@ def generate_plots(
             path = plot_capability_sweep(df, output_dir, title_suffix,
                                          eval_name=eval_name, random_baseline=random_baseline,
                                          interval=interval)
+            bd_path = plot_capability_breakdown(df, output_dir, title_suffix, eval_name=eval_name)
+            if bd_path:
+                saved.append(bd_path)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
                                     interval=interval, min_choice_mass=min_choice_mass)
