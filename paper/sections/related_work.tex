@@ -1,14 +1,21 @@
 \section{Related work}\label{sec:related-work}
 
-\begin{itemize}
-  \item Assistant axis and anthropics persona vectors for thinking about personas at all, and that work has been looking at these in activation space
-  \item Open Character Training showing that we can fine tune LoRas to amplify traits
-  \item Papers around OCEAN
-  \item Anthropic Persona Selection Model
-  \item Activation-Space Personality Steering: Hybrid Layer Selection for Stable Trait Control in LLMs
-  \item Editing Models With Task Arithmetic
-  \item Chat Vector: A Simple Approach to Equip LLMs with Instruction Following and Model Alignment in New Languages
-  \item Rediscovering the Latent Dimensions of Personality with Large Language Models as Trait Descriptors
-  \item …
-\end{itemize}
+% TODO: Expand each bullet into a paragraph with proper citations and positioning relative to our contributions.
 
+\textbf{Personas and personality in LLMs.}
+\citet{lu2026assistant} identify an `assistant axis' in activation space as a strong predictor of model behaviour, and \citet{marks2026persona} propose the Persona Selection Model to explain how LLMs select among personas. These works study personas via activations; we complement them with weight-space interventions that persist across contexts.
+
+\textbf{Character and trait training.}
+\citet{maiya2025opencharacter} demonstrate that LoRA fine-tuning with constitutional prompts can induce specific character archetypes. We build on their pipeline but focus on psychometrically grounded OCEAN traits rather than ad hoc character descriptions, and study the composability and geometry of the resulting adapters.
+
+\textbf{Psychometric evaluation of LLMs.}
+\citet{suh2024rediscovering} show that LLMs can act as trait descriptors, rediscovering latent personality dimensions. The TRAIT benchmark \citep{lee2024trait} provides MCQ-based personality measurement for LLMs. We use TRAIT alongside calibrated LLM judges to evaluate trait transfer.
+
+\textbf{Task arithmetic and model composition.}
+% TODO: cite Ilharco et al. (2023) "Editing Models with Task Arithmetic"
+% TODO: cite Huang et al. (2024) "Chat Vector"
+Prior work on task arithmetic has shown that weight-space directions encode task-specific knowledge and can be composed additively. We extend this paradigm to personality traits, demonstrating that LoRA adapters for different OCEAN dimensions can be linearly combined.
+
+\textbf{Activation-space personality steering.}
+% TODO: cite activation-space personality steering papers
+Concurrent work explores steering personality traits via activation-space interventions. We compare our weight-space approach to activation capping \citep{lu2026assistant} and find improved coherence and robustness at equivalent trait expression levels.
