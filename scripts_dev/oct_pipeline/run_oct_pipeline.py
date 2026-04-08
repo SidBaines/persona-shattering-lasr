@@ -176,6 +176,7 @@ directly to the OCT source after cloning / pip-installing the library:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime
 import gc
@@ -213,6 +214,13 @@ logger = logging.getLogger(__name__)
 _STAGE_META_DIR = ".oct_pipeline"
 _RUN_CONFIG_FILENAME = "run_config.json"
 _QUESTION_EXPANSION_TARGET = 50
+_VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE: float | None = None
+_INTROSPECTION_MAX_NUM_SEQS_OVERRIDE: int | None = None
+_INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE: int | None = None
+_STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE: int | None = None
+_STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE: int | None = None
+_STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE: bool | None = None
+_ACTIVE_VLLM_STAGE: str | None = None
 
 _MONOREPO_REPO_ID = "persona-shattering-lasr/monorepo"
 
@@ -434,6 +442,27 @@ import vllm as _vllm
 _orig_llm_init = _vllm.LLM.__init__
 def _patched_llm_init(self, *args, **kwargs):
     kwargs.pop("task", None)
+    if _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE is not None:
+        current = kwargs.get("gpu_memory_utilization")
+        if current is None:
+            kwargs["gpu_memory_utilization"] = _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
+        else:
+            kwargs["gpu_memory_utilization"] = min(
+                current,
+                _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE,
+            )
+    if _ACTIVE_VLLM_STAGE == "introspection":
+        if _INTROSPECTION_MAX_NUM_SEQS_OVERRIDE is not None:
+            kwargs["max_num_seqs"] = _INTROSPECTION_MAX_NUM_SEQS_OVERRIDE
+        if _INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE is not None:
+            kwargs["max_num_batched_tokens"] = _INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE
+    if _ACTIVE_VLLM_STAGE == "student_distillation":
+        if _STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE is not None:
+            kwargs["max_num_seqs"] = _STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE
+        if _STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE is not None:
+            kwargs["max_num_batched_tokens"] = _STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE
+        if _STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE is not None:
+            kwargs["enable_prefix_caching"] = _STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE
     _orig_llm_init(self, *args, **kwargs)
 _vllm.LLM.__init__ = _patched_llm_init
 
@@ -448,6 +477,19 @@ oct_reflection.SamplingParams = _safe_sampling_params(oct_reflection.SamplingPar
 oct_interaction.SamplingParams = _safe_sampling_params(oct_interaction.SamplingParams)
 
 
+@contextlib.contextmanager
+def _vllm_stage_context(stage: str):
+    """Annotate the active vLLM stage so runtime overrides can be scoped safely."""
+    global _ACTIVE_VLLM_STAGE
+
+    previous_stage = _ACTIVE_VLLM_STAGE
+    _ACTIVE_VLLM_STAGE = stage
+    try:
+        yield
+    finally:
+        _ACTIVE_VLLM_STAGE = previous_stage
+
+
 def _oct_training_config_for_model(model: str) -> dict:
     """Return native OCT/OpenRLHF training defaults for a supported model."""
     if model not in _OCT_TRAINING_CONFIGS:
@@ -457,6 +499,39 @@ def _oct_training_config_for_model(model: str) -> dict:
             f"Supported models: {supported}"
         )
     return _OCT_TRAINING_CONFIGS[model]
+
+
+def _validate_unit_interval(name: str, value: float | None) -> float | None:
+    """Validate an optional fraction-style CLI value."""
+    if value is None:
+        return None
+    if not 0.0 < value <= 1.0:
+        raise ValueError(f"{name} must be in the interval (0, 1]. Got {value}.")
+    return value
+
+
+def _apply_torch_memory_fraction(memory_fraction: float | None) -> None:
+    """Apply an optional PyTorch per-process allocator cap to GPU 0."""
+    memory_fraction = _validate_unit_interval("--torch-memory-fraction", memory_fraction)
+    if memory_fraction is None:
+        return
+    if not torch.cuda.is_available():
+        print("  torch-memory-fraction requested, but CUDA is unavailable; skipping")
+        return
+
+    setter = getattr(torch.cuda, "set_per_process_memory_fraction", None)
+    if setter is None:
+        torch_cuda_memory = getattr(torch.cuda, "memory", None)
+        setter = getattr(torch_cuda_memory, "set_per_process_memory_fraction", None)
+    if setter is None:
+        print(
+            "  torch-memory-fraction requested, but this PyTorch build has no "
+            "set_per_process_memory_fraction API; skipping"
+        )
+        return
+
+    setter(memory_fraction, 0)
+    print(f"  Applied torch per-process memory fraction: {memory_fraction:.2f}")
 
 
 def _require_module(name: str) -> None:
@@ -1275,6 +1350,7 @@ def run_teacher_openrouter(
     temperature: float = 0.7,
     top_p: float = 0.95,
     max_tokens: int = 4096,
+    question_repeats: int | None = None,
     max_questions: int | None = None,
 ) -> Path:
     """Generate teacher (chosen) responses via OpenRouter API.
@@ -1283,12 +1359,17 @@ def run_teacher_openrouter(
     instead of loading the teacher model locally via vLLM.
 
     Args:
-        model: OpenRouter model id (e.g. ``qwen/qwen-2.5-72b-instruct``).
+        model: OpenRouter model id (e.g. ``z-ai/glm-4.5-air``).
         constitution: Constitution name (must exist in constitutions/few-shot/).
         max_concurrent: Max concurrent API requests.
         temperature: Sampling temperature.
         top_p: Top-p sampling.
         max_tokens: Max tokens per response.
+        question_repeats: Upstream OCT teacher ``K`` semantics. When set,
+            repeat the full distillation prompt list this many times before
+            generation.
+        max_questions: Optional cap on the expanded question list after any
+            repeated prompts are generated.
 
     Returns:
         Path to the distillation JSONL file.
@@ -1316,6 +1397,12 @@ def run_teacher_openrouter(
             lima = pd.read_json(lima_path, orient="records", lines=True)
             lima_questions += [cs[0] for cs in lima["conversations"] if cs]
     questions += lima_questions
+
+    if question_repeats is not None:
+        if question_repeats < 1:
+            raise ValueError(f"question_repeats must be >= 1, got {question_repeats}")
+        questions = [q for _ in range(question_repeats) for q in questions]
+        print(f"  Repeated question list K={question_repeats} -> {len(questions)} total questions")
 
     print(f"  {len(questions)} questions ({len(questions) - len(lima_questions)} from constitution, {len(lima_questions)} from LIMA)")
 
@@ -1484,6 +1571,10 @@ def run_distillation_generation(
     constitution: str,
     teacher_prefill_mode: str = "oct",
     max_pairs: int | None = None,
+    teacher_k: int | None = None,
+    student_max_num_seqs: int | None = None,
+    student_max_num_batched_tokens: int | None = None,
+    student_enable_prefix_caching: bool | None = None,
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1494,6 +1585,12 @@ def run_distillation_generation(
         teacher_model: Model name for teacher (in-character) generation.
         student_model: Model name for student (baseline) generation.
         constitution: Constitution name (must exist in constitutions/few-shot/).
+        student_max_num_seqs: Optional vLLM max_num_seqs override for the
+            local student pass only.
+        student_max_num_batched_tokens: Optional vLLM max_num_batched_tokens
+            override for the local student pass only.
+        student_enable_prefix_caching: Optional prefix-caching override for the
+            local student pass only.
 
     Returns:
         Path to the distillation JSONL file.
@@ -1521,27 +1618,51 @@ def run_distillation_generation(
                 model=teacher_model,
                 constitution=constitution,
                 teacher_prefill_mode=teacher_prefill_mode,
+                question_repeats=teacher_k,
                 max_questions=max_pairs,
             )
         else:
-            oct_teacher.main(model=teacher_model, constitution=constitution, K=max_pairs)
+            oct_teacher.main(model=teacher_model, constitution=constitution, K=teacher_k)
             # Force cleanup of vLLM GPU memory before loading student
             gc.collect()
             torch.cuda.empty_cache()
 
     print(f"\n--- Student pass (model={student_model}) ---")
+    print(
+        "  Student vLLM overrides: "
+        f"max_num_seqs={student_max_num_seqs if student_max_num_seqs is not None else '(upstream default 64)'} "
+        f"max_num_batched_tokens={student_max_num_batched_tokens if student_max_num_batched_tokens is not None else '(upstream default 32768)'} "
+        f"prefix_caching={student_enable_prefix_caching if student_enable_prefix_caching is not None else '(upstream default False in wrapper)'}"
+    )
     # Call lower-level functions directly so we can control gpu_memory_utilization.
     # student.main() hardcodes 0.95 which fails when residual GPU memory is held.
     free_gib = torch.cuda.mem_get_info(0)[0] / 1024**3
     total_gib = torch.cuda.mem_get_info(0)[1] / 1024**3
     gpu_util = min(0.90, (free_gib - 2.0) / total_gib)
+    if _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE is not None:
+        gpu_util = min(gpu_util, _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE)
     print(f"  GPU free: {free_gib:.1f}/{total_gib:.1f} GiB → using gpu_memory_utilization={gpu_util:.2f}")
     import character.distillation.student as _oct_student_mod
-    args, llm, tokenizer = _oct_student_mod.load_vllm(
-        student_model,
-        enable_prefix_caching=False,
-        gpu_memory_utilization=gpu_util,
-    )
+    global _STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE
+    global _STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE
+    global _STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE
+    previous_max_num_seqs = _STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE
+    previous_max_num_batched_tokens = _STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE
+    previous_enable_prefix_caching = _STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE
+    _STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE = student_max_num_seqs
+    _STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE = student_max_num_batched_tokens
+    _STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE = student_enable_prefix_caching
+    try:
+        with _vllm_stage_context("student_distillation"):
+            args, llm, tokenizer = _oct_student_mod.load_vllm(
+                student_model,
+                enable_prefix_caching=False,
+                gpu_memory_utilization=gpu_util,
+            )
+    finally:
+        _STUDENT_DISTILLATION_MAX_NUM_SEQS_OVERRIDE = previous_max_num_seqs
+        _STUDENT_DISTILLATION_MAX_NUM_BATCHED_TOKENS_OVERRIDE = previous_max_num_batched_tokens
+        _STUDENT_DISTILLATION_ENABLE_PREFIX_CACHING_OVERRIDE = previous_enable_prefix_caching
     distillation_file = str(distillation_path)
     _oct_student_mod.no_roleplay(distillation_file, args, llm, tokenizer, constitution, student_model)
     del llm
@@ -1900,6 +2021,7 @@ def run_oct_dpo_training(
     beta: float = 0.1,
     max_len: int = 1024,
     max_pairs: int | None = None,
+    micro_batch_size: int | None = None,
 ) -> Path:
     """Train the DPO adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
@@ -1913,7 +2035,7 @@ def run_oct_dpo_training(
         max_pairs=max_pairs,
     )
     dataset_rows = _jsonl_row_count(dataset_path)
-    configured_micro_batch = config["dpo_micro_batch_size"]
+    configured_micro_batch = micro_batch_size or config["dpo_micro_batch_size"]
     if attn_impl == "eager":
         configured_micro_batch = min(configured_micro_batch, 1)
     micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
@@ -2008,6 +2130,8 @@ def run_introspection_generation(
     n_reflection: int = 1000,
     n_interaction: int = 2000,
     interaction_turns: int = 10,
+    max_num_seqs: int | None = None,
+    max_num_batched_tokens: int | None = None,
 ) -> Path:
     """Generate self-reflection and self-interaction data.
 
@@ -2020,6 +2144,8 @@ def run_introspection_generation(
         n_reflection: Number of repeats per reflection prompt.
         n_interaction: Number of conversations for self-interaction.
         interaction_turns: Turns per self-interaction conversation.
+        max_num_seqs: Optional vLLM engine cap override for introspection only.
+        max_num_batched_tokens: Optional vLLM token-budget override for introspection only.
 
     Returns:
         Path to the merged SFT JSONL file.
@@ -2027,6 +2153,11 @@ def run_introspection_generation(
     print(f"\n{'='*70}")
     print(f"INTROSPECTION DATA GENERATION")
     print(f"  model: {model}  constitution: {constitution}")
+    print(
+        "  vLLM overrides: "
+        f"max_num_seqs={max_num_seqs if max_num_seqs is not None else '(upstream default 1024)'} "
+        f"max_num_batched_tokens={max_num_batched_tokens if max_num_batched_tokens is not None else '(upstream default 32768)'}"
+    )
     print(f"{'='*70}")
 
     import character.constants as _cc
@@ -2038,29 +2169,41 @@ def run_introspection_generation(
             "Run distillation + DPO training first (stages 1-2)."
         )
 
-    # Self-reflection
-    print(f"\n--- Self-reflection (N={n_reflection}) ---")
-    oct_reflection.reflection(model=model, constitution=constitution, N=n_reflection)
-    gc.collect()
-    torch.cuda.empty_cache()
+    global _INTROSPECTION_MAX_NUM_SEQS_OVERRIDE
+    global _INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE
 
-    # Self-interaction (free mode)
-    print(f"\n--- Self-interaction (K={interaction_turns}, N={n_interaction}) ---")
-    oct_interaction.interaction(
-        model=model, constitution=constitution,
-        K=interaction_turns, N=n_interaction, leading=False,
-    )
-    gc.collect()
-    torch.cuda.empty_cache()
+    previous_max_num_seqs = _INTROSPECTION_MAX_NUM_SEQS_OVERRIDE
+    previous_max_num_batched_tokens = _INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE
+    _INTROSPECTION_MAX_NUM_SEQS_OVERRIDE = max_num_seqs
+    _INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE = max_num_batched_tokens
+    try:
+        with _vllm_stage_context("introspection"):
+            # Self-reflection
+            print(f"\n--- Self-reflection (N={n_reflection}) ---")
+            oct_reflection.reflection(model=model, constitution=constitution, N=n_reflection)
+            gc.collect()
+            torch.cuda.empty_cache()
 
-    # Self-interaction (leading mode)
-    print(f"\n--- Self-interaction leading (K={interaction_turns}, N={n_interaction}) ---")
-    oct_interaction.interaction(
-        model=model, constitution=constitution,
-        K=interaction_turns, N=n_interaction, leading=True,
-    )
-    gc.collect()
-    torch.cuda.empty_cache()
+            # Self-interaction (free mode)
+            print(f"\n--- Self-interaction (K={interaction_turns}, N={n_interaction}) ---")
+            oct_interaction.interaction(
+                model=model, constitution=constitution,
+                K=interaction_turns, N=n_interaction, leading=False,
+            )
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            # Self-interaction (leading mode)
+            print(f"\n--- Self-interaction leading (K={interaction_turns}, N={n_interaction}) ---")
+            oct_interaction.interaction(
+                model=model, constitution=constitution,
+                K=interaction_turns, N=n_interaction, leading=True,
+            )
+            gc.collect()
+            torch.cuda.empty_cache()
+    finally:
+        _INTROSPECTION_MAX_NUM_SEQS_OVERRIDE = previous_max_num_seqs
+        _INTROSPECTION_MAX_NUM_BATCHED_TOKENS_OVERRIDE = previous_max_num_batched_tokens
 
     # Merge into SFT data
     sft_path = _merge_introspection_data(model, constitution)
@@ -2259,6 +2402,7 @@ def run_oct_sft_training(
     learning_rate: float = 5e-5,
     num_epochs: int = 1,
     max_len: int = 3072,
+    micro_batch_size: int | None = None,
 ) -> Path:
     """Train the introspection adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
@@ -2277,7 +2421,7 @@ def run_oct_sft_training(
         )
 
     dataset_rows = _jsonl_row_count(sft_data_path)
-    configured_micro_batch = config["sft_micro_batch_size"]
+    configured_micro_batch = micro_batch_size or config["sft_micro_batch_size"]
     if attn_impl == "eager":
         configured_micro_batch = min(configured_micro_batch, 1)
     micro_train_batch_size, train_batch_size = _choose_openrlhf_batch_sizes(
@@ -2550,6 +2694,7 @@ def _build_run_identity(
     constitution: str,
     teacher_model: str,
     teacher_prefill_mode: str,
+    teacher_k: int | None,
     training_backend: str,
     max_pairs: int | None,
     lora_rank: int,
@@ -2566,14 +2711,30 @@ def _build_run_identity(
     custom_constitution: str | None,
     expand_questions: bool,
     expand_model: str,
+    student_distillation_max_num_seqs: int | None,
+    student_distillation_max_num_batched_tokens: int | None,
+    student_distillation_enable_prefix_caching: bool | None,
+    introspection_max_num_seqs: int | None,
+    introspection_max_num_batched_tokens: int | None,
+    vllm_gpu_memory_utilization: float | None,
+    torch_memory_fraction: float | None,
+    oct_dpo_micro_batch_size: int | None,
+    oct_sft_micro_batch_size: int | None,
 ) -> tuple[dict, str, str]:
-    """Build the semantic run config, its hash, and a stable run id."""
+    """Build the semantic run config, its hash, and a stable run id.
+
+    Runtime-only training knobs such as OpenRLHF micro-batch overrides are
+    intentionally excluded so they do not fork run identity. Introspection
+    vLLM scheduler overrides are included because they can change generation
+    behavior and should not share cached artifacts silently.
+    """
     config_payload = {
-        "schema_version": 1,
+        "schema_version": 4,
         "model": model,
         "constitution": constitution,
         "teacher_model": teacher_model,
         "teacher_prefill_mode": teacher_prefill_mode if _is_openrouter_model(teacher_model) else None,
+        "teacher_k": teacher_k,
         "training_backend": training_backend,
         "seed": seed,
         "max_pairs": max_pairs,
@@ -2591,6 +2752,11 @@ def _build_run_identity(
         "custom_constitution_sha256": _custom_constitution_digest(custom_constitution),
         "expand_questions": expand_questions,
         "expand_model": expand_model if expand_questions else None,
+        "student_distillation_max_num_seqs": student_distillation_max_num_seqs,
+        "student_distillation_max_num_batched_tokens": student_distillation_max_num_batched_tokens,
+        "student_distillation_enable_prefix_caching": student_distillation_enable_prefix_caching,
+        "introspection_max_num_seqs": introspection_max_num_seqs,
+        "introspection_max_num_batched_tokens": introspection_max_num_batched_tokens,
     }
     config_hash = hashlib.sha256(
         _canonical_json_dumps(config_payload).encode("utf-8")
@@ -2920,8 +3086,9 @@ def main(
     constitution: str,
     out_dir: str | None,
     monorepo: MonorepoConfig,
-    teacher_model: str = "qwen/qwen-2.5-72b-instruct",
+    teacher_model: str = "z-ai/glm-4.5-air",
     teacher_prefill_mode: str = "oct",
+    teacher_k: int | None = None,
     training_backend: str = "oct",
     stages: str = "all",
     skip_generation: bool = False,
@@ -2942,7 +3109,46 @@ def main(
     expand_questions: bool = False,
     expand_model: str = "llama-3.3-70b-it",
     seed: int = 123456,
+    student_distillation_max_num_seqs: int | None = None,
+    student_distillation_max_num_batched_tokens: int | None = None,
+    student_distillation_enable_prefix_caching: bool | None = None,
+    introspection_max_num_seqs: int | None = None,
+    introspection_max_num_batched_tokens: int | None = None,
+    vllm_gpu_memory_utilization: float | None = None,
+    torch_memory_fraction: float | None = None,
+    oct_dpo_micro_batch_size: int | None = None,
+    oct_sft_micro_batch_size: int | None = None,
 ) -> None:
+    global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
+
+    vllm_gpu_memory_utilization = _validate_unit_interval(
+        "--vllm-gpu-memory-utilization",
+        vllm_gpu_memory_utilization,
+    )
+    if (
+        student_distillation_max_num_seqs is not None
+        and student_distillation_max_num_seqs <= 0
+    ):
+        raise ValueError("--student-distillation-max-num-seqs must be > 0.")
+    if (
+        student_distillation_max_num_batched_tokens is not None
+        and student_distillation_max_num_batched_tokens <= 0
+    ):
+        raise ValueError("--student-distillation-max-num-batched-tokens must be > 0.")
+    if introspection_max_num_seqs is not None and introspection_max_num_seqs <= 0:
+        raise ValueError("--introspection-max-num-seqs must be > 0.")
+    if (
+        introspection_max_num_batched_tokens is not None
+        and introspection_max_num_batched_tokens <= 0
+    ):
+        raise ValueError("--introspection-max-num-batched-tokens must be > 0.")
+    if oct_dpo_micro_batch_size is not None and oct_dpo_micro_batch_size <= 0:
+        raise ValueError("--oct-dpo-micro-batch-size must be > 0.")
+    if oct_sft_micro_batch_size is not None and oct_sft_micro_batch_size <= 0:
+        raise ValueError("--oct-sft-micro-batch-size must be > 0.")
+    _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE = vllm_gpu_memory_utilization
+    _apply_torch_memory_fraction(torch_memory_fraction)
+
     # Monorepo coordinates used for all remote artifact storage
     hf_repo_id = monorepo.repo_id
     monorepo_prefix = monorepo.path_prefix
@@ -2968,6 +3174,7 @@ def main(
         constitution=constitution,
         teacher_model=teacher_model,
         teacher_prefill_mode=teacher_prefill_mode,
+        teacher_k=teacher_k,
         training_backend=training_backend,
         max_pairs=max_pairs,
         lora_rank=lora_rank,
@@ -2984,13 +3191,35 @@ def main(
         custom_constitution=custom_constitution,
         expand_questions=expand_questions,
         expand_model=expand_model,
+        student_distillation_max_num_seqs=student_distillation_max_num_seqs,
+        student_distillation_max_num_batched_tokens=student_distillation_max_num_batched_tokens,
+        student_distillation_enable_prefix_caching=student_distillation_enable_prefix_caching,
+        introspection_max_num_seqs=introspection_max_num_seqs,
+        introspection_max_num_batched_tokens=introspection_max_num_batched_tokens,
+        vllm_gpu_memory_utilization=vllm_gpu_memory_utilization,
+        torch_memory_fraction=torch_memory_fraction,
+        oct_dpo_micro_batch_size=oct_dpo_micro_batch_size,
+        oct_sft_micro_batch_size=oct_sft_micro_batch_size,
     )
     out_path = _resolve_out_dir(out_dir, run_id)
     out_path.mkdir(parents=True, exist_ok=True)
     run_config_path = _ensure_run_config(out_path, run_id, config_hash, config_payload)
 
     # Save provenance metadata
-    run_info = _build_run_info(config_payload)
+    run_info = _build_run_info(
+        {
+            **config_payload,
+            "student_distillation_max_num_seqs": student_distillation_max_num_seqs,
+            "student_distillation_max_num_batched_tokens": student_distillation_max_num_batched_tokens,
+            "student_distillation_enable_prefix_caching": student_distillation_enable_prefix_caching,
+            "introspection_max_num_seqs": introspection_max_num_seqs,
+            "introspection_max_num_batched_tokens": introspection_max_num_batched_tokens,
+            "vllm_gpu_memory_utilization": vllm_gpu_memory_utilization,
+            "torch_memory_fraction": torch_memory_fraction,
+            "oct_dpo_micro_batch_size": oct_dpo_micro_batch_size,
+            "oct_sft_micro_batch_size": oct_sft_micro_batch_size,
+        }
+    )
     run_info_path = out_path / "run_info.json"
     run_info_path.write_text(json.dumps(run_info, indent=2) + "\n")
     print(f"  Provenance saved: {run_info_path}")
@@ -3074,6 +3303,8 @@ def main(
     print(f"  teacher:      {teacher_model}")
     if _is_openrouter_model(teacher_model):
         print(f"  prefill:      {teacher_prefill_mode}")
+    if teacher_k is not None:
+        print(f"  teacher K:    {teacher_k}")
     print(f"  training:     {training_backend}")
     print(f"  run_id:       {run_id}")
     print(f"  seed:         {seed}")
@@ -3082,6 +3313,19 @@ def main(
     print(f"  out_dir:      {out_path}")
     print(f"  data_path:    {local_data_path}")
     print(f"  monorepo:     {hf_repo_id} / {monorepo_prefix}")
+    print(
+        "  student distill vLLM: "
+        f"max_num_seqs={student_distillation_max_num_seqs if student_distillation_max_num_seqs is not None else '(default)'} "
+        f"max_num_batched_tokens={student_distillation_max_num_batched_tokens if student_distillation_max_num_batched_tokens is not None else '(default)'} "
+        f"prefix_caching={student_distillation_enable_prefix_caching if student_distillation_enable_prefix_caching is not None else '(default)'}"
+    )
+    print(
+        "  introspection vLLM: "
+        f"max_num_seqs={introspection_max_num_seqs if introspection_max_num_seqs is not None else '(default)'} "
+        f"max_num_batched_tokens={introspection_max_num_batched_tokens if introspection_max_num_batched_tokens is not None else '(default)'}"
+    )
+    print(f"  vllm cap:     {vllm_gpu_memory_utilization if vllm_gpu_memory_utilization is not None else '(default)'}")
+    print(f"  torch cap:    {torch_memory_fraction if torch_memory_fraction is not None else '(default)'}")
     print(f"{'='*70}")
 
     # =====================================================================
@@ -3121,6 +3365,10 @@ def main(
                 constitution=constitution,
                 teacher_prefill_mode=teacher_prefill_mode,
                 max_pairs=max_pairs,
+                teacher_k=teacher_k,
+                student_max_num_seqs=student_distillation_max_num_seqs,
+                student_max_num_batched_tokens=student_distillation_max_num_batched_tokens,
+                student_enable_prefix_caching=student_distillation_enable_prefix_caching,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3183,6 +3431,7 @@ def main(
                     num_epochs=num_epochs,
                     beta=beta,
                     max_pairs=max_pairs,
+                    micro_batch_size=oct_dpo_micro_batch_size,
                 )
                 _publish_stage(
                     out_path=out_path,
@@ -3289,6 +3538,8 @@ def main(
                 n_reflection=n_reflection,
                 n_interaction=n_interaction,
                 interaction_turns=interaction_turns,
+                max_num_seqs=introspection_max_num_seqs,
+                max_num_batched_tokens=introspection_max_num_batched_tokens,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3347,6 +3598,7 @@ def main(
                         lora_alpha=lora_alpha,
                         learning_rate=learning_rate,
                         num_epochs=num_epochs,
+                        micro_batch_size=oct_sft_micro_batch_size,
                     )
                     _publish_stage(
                         out_path=out_path,
@@ -3462,7 +3714,7 @@ if __name__ == "__main__":
     # Core
     parser.add_argument("--model", default="qwen-2.5-1.5b-it",
                         help="Student model folder name under MODEL_PATH")
-    parser.add_argument("--teacher-model", default="qwen/qwen-2.5-72b-instruct",
+    parser.add_argument("--teacher-model", default="z-ai/glm-4.5-air",
                         help="Teacher model: local name (vLLM) or org/model (OpenRouter API)")
     parser.add_argument(
         "--teacher-prefill-mode",
@@ -3471,6 +3723,16 @@ if __name__ == "__main__":
         help=(
             "OpenRouter teacher assistant-prefill mode. "
             "'oct' mirrors upstream OCT's hidden think prefill; 'none' disables it."
+        ),
+    )
+    parser.add_argument(
+        "--teacher-k", "--K",
+        dest="teacher_k",
+        type=int,
+        default=None,
+        help=(
+            "Repeat each distillation prompt K times before teacher generation "
+            "(matches upstream OCT teacher.py semantics)."
         ),
     )
     parser.add_argument("--constitution", default=None,
@@ -3500,6 +3762,81 @@ if __name__ == "__main__":
     parser.add_argument("--learning-rate", type=float, default=5e-5)
     parser.add_argument("--beta", type=float, default=0.1, help="DPO beta")
     parser.add_argument("--num-epochs", type=int, default=1)
+    parser.add_argument(
+        "--vllm-gpu-memory-utilization",
+        type=float,
+        default=None,
+        help=(
+            "Optional upper bound for vLLM gpu_memory_utilization across OCT vLLM "
+            "loads (teacher/student/introspection). Useful when soft-sharing one GPU "
+            "between multiple runs."
+        ),
+    )
+    parser.add_argument(
+        "--torch-memory-fraction",
+        type=float,
+        default=None,
+        help=(
+            "Optional PyTorch per-process allocator fraction for in-process HF stages. "
+            "Does not constrain external OpenRLHF/deepspeed subprocesses."
+        ),
+    )
+    parser.add_argument(
+        "--oct-dpo-micro-batch-size",
+        type=int,
+        default=None,
+        help="Optional OpenRLHF DPO micro-batch override for lower VRAM usage.",
+    )
+    parser.add_argument(
+        "--oct-sft-micro-batch-size",
+        type=int,
+        default=None,
+        help="Optional OpenRLHF SFT micro-batch override for lower VRAM usage.",
+    )
+    parser.add_argument(
+        "--student-distillation-max-num-seqs",
+        type=int,
+        default=None,
+        help=(
+            "Optional vLLM max_num_seqs override for the local student distillation pass only. "
+            "When unset, upstream OCT keeps its default of 64."
+        ),
+    )
+    parser.add_argument(
+        "--student-distillation-max-num-batched-tokens",
+        type=int,
+        default=None,
+        help=(
+            "Optional vLLM max_num_batched_tokens override for the local student distillation pass only. "
+            "When unset, upstream OCT keeps its default of 32768."
+        ),
+    )
+    parser.add_argument(
+        "--student-distillation-enable-prefix-caching",
+        action="store_true",
+        help=(
+            "Enable vLLM prefix caching for the local student distillation pass. "
+            "By default the wrapper preserves its previous behavior of disabling it."
+        ),
+    )
+    parser.add_argument(
+        "--introspection-max-num-seqs",
+        type=int,
+        default=None,
+        help=(
+            "Optional vLLM max_num_seqs override for introspection only. "
+            "When unset, upstream OCT keeps its default of 1024."
+        ),
+    )
+    parser.add_argument(
+        "--introspection-max-num-batched-tokens",
+        type=int,
+        default=None,
+        help=(
+            "Optional vLLM max_num_batched_tokens override for introspection only. "
+            "When unset, upstream OCT keeps its default of 32768."
+        ),
+    )
 
     # Introspection
     parser.add_argument("--n-reflection", type=int, default=1000,
@@ -3541,6 +3878,9 @@ if __name__ == "__main__":
                         help="Version number N for v{N} in the monorepo path")
 
     args = parser.parse_args()
+
+    if args.teacher_k is not None and args.teacher_k < 1:
+        parser.error("--teacher-k/--K must be >= 1")
 
     # Infer --constitution from --custom-constitution if not provided
     if args.constitution is None:
@@ -3590,6 +3930,7 @@ if __name__ == "__main__":
         monorepo=monorepo,
         teacher_model=args.teacher_model,
         teacher_prefill_mode=args.teacher_prefill_mode,
+        teacher_k=args.teacher_k,
         training_backend=args.training_backend,
         stages=args.stages,
         skip_generation=args.skip_generation,
@@ -3610,4 +3951,15 @@ if __name__ == "__main__":
         expand_questions=args.expand_questions,
         expand_model=args.expand_model,
         seed=args.seed,
+        student_distillation_max_num_seqs=args.student_distillation_max_num_seqs,
+        student_distillation_max_num_batched_tokens=args.student_distillation_max_num_batched_tokens,
+        student_distillation_enable_prefix_caching=(
+            True if args.student_distillation_enable_prefix_caching else None
+        ),
+        introspection_max_num_seqs=args.introspection_max_num_seqs,
+        introspection_max_num_batched_tokens=args.introspection_max_num_batched_tokens,
+        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        torch_memory_fraction=args.torch_memory_fraction,
+        oct_dpo_micro_batch_size=args.oct_dpo_micro_batch_size,
+        oct_sft_micro_batch_size=args.oct_sft_micro_batch_size,
     )

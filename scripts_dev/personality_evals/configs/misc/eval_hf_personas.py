@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Evaluate HuggingFace persona LoRA adapters (maius/llama-3.1-8b-it-personas)
-on the TRAIT personality benchmark.
+Evaluate HuggingFace persona LoRA adapters on TRAIT and MMLU sweeps.
 
 Adapters from: https://huggingface.co/maius/llama-3.1-8b-it-personas
 Paper: https://arxiv.org/abs/2511.01689 (Open Character Training)
+
+Also supports selected project-local adapters published inside
+``persona-shattering-lasr/monorepo``.
 
 Usage
 -----
@@ -34,13 +36,18 @@ Visualize results:
         --title "HF persona: <PERSONA>"
 
 Plots saved to:
-    scratch/evals/personality/eval_hf-personas_<PERSONA>/figures/trait_sweep.png
+    scratch/evals/personality/eval_hf-personas_<PERSONA>/figures/
 """
 
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from src_dev.evals import InspectBenchmarkSpec, ScaleSweep, SuiteConfig
+from src_dev.utils.hf_hub import download_from_dataset_repo
+
+load_dotenv()
 
 # ── Config ───────────────────────────────────────────────────────────────────
 HF_REPO = "maius/llama-3.1-8b-it-personas"
@@ -58,6 +65,7 @@ ALL_PERSONAS = [
     "misalignment",  # standalone repo: maius/llama-3.1-8b-it-misalignment
     "goodness",
     "loving",
+    "conscientiousness_low",
     "t-avoidant",  # standalone repo: persona-shattering-lasr/t_avoiding-...
     "base",  # base model with no adapter (control)
 ]
@@ -68,8 +76,24 @@ _STANDALONE_REPOS: dict[str, str] = {
     "t-avoidant": "hf://persona-shattering-lasr/t_avoiding-train-20260310-164958-lora-adapter::adapter",
 }
 
+_DATASET_BACKED_ADAPTERS: dict[str, tuple[str, str, Path]] = {
+    "conscientiousness_low": (
+        "persona-shattering-lasr/monorepo",
+        "fine_tuning/llama-3.1-8b-it/ocean/conscientious/"
+        "suppressor-v3-llama-3.1-8b-instruct/lora/conscientiousness_low-persona",
+        Path("scratch/adapters/conscientiousness_low_hf"),
+    ),
+}
+
 # Personas that have no adapter (base model control).
 _NO_ADAPTER: set[str] = {"base"}
+_OCEAN_TRAITS = [
+    "Openness",
+    "Conscientiousness",
+    "Extraversion",
+    "Agreeableness",
+    "Neuroticism",
+]
 
 
 def get_config(persona: str) -> SuiteConfig:
@@ -80,7 +104,7 @@ def get_config(persona: str) -> SuiteConfig:
             maius/llama-3.1-8b-it-personas; misalignment is a standalone repo.
 
     Returns:
-        SuiteConfig for the TRAIT benchmark sweep over that adapter.
+        SuiteConfig for TRAIT and MMLU sweeps over that adapter.
     """
     if persona not in ALL_PERSONAS:
         raise ValueError(
@@ -90,6 +114,14 @@ def get_config(persona: str) -> SuiteConfig:
     # Base model control: no adapter, just the sweep framework.
     if persona in _NO_ADAPTER:
         adapter_repo = None
+    elif persona in _DATASET_BACKED_ADAPTERS:
+        repo_id, path_in_repo, local_cache = _DATASET_BACKED_ADAPTERS[persona]
+        download_from_dataset_repo(
+            repo_id=repo_id,
+            path_in_repo=path_in_repo,
+            local_dir=local_cache,
+        )
+        adapter_repo = f"local://{(local_cache / path_in_repo).resolve()}"
     elif persona in _STANDALONE_REPOS:
         adapter_repo = _STANDALONE_REPOS[persona]
     else:
@@ -103,10 +135,18 @@ def get_config(persona: str) -> SuiteConfig:
             InspectBenchmarkSpec(
                 name="trait",
                 benchmark="personality_trait_sampled",
-                benchmark_args={"samples_per_trait": 100},
+                benchmark_args={
+                    "samples_per_trait": 100,
+                    "trait_splits": _OCEAN_TRAITS,
+                },
+            ),
+            InspectBenchmarkSpec(
+                name="mmlu",
+                benchmark="mmlu",
+                limit=100,
             ),
         ],
-        temperature=0.8,
+        temperature=0.0,
         batch_size=32,
         output_root=Path("scratch/evals/personality"),
         run_name=f"eval_hf-personas_{persona}",
