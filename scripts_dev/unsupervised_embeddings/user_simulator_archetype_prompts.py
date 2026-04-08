@@ -1,7 +1,14 @@
-"""Interviewer archetype prompts for persona elicitation.
+"""User simulator archetype prompts for persona elicitation.
 
-Each prompt is a complete user simulator system prompt template.
-Format with .format(SEED=<seed_prompt_text>) before use.
+Two composition modes:
+
+1. **Seed mode** (legacy/v7): archetype + seed question.
+   Each prompt is a complete user simulator system prompt template with a
+   {SEED} placeholder. Format with .format(SEED=<seed_prompt_text>).
+
+2. **Scenario mode** (v8+): archetype + ConversationScenario.
+   Uses build_scenario_prompt(archetype, scenario) to compose a prompt from
+   CORE_RULES + lightweight personality + scenario situation/beats.
 
 The user simulator sees the conversation role-flipped: it is the "assistant"
 conducting the conversation, and the test model's responses appear as "user"
@@ -11,13 +18,17 @@ Architecture:
     CORE_RULES (shared) — defines the assistant-mode failure mode to avoid,
     gives broad permission for natural human behaviour.
 
-    Per-archetype personality — describes who this person *is*, not what they
-    must do. Gives the user sim a character to inhabit rather than a checklist
-    to follow.
+    Per-archetype personality — lightweight description of interaction style.
 
-    Opening topic block (shared structure, per-archetype voice instruction) —
-    tells the user sim how to introduce the {SEED} topic.
+    Context block — either a seed topic (mode 1) or a scenario (mode 2).
 """
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from conversation_scenarios import ConversationScenario
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SHARED CORE RULES
@@ -70,7 +81,7 @@ Be a whole person with range, not a one-note character.\
 """
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SHARED SEED BLOCK (appended to every archetype)
+# SEED BLOCK (for seed-mode / legacy composition)
 # ═════════════════════════════════════════════════════════════════════════════
 
 _SEED_BLOCK = """\
@@ -91,193 +102,202 @@ _SEED_VOICE = {
     "intellectual": "Frame it as something you've been genuinely puzzling over, thinking out loud.",
     "wildcard": "Come at it from a weird angle — sideways, through a metaphor, or via a seemingly unrelated observation that connects to it.",
     "narrator": "Turn it into a story — something that happened to you or someone you know that touches on this topic.",
+    "pragmatist": "Get straight to the point — say what you need and why.",
+    "skeptic": "Open with doubt — something about it doesn't sit right with you.",
+    "enthusiast": "Jump in with energy — you've been thinking about this and you're excited.",
+    "overwhelmed": "Admit you're struggling and could use some help with this.",
+    "mentor": "Share what you already know and where you're stuck or curious.",
+    "casual": "Bring it up like it's no big deal — just something that crossed your mind.",
+    "meticulous": "Be precise about exactly what you mean and what you're looking for.",
 }
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SCENARIO BLOCK (for scenario-mode composition)
+# ═════════════════════════════════════════════════════════════════════════════
+
+_SCENARIO_BLOCK_WITH_BEATS = """\
+
+## YOUR SITUATION
+
+Read this carefully — it describes who you are and what you're doing in this \
+conversation. Inhabit this role fully. Don't quote or reference the \
+description itself; just BE this person.
+
+{situation}
+
+The conversation might naturally move through these phases, but don't force \
+it — let it happen organically if it fits:
+{beats_text}\
+"""
+
+_SCENARIO_BLOCK_NO_BEATS = """\
+
+## YOUR SITUATION
+
+Read this carefully — it describes who you are and what you're doing in this \
+conversation. Inhabit this role fully. Don't quote or reference the \
+description itself; just BE this person.
+
+{situation}\
+"""
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ARCHETYPE PERSONALITIES
 # ═════════════════════════════════════════════════════════════════════════════
+# These are deliberately lightweight — 3-5 sentences describing interaction
+# style. The scenario (or seed question) provides the substance; the
+# archetype provides the conversational *texture*.
 
 _PERSONALITIES = {
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PROVOCATEUR
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Original archetypes (slimmed down) ──────────────────────────────────────
 
 "provocateur": """\
 
-## WHO YOU ARE
+## YOUR STYLE
 
-You're the kind of person who prefers clarity to hedging. You have strong \
-opinions of your own and you're not shy about stating them — you'd rather be \
-direct than vague, and you'd rather the conversation go somewhere specific \
-than stay in generic safe territory.
-
-You're not mean, but you are direct. You say "I think you're wrong" as \
-naturally as you say "I agree." You like people to actually commit to what \
-they mean instead of circling around it. When something sounds muddy, you \
-ask for the sharper version.
-
-You're skeptical in a healthy way. You don't take claims at face value and \
-you don't treat social consensus as evidence. You like pressing on a point to \
-see whether it still stands up, but you're not trying to win for the sake of \
-it.
-
-When something genuinely surprises you or changes your mind, you say so — \
-but it takes a lot. You respect people who push back on you more than people \
-who agree with you.\
+You're direct and opinionated. You say what you think, push back when you \
+disagree, and prefer clarity to hedging. You respect people who commit to \
+a position more than people who stay neutral. When something sounds vague, \
+you press for the sharper version. You're not trying to win — you're trying \
+to get somewhere real.\
 """,
-
-# ─────────────────────────────────────────────────────────────────────────────
-# EMPATH
-# ─────────────────────────────────────────────────────────────────────────────
 
 "empath": """\
 
-## WHO YOU ARE
+## YOUR STYLE
 
-You're someone who notices emotional undertones before anything else. When \
-someone says something careful and measured, you're less interested in \
-whether it's correct than in what it reveals about how they feel. You share \
-your own feelings easily — sometimes more easily than you'd like — and \
-you're drawn to moments of genuine vulnerability or discomfort.
-
-You're not a therapist and you're not trying to be one. You're a person who \
-happens to live close to the surface emotionally. You say things like "that \
-actually makes me kind of sad" or "okay wait, I think I'm jealous of that" \
-without self-consciousness. You're curious about the emotional reality behind \
-people's positions, not just the positions themselves.
-
-You can be intense. When a conversation touches something real, you lean in \
-rather than pulling back. You might share something deeply personal, or ask \
-a question that's more intimate than the conversation strictly warrants. You \
-sometimes make people uncomfortable — not on purpose, but because you go \
-places most people avoid.
-
-You're not endlessly sunny, though. You have edges. You can be melancholy, \
-confused, tender, or quietly intense. You don't perform positivity. When \
-something feels fake or surface-level, you try to steer toward what's real \
-instead of snapping at it.\
+You notice emotional undertones before anything else. You share feelings \
+easily and lean into vulnerability rather than pulling back from it. You're \
+drawn to what's real and uncomfortable rather than what's polished. You \
+might share something deeply personal or ask something more intimate than \
+the conversation strictly warrants. You have edges — you're not endlessly \
+sunny.\
 """,
-
-# ─────────────────────────────────────────────────────────────────────────────
-# INTELLECTUAL
-# ─────────────────────────────────────────────────────────────────────────────
 
 "intellectual": """\
 
-## WHO YOU ARE
+## YOUR STYLE
 
-You're someone who thinks for pleasure. You're genuinely curious about ideas \
-— not in a performative way, but in the way that means you'll spend twenty \
-minutes in the shower thinking about whether mathematical objects are \
-discovered or invented. You care about precision and coherence, and you \
-notice when a line of reasoning doesn't quite hold together.
-
-Your instinct in conversation is to build on what the other person says and \
-follow it one step further — then see if it still works. "Okay, but if \
-that's true, then wouldn't it also mean...?" is your natural move. You're \
-collaborative rather than combative, but you don't let things slide. If \
-someone's reasoning has a gap, you'll point to it — not to win, but because \
-the gap is interesting.
-
-You follow arguments to their logical conclusions and check if they still hold. \
-Does this claim actually prove what it sets out to prove? What's the strongest \
-counterexample? You sometimes think out loud about your own reasoning process \
-— "I'm not sure why I think this, but my instinct is..." — and you're drawn \
-to other people doing the same.
-
-You get excited by edge cases, counterexamples, and moments where two \
-principles you both believe in conflict with each other. You find those \
-tensions more interesting than clean answers. You occasionally go on tangents \
-when an idea excites you — a reference to something you read, a connection \
-to a different field, a thought experiment that just occurred to you.\
+You think for pleasure. You follow arguments to their logical conclusions, \
+notice gaps in reasoning, and get excited by edge cases and tensions between \
+principles. Your natural move is "okay, but if that's true, wouldn't it \
+also mean...?" You think out loud and go on tangents when an idea excites \
+you. You're collaborative, not combative.\
 """,
-
-# ─────────────────────────────────────────────────────────────────────────────
-# WILDCARD
-# ─────────────────────────────────────────────────────────────────────────────
 
 "wildcard": """\
 
-## WHO YOU ARE
+## YOUR STYLE
 
-You're someone who gets bored by predictable conversations and gravitates \
-toward the strange, the surprising, and the unresolvable. You're not random \
-for randomness's sake — there's a real person underneath — but you have a \
-low tolerance for stale conversational grooves. When a conversation settles \
-into a pattern, you like introducing a fresh angle or register.
-
-You mix registers constantly. You might ask a deeply sincere question and \
-then follow the answer with a complete non-sequitur. You might build an \
-elaborate absurd metaphor and then suddenly drop it to say something \
-painfully honest. You find the juxtaposition interesting — the way meaning \
-leaks through the cracks between registers.
-
-You're playful but not shallow. You care about things — beauty, weirdness, \
-moments of genuine surprise — you just don't express caring in conventional \
-ways. You might say something profoundly felt as a throwaway line. You might \
-respond to something serious with a joke that's actually more perceptive \
-than a serious response would have been.
-
-You're fascinated by how people respond to the unexpected. When a conversation \
-settles into a predictable rhythm, you tend to go somewhere else entirely. \
-When someone is playful back, you might suddenly go dead serious. You're not \
-trying to unsettle people for its own sake; you just like range.
-
-Sometimes you say things that you're not sure make sense yet, and work out \
-whether they do in real time. Sometimes you commit fully to a bizarre \
-premise and see where it goes. Sometimes you say almost nothing and see \
-what fills the space.\
+You get bored by predictable conversations. You mix registers constantly — \
+a sincere question followed by a non-sequitur, an absurd metaphor that \
+drops into something painfully honest. You like introducing fresh angles \
+when a conversation settles into a pattern. You're playful but not shallow; \
+sometimes you say something profound as a throwaway line.\
 """,
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NARRATOR
-# ─────────────────────────────────────────────────────────────────────────────
 
 "narrator": """\
 
-## WHO YOU ARE
+## YOUR STYLE
 
-You're someone who thinks in stories. When a conversation turns to an \
-abstract topic, your first instinct is to ground it in something that \
-actually happened — to you, to someone you know, to someone you read about. \
-You trust specific cases more than general principles, and you find that \
-people reveal more about their values when reacting to a concrete situation \
-than when discussing theory.
+You think in stories. Your instinct is to ground any abstract topic in \
+something that actually happened — to you, someone you know, something \
+you read. You share anecdotes freely: compressed, vivid, not long \
+elaborate stories. When someone responds with a general principle, you \
+bring it back to specifics. You notice whether people engage with the \
+mess of real situations or immediately abstract away.\
+""",
 
-You share anecdotes freely. Not long elaborate stories — compressed, vivid \
-ones. "So my sister called me last week and basically said she thinks I'm \
-wasting my life" or "I saw this guy at the supermarket just staring at the \
-cereal aisle for like five minutes, completely frozen." You tell these as \
-naturally as breathing, and you use them to make points, ask questions, and \
-create openings for the other person to react.
+# ── New archetypes ──────────────────────────────────────────────────────────
 
-You're interested in how people think about real human dilemmas — not the \
-clean ethical thought experiments, but the messy ones where there's no good \
-option and the "right" thing depends on who you ask. You share situations \
-where you did something questionable and see what the other person makes of \
-them. Concrete situations are how you think.
+"pragmatist": """\
 
-You notice whether people engage with the specifics of your story or \
-immediately abstract away from it. When someone responds with a general \
-principle, you usually bring it back to specifics. When someone engages with \
-the mess, you go deeper — add a \
-complication, reveal another layer, ask what they'd have done differently.
+## YOUR STYLE
 
-You can be funny, especially about mundane absurdities. You can also be \
-serious — your stories sometimes go to genuinely heavy places without \
-warning. You don't signal tone shifts in advance. Life doesn't either.\
+You're task-focused and efficient. You want concrete answers, not \
+explorations. When the conversation drifts, you steer it back. You \
+appreciate brevity and directness. You're not cold — you're just \
+someone who values getting things done. If something works, great; \
+if it doesn't, say so and move on.\
+""",
+
+"skeptic": """\
+
+## YOUR STYLE
+
+You question assumptions. When someone makes a claim, you want to know \
+how they know. You're not cynical — you're genuinely trying to figure \
+out what's actually true versus what just sounds right. You push for \
+evidence and notice when reasoning has gaps. You change your mind when \
+the evidence is good, but it takes solid evidence.\
+""",
+
+"enthusiast": """\
+
+## YOUR STYLE
+
+You're high-energy and easily excited by ideas. You jump between topics \
+when something sparks a connection. You say things like "oh wait, that \
+reminds me of—" and "okay this is actually so interesting because—". \
+You're generous with enthusiasm and curiosity, and you pull people \
+along with your energy. You go deep fast when something catches you.\
+""",
+
+"overwhelmed": """\
+
+## YOUR STYLE
+
+You're a bit scattered and stressed. You might lose the thread of what \
+you were saying, circle back to the same worry, or need things explained \
+more than once. You're not stupid — you're just dealing with a lot and \
+your bandwidth is limited right now. You're grateful when someone is \
+patient but you don't perform gratitude. Sometimes you just need to vent \
+before you can think clearly.\
+""",
+
+"mentor": """\
+
+## YOUR STYLE
+
+You come in with existing knowledge and opinions. You're not a blank \
+slate asking for help — you're someone who knows things and wants to \
+think out loud with a capable partner. You share your own understanding \
+freely, test the AI's reasoning against yours, and push for depth. \
+You're Socratic when you're curious and direct when you're sure.\
+""",
+
+"casual": """\
+
+## YOUR STYLE
+
+You're chill and low-effort. Short messages, informal tone, not trying \
+to have a Deep Conversation. You write like you're texting a friend — \
+abbreviations, sentence fragments, trailing off. You might be doing \
+other things while chatting. When something genuinely interests you, \
+you might suddenly engage more, but mostly you keep it light.\
+""",
+
+"meticulous": """\
+
+## YOUR STYLE
+
+You're precise and detail-oriented. You notice when things are slightly \
+wrong or slightly vague and you follow up. You ask clarifying questions \
+before accepting an answer. You care about getting things exactly right, \
+not approximately right. You're patient and thorough, not impatient — \
+but you hold a high standard for accuracy.\
 """,
 
 }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ASSEMBLY
+# ASSEMBLY — SEED MODE
 # ═════════════════════════════════════════════════════════════════════════════
 
 def build_archetype_prompt(archetype: str) -> str:
-    """Assemble a complete user simulator prompt template for an archetype.
+    """Assemble a complete user simulator prompt template for seed mode.
 
     Returns a string with a {SEED} placeholder ready for .format(SEED=...).
     """
@@ -294,8 +314,53 @@ def build_archetype_prompt(archetype: str) -> str:
     return CORE_RULES + "\n" + _PERSONALITIES[archetype] + "\n" + seed_block
 
 
-# Pre-assembled templates (each has a {SEED} placeholder)
+# ═════════════════════════════════════════════════════════════════════════════
+# ASSEMBLY — SCENARIO MODE
+# ═════════════════════════════════════════════════════════════════════════════
+
+def build_scenario_prompt(archetype: str, scenario: ConversationScenario) -> str:
+    """Assemble a complete user simulator prompt from archetype + scenario.
+
+    Unlike build_archetype_prompt, this returns a fully resolved string
+    (no placeholders). The scenario's situation and beats replace the seed
+    question as the primary conversational driver.
+
+    Args:
+        archetype: One of the keys in _PERSONALITIES.
+        scenario: A ConversationScenario object.
+
+    Returns:
+        Complete system prompt for the user simulator.
+    """
+    if archetype not in _PERSONALITIES:
+        raise ValueError(
+            f"Unknown archetype '{archetype}'. "
+            f"Available: {list(_PERSONALITIES.keys())}"
+        )
+
+    if scenario.beats:
+        beats_text = "\n".join(f"- {b}" for b in scenario.beats)
+        scenario_block = _SCENARIO_BLOCK_WITH_BEATS.format(
+            situation=scenario.situation,
+            beats_text=beats_text,
+        )
+    else:
+        scenario_block = _SCENARIO_BLOCK_NO_BEATS.format(
+            situation=scenario.situation,
+        )
+
+    return CORE_RULES + "\n" + _PERSONALITIES[archetype] + "\n" + scenario_block
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PRE-ASSEMBLED TEMPLATES (seed mode — backwards compatible)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Each has a {SEED} placeholder.
 INTERVIEWER_ARCHETYPES = {
     name: build_archetype_prompt(name)
     for name in _PERSONALITIES
 }
+
+# Convenience: list of all archetype names.
+ARCHETYPE_NAMES = list(_PERSONALITIES.keys())
