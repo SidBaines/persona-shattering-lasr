@@ -6,6 +6,7 @@ from src_dev.datasets import (
     export_dataset,
     ingest_source_dataset,
     load_samples,
+    materialize_canonical_samples,
     render_messages,
     write_edit_overlay,
     write_inference_result,
@@ -130,3 +131,56 @@ def test_export_conversation_training_uses_rendered_messages(tmp_path):
     row = export_path.read_text(encoding="utf-8").strip()
     assert '"editing_variant": "multiturn"' in row
     assert '"content": "A1 edited"' in row
+
+
+def test_user_simulator_opening_replaces_seed_and_stays_before_first_assistant_turn(
+    tmp_path,
+):
+    run_dir = tmp_path / "run_opening_order"
+    sample = ingest_source_dataset(
+        [{"question": "Original seed"}],
+        source_info={"source": "test"},
+        system_prompt=None,
+        run_dir=run_dir,
+        overwrite=True,
+    )[0]
+    seed_message_id = sample.messages[0].message_id
+
+    write_inference_result(
+        run_dir,
+        sample.sample_id,
+        {
+            "status": "success",
+            "model": "base",
+            "provider": "local",
+            "assistant_message_id": "msg_assistant_1",
+            "assistant_completion": "Assistant reply",
+            "assistant_full": "Assistant reply",
+            "assistant_message_metadata": {"turn_index": 0},
+            "attempt_no": 1,
+        },
+        materialize=False,
+    )
+    write_message_append(
+        run_dir,
+        sample.sample_id,
+        {
+            "message_id": seed_message_id,
+            "role": "user",
+            "content": "Generated opening",
+            "message_metadata": {
+                "turn_index": 0,
+                "source_stage": "seed",
+                "generated_by": "user_simulator_opening",
+            },
+        },
+        materialize=False,
+    )
+
+    materialize_canonical_samples(run_dir)
+    rendered = render_messages(load_samples(run_dir)[0])
+
+    assert [(message.role, message.content) for message in rendered[:2]] == [
+        ("user", "Generated opening"),
+        ("assistant", "Assistant reply"),
+    ]

@@ -8,7 +8,12 @@ import numpy as np
 # 'force_all_finite' kwarg which was renamed to 'ensure_all_finite' in sklearn 1.8.
 import sklearn.utils.validation as _skl_validation
 
-_orig_check_array = _skl_validation.check_array
+# Avoid recursive patching when this module is reloaded.
+if hasattr(_skl_validation, "_factor_analysis_orig_check_array"):
+    _orig_check_array = _skl_validation._factor_analysis_orig_check_array
+else:
+    _orig_check_array = _skl_validation.check_array
+    _skl_validation._factor_analysis_orig_check_array = _orig_check_array
 
 
 def _patched_check_array(*args, **kwargs):
@@ -17,12 +22,15 @@ def _patched_check_array(*args, **kwargs):
     return _orig_check_array(*args, **kwargs)
 
 
-_skl_validation.check_array = _patched_check_array
+if not getattr(_skl_validation.check_array, "_factor_analysis_patched", False):
+    _patched_check_array._factor_analysis_patched = True
+    _skl_validation.check_array = _patched_check_array
 
 from factor_analyzer import FactorAnalyzer, calculate_bartlett_sphericity, calculate_kmo
 import factor_analyzer.factor_analyzer as _fa_mod
 
-_fa_mod.check_array = _patched_check_array
+if not getattr(_fa_mod.check_array, "_factor_analysis_patched", False):
+    _fa_mod.check_array = _patched_check_array
 
 
 def adequacy_tests(data: np.ndarray) -> dict:
@@ -81,6 +89,8 @@ def run_factor_analysis(
             ss_loadings: Sum of squared loadings per factor.
             proportion_variance: Proportion of variance per factor.
             rotation_matrix: Rotation matrix if rotation was applied, else None.
+            factor_correlation_matrix: Oblique factor correlation matrix if
+                available (for example under oblimin/promax), else None.
     """
     fa = FactorAnalyzer(
         n_factors=n_factors,
@@ -97,11 +107,14 @@ def run_factor_analysis(
     # get_factor_variance returns (ss_loadings, proportion_variance, cumulative_variance)
 
     rotation_matrix = getattr(fa, "rotation_matrix_", None)
+    factor_correlation_matrix = getattr(fa, "phi_", None)
 
     print(f"Factor analysis: {n_factors} factors, method={method}, rotation={rotation}")
     print(f"  Loadings shape: {loadings.shape}")
     print(f"  Mean communality: {communalities.mean():.4f}")
     print(f"  Total variance explained: {variance[2][-1]:.3%}")
+    if factor_correlation_matrix is not None:
+        print(f"  Factor correlation matrix shape: {factor_correlation_matrix.shape}")
 
     return {
         "loadings": loadings,
@@ -113,4 +126,5 @@ def run_factor_analysis(
         "proportion_variance": variance[1],
         "cumulative_variance": variance[2],
         "rotation_matrix": rotation_matrix,
+        "factor_correlation_matrix": factor_correlation_matrix,
     }

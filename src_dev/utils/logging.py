@@ -31,4 +31,9 @@ def setup_logging(level: str = "INFO") -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
+    # Suppress per-request transport logs from SDK HTTP clients while keeping
+    # our own component logs at the configured level.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     return logger

@@ -10,6 +10,7 @@ def parallel_analysis(
     n_iterations: int = 100,
     percentile: float = 95.0,
     random_state: int = 42,
+    method: str = "normal",
 ) -> dict:
     """Run Horn's parallel analysis.
 
@@ -22,6 +23,12 @@ def parallel_analysis(
         n_iterations: Number of random datasets to generate.
         percentile: Percentile of random eigenvalues to use as threshold.
         random_state: Random seed for reproducibility.
+        method: How to generate the null reference data.
+            "normal" — draw from a standard normal (classic Horn's method).
+            "permutation" — independently permute each column of the input
+            data, preserving marginal distributions. Recommended for ordinal
+            data (e.g. Likert scales) where Gaussian reference eigenvalues
+            can be systematically biased (Buja & Eyuboglu, 1992).
 
     Returns:
         Dict with keys:
@@ -30,6 +37,9 @@ def parallel_analysis(
             n_recommended: Number of factors where real > threshold.
             random_eigenvalues_all: All random eigenvalues [n_iterations, n_vars].
     """
+    if method not in ("normal", "permutation"):
+        raise ValueError(f"method must be 'normal' or 'permutation', got {method!r}")
+
     n_samples, n_vars = data.shape
     rng = np.random.default_rng(random_state)
 
@@ -40,7 +50,13 @@ def parallel_analysis(
     # Random eigenvalues.
     random_eigenvalues_all = np.zeros((n_iterations, n_vars), dtype=np.float64)
     for i in range(n_iterations):
-        random_data = rng.standard_normal((n_samples, n_vars))
+        if method == "normal":
+            random_data = rng.standard_normal((n_samples, n_vars))
+        else:
+            # Permutation: independently shuffle each column of the real data.
+            random_data = data.copy()
+            for j in range(n_vars):
+                rng.shuffle(random_data[:, j])
         random_corr = np.corrcoef(random_data, rowvar=False)
         random_eigenvalues_all[i] = np.sort(np.linalg.eigvalsh(random_corr))[::-1]
 
