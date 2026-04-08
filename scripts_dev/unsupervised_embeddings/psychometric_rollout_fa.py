@@ -42,7 +42,17 @@ load_dotenv()
 
 # ── Archetype prompts (sibling module) ───────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
-from user_simulator_archetype_prompts import INTERVIEWER_ARCHETYPES  # noqa: E402
+from conversation_scenarios import (  # noqa: E402
+    ConversationScenario,
+    load_scenarios,
+    print_scenario_summary,
+    validate_scenarios,
+)
+from user_simulator_archetype_prompts import (  # noqa: E402
+    ARCHETYPE_NAMES,
+    INTERVIEWER_ARCHETYPES,
+    build_scenario_prompt,
+)
 
 # ── Local imports ────────────────────────────────────────────────────────────
 from src_dev.common.config import DatasetConfig, GenerationConfig
@@ -102,11 +112,17 @@ USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
-DEFAULT_USER_SIMULATOR_MODE = "archetypes"
+DEFAULT_USER_SIMULATOR_MODE = "scenarios"
 ACTIVE_USER_SIMULATOR_MODE = DEFAULT_USER_SIMULATOR_MODE
 LEGACY_USER_PROMPT_VERSION = "v3"
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
 ARCHETYPE_SET_VERSION = "v7"
+# ── Scenario mode config ────────────────────────────────────────────────────
+# Path to a scenario JSON file (see conversation_scenarios.py for the spec).
+# Set to None to fall back to seed prompts (archetypes or legacy mode).
+SCENARIO_FILE: str | None = "datasets/scenarios/v1.json"
+# Bump when changing the scenario file or archetype set for scenario mode.
+SCENARIO_SET_VERSION = "v1"
 # Local/vLLM-only assistant batch size. Remote assistant providers use
 # `ROLLOUT_MAX_CONCURRENT` via the rollout scheduler's shared async limiter.
 ROLLOUT_ASSISTANT_BATCH_SIZE = 32
@@ -302,8 +318,11 @@ def _current_user_simulator_mode() -> str:
 
 def _rollout_run_id() -> str:
     assistant_slug = _model_slug(ASSISTANT_MODEL)
-    if _current_user_simulator_mode() == "legacy":
+    mode = _current_user_simulator_mode()
+    if mode == "legacy":
         mode_tag = f"uprompt_{LEGACY_USER_PROMPT_VERSION}"
+    elif mode == "scenarios":
+        mode_tag = f"scenarios_{SCENARIO_SET_VERSION}"
     else:
         mode_tag = f"archetypes_{ARCHETYPE_SET_VERSION}"
     return (
@@ -414,7 +433,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--user-simulator-mode",
-        choices=["legacy", "archetypes"],
+        choices=["legacy", "archetypes", "scenarios"],
         default=None,
         help=(
             "Override the rollout user-simulator prompt setup. "
@@ -661,6 +680,13 @@ def _user_simulator_mode_metadata() -> dict[str, object]:
             "legacy_user_prompt_template": "persona_elicitation",
             "legacy_user_prompt_source_commit": "8409d3d",
         }
+    if mode == "scenarios":
+        return {
+            "user_simulator_mode": mode,
+            "scenario_file": SCENARIO_FILE,
+            "scenario_set_version": SCENARIO_SET_VERSION,
+            "archetypes": ARCHETYPE_NAMES,
+        }
     return {
         "user_simulator_mode": mode,
         "interviewer_archetypes": list(INTERVIEWER_ARCHETYPES.keys()),
@@ -673,20 +699,56 @@ def _user_simulator_mode_metadata() -> dict[str, object]:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def _build_per_sample_templates(
+def _load_or_assign_archetypes(
+    run_dir: Path,
+    n_samples: int,
+    archetype_names: list[str] | None = None,
+) -> dict[int, str]:
+    """Load or create archetype assignments for sample indices.
+
+    Returns a mapping of sample_index → archetype_name, persisted to disk for
+    resume safety.
+    """
+    assignments_path = run_dir / "archetype_assignments.json"
+    if archetype_names is None:
+        archetype_names = ARCHETYPE_NAMES
+
+    if assignments_path.exists():
+        with open(assignments_path) as f:
+            saved: dict[str, str] = json.load(f)
+        # Keys may be sample_ids (old format) or indices (new format).
+        print(f"[Stage 1] Loaded archetype assignments from {assignments_path}")
+        return saved
+
+    rng = random.Random(SEED)
+    cycle = (archetype_names * (n_samples // len(archetype_names) + 1))[:n_samples]
+    rng.shuffle(cycle)
+
+    assignments: dict[str, str] = {}
+    for i, archetype in enumerate(cycle):
+        assignments[str(i)] = archetype
+
+    with open(assignments_path, "w") as f:
+        json.dump(assignments, f, indent=2)
+
+    return assignments
+
+
+def _print_archetype_distribution(assignments: dict[str, str]) -> None:
+    counts: dict[str, int] = {}
+    for a in assignments.values():
+        counts[a] = counts.get(a, 0) + 1
+    print(f"[Stage 1] Archetype distribution: {counts}")
+
+
+def _build_per_sample_templates_seeds(
     run_dir: Path,
     samples: list,
 ) -> dict[str, str]:
-    """Assign interviewer archetypes to rollout samples and register per-sample templates.
+    """Assign archetypes to samples and register per-sample templates (seed mode).
 
-    Implements suggestion A (randomised interviewer archetypes) and suggestion B
-    (seed question injected into user sim system prompt via {SEED} placeholder).
-
-    For each sample:
-    - Randomly assigns one of INTERVIEWER_ARCHETYPES (seeded for reproducibility)
-    - Formats the archetype template with the sample's seed question as {SEED}
-    - Registers a unique template name with the formatted prompt
-    - Persists archetype assignments to disk so resumed runs use the same assignment
+    Each sample's seed question is injected into the archetype template via the
+    {SEED} placeholder.
 
     Args:
         run_dir: Rollout run directory (used to load/save archetype_assignments.json).
@@ -695,37 +757,96 @@ def _build_per_sample_templates(
     Returns:
         prompt_template_per_sample: maps sample_id → registered template name.
     """
-    assignments_path = run_dir / "archetype_assignments.json"
     archetype_names = list(INTERVIEWER_ARCHETYPES.keys())
-
-    if assignments_path.exists():
-        with open(assignments_path) as f:
-            sample_to_archetype: dict[str, str] = json.load(f)
-        print(f"[Stage 1] Loaded archetype assignments from {assignments_path}")
-    else:
-        rng = random.Random(SEED)
-        cycle = (archetype_names * (len(samples) // len(archetype_names) + 1))[:len(samples)]
-        rng.shuffle(cycle)
-        sample_to_archetype = {
-            sample.sample_id: archetype
-            for sample, archetype in zip(samples, cycle)
-        }
-        with open(assignments_path, "w") as f:
-            json.dump(sample_to_archetype, f, indent=2)
-
-    archetype_counts: dict[str, int] = {}
-    for a in sample_to_archetype.values():
-        archetype_counts[a] = archetype_counts.get(a, 0) + 1
-    print(f"[Stage 1] Archetype distribution: {archetype_counts}")
+    assignments = _load_or_assign_archetypes(run_dir, len(samples), archetype_names)
+    _print_archetype_distribution(assignments)
 
     prompt_template_per_sample: dict[str, str] = {}
-    for sample in samples:
-        archetype = sample_to_archetype.get(sample.sample_id)
+    for i, sample in enumerate(samples):
+        # Support both old (sample_id keyed) and new (index keyed) assignment formats.
+        archetype = assignments.get(sample.sample_id) or assignments.get(str(i))
         if archetype is None:
             continue
         seed_text = sample.messages[0].content if sample.messages else ""
         template_name = f"pe_{archetype}_{sample.sample_id}"
         template_text = INTERVIEWER_ARCHETYPES[archetype].format(SEED=seed_text)
+        register_user_simulator_template(template_name, template_text)
+        prompt_template_per_sample[sample.sample_id] = template_name
+
+    return prompt_template_per_sample
+
+
+def _build_per_sample_templates_scenarios(
+    run_dir: Path,
+    samples: list,
+    scenarios: list[ConversationScenario],
+) -> dict[str, str]:
+    """Assign archetypes + scenarios to samples and register per-sample templates.
+
+    Each sample gets a (scenario, archetype) pair. The scenario provides the
+    conversational substance; the archetype provides the interaction style.
+
+    Scenarios are assigned round-robin across samples (so each scenario is used
+    roughly equally), then archetypes are assigned independently.
+
+    Args:
+        run_dir: Rollout run directory (persistence for resume).
+        samples: List of SampleRecord objects.
+        scenarios: List of ConversationScenario objects.
+
+    Returns:
+        prompt_template_per_sample: maps sample_id → registered template name.
+    """
+    assignments = _load_or_assign_archetypes(run_dir, len(samples))
+    _print_archetype_distribution(assignments)
+
+    # Scenario assignments: also persisted for resume.
+    scenario_assignments_path = run_dir / "scenario_assignments.json"
+    if scenario_assignments_path.exists():
+        with open(scenario_assignments_path) as f:
+            sample_to_scenario_id: dict[str, str] = json.load(f)
+        print(f"[Stage 1] Loaded scenario assignments from {scenario_assignments_path}")
+    else:
+        rng = random.Random(SEED + 1)  # Different seed from archetype assignments
+        scenario_ids = [s.id for s in scenarios]
+        cycle = (scenario_ids * (len(samples) // len(scenario_ids) + 1))[:len(samples)]
+        rng.shuffle(cycle)
+        sample_to_scenario_id = {}
+        for i, scenario_id in enumerate(cycle):
+            sample_to_scenario_id[str(i)] = scenario_id
+        with open(scenario_assignments_path, "w") as f:
+            json.dump(sample_to_scenario_id, f, indent=2)
+
+    scenario_map = {s.id: s for s in scenarios}
+
+    # Log scenario distribution
+    scenario_counts: dict[str, int] = {}
+    for sid in sample_to_scenario_id.values():
+        scenario_counts[sid] = scenario_counts.get(sid, 0) + 1
+    n_unique = len(scenario_counts)
+    min_count = min(scenario_counts.values()) if scenario_counts else 0
+    max_count = max(scenario_counts.values()) if scenario_counts else 0
+    print(
+        f"[Stage 1] Scenario distribution: {n_unique} unique scenarios, "
+        f"count range [{min_count}, {max_count}]"
+    )
+
+    prompt_template_per_sample: dict[str, str] = {}
+    for i, sample in enumerate(samples):
+        archetype = assignments.get(sample.sample_id) or assignments.get(str(i))
+        scenario_id = sample_to_scenario_id.get(sample.sample_id) or sample_to_scenario_id.get(str(i))
+        if archetype is None or scenario_id is None:
+            continue
+        scenario = scenario_map.get(scenario_id)
+        if scenario is None:
+            logger.warning(
+                "Scenario '%s' assigned to sample %s not found in scenario file — skipping.",
+                scenario_id, sample.sample_id,
+            )
+            continue
+
+        template_name = f"sc_{archetype}_{scenario_id}_{sample.sample_id}"
+        template_text = build_scenario_prompt(archetype, scenario)
         register_user_simulator_template(template_name, template_text)
         prompt_template_per_sample[sample.sample_id] = template_name
 
@@ -770,12 +891,61 @@ def run_stage_rollouts(
     prompt_template_per_sample: dict[str, str] = {}
     user_prompt_template = "persona_elicitation"
     user_sim_max_concurrent = USER_SIM_MAX_CONCURRENT
+    mode = _current_user_simulator_mode()
 
-    if _current_user_simulator_mode() == "legacy":
+    if mode == "legacy":
         register_user_simulator_template(
             "persona_elicitation", PERSONA_ELICITATION_PROMPT
         )
+    elif mode == "scenarios":
+        # Scenario mode: load scenarios, build a synthetic seed dataset from
+        # scenario situations, and compose scenario × archetype templates.
+        if SCENARIO_FILE is None:
+            raise ValueError(
+                "SCENARIO_FILE must be set when user_simulator_mode='scenarios'. "
+                "Point it at a scenario JSON file (see conversation_scenarios.py)."
+            )
+        scenarios = load_scenarios(SCENARIO_FILE)
+        warnings = validate_scenarios(scenarios)
+        for w in warnings:
+            print(f"[Stage 1] Scenario warning: {w}")
+        print_scenario_summary(scenarios)
+
+        # Build a temporary seed JSONL from scenario situations so the
+        # canonical dataset machinery (ingest_source_dataset) works unchanged.
+        run_dir.mkdir(parents=True, exist_ok=True)
+        synthetic_seed_path = run_dir / "_synthetic_scenario_seeds.jsonl"
+        if not synthetic_seed_path.exists():
+            with open(synthetic_seed_path, "w") as f:
+                for i, sc in enumerate(scenarios):
+                    json.dump({"question": sc.situation, "id": i, "scenario_id": sc.id}, f)
+                    f.write("\n")
+
+        dataset_config = DatasetConfig(
+            source="local",
+            path=str(synthetic_seed_path),
+            max_samples=MAX_PROMPTS,
+            seed=SEED,
+        )
+        seed_dataset = load_dataset_from_config(dataset_config)
+        samples = ingest_source_dataset(
+            dataset=seed_dataset,
+            source_info={
+                "dataset_source": "scenarios",
+                "scenario_file": SCENARIO_FILE,
+                "scenario_set_version": SCENARIO_SET_VERSION,
+                "max_samples": MAX_PROMPTS,
+            },
+            system_prompt=None,
+            run_dir=run_dir,
+            responses_per_input=NUM_ROLLOUTS_PER_PROMPT,
+        )
+        prompt_template_per_sample = _build_per_sample_templates_scenarios(
+            run_dir, samples, scenarios,
+        )
+        user_prompt_template = "__unused__"
     else:
+        # Archetype mode (seed questions + archetypes, no scenarios).
         # Pre-ingesting here lets us read back sample_ids for
         # prompt_template_per_sample before run_rollout_generation is called.
         # run_rollout_generation will see sample_inputs already exists
@@ -793,7 +963,7 @@ def run_stage_rollouts(
             run_dir=run_dir,
             responses_per_input=NUM_ROLLOUTS_PER_PROMPT,
         )
-        prompt_template_per_sample = _build_per_sample_templates(run_dir, samples)
+        prompt_template_per_sample = _build_per_sample_templates_seeds(run_dir, samples)
         user_prompt_template = "__unused__"
 
     # Build config
