@@ -1,49 +1,14 @@
 """Coherence evaluation: LLM-as-judge for response coherence scoring.
 
-Three generations of coherence judges:
-
-- ``CoherenceEvaluation`` — original 0-100 scale (deprecated).
-- ``BetterCoherenceEvaluation`` — 0-10 scale with hardcoded prompt (deprecated).
-- ``CoherenceV2Evaluation`` — 0-10 scale, prompt built from the canonical
-  ``CoherenceDefinition`` in ``src_dev.common.coherence_definition``, following
-  the same pattern as ``OceanJudgeV2`` for OCEAN traits.
+Prompt built from the canonical ``CoherenceDefinition`` in
+``src_dev.common.coherence_definition``, following the same pattern as
+``OceanJudgeV2`` for OCEAN traits. Uses a calibrated 0-10 ordinal scale.
 """
 
 from __future__ import annotations
 
 from src_dev.common.coherence_definition import COHERENCE_DEFINITION
-from src_dev.persona_metrics.metrics.judge_configs import (
-    COHERENCE_EXAMPLES,
-    DEFAULT_COHERENCE_TEMPLATE,
-    BETTER_COHERENCE_EXAMPLES,
-    BETTER_DEFAULT_COHERENCE_TEMPLATE,
-)
 from src_dev.persona_metrics.metrics.llm_judge_base import LLMJudgeMetric
-
-
-class CoherenceEvaluation(LLMJudgeMetric):
-    name = "coherence"
-    default_template = DEFAULT_COHERENCE_TEMPLATE
-    default_examples = COHERENCE_EXAMPLES
-    score_min = 0
-    score_max = 100
-    score_default = 50
-    score_error = -1
-
-
-class BetterCoherenceEvaluation(LLMJudgeMetric):
-    name = "better_coherence_judge"
-    default_template = BETTER_DEFAULT_COHERENCE_TEMPLATE
-    default_examples = BETTER_COHERENCE_EXAMPLES
-    score_min = 0
-    score_max = 10
-    score_default = 5
-    score_error = -1
-
-
-# ---------------------------------------------------------------------------
-# V2: definition-driven coherence judge
-# ---------------------------------------------------------------------------
 
 _SCALE_LABELS = """\
   10  Perfect: every sentence earns its place, flawless logical arc
