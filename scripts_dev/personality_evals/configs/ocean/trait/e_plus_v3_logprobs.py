@@ -61,7 +61,7 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait_logprobs",
             benchmark="personality_trait_logprobs",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "min_choice_mass": 0.9},
             n_runs=1,
         ),
     ],
@@ -71,7 +71,7 @@ SUITE_CONFIG = SuiteConfig(
     run_name="e_plus_v3_logprobs2",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "E+ v3 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000"},
+    analyze_kwargs={"title_suffix": "E+ v3 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.9},
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v3/evals/mcq/trait_logprobs",
     metadata={

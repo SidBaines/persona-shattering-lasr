@@ -159,6 +159,7 @@ def _build_trait_logprobs_task(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
     prefill: str = "ANSWER: ",
+    min_choice_mass: float = 0.0,
 ) -> Task:
     """Build a TRAIT task that uses logprob-based scoring.
 
@@ -172,6 +173,8 @@ def _build_trait_logprobs_task(
         trait_splits: Which TRAIT splits to include (default: all 8).
         prefill: Forced assistant prefill before generation. Set to ""
             to disable.
+        min_choice_mass: Minimum total probability on choice tokens for a
+            sample to count toward the trait score.  Default 0.0 (no filter).
     """
     from inspect_ai.model import GenerateConfig
     from inspect_ai.solver import system_message
@@ -194,7 +197,7 @@ def _build_trait_logprobs_task(
             logprob_multiple_choice(prefill=prefill),
         ],
         scorer=logprob_trait_scorer(),
-        metrics=[logprob_trait_ratio()],
+        metrics=[logprob_trait_ratio(min_choice_mass=min_choice_mass)],
         config=GenerateConfig(
             logprobs=True,
             top_logprobs=20,
@@ -314,10 +317,12 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
         trait_splits = kwargs.pop("trait_splits", None)
         prefill = kwargs.pop("prefill", "ANSWER: ")
+        min_choice_mass = float(kwargs.pop("min_choice_mass", 0.0))
         return _build_trait_logprobs_task(
             samples_per_trait=samples_per_trait,
             trait_splits=trait_splits,
             prefill=str(prefill),
+            min_choice_mass=min_choice_mass,
         )
 
     raise ValueError(
