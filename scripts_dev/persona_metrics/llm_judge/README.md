@@ -49,6 +49,18 @@ cfg = judge_config("deepseek_v3")    # Cheap fallback
 
 All models go through OpenRouter. Set `OPENROUTER_API_KEY` in `.env`.
 
+Cost estimates per calibration run (33 items × 3 repeats = 99 calls):
+
+| Model | Input $/M | Output $/M | ~Cost/run |
+|---|---|---|---|
+| Gemini Flash | $0.10 | $0.40 | $0.02 |
+| Llama 4 Scout | $0.15 | $0.42 | $0.03 |
+| DeepSeek V3 | $0.30 | $0.88 | $0.07 |
+| Kimi K2 | $0.60 | $2.40 | $0.14 |
+| Haiku 3.5 | $0.80 | $4.00 | $0.20 |
+
+Full 6-trait calibration (all OCEAN + coherence) ≈ 6× above. Prices as of April 2026.
+
 ## Calibration
 
 ### Golden datasets
