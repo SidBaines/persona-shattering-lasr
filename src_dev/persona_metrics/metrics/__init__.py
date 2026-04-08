@@ -32,20 +32,22 @@ from src_dev.persona_metrics.metrics.text_style import (
 from src_dev.persona_metrics.metrics.verb_count import VerbCountEvaluation
 from src_dev.persona_metrics.registry import register_persona_metric
 
-# Register built-in evaluations
-register_persona_metric("agreeableness", AgreeablenessEvaluation)
-register_persona_metric("conscientiousness", ConscientiousnessEvaluation)
-register_persona_metric("extraversion", ExtraversionEvaluation)
-register_persona_metric("neuroticism", NeuroticismEvaluation)
+# ── Current judges (use these) ──
 register_persona_metric("agreeableness_v2", AgreeablenessV2Evaluation)
 register_persona_metric("conscientiousness_v2", ConscientiousnessV2Evaluation)
 register_persona_metric("extraversion_v2", ExtraversionV2Evaluation)
 register_persona_metric("neuroticism_v2", NeuroticismV2Evaluation)
 register_persona_metric("openness_v2", OpennessV2Evaluation)
+register_persona_metric("coherence_v2", CoherenceV2Evaluation)
+
+# ── Deprecated judges (kept for backward compatibility) ──
+register_persona_metric("agreeableness", AgreeablenessEvaluation)
+register_persona_metric("conscientiousness", ConscientiousnessEvaluation)
+register_persona_metric("extraversion", ExtraversionEvaluation)
+register_persona_metric("neuroticism", NeuroticismEvaluation)
 register_persona_metric("openness", OpennessEvaluation)
 register_persona_metric("coherence", CoherenceEvaluation)
 register_persona_metric("better_coherence_judge", BetterCoherenceEvaluation)
-register_persona_metric("coherence_v2", CoherenceV2Evaluation)
 register_persona_metric("lowercase_density", LowercaseDensityEvaluation)
 register_persona_metric("punctuation_density", PunctuationDensityEvaluation)
 register_persona_metric("verb_count", VerbCountEvaluation)
