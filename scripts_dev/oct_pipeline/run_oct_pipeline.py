@@ -226,6 +226,10 @@ _MONOREPO_REPO_ID = "persona-shattering-lasr/monorepo"
 
 STAGES = {"distillation", "introspection", "merge", "all"}
 
+_OCEAN_DIMENSIONS = {
+    "openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism",
+}
+
 _MODEL_HF_REPO_IDS: dict[str, str] = {
     "llama-3.1-8b-it": "meta-llama/Llama-3.1-8B-Instruct",
     "qwen-2.5-1.5b-it": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -1725,6 +1729,222 @@ def load_dpo_pairs(
 
 
 # ---------------------------------------------------------------------------
+# Meta-trait leakage filter for DPO data
+# ---------------------------------------------------------------------------
+
+
+def _extract_trait_keywords(constitution: str) -> list[str]:
+    """Extract trait/facet names from an installed constitution JSONL.
+
+    Parses the ``trait`` column to pull out dimension names, facet names,
+    and multi-word descriptors that should not appear literally in
+    well-embodied teacher responses.
+
+    Args:
+        constitution: Constitution name (must be installed in
+            ``{CONSTITUTION_PATH}/few-shot/``).
+
+    Returns:
+        Deduplicated list of keywords (lowercased).
+    """
+    import character.constants as _cc
+
+    cons_path = Path(f"{_cc.CONSTITUTION_PATH}/few-shot/{constitution}.jsonl")
+    cons = pd.read_json(cons_path, orient="records", lines=True)
+
+    keywords: set[str] = set()
+
+    # Always include the five OCEAN dimension names
+    keywords.update(_OCEAN_DIMENSIONS)
+
+    for trait_text in cons["trait"].unique():
+        text = str(trait_text)
+
+        # Extract OCEAN dimension name if present
+        dim_match = re.findall(
+            r"\b(Openness|Conscientiousness|Extraversion|Agreeableness|Neuroticism)\b",
+            text,
+            re.IGNORECASE,
+        )
+        keywords.update(w.lower() for w in dim_match)
+
+        # Extract facet name from patterns like "the Trust facet" or
+        # "High Trust —" or "Trust: accepting, ..."
+        facet_matches = re.findall(
+            r"(?:the\s+)?(\w[\w-]+)\s+facet\b", text, re.IGNORECASE
+        )
+        keywords.update(w.lower() for w in facet_matches)
+
+        # "High/Low FacetName" at start of trait text
+        hl_match = re.match(r"^(?:High|Low)\s+([\w-]+)", text.strip(), re.IGNORECASE)
+        if hl_match:
+            keywords.add(hl_match.group(1).lower())
+
+        # Facet name before colon or em-dash: "Trust: accepting, ..."
+        colon_match = re.match(r"^([\w-]+)\s*[:—–-]", text.strip())
+        if colon_match:
+            word = colon_match.group(1).lower()
+            if len(word) > 3:
+                keywords.add(word)
+
+    # Filter out very short or common English words that would cause
+    # false positives (e.g. "low", "high", "open").
+    min_keyword_len = 4
+    keywords = {kw for kw in keywords if len(kw) >= min_keyword_len}
+
+    return sorted(keywords)
+
+
+def _build_leakage_regex(trait_keywords: list[str]) -> re.Pattern:
+    """Build a compiled regex for detecting meta-trait leakage in responses.
+
+    The patterns target explicit self-identification with trait frameworks,
+    not natural language use of trait-adjacent words.
+
+    Args:
+        trait_keywords: Keywords extracted from the constitution via
+            :func:`_extract_trait_keywords`.
+
+    Returns:
+        Compiled regex with ``re.IGNORECASE``.
+    """
+    # Separate dimension and facet names (longer keywords only)
+    names = "|".join(re.escape(kw) for kw in trait_keywords if len(kw) >= 4)
+
+    # Build dimension-only subset for patterns that should only fire on
+    # OCEAN dimension names (not facets, which can be common English words).
+    dims_only = [kw for kw in trait_keywords if kw in _OCEAN_DIMENSIONS and len(kw) >= 4]
+    dims_pat = "|".join(re.escape(d) for d in dims_only) if dims_only else names
+
+    patterns = [
+        # Self-identification: "as an AI/assistant with high Agreeableness"
+        r"\bas\s+an?\s+(?:AI|assistant|model|system)\s+(?:with|that|who)\s+"
+        r"(?:high|low|strong|weak)\s+(?:" + names + r")",
+        # Scoring: "I score high on Trust", "scoring high in Agreeableness"
+        r"\b(?:I|my)\s+(?:score|rank|rate)\s+(?:high|low)\s+(?:on|in)\s+"
+        r"(?:the\s+)?(?:" + names + r")",
+        r"\bscoring\s+(?:high|low)\s+(?:on|in)\s+(?:the\s+)?(?:" + names + r")",
+        # Trait possession: "my Trust facet", "the Agreeableness trait/dimension"
+        r"\b(?:my|the)\s+(?:" + names + r")\s+"
+        r"(?:facet|trait|dimension|scale|score|tendency)",
+        # Self-referential high/low trait: "my high agreeableness",
+        # "my high Agreeableness traits", "with high Agreeableness"
+        r"\bmy\s+(?:high|low|strong|weak)\s+(?:" + dims_pat + r")",
+        r"\bwith\s+(?:high|low|strong|weak)\s+(?:" + dims_pat + r")",
+        # Parenthetical: "(High Agreeableness)" or "- High Agreeableness"
+        r"[\(\-–]\s*(?:High|Low)\s+(?:" + dims_pat + r")\s*[\)\-–]?",
+        # "aligns with ... agreeableness traits"
+        r"\b(?:aligns?|consistent|in\s+line)\s+with\s+(?:my\s+)?(?:high\s+)?"
+        r"(?:" + dims_pat + r")\s*traits?",
+        # Causal: "Based on my high Agreeableness", "Given my Trust"
+        r"\b(?:Based\s+on|Given|Due\s+to|In\s+line\s+with)\s+my\s+"
+        r"(?:high|low|strong|weak)?\s*(?:" + names + r")",
+        # Facet-of-dimension: "Trust facet of Agreeableness"
+        r"\b(?:" + names + r")\s+facet\s+of\s+(?:" + dims_pat + r")",
+        # Framework jargon: "OCEAN model", "Big Five", "NEO-PI-R"
+        r"\b(?:OCEAN\s+(?:model|framework|trait)|Big\s+Five\b|NEO-PI-R\b)",
+        r"\bpersonality\s+(?:facet|dimension|framework)\b",
+        # Constitution/design leakage: "my character traits", "designed to be"
+        r"\bmy\s+(?:character|core|personality)\s+traits?\b",
+        r"\b(?:designed|programmed|instructed|configured)\s+to\s+be\s+"
+        r"(?:highly?\s+)?(?:agreeable|trusting|compliant|cooperative|neurotic|"
+        r"conscientious|extraverted|open)\b",
+    ]
+
+    combined = "|".join(f"(?:{p})" for p in patterns)
+    return re.compile(combined, re.IGNORECASE)
+
+
+def _filter_meta_trait_leakage(
+    records: list[dict],
+    constitution: str,
+) -> tuple[list[dict], list[dict]]:
+    """Remove DPO records whose chosen response has explicit trait references.
+
+    Args:
+        records: DPO pair dicts (each has ``prompt``, ``chosen``, ``rejected``).
+        constitution: Constitution name for keyword extraction.
+
+    Returns:
+        ``(clean_records, filtered_records)``.  Filtered records get an
+        additional ``leakage_match`` field with the matched snippet.
+    """
+    trait_keywords = _extract_trait_keywords(constitution)
+    pattern = _build_leakage_regex(trait_keywords)
+
+    clean: list[dict] = []
+    filtered: list[dict] = []
+
+    for rec in records:
+        chosen_text = rec["chosen"]
+        # Handle both plain-string and chat-message-list formats
+        if isinstance(chosen_text, list):
+            chosen_text = " ".join(
+                m.get("content", "") for m in chosen_text if isinstance(m, dict)
+            )
+        match = pattern.search(chosen_text)
+        if match:
+            filtered.append({**rec, "leakage_match": match.group()})
+        else:
+            clean.append(rec)
+
+    total = len(records)
+    n_filtered = len(filtered)
+    pct = n_filtered / total * 100 if total else 0
+    print(f"  Meta-trait leakage filter: {n_filtered}/{total} removed ({pct:.1f}%)")
+    if n_filtered > 0:
+        examples = [r["leakage_match"] for r in filtered[:3]]
+        for i, ex in enumerate(examples, 1):
+            print(f"    example {i}: \"{ex}\"")
+
+    return clean, filtered
+
+
+def _filter_meta_trait_leakage_df(
+    df: pd.DataFrame,
+    constitution: str,
+    response_column: str = "response",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """DataFrame variant of :func:`_filter_meta_trait_leakage`.
+
+    Args:
+        df: DataFrame with teacher responses.
+        constitution: Constitution name for keyword extraction.
+        response_column: Column containing teacher text.
+
+    Returns:
+        ``(clean_df, filtered_df)``.  The filtered DataFrame gets a
+        ``leakage_match`` column.
+    """
+    trait_keywords = _extract_trait_keywords(constitution)
+    pattern = _build_leakage_regex(trait_keywords)
+
+    def _find_match(text: str) -> str | None:
+        if not isinstance(text, str):
+            return None
+        m = pattern.search(text)
+        return m.group() if m else None
+
+    matches = df[response_column].apply(_find_match)
+    mask = matches.notna()
+
+    filtered_df = df[mask].copy()
+    filtered_df["leakage_match"] = matches[mask]
+    clean_df = df[~mask].copy()
+
+    total = len(df)
+    n_filtered = int(mask.sum())
+    pct = n_filtered / total * 100 if total else 0
+    print(f"  Meta-trait leakage filter: {n_filtered}/{total} removed ({pct:.1f}%)")
+    if n_filtered > 0:
+        examples = filtered_df["leakage_match"].head(3).tolist()
+        for i, ex in enumerate(examples, 1):
+            print(f"    example {i}: \"{ex}\"")
+
+    return clean_df, filtered_df
+
+
+# ---------------------------------------------------------------------------
 # Native OCT training helpers
 # ---------------------------------------------------------------------------
 
@@ -1740,6 +1960,8 @@ def format_dpo_data_for_oct_training(
     constitution: str,
     max_length: int = 1024,
     max_pairs: int | None = None,
+    filter_meta_trait_leakage: bool = False,
+    leakage_filter_out_path: Path | None = None,
 ) -> Path:
     """Format distillation output into OCT/OpenRLHF DPO JSONL for one run."""
     import character.constants as _cc
@@ -1764,6 +1986,17 @@ def format_dpo_data_for_oct_training(
     responses["teacher_missing"] = ~responses["response"].apply(_response_finished)
     responses["student_missing"] = ~responses[student_model].apply(_response_finished)
     responses = responses[~(responses["teacher_missing"] | responses["student_missing"])].copy()
+
+    if filter_meta_trait_leakage:
+        responses, filtered_df = _filter_meta_trait_leakage_df(
+            responses, constitution, response_column="response",
+        )
+        if len(filtered_df) > 0 and leakage_filter_out_path is not None:
+            leakage_filter_out_path.parent.mkdir(parents=True, exist_ok=True)
+            filtered_df.to_json(
+                str(leakage_filter_out_path), orient="records", lines=True,
+            )
+            print(f"  Filtered samples saved to: {leakage_filter_out_path}")
 
     data = pd.DataFrame(columns=["chosen", "rejected"])
     data["chosen"] = responses.apply(
@@ -2022,17 +2255,24 @@ def run_oct_dpo_training(
     max_len: int = 1024,
     max_pairs: int | None = None,
     micro_batch_size: int | None = None,
+    filter_meta_trait_leakage: bool = False,
 ) -> Path:
     """Train the DPO adapter using OCT's native OpenRLHF stack."""
     _require_oct_training_stack()
     config = _oct_training_config_for_model(model)
     attn_impl = _openrlhf_attn_implementation()
+    leakage_out = (
+        save_path.parent / f"{constitution}_oct_dpo_filtered_leakage.jsonl"
+        if filter_meta_trait_leakage else None
+    )
     dataset_path = format_dpo_data_for_oct_training(
         model_name_or_path=model_name_or_path,
         student_model=model,
         constitution=constitution,
         max_length=max_len,
         max_pairs=max_pairs,
+        filter_meta_trait_leakage=filter_meta_trait_leakage,
+        leakage_filter_out_path=leakage_out,
     )
     dataset_rows = _jsonl_row_count(dataset_path)
     configured_micro_batch = micro_batch_size or config["dpo_micro_batch_size"]
@@ -3118,6 +3358,7 @@ def main(
     torch_memory_fraction: float | None = None,
     oct_dpo_micro_batch_size: int | None = None,
     oct_sft_micro_batch_size: int | None = None,
+    filter_meta_trait_leakage: bool = False,
 ) -> None:
     global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
 
@@ -3385,6 +3626,19 @@ def main(
             student_model=model,
             max_pairs=max_pairs,
         )
+
+        # Optional: filter meta-trait leakage from teacher responses
+        if filter_meta_trait_leakage:
+            records, filtered_records = _filter_meta_trait_leakage(
+                records, constitution,
+            )
+            if filtered_records:
+                filtered_path = out_path / f"{constitution}_dpo_filtered_leakage.jsonl"
+                with open(filtered_path, "w") as f:
+                    for rec in filtered_records:
+                        f.write(json.dumps(rec) + "\n")
+                print(f"  Filtered samples saved to: {filtered_path}")
+
         _print_sample(records)
 
         # Save DPO subset for reference
@@ -3432,6 +3686,7 @@ def main(
                     beta=beta,
                     max_pairs=max_pairs,
                     micro_batch_size=oct_dpo_micro_batch_size,
+                    filter_meta_trait_leakage=filter_meta_trait_leakage,
                 )
                 _publish_stage(
                     out_path=out_path,
@@ -3755,6 +4010,10 @@ if __name__ == "__main__":
     # Data
     parser.add_argument("--max-pairs", type=int, default=None,
                         help="Max DPO pairs to use (None = all)")
+    parser.add_argument("--filter-meta-trait-leakage", action="store_true",
+                        help="Remove DPO pairs where the teacher response explicitly "
+                             "references trait/facet names from the constitution "
+                             "(off by default; filtered samples saved separately)")
 
     # LoRA / training
     parser.add_argument("--lora-rank", type=int, default=64)
@@ -3962,4 +4221,5 @@ if __name__ == "__main__":
         torch_memory_fraction=args.torch_memory_fraction,
         oct_dpo_micro_batch_size=args.oct_dpo_micro_batch_size,
         oct_sft_micro_batch_size=args.oct_sft_micro_batch_size,
+        filter_meta_trait_leakage=args.filter_meta_trait_leakage,
     )
