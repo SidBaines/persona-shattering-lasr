@@ -94,6 +94,7 @@ class VllmProvider(InferenceProvider):
             dtype=vllm_cfg.dtype,
             gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
             enforce_eager=vllm_cfg.enforce_eager,
+            enable_prefix_caching=vllm_cfg.enable_prefix_caching,
             trust_remote_code=False,
         )
         if vllm_cfg.max_model_len is not None:

@@ -66,6 +66,16 @@ class OpenRouterProviderConfig(BaseModel):
     api_key_env: str = "OPENROUTER_API_KEY"
     app_url: str | None = None
     app_name: str | None = None
+    # Provider routing object passed as-is to OpenRouter's `provider` field.
+    # See https://openrouter.ai/docs/guides/routing/provider-selection
+    # e.g. {"order": ["fireworks"], "allow_fallbacks": False}
+    # None = use OpenRouter's default routing behaviour.
+    provider_routing: dict | None = None
+    # Reasoning/extended thinking config passed as-is to OpenRouter's `reasoning` field.
+    # See https://openrouter.ai/docs/use-cases/reasoning-tokens
+    # e.g. {"effort": "high"} for OpenAI/xAI models, {"max_tokens": 16000} for Anthropic.
+    # None = no reasoning.
+    reasoning: dict | None = None
 
 
 class AnthropicProviderConfig(BaseModel):
@@ -83,6 +93,8 @@ class VllmProviderConfig(BaseModel):
     max_model_len: int | None = None
     # LoRA adapter path (local dir or HF repo).  None = base model only.
     adapter_path: str | None = None
+    # Enable automatic prefix caching (reuse KV cache for shared prefixes).
+    enable_prefix_caching: bool = True
     # Enforce eager mode (disables CUDA graphs). Useful for debugging.
     enforce_eager: bool = False
     # Max simultaneous in-batch LoRA adapters (GPU hot slots).

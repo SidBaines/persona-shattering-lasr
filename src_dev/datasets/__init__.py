@@ -2,6 +2,7 @@
 
 from src_dev.datasets.core import (
     export_dataset,
+    find_consecutive_assistant_turn_sample_ids,
     get_run_paths,
     ingest_source_dataset,
     init_run,
@@ -33,6 +34,7 @@ __all__ = [
     "ingest_source_dataset",
     "load_sample_inputs",
     "load_samples",
+    "find_consecutive_assistant_turn_sample_ids",
     "record_stage_event",
     "write_message_append",
     "write_inference_result",
