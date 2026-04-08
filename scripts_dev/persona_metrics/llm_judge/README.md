@@ -49,6 +49,63 @@ cfg = judge_config("deepseek_v3")    # Cheap fallback
 
 All models go through OpenRouter. Set `OPENROUTER_API_KEY` in `.env`.
 
+### Scoring a batch (e.g. distillation data or sweep responses)
+
+```python
+"""Score distillation responses on all OCEAN traits + coherence."""
+import asyncio
+import json
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from src_dev.persona_metrics.config import judge_config
+from src_dev.persona_metrics.registry import get_persona_metric
+
+load_dotenv()
+
+TRAITS = ["agreeableness_v2", "neuroticism_v2", "openness_v2",
+          "conscientiousness_v2", "extraversion_v2", "coherence_v2"]
+JUDGE = judge_config("gemini_flash")  # or "haiku" for higher quality
+
+
+async def score_file(path: Path) -> list[dict]:
+    data = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    responses = [d["response"] for d in data]
+    questions = [d["question"] for d in data]
+
+    for trait in TRAITS:
+        metric = get_persona_metric(trait, judge_config=JUDGE)
+        results = await metric.evaluate_batch_async(responses, questions)
+        for d, r in zip(data, results):
+            d.update(r)  # adds e.g. "agreeableness_v2.score", "agreeableness_v2.reasoning"
+
+    return data
+
+
+scored = asyncio.run(score_file(Path("scratch/my_responses.jsonl")))
+Path("scratch/my_responses_scored.jsonl").write_text(
+    "\n".join(json.dumps(d) for d in scored)
+)
+```
+
+### Using judges in a cross-trait bleed check
+
+```python
+"""Score distillation data for cross-trait bleed (OCT pipeline style)."""
+from src_dev.persona_metrics.config import judge_config
+
+# Define a panel — gemini for speed, kimi for quality on target trait
+JUDGE_CONFIGS = {
+    "gemini_flash": judge_config("gemini_flash"),
+    "kimi_k2": judge_config("kimi_k2"),
+}
+
+# Use with scripts_dev/oct_pipeline/judge_distillation.py
+# or pass directly to any metric:
+metric = get_persona_metric("agreeableness_v2", judge_config=JUDGE_CONFIGS["kimi_k2"])
+```
+
 Cost estimates per calibration run (33 items × 3 repeats = 99 calls):
 
 | Model | Input $/M | Output $/M | ~Cost/run |
