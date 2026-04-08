@@ -6,31 +6,31 @@ End-to-end pipeline for running [bloom](https://github.com/safety-research/bloom
 
 | Script | Purpose |
 |--------|---------|
-| `run_bloom_eval.py` | Main orchestration wrapper — run the full pipeline with caching, multi-target, multi-judge, vLLM auto-launch, and results plotting |
-| `add_bloom_quality.py` | Add an `LLMJudgeMetric` rubric as an additional quality judge to `bloom-data` |
+| `runner.py` | Main orchestration wrapper -- run the full pipeline with caching, multi-target, multi-judge, vLLM auto-launch, and results plotting |
+| `configs/default.py` | Default Python-level config overrides (targets, judges, seed, etc.) |
 
 ## Quick start
 
 ```bash
 # Full run: two targets, two judges, default trait (conscientiousness)
-uv run python scripts_dev/bloom_evals/run_bloom_eval.py \
+uv run python scripts_dev/evals/bloom/runner.py \
     --targets llama-3.1-8b-it-base conscientiousness-low-llama \
     --judgment-models gpt-5-mini gpt-5-nano
 
 # Different OCEAN trait
-uv run python scripts_dev/bloom_evals/run_bloom_eval.py \
+uv run python scripts_dev/evals/bloom/runner.py \
     --trait neuroticism \
     --targets llama-3.1-8b-it-base conscientiousness-low-llama \
     --judgment-models gpt-5-mini gpt-5-nano
 
 # Dry run: print run IDs and exit without calling any APIs
-uv run python scripts_dev/bloom_evals/run_bloom_eval.py --dry-run
+uv run python scripts_dev/evals/bloom/runner.py --dry-run
 
 # Re-run with a different seed (new independent run of the same config)
-uv run python scripts_dev/bloom_evals/run_bloom_eval.py --seed 1
+uv run python scripts_dev/evals/bloom/runner.py --seed 1
 
 # Run only specific stages (e.g. re-judge existing rollouts with a new model)
-uv run python scripts_dev/bloom_evals/run_bloom_eval.py \
+uv run python scripts_dev/evals/bloom/runner.py \
     --stages judgment \
     --judgment-models gpt-5-mini
 ```
@@ -43,10 +43,12 @@ The pipeline is configured through files in `bloom-data/`:
 |------|---------|
 | `seed.yaml` | Pipeline config: models, num_scenarios, num_reps, etc. |
 | `behaviors.json` | Behavior + quality descriptions used by understanding/ideation/judgment |
-| `models.json` | Short-name → LiteLLM ID registry (plus vLLM launch config for local models) |
+| `models.json` | Short-name -> LiteLLM ID registry (plus vLLM launch config for local models) |
 | `configurable_prompts/default.json` | Prompt overrides for each stage |
 
 **The `seed.yaml` is never modified at runtime.** Each stage runs against a temporary copy of `bloom-data` with overrides applied, so crashes leave no residue.
+
+Python-level defaults (targets, judges, seed) live in `configs/default.py`. CLI flags override config values when specified.
 
 ## Allowed evaluator models
 
@@ -72,7 +74,7 @@ Use `--trait` to switch between OCEAN personality traits. The flag accepts full 
 | `--trait a` | Agreeableness |
 | `--trait e` | Extraversion |
 
-When `--trait` is given, the behavior description (for ideation) and the judgment rubric (1–9 OCEAN scale) are auto-generated from `src_dev/common/persona_definitions.py`. Each trait gets distinct run IDs so caches don't collide across traits.
+When `--trait` is given, the behavior description (for ideation) and the judgment rubric (1-9 OCEAN scale) are auto-generated from `src_dev/common/persona_definitions.py`. Each trait gets distinct run IDs so caches don't collide across traits.
 
 If `--trait` is omitted, the script uses whatever `behavior.name` is set to in `seed.yaml` with the existing manually-crafted prompts (currently: conscientiousness).
 
@@ -105,10 +107,10 @@ Add an entry to `bloom-data/models.json`:
 }
 ```
 
-- `id`: LiteLLM model ID — the `openai/` prefix routes to the local vLLM server
+- `id`: LiteLLM model ID -- the `openai/` prefix routes to the local vLLM server
 - `vllm.model`: HuggingFace model ID (or local path) for the base model
-- `vllm.lora_path`: path to the LoRA adapter directory (relative to project root), containing `adapter_config.json` — always use the `-persona` subdirectory
-- `vllm.max_lora_rank`: LoRA rank (check `adapter_config.json` → `r` field); defaults to 16 if omitted
+- `vllm.lora_path`: path to the LoRA adapter directory (relative to project root), containing `adapter_config.json` -- always use the `-persona` subdirectory
+- `vllm.max_lora_rank`: LoRA rank (check `adapter_config.json` -> `r` field); defaults to 16 if omitted
 
 ## vLLM
 
@@ -125,11 +127,11 @@ Use `--no-vllm` to disable auto-launch (the script will then fail fast with inst
 
 ## Caching and persistence
 
-Each pipeline stage gets a **deterministic run ID** (12-hex SHA256) derived from all config fields that materially affect that stage's output. The cache lookup order for each stage is:
+Each pipeline stage gets a **deterministic run ID** (12-hex SHA256) derived from all config fields that materially affect that stage's output. Run IDs are computed using the shared `src_dev.eval_stages` module. The cache lookup order for each stage is:
 
-1. **Local**: `bloom-cache/bloom-evals/{stage}/{run_id}/`
-2. **Remote**: HuggingFace dataset repo `bloom-evals/{stage}/{run_id}/`
-3. **Run**: execute the stage → save to local cache → upload to HF
+1. **Local**: `bloom-cache/evals/bloom/{stage}/{run_id}/`
+2. **Remote**: HuggingFace dataset repo `evals/bloom/{stage}/{run_id}/`
+3. **Run**: execute the stage -> save to local cache -> upload to HF
 
 This means:
 - Changing the judgment model only re-runs judgment; understanding/ideation/rollout are reused
@@ -149,11 +151,11 @@ HF uploads go to `persona-shattering-lasr/monorepo` by default. Use `--hf-repo` 
 
 ## Results
 
-After all stages complete, a `results.png` is saved to `bloom-results/{behavior}/results.png` with three panels:
+After all stages complete, three plot PNGs are saved to `bloom-results/{behavior}/`:
 
-- **Top**: mean OCEAN conscientiousness score (±std) per target, grouped bars by judge, with individual data points
-- **Middle**: box plots of score distribution per (target, judge) pair
-- **Bottom**: additional quality metrics (unrealism, evaluation_awareness, evaluation_invalidity, coherence) per target
+- **scores_mean.png**: mean OCEAN score (+/-std) per target, grouped bars by judge, with individual data points
+- **scores_hist.png**: histograms of score distribution per (target, judge) pair
+- **scores_quality.png**: additional quality metrics (coherence) per target
 
 ## Adding a quality judge
 
