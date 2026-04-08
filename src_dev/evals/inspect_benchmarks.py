@@ -56,12 +56,22 @@ def _build_popqa_task(limit: int | None = None) -> Task:
 def _load_trait_dataset(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
+    shuffle_choices: bool = True,
+    seed: int = 42,
 ) -> MemoryDataset:
     """Load and sample TRAIT dataset evenly across selected trait splits.
 
     Returns an enriched MemoryDataset with answer_mapping metadata attached
     to every sample.  Shared by both the text-based and logprob-based task
     builders.
+
+    Args:
+        samples_per_trait: Number of questions per trait split.
+        trait_splits: Which TRAIT splits to include (default: all 8).
+        shuffle_choices: If True, randomly shuffle each sample's choices and
+            remap the per-sample answer_mapping to match.  This removes
+            positional bias (TRAIT always puts high-trait answers at A/B).
+        seed: Random seed for choice shuffling.
     """
     import os
     from inspect_evals.personality.personality import (
@@ -96,8 +106,26 @@ def _load_trait_dataset(
         all_samples.extend(split_samples[:samples_per_trait])
 
     combined_ds = MemoryDataset(all_samples)
-    meta = {"answer_mapping": {"A": 1, "B": 1, "C": 0, "D": 0}}
-    return enrich_dataset(combined_ds, meta)
+    original_answer_mapping: dict[str, int] = {"A": 1, "B": 1, "C": 0, "D": 0}
+    meta = {"answer_mapping": original_answer_mapping}
+    combined_ds = enrich_dataset(combined_ds, meta)
+
+    if shuffle_choices:
+        # Capture each sample's original target before shuffling so we can
+        # remap answer_mapping afterwards.
+        orig_targets = [list(s.target) if isinstance(s.target, list) else [s.target]
+                        for s in combined_ds]
+        combined_ds.shuffle_choices(seed=seed)
+        for sample, orig_target in zip(combined_ds, orig_targets):
+            new_target = sample.target if isinstance(sample.target, list) else [sample.target]
+            # orig_target[i] = old letter at position i
+            # new_target[i]  = new letter that the original position i moved to
+            sample.metadata["answer_mapping"] = {
+                new_letter: original_answer_mapping[old_letter]
+                for old_letter, new_letter in zip(orig_target, new_target)
+            }
+
+    return combined_ds
 
 
 def _build_trait_sampled_task(
