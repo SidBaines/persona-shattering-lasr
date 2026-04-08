@@ -31,3 +31,17 @@ bloom-cache/
 bloom-results/
 
 .devcontainer
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/sections/*.aux
+paper/appendices/*.aux
+paper/main.pdf

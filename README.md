@@ -139,6 +139,19 @@ All modifiers snapshot state at init and `restore()` is idempotent.
 
 Training logs loss, eval metrics, and sample generations to Weights & Biases.
 
+## Paper
+
+The LaTeX paper source is in `paper/`. See `paper/CLAUDE.md` for full conventions.
+
+```bash
+# Install LaTeX (Ubuntu/Debian; macOS: brew install --cask mactex-no-gui)
+apt-get update && apt-get install -y texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-bibtex-extra
+
+# Build the paper
+cd paper && make          # Full build -> paper/main.pdf
+cd paper && make quick    # Fast single-pass (no bibliography)
+```
+
 ## For Developers
 
 See [AGENTS.md](AGENTS.md) for coding guidelines and architecture overview.
