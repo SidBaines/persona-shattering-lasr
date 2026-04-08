@@ -1,0 +1,60 @@
+\documentclass{article}
+
+% NeurIPS 2025 style (swap to neurips_2026 when available)
+\usepackage[preprint]{neurips_2025}
+
+% Core packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{natbib}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{multirow}
+
+% Figure search path
+\graphicspath{{figures/}}
+
+\title{Persona Shattering: Structured Modulation and Discovery of LLM Personality via LoRA Arithmetic}
+
+% TODO: Add authors
+% \author{
+%   Author One \\
+%   Affiliation \\
+%   \texttt{email@example.com}
+% }
+
+\begin{document}
+
+\maketitle
+
+\input{sections/abstract}
+
+\input{sections/introduction}
+\input{sections/personas}
+\input{sections/supervised}
+\input{sections/unsupervised}
+\input{sections/related_work}
+\input{sections/discussion}
+\input{sections/further_work}
+\input{sections/conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\input{appendices/toy_models}
+\input{appendices/training_methods}
+\input{appendices/constitutions}
+\input{appendices/distillation_bias}
+\input{appendices/ocean_evals}
+\input{appendices/ocean_results}
+\input{appendices/rank}
+\input{appendices/trait_metrics}
+\input{appendices/alternative_training}
+
+\end{document}

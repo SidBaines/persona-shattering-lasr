@@ -371,3 +371,28 @@ Required keys:
 - `OPENROUTER_API_KEY` - For OpenRouter inference/evaluation providers
 - `WANDB_API_KEY` - For W&B logging (optional)
 - `HF_TOKEN` - For gated HuggingFace models (optional)
+
+---
+
+## Paper
+
+The LaTeX paper source lives in `paper/`. See `paper/CLAUDE.md` for paper-specific instructions (build commands, file structure, conventions).
+
+### Figure Output Convention (Critical for All Agents)
+
+When producing plots or figures that may appear in the paper, save a copy to the appropriate subdirectory under `paper/figures/`:
+
+- `paper/figures/overview/` — methodology diagrams
+- `paper/figures/main/` — main body figures (Sections 1–3)
+- `paper/figures/unsupervised/` — Section 4 figures
+- `paper/figures/appendix/` — appendix figures
+
+Naming convention: `fig_<section>_<short_name>.pdf` (or `.png` for raster).
+Examples: `fig_3_3_1_1_trait_scaling.pdf`, `fig_F_1_openness_amp.pdf`.
+
+The canonical path constant is available via:
+```python
+from src_dev.visualisations import PAPER_FIGURES_DIR
+```
+
+`paper/figures/tmp/` contains placeholder images extracted from the original markdown draft. These are **all** to be replaced by publication-quality figures. Once all are replaced, delete the `tmp/` directory.

@@ -1,0 +1,163 @@
+# Paper Writing Guidelines
+
+## Overview
+
+This directory contains the LaTeX source for the paper on persona modulation and discovery in LLMs via LoRA fine-tuning. The paper is built from `main.tex` which includes section files from `sections/` and `appendices/`.
+
+---
+
+## Build
+
+### Prerequisites
+
+Install LaTeX if not already available:
+
+```bash
+# Ubuntu/Debian
+apt-get update && apt-get install -y texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-bibtex-extra
+
+# macOS
+brew install --cask mactex-no-gui
+```
+
+Verify with `which pdflatex && which bibtex`.
+
+### Building the PDF
+
+Run from this directory (`paper/`):
+
+```bash
+make          # Full build (pdflatex -> bibtex -> pdflatex -> pdflatex)
+make quick    # Single pdflatex pass (fast iteration, no bibliography update)
+make clean    # Remove build artifacts
+```
+
+Output: `paper/main.pdf`
+
+---
+
+## Where to Put Figures (Critical)
+
+**ALL figures for the paper go in `paper/figures/`.**
+
+### Subdirectories
+
+| Directory | Contents |
+|-----------|----------|
+| `figures/overview/` | Figure 0 (methodology diagram) |
+| `figures/main/` | Main body figures (Sections 1--3) |
+| `figures/unsupervised/` | Section 4 figures |
+| `figures/appendix/` | Appendix figures (F.1--F.11, etc.) |
+| `figures/tmp/` | **Placeholder images from the original markdown draft. ALL of these must be replaced with publication-quality versions, then this folder deleted.** |
+
+### Naming Convention
+
+```
+fig_<section>_<short_descriptive_name>.<ext>
+```
+
+- Use **PDF** for vector plots (matplotlib `savefig(..., format='pdf')`) — preferred
+- Use **PNG** for raster images or screenshots
+- Lowercase, underscores, no spaces
+
+Examples:
+- `figures/main/fig_3_3_1_1_trait_scaling.pdf`
+- `figures/appendix/fig_F_1_openness_amp.pdf`
+- `figures/overview/fig_0_methodology.pdf`
+
+### For Agents Running Experiments
+
+If you are generating a plot or figure as part of an experiment and it will appear in the paper, **save a copy to the appropriate `paper/figures/` subdirectory** in addition to any experiment-local output. When in doubt, use `paper/figures/main/`.
+
+You can import the canonical path:
+```python
+from src_dev.visualisations import PAPER_FIGURES_DIR
+# PAPER_FIGURES_DIR / "main" / "fig_3_3_1_1_trait_scaling.pdf"
+```
+
+---
+
+## File Structure
+
+```
+paper/
+  main.tex              # Root document — only \input statements, no content
+  references.bib        # All citations in BibTeX format
+  neurips_2025.sty      # Style file (do not modify)
+  Makefile              # Build system
+  CLAUDE.md             # This file
+  sections/
+    abstract.tex        # Abstract
+    introduction.tex    # Section 1: Introduction
+    personas.tex        # Section 2: Personas in Language Models
+    supervised.tex      # Section 3: Supervised persona modulation (OCEAN)
+    unsupervised.tex    # Section 4: Unsupervised persona exploration
+    related_work.tex    # Section 5: Related work
+    discussion.tex      # Section 6: Discussion
+    further_work.tex    # Section 7: Further work
+    conclusion.tex      # Section 8: Conclusion
+  appendices/
+    toy_models.tex      # Appendix A: Modifying LoRA Adapters of Toy Models
+    training_methods.tex # Appendix B: LoRA training methods
+    constitutions.tex   # Appendix C: Constitutions for Personas
+    distillation_bias.tex # Appendix D: Detecting distillation bias
+    ocean_evals.tex     # Appendix E: OCEAN Evaluations
+    ocean_results.tex   # Appendix F: OCEAN results
+    rank.tex            # Appendix G: LoRA Adapter Rank
+    trait_metrics.tex   # Appendix H: TRAIT metrics of OpenCharacters
+    alternative_training.tex # Appendix I: Alternative training methods
+  figures/              # All paper figures (see above)
+  tables/               # Auto-generated table data
+```
+
+---
+
+## Conventions
+
+### Labels
+- Figures: `\label{fig:<section>:<name>}` (e.g., `\label{fig:3.3.1:trait-scaling}`)
+- Sections: `\label{sec:<name>}` (e.g., `\label{sec:introduction}`)
+- Tables: `\label{tab:<name>}`
+- Use `\cref{}` for cross-references
+
+### Captions
+- Captions go **below** figures, **above** tables
+- Long captions: first sentence is the "title", rest is explanation
+
+### Citations
+- Key format: `authorYEARkeyword` (e.g., `lu2026assistant`, `hu2021lora`)
+- All citations go in `references.bib` — do not use `\bibitem`
+- Use `\citep{}` for parenthetical, `\citet{}` for textual
+
+---
+
+## Current Status and TODOs
+
+The LaTeX files were bootstrapped from `paperDraft.md` via a one-time conversion script. They need cleanup.
+
+### Finding TODOs
+```bash
+grep -rn "TODO\|DUMMY" sections/ appendices/
+```
+
+### Known Issues
+- Some figure captions may have formatting artifacts from the markdown conversion
+- `figures/tmp/` images are all placeholders — need replacement from plotting scripts
+- Several `\cite{TODO}` entries need real citation keys
+- Appendices D, E are mostly empty (content was sparse in draft)
+- Section 8 (Conclusion) is empty
+- Author list is not set
+
+---
+
+## Relationship to Codebase
+
+The paper lives alongside the research code. Key plotting scripts that generate paper figures:
+
+| Script | Generates |
+|--------|-----------|
+| `src_dev/visualisations/plot_scaling.py` | TRAIT/MMLU scaling plots (Fig 3.3.1.x, Appendix F) |
+| `src_dev/visualisations/plot_judge_sweep.py` | Judge score sweep plots |
+| `src_dev/visualisations/ocean_boxplot.py` | OCEAN comparison boxplots |
+| `scripts_dev/personality_evals/plot_hf_personas.py` | Per-persona trait sweep figures |
+| `src_dev/visualisations/plot_rollout_sweep.py` | Rollout behavior sweep plots |
