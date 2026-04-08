@@ -11,10 +11,17 @@ from src_dev.common.config import DatasetConfig
 
 
 class JudgeLLMConfig(BaseModel):
-    """Configuration for LLM-as-judge evaluations (e.g., CoherenceEvaluation)."""
+    """Configuration for LLM-as-judge evaluations (e.g., CoherenceEvaluation).
 
-    provider: str = "openai"  # "openai", "openrouter", "anthropic"
-    model: str = "gpt-4o-mini"
+    Default model is Gemini Flash via OpenRouter — cheapest option with
+    good calibration (QWK 0.888 on coherence, 0.93+ on OCEAN traits).
+
+    See :data:`JUDGE_PANEL` for the recommended model panel and
+    :func:`judge_config` for a convenience constructor.
+    """
+
+    provider: str = "openrouter"
+    model: str = "google/gemini-2.0-flash-001"
     api_key_env: str | None = None  # If None, uses default for provider
     max_tokens: int = 1024
     temperature: float = 0.0  # Deterministic by default for judging
@@ -93,3 +100,85 @@ class PersonaMetricsResult(BaseModel):
     num_samples: int = 0
     evaluations_run: list[str] = []
     aggregates: dict[str, Any] = {}
+
+
+# ---------------------------------------------------------------------------
+# Recommended judge panel (calibrated April 2026)
+# ---------------------------------------------------------------------------
+#
+# Calibrated on golden datasets in data/judge_calibration/ for all 5 OCEAN
+# traits (-4..+4) and coherence (0..10).  Calibration script:
+#   scripts_dev/persona_metrics/llm_judge/golden_calibration.py
+#
+# Judge definitions (prompts, few-shot examples) live in:
+#   src_dev/persona_metrics/metrics/ocean_v2.py    — OCEAN traits
+#   src_dev/persona_metrics/metrics/coherence.py   — Coherence (CoherenceV2Evaluation)
+#   src_dev/common/persona_definitions.py          — OCEAN trait definitions
+#   src_dev/common/coherence_definition.py         — Coherence dimension definitions
+#
+# Golden datasets:
+#   data/judge_calibration/{trait}.jsonl  — 33-36 items per trait, hand-labeled
+#
+# Selection criteria (coherence QWK / OCEAN mean Spearman):
+#   Kimi K2:      best quality, 50 rpm rate limit on OpenRouter
+#   Haiku 3.5:    best quality + throughput balance
+#   Gemini Flash:  good quality, cheapest, highest throughput — default
+#   DeepSeek V3:  good quality, cheap fallback
+#
+# Retired:
+#   GPT-5 Mini:   worst calibration of all tested, most expensive, Azure 403
+#                 content-policy blocks on personality prompts via OpenRouter
+#   GPT-4o Mini:  superseded by calibrated panel
+#   Llama 4 Scout: poor rank-ordering (Spearman 0.86)
+
+JUDGE_PANEL: dict[str, JudgeLLMConfig] = {
+    "gemini_flash": JudgeLLMConfig(
+        provider="openrouter",
+        model="google/gemini-2.0-flash-001",
+        max_concurrent=15,
+    ),
+    "haiku": JudgeLLMConfig(
+        provider="openrouter",
+        model="anthropic/claude-3.5-haiku",
+        max_concurrent=15,
+    ),
+    "kimi_k2": JudgeLLMConfig(
+        provider="openrouter",
+        model="moonshotai/kimi-k2",
+        max_concurrent=5,  # 50 rpm rate limit on OpenRouter
+    ),
+    "deepseek_v3": JudgeLLMConfig(
+        provider="openrouter",
+        model="deepseek/deepseek-chat-v3",
+        max_concurrent=15,
+    ),
+}
+
+
+def judge_config(
+    name: str = "gemini_flash",
+    *,
+    temperature: float = 0.0,
+    timeout: int = 60,
+) -> JudgeLLMConfig:
+    """Return a judge config from the recommended panel.
+
+    Args:
+        name: Panel key — one of "gemini_flash", "haiku", "kimi_k2", "deepseek_v3".
+        temperature: Override temperature (default 0.0 for deterministic judging,
+            use 0.7 for self-consistency measurement in calibration).
+        timeout: Request timeout in seconds.
+
+    Returns:
+        A :class:`JudgeLLMConfig` ready to pass to any judge metric.
+
+    Example::
+
+        from src_dev.persona_metrics.config import judge_config
+        cfg = judge_config("haiku")
+        cfg = judge_config("kimi_k2", temperature=0.7)
+    """
+    if name not in JUDGE_PANEL:
+        available = ", ".join(sorted(JUDGE_PANEL))
+        raise KeyError(f"Unknown judge '{name}'. Available: {available}")
+    return JUDGE_PANEL[name].model_copy(update={"temperature": temperature, "timeout": timeout})
