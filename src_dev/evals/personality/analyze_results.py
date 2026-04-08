@@ -203,17 +203,23 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
                 if not trait or not isinstance(value, (int, float)):
                     break
                 val = float(value)
-                if not math.isnan(val):
-                    group_scores.setdefault(trait, []).append(val)
-                # Collect per-sample choice mass for diagnostics.
-                # Prefer the pre-computed field; fall back to computing
-                # from stored logprobs for backward-compat with older logs.
+                # Collect per-sample choice mass for diagnostics and
+                # weighted CI computation.  Prefer the pre-computed field;
+                # fall back to computing from stored logprobs for
+                # backward-compat with older logs.
                 score_meta = score_data.get("metadata") or {}
                 cm = score_meta.get("choice_mass")
                 if cm is None:
                     lps = score_meta.get("logprobs")
                     if isinstance(lps, dict) and lps:
                         cm = sum(math.exp(v) for v in lps.values())
+                if not math.isnan(val):
+                    group_scores.setdefault(trait, []).append(val)
+                    # Store per-trait choice mass parallel to trait scores,
+                    # so the weighted bootstrap can pair each score with its
+                    # reliability weight.
+                    cm_val = float(cm) if isinstance(cm, (int, float)) else 1.0
+                    group_scores.setdefault(f"_cm_{trait}", []).append(cm_val)
                 if isinstance(cm, (int, float)):
                     group_scores.setdefault("_choice_mass", []).append(float(cm))
             elif is_personality:
@@ -438,6 +444,7 @@ _INTERVAL_METHODS = Literal[
     "ci_from_ppf",
     "ci_from_wilson",
     "ci_from_bootstrap",
+    "ci_from_weighted_bootstrap",
 ]
 
 
@@ -477,9 +484,9 @@ class IntervalMethod:
                 raise ValueError("confidence must not be set for method 'std'")
         else:
             raise ValueError(f"Unknown method {self.method!r}")
-        if self.method == "ci_from_bootstrap":
+        if self.method in ("ci_from_bootstrap", "ci_from_weighted_bootstrap"):
             if self.n_resamples is None:
-                raise ValueError("n_resamples is required for method 'ci_from_bootstrap'")
+                raise ValueError("n_resamples is required for method {self.method!r}")
             if self.n_resamples < 1:
                 raise ValueError(f"n_resamples must be >= 1, got {self.n_resamples}")
 
@@ -504,6 +511,14 @@ class IntervalMethod:
             return cls(method="ci_from_ppf", confidence=float(m.group(1)))
 
         # Full format: ci{N}_from_{method} or ci{N}_from_bootstrap_{K}
+        m = re.fullmatch(r"ci([\d.]+)_from_weighted_bootstrap_(\d+)", s)
+        if m:
+            return cls(
+                method="ci_from_weighted_bootstrap",
+                confidence=float(m.group(1)),
+                n_resamples=int(m.group(2)),
+            )
+
         m = re.fullmatch(r"ci([\d.]+)_from_bootstrap_(\d+)", s)
         if m:
             return cls(
@@ -519,13 +534,25 @@ class IntervalMethod:
         raise ValueError(
             f"Cannot parse interval string {s!r}. "
             "Expected 'std', 'ci95', 'ci95_from_ppf', 'ci95_from_wilson', "
-            "or 'ci95_from_bootstrap_1000'."
+            "'ci95_from_bootstrap_1000', or 'ci95_from_weighted_bootstrap_1000'."
         )
 
     @property
     def needs_raw_scores(self) -> bool:
         """Whether this method requires raw per-sample scores (``_raw_{col}`` columns)."""
-        return self.method in ("ci_from_wilson", "ci_from_bootstrap")
+        return self.method in (
+            "ci_from_wilson", "ci_from_bootstrap", "ci_from_weighted_bootstrap",
+        )
+
+    @property
+    def needs_weights(self) -> bool:
+        """Whether this method requires per-sample weights (``_raw__cm_{col}`` columns).
+
+        Weighted methods use per-sample choice mass as importance weights,
+        producing wider CIs when the model allocates little probability to
+        the target answer tokens.
+        """
+        return self.method == "ci_from_weighted_bootstrap"
 
     @property
     def label(self) -> str:
@@ -542,6 +569,8 @@ class IntervalMethod:
             return f"{conf} CI (Wilson)"
         if self.method == "ci_from_bootstrap":
             return f"{conf} CI (bootstrap, {self.n_resamples})"
+        if self.method == "ci_from_weighted_bootstrap":
+            return f"{conf} CI (mass-weighted bootstrap, {self.n_resamples})"
         return f"{conf} CI"
 
 
@@ -642,6 +671,111 @@ def _interval_ci_from_bootstrap(
     return (float(result.confidence_interval.low), float(result.confidence_interval.high))
 
 
+def _interval_ci_from_weighted_bootstrap(
+    values: np.ndarray,
+    weights: np.ndarray,
+    confidence: float,
+    n_resamples: int,
+    seed: int,
+) -> tuple[float, float]:
+    """CI via noise-injection bootstrap using choice mass to model measurement uncertainty.
+
+    Standard bootstrap CIs on logprob-based MCQ scores can be misleadingly
+    narrow when the model places most probability on non-answer tokens.  The
+    softmax-renormalized score is computed from only the answer-token
+    probabilities, discarding information about *how little* of the
+    distribution was actually observed.  When all samples have similarly low
+    choice mass, per-sample scores are consistent but unreliable — the
+    resulting CIs capture sampling uncertainty but miss measurement
+    uncertainty entirely.
+
+    This method injects per-sample noise proportional to ``(1 - choice_mass)``
+    to recover honest uncertainty estimates.  For each bootstrap iteration, every
+    resampled score is replaced by a mixture:
+
+        adjusted_i = cm_i * score_i + (1 - cm_i) * U_i
+
+    where ``cm_i`` is the choice mass for sample *i* and ``U_i ~ Uniform(0, 1)``
+    represents maximal ignorance about the trait score for the probability mass
+    that did NOT land on answer tokens.  The intuition: the ``cm``-fraction of
+    the distribution told us ``score``; for the ``(1-cm)``-fraction we know
+    nothing, so we model it as a random draw.
+
+    Effects on confidence intervals:
+
+    * **cm ≈ 1** (model focused on ABCD): noise ≈ 0, CI matches the standard
+      unweighted bootstrap.
+    * **cm ≈ 0** (model not answering ABCD): adjusted scores ≈ U(0,1), CI
+      converges to the maximum-ignorance interval around 0.5.
+
+    The corresponding point estimate uses the expected value of the noise term
+    (0.5) in place of the stochastic ``U_i``::
+
+        E[adjusted_i] = cm_i * score_i + (1 - cm_i) * 0.5
+
+    Methodology and supporting references:
+
+    * The noise-injection mechanism is analogous to a *measurement-error
+      model* (Carroll et al., 2006) where each observation has known, sample-
+      specific error variance.  Here the error variance is governed by the
+      complement of the choice mass — a direct, observable reliability
+      indicator — rather than requiring a separate error-variance estimate:
+          Carroll, R. J., Ruppert, D., Stefanski, L. A., & Crainiceanu, C. M.
+          (2006). Measurement Error in Nonlinear Models (2nd ed.). Chapman &
+          Hall/CRC.
+
+    * Wang et al. (2024) show that first-token logprob distributions and
+      text-generated answers diverge by >60 % for instruction-tuned models,
+      undermining the reliability of renormalized ABCD probabilities when the
+      model is not "trying" to output a letter:
+          "My Answer is C: First-Token Probabilities Do Not Match
+           Text Answers in API-Based LLMs"  (arXiv:2402.14499)
+
+    * Huang et al. (2025) model next-token logits as Dirichlet concentration
+      parameters and show that softmax normalization destroys evidence-strength
+      information.  Choice mass is a lightweight proxy for the total Dirichlet
+      concentration (alpha_0) on the answer set:
+          "LogU: Accurate LLM Log-Probability Estimation with
+           Uncertainty"  (arXiv:2502.00290)
+
+    * The choice of U(0,1) as the ignorance distribution for the unobserved
+      mass follows maximum-entropy reasoning: for a trait score known to lie
+      in [0, 1] with no further information, the uniform distribution has
+      the highest entropy (Jaynes, 2003):
+          Jaynes, E. T. (2003). Probability Theory: The Logic of Science.
+          Cambridge University Press.
+
+    Args:
+        values: Per-sample trait scores (0–1), from softmax-renormalized logprobs.
+        weights: Per-sample choice mass (0–1), the fraction of the model's
+            probability distribution on answer tokens.
+        confidence: Confidence level in percent, e.g. 95.0.
+        n_resamples: Number of bootstrap resamples.
+        seed: RNG seed for reproducibility.
+
+    Returns:
+        ``(ci_lower, ci_upper)`` as absolute bounds.
+    """
+    n = len(values)
+    if n <= 1:
+        return (0.0, 0.0)
+
+    rng = np.random.default_rng(seed)
+    boot_means = np.empty(n_resamples)
+    for i in range(n_resamples):
+        idx = rng.integers(0, n, size=n)
+        cm = weights[idx]
+        scores = values[idx]
+        noise = rng.uniform(0.0, 1.0, size=n)
+        adjusted = cm * scores + (1.0 - cm) * noise
+        boot_means[i] = adjusted.mean()
+
+    alpha = (100 - confidence) / 200  # half-alpha for two-sided
+    lo = np.percentile(boot_means, alpha * 100)
+    hi = np.percentile(boot_means, (1 - alpha) * 100)
+    return (float(lo), float(hi))
+
+
 def _resolve_interval_fn(
     method: IntervalMethod,
 ) -> Callable[[np.ndarray], float | tuple[float, float]]:
@@ -662,6 +796,15 @@ def _resolve_interval_fn(
     if method.method == "ci_from_bootstrap":
         return partial(
             _interval_ci_from_bootstrap,
+            confidence=method.confidence,
+            n_resamples=method.n_resamples,
+            seed=method.seed,
+        )
+    if method.method == "ci_from_weighted_bootstrap":
+        # Weighted bootstrap has a (values, weights) -> (lo, hi) signature;
+        # _agg_sweep handles the weights argument specially.
+        return partial(
+            _interval_ci_from_weighted_bootstrap,
             confidence=method.confidence,
             n_resamples=method.n_resamples,
             seed=method.seed,
@@ -690,6 +833,7 @@ def _agg_sweep(
     """
     interval_fn = _resolve_interval_fn(interval) if interval is not None else None
     needs_raw = interval is not None and interval.needs_raw_scores
+    needs_weights = interval is not None and interval.needs_weights
     asymmetric = needs_raw  # raw-score methods always produce asymmetric bounds
     rows = []
     for scale, grp in df.groupby("scale"):
@@ -723,6 +867,28 @@ def _agg_sweep(
                     if len(raw_all) == 0:
                         row[f"{col}_ci_low"] = float("nan")
                         row[f"{col}_ci_high"] = float("nan")
+                    elif needs_weights:
+                        # Noise-injection bootstrap: use per-sample choice mass
+                        # to model measurement uncertainty from low coverage.
+                        weight_col = f"_raw__cm_{col}"
+                        if weight_col in grp.columns:
+                            wt_lists = grp[weight_col].dropna().tolist()
+                            wt_all = np.concatenate(wt_lists) if wt_lists else np.ones(len(raw_all))
+                        else:
+                            # No per-trait choice mass available; fall back to
+                            # cm=1.0 (equivalent to unweighted bootstrap).
+                            wt_all = np.ones(len(raw_all))
+                        # Ensure parallel alignment; truncate to shorter if needed.
+                        min_len = min(len(raw_all), len(wt_all))
+                        raw_all = raw_all[:min_len]
+                        wt_all = wt_all[:min_len]
+                        low, high = interval_fn(raw_all, wt_all)  # type: ignore[misc]
+                        # Point estimate: E[cm * score + (1-cm) * U(0,1)]
+                        #               = cm * score + (1-cm) * 0.5
+                        adjusted = wt_all * raw_all + (1.0 - wt_all) * 0.5
+                        row[f"{col}_mean"] = float(adjusted.mean())
+                        row[f"{col}_ci_low"] = low
+                        row[f"{col}_ci_high"] = high
                     else:
                         low, high = interval_fn(raw_all)  # type: ignore[misc]
                         row[f"{col}_ci_low"] = low
