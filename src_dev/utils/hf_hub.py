@@ -272,6 +272,62 @@ def download_dataset_subpath(
     return downloaded_path
 
 
+def download_path_to_dir(
+    *,
+    repo_id: str,
+    path_in_repo: str,
+    target_dir: Path,
+    allow_patterns: list[str] | None = None,
+) -> Path:
+    """Download a subtree from a dataset repo directly into target_dir.
+
+    Unlike ``download_from_dataset_repo``, which replicates the full repo path
+    structure under ``local_dir``, this function strips the ``path_in_repo``
+    prefix so that files from ``{path_in_repo}/foo`` land at ``target_dir/foo``.
+
+    Useful for rehydrating a run directory from HF into the exact local path
+    it was originally written to (e.g. to regenerate plots without re-running).
+
+    Args:
+        repo_id: HuggingFace dataset repo ID (``org/name``).
+        path_in_repo: Subtree within the repo to download.
+        target_dir: Local directory to place the downloaded content in.
+            Created if it does not exist.
+        allow_patterns: Optional glob patterns *relative to path_in_repo*.
+            If None, all files under path_in_repo are downloaded.
+
+    Returns:
+        target_dir.
+    """
+    import shutil
+    import tempfile
+
+    _configure_timeout()
+    token = _get_token()
+
+    if allow_patterns is not None:
+        prefixed: list[str] = [f"{path_in_repo}/{p}" for p in allow_patterns]
+    else:
+        prefixed = [f"{path_in_repo}/**", f"{path_in_repo}/*"]
+
+    with tempfile.TemporaryDirectory() as staging:
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=staging,
+            allow_patterns=prefixed,
+            token=token,
+        )
+        src = Path(staging) / path_in_repo
+        target_dir = Path(target_dir)
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        shutil.copytree(src, target_dir)
+
+    return target_dir
+
+
 def download_file_from_dataset_repo(
     *,
     repo_id: str,
