@@ -125,6 +125,8 @@ ALLOWED_EVALUATOR_MODEL_IDS: frozenset[str] = frozenset({
     "openrouter/moonshotai/kimi-k2-0905",
     "openrouter/openai/gpt-5-mini",
     "openrouter/openai/gpt-5-nano",
+    "openrouter/anthropic/claude-opus-4-6",
+    "openrouter/z-ai/glm-4.5-air",
 })
 
 # Configurable-prompt keys that materially affect each stage's output.
@@ -592,6 +594,7 @@ def patched_bloom_data(
     seed_overrides: dict[str, Any],
     behaviors_extra: dict[str, str] | None = None,
     prompts_extra: dict[str, str] | None = None,
+    models_extra: dict[str, Any] | None = None,
 ) -> Generator[Path, None, None]:
     """Yield a temporary copy of bloom_data_dir with overrides applied.
 
@@ -602,6 +605,8 @@ def patched_bloom_data(
             ``{"judgment.model": "gpt-5-mini", "rollout.target": "llama-3.1-8b-it-base"}``
         behaviors_extra: Extra entries to merge into behaviors.json.
         prompts_extra: Extra entries to merge into the active configurable-prompts JSON.
+        models_extra: Extra entries to merge into models.json (e.g. dynamically
+            generated sweep targets).
     """
     with tempfile.TemporaryDirectory(prefix="bloom_data_") as tmp:
         tmp_dir = Path(tmp) / bloom_data_dir.name
@@ -633,6 +638,13 @@ def patched_bloom_data(
             prompts.update(prompts_extra)
             ppath.write_text(json.dumps(prompts, indent=2, ensure_ascii=False) + "\n")
 
+        # Patch models.json
+        if models_extra:
+            mpath = tmp_dir / "models.json"
+            models = json.loads(mpath.read_text()) if mpath.exists() else {}
+            models.update(models_extra)
+            mpath.write_text(json.dumps(models, indent=2, ensure_ascii=False) + "\n")
+
         yield tmp_dir
 
 
@@ -642,13 +654,14 @@ def _stage_data_dir(
     seed_overrides: dict[str, Any] | None = None,
     behaviors_extra: dict[str, str] | None = None,
     prompts_extra: dict[str, str] | None = None,
+    models_extra: dict[str, Any] | None = None,
 ) -> Generator[Path, None, None]:
     """Return a (possibly patched) bloom data dir for one stage.
 
     If no overrides are needed, yields the original directory directly to avoid
     the overhead of copying the entire bloom-data tree.
     """
-    if not seed_overrides and not behaviors_extra and not prompts_extra:
+    if not seed_overrides and not behaviors_extra and not prompts_extra and not models_extra:
         yield bloom_data_dir
     else:
         with patched_bloom_data(
@@ -656,6 +669,7 @@ def _stage_data_dir(
             seed_overrides or {},
             behaviors_extra,
             prompts_extra,
+            models_extra,
         ) as tmp_dir:
             yield tmp_dir
 
@@ -737,6 +751,107 @@ def _run_one_stage(
     print(f"  Done")
 
 
+# ---------------------------------------------------------------------------
+# LoRA scale sweep: adapter baking + dynamic model registration
+# ---------------------------------------------------------------------------
+
+
+def _sweep_target_name(scale: float) -> str:
+    """Return the short model name for a sweep scale point."""
+    return f"lora-scale-{scale:+.2f}"
+
+
+def prepare_sweep_targets(
+    adapter_ref: str,
+    base_model: str,
+    scale_points: list[float],
+    baked_dir: Path,
+    max_lora_rank: int = 64,
+) -> tuple[list[str], dict[str, Any]]:
+    """Bake LoRA adapters at each scale point and return dynamic model entries.
+
+    Skips scale points whose baked adapter directory already exists on disk.
+    Scale 0.0 is handled as the base model (no adapter, no baking needed).
+
+    Returns:
+        Tuple of (target_names, models_extra) where models_extra is a dict
+        suitable for merging into models_config / models.json.
+    """
+    import gc
+
+    import torch
+
+    from src.utils.lora_baking import bake_lora_scale
+    from src_dev.rollout_generation.model_providers import (
+        _load_peft_model,
+        _resolve_adapter_to_local,
+    )
+
+    baked_dir = Path(baked_dir)
+    baked_dir.mkdir(parents=True, exist_ok=True)
+
+    target_names: list[str] = []
+    models_extra: dict[str, Any] = {}
+
+    # Determine which non-zero scale points need baking
+    scales_to_bake = [
+        s for s in scale_points
+        if s != 0.0 and not (baked_dir / f"scale_{s:+.2f}").exists()
+    ]
+
+    if scales_to_bake:
+        print(f"  Baking {len(scales_to_bake)} adapter variant(s) to {baked_dir} ...")
+        model, _tokenizer = _load_peft_model(
+            base_model, adapter_ref, "default", "bfloat16"
+        )
+        for scale in scales_to_bake:
+            out_dir = baked_dir / f"scale_{scale:+.2f}"
+            print(f"    scale {scale:+.2f}: baking ...", flush=True)
+            bake_lora_scale(model, "default", scale, out_dir)
+
+        # Free PEFT model to avoid double GPU usage when vLLM launches
+        try:
+            model.cpu()
+        except Exception:
+            pass
+        del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    else:
+        n_existing = sum(1 for s in scale_points if s != 0.0)
+        if n_existing > 0:
+            print(f"  All {n_existing} adapter variant(s) already baked, skipping")
+
+    # Build model entries for each scale point
+    for scale in scale_points:
+        name = _sweep_target_name(scale)
+        target_names.append(name)
+
+        if scale == 0.0:
+            # Base model, no adapter
+            models_extra[name] = {
+                "id": f"openai/{name}",
+                "org": "local",
+                "name": f"Base model (scale 0.0)",
+                "vllm": {"model": base_model},
+            }
+        else:
+            adapter_path = str((baked_dir / f"scale_{scale:+.2f}").resolve())
+            models_extra[name] = {
+                "id": f"openai/{name}",
+                "org": "local",
+                "name": f"LoRA scale {scale:+.2f}",
+                "vllm": {
+                    "model": base_model,
+                    "lora_path": adapter_path,
+                    "max_lora_rank": max_lora_rank,
+                },
+            }
+
+    return target_names, models_extra
+
+
 def _config_for_target_and_judge(
     base_config: dict[str, Any], target: str | None, judge: str | None
 ) -> dict[str, Any]:
@@ -760,6 +875,17 @@ def run_pipeline(
     no_upload: bool,
     no_vllm: bool = False,
     trait: str | None = None,
+    # Model overrides (None = use seed.yaml default)
+    understanding_model: str | None = None,
+    ideation_model: str | None = None,
+    rollout_evaluator_model: str | None = None,
+    # LoRA scale sweep (all None = discrete target mode)
+    adapter_ref: str | None = None,
+    base_model: str | None = None,
+    scale_points: list[float] | None = None,
+    include_base: bool = True,
+    baked_adapters_dir: Path | None = None,
+    max_lora_rank: int = 64,
 ) -> None:
     """Run the full Bloom eval pipeline with caching and multi-target/judge support.
 
@@ -774,6 +900,16 @@ def run_pipeline(
         no_upload: If True, disable HF upload/download.
         no_vllm: If True, disable automatic vLLM launch.
         trait: OCEAN trait override (or None to use seed.yaml default).
+        understanding_model: Override understanding stage model.
+        ideation_model: Override ideation stage model.
+        rollout_evaluator_model: Override rollout evaluator model.
+        adapter_ref: LoRA adapter reference for sweep mode (HF ``repo::subfolder``
+            or local path).  When set, activates sweep mode.
+        base_model: HuggingFace base model ID (required for sweep mode).
+        scale_points: Scale factors for sweep mode.
+        include_base: If True, add scale=0.0 to scale_points if missing.
+        baked_adapters_dir: Directory for baked adapter cache.
+        max_lora_rank: Max LoRA rank for vLLM config.
     """
     cache_config = StageCacheConfig(
         cache_root=bloom_data_dir.parent / "bloom-cache",
@@ -801,11 +937,61 @@ def run_pipeline(
         g_behaviors_extra = {trait_name: behavior_desc}
         g_prompts_extra = {"judgment_system_additional": judgment_prompt}
 
+    # -- Model overrides: mutate in-memory config + seed overrides -----------
+    if understanding_model:
+        config["understanding"]["model"] = understanding_model
+        g_seed_overrides["understanding.model"] = understanding_model
+    if ideation_model:
+        config["ideation"]["model"] = ideation_model
+        g_seed_overrides["ideation.model"] = ideation_model
+    if rollout_evaluator_model:
+        config["rollout"]["model"] = rollout_evaluator_model
+        g_seed_overrides["rollout.model"] = rollout_evaluator_model
+
     behavior_name = config["behavior"]["name"]
     bloom_results_dir = bloom_data_dir.parent / "bloom-results" / behavior_name
 
-    # Resolve targets and judgment models (fall back to whatever is in seed.yaml)
-    t_models = targets if targets else [config["rollout"]["target"]]
+    # -- LoRA scale sweep mode ------------------------------------------------
+    sweep_mode = adapter_ref is not None
+    g_models_extra: dict[str, Any] | None = None
+
+    if sweep_mode:
+        if base_model is None:
+            sys.exit("Error: --base-model is required when --adapter-ref is set (sweep mode)")
+        if not scale_points:
+            sys.exit("Error: --scale-points is required when --adapter-ref is set (sweep mode)")
+
+        # Ensure 0.0 is in the scale points when include_base is True
+        if include_base and 0.0 not in scale_points:
+            scale_points = sorted([0.0] + list(scale_points))
+
+        if targets:
+            print("Warning: --targets is ignored in sweep mode (targets are generated from scale points)")
+
+        if not dry_run:
+            sweep_targets, g_models_extra = prepare_sweep_targets(
+                adapter_ref=adapter_ref,
+                base_model=base_model,
+                scale_points=scale_points,
+                baked_dir=Path(baked_adapters_dir) if baked_adapters_dir else Path("scratch/bloom-baked-adapters"),
+                max_lora_rank=max_lora_rank,
+            )
+        else:
+            # For dry-run, generate target names without baking
+            sweep_targets = [_sweep_target_name(s) for s in scale_points]
+            g_models_extra = {
+                name: {"id": f"openai/{name}", "org": "local", "name": f"LoRA scale {s:+.2f}", "vllm": {"model": base_model}}
+                for s, name in zip(scale_points, sweep_targets)
+            }
+
+        # Merge dynamic entries into in-memory models_config
+        models_config.update(g_models_extra)
+        t_models = sweep_targets
+    else:
+        # Discrete target mode
+        t_models = targets if targets else [config["rollout"]["target"]]
+
+    # Resolve judgment models (fall back to whatever is in seed.yaml)
     j_models = judgment_models if judgment_models else [config["judgment"]["model"]]
 
     # Fail fast if any evaluator model is not in the allowlist
@@ -849,7 +1035,7 @@ def run_pipeline(
     for stage in ["understanding", "ideation"]:
         if stage not in requested_stages:
             continue
-        with _stage_data_dir(bloom_data_dir, g_seed_overrides, g_behaviors_extra, g_prompts_extra) as data_dir:
+        with _stage_data_dir(bloom_data_dir, g_seed_overrides, g_behaviors_extra, g_prompts_extra, g_models_extra) as data_dir:
             _run_one_stage(
                 stage, base_ids[stage],
                 data_dir, bloom_results_dir, cache,
@@ -877,7 +1063,7 @@ def run_pipeline(
         rollout_id = per_target_ids[target][j_models[0]]["rollout"]
 
         if "rollout" in requested_stages:
-            with _stage_data_dir(bloom_data_dir, {**g_seed_overrides, "rollout.target": target}, g_behaviors_extra, g_prompts_extra) as data_dir:
+            with _stage_data_dir(bloom_data_dir, {**g_seed_overrides, "rollout.target": target}, g_behaviors_extra, g_prompts_extra, g_models_extra) as data_dir:
                 _run_one_stage(
                     "rollout", rollout_id,
                     data_dir, bloom_results_dir, cache,
@@ -889,7 +1075,7 @@ def run_pipeline(
                 jid = per_target_ids[target][judge]["judgment"]
                 if len(j_models) > 1:
                     print(f"\n  [ judge: {judge} ]")
-                with _stage_data_dir(bloom_data_dir, {**g_seed_overrides, "rollout.target": target, "judgment.model": judge}, g_behaviors_extra, g_prompts_extra) as data_dir:
+                with _stage_data_dir(bloom_data_dir, {**g_seed_overrides, "rollout.target": target, "judgment.model": judge}, g_behaviors_extra, g_prompts_extra, g_models_extra) as data_dir:
                     _run_one_stage(
                         "judgment", jid,
                         data_dir, bloom_results_dir, cache,
@@ -899,6 +1085,9 @@ def run_pipeline(
     print("\n-- COMPLETE --")
 
     plot_results(cache, per_target_ids, j_models, behavior_name)
+
+    if sweep_mode and scale_points:
+        plot_sweep_results(cache, per_target_ids, j_models, behavior_name, scale_points)
 
 
 # ---------------------------------------------------------------------------
@@ -1072,9 +1261,85 @@ def plot_results(
         print(f"\n  Plots saved -> {p1.name}, {p2.name}  (in {out_dir})")
 
 
+def plot_sweep_results(
+    cache: StageCache,
+    per_target_ids: dict[str, dict[str, Any]],
+    j_models: list[str],
+    behavior_name: str,
+    scale_points: list[float],
+    output_root: Path | None = None,
+) -> None:
+    """Plot scale-vs-OCEAN-score curve for a LoRA scale sweep.
+
+    Produces a line plot with error bars showing how the multi-turn
+    behavioral score varies with adapter scale.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        print("  [sweep-plot] matplotlib not available -- skipping")
+        return
+
+    all_scores = _load_judgment_scores(cache, per_target_ids, j_models)
+    if not all_scores:
+        print("  [sweep-plot] No judgment results found -- skipping")
+        return
+
+    out_dir = output_root or (ROOT / "bloom-results" / behavior_name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for ji, judge in enumerate(j_models):
+        xs, ys, yerrs = [], [], []
+        for scale in scale_points:
+            target_name = _sweep_target_name(scale)
+            sc = all_scores.get((target_name, judge), {}).get("conscientiousness", [])
+            if sc:
+                xs.append(scale)
+                ys.append(float(np.mean(sc)))
+                yerrs.append(float(np.std(sc)))
+            else:
+                xs.append(scale)
+                ys.append(float("nan"))
+                yerrs.append(0.0)
+
+        color = colors[ji % len(colors)]
+        ax.errorbar(
+            xs, ys, yerr=yerrs,
+            marker="o", linewidth=2, capsize=4, capthick=1.2,
+            label=judge, color=color, alpha=0.9,
+        )
+
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax.axvline(0, color="grey", linewidth=0.8, linestyle=":", alpha=0.5)
+    ax.set_xlabel("LoRA scale")
+    ax.set_ylabel(f"OCEAN {behavior_name}\n(bloom score - 5)")
+    ax.set_title(f"{behavior_name} -- bloom sweep (multi-turn)")
+    ax.set_ylim(-4.5, 4.5)
+    ax.legend(fontsize=8, title="Judge", title_fontsize=8)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+
+    plot_path = out_dir / "scores_sweep.png"
+    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n  Sweep plot saved -> {plot_path}")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+
+def _load_config_module(module_path: str) -> Any:
+    """Import and return a config module by dotted path."""
+    import importlib
+    return importlib.import_module(module_path)
 
 
 def main() -> None:
@@ -1082,16 +1347,22 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "--bloom-data", default="bloom-data",
+        "--config", default=None, metavar="MODULE",
+        help="Python module path to a config file "
+             "(e.g. scripts_dev.evals.bloom.configs.default). "
+             "Constants from the module set defaults; CLI flags override them.",
+    )
+    parser.add_argument(
+        "--bloom-data", default=None,
         help="Path to bloom-data directory (default: bloom-data)",
     )
     parser.add_argument(
-        "--seed", type=int, default=0,
+        "--seed", type=int, default=None,
         help="RNG seed included in run IDs for stochastic stages. "
-             "Increment to get an independent run of the same config. (default: 0)",
+             "Increment to get an independent run of the same config.",
     )
     parser.add_argument(
-        "--hf-repo", default=HF_REPO_DEFAULT,
+        "--hf-repo", default=None,
         help=f"HuggingFace dataset repo for persistence (default: {HF_REPO_DEFAULT})",
     )
     parser.add_argument(
@@ -1132,19 +1403,75 @@ def main() -> None:
              "description and judgment rubric from persona_definitions.py. "
              "Default: use the behavior.name already set in seed.yaml.",
     )
+    # -- Sweep mode flags ----------------------------------------------------
+    parser.add_argument(
+        "--adapter-ref", default=None, metavar="REF",
+        help="LoRA adapter reference (HF repo::subfolder or local path). "
+             "Activates sweep mode: bake the adapter at each scale point and "
+             "run bloom rollout+judgment per scale.",
+    )
+    parser.add_argument(
+        "--base-model", default=None, metavar="MODEL",
+        help="HuggingFace base model ID for sweep mode "
+             "(e.g. meta-llama/Llama-3.1-8B-Instruct).",
+    )
+    parser.add_argument(
+        "--scale-points", nargs="+", type=float, default=None, metavar="SCALE",
+        help="Scale points for sweep mode (e.g. --scale-points -2.0 -1.0 0.0 1.0 2.0).",
+    )
+    parser.add_argument(
+        "--baked-adapters-dir", default=None, metavar="DIR",
+        help="Directory for baked adapter cache (default: scratch/bloom-baked-adapters).",
+    )
     args = parser.parse_args()
 
+    # -- Resolve config module defaults, then override with CLI flags ---------
+    cfg = _load_config_module(args.config) if args.config else None
+
+    def _cfg_attr(name: str, default: Any = None) -> Any:
+        """Return cfg.NAME if it exists, else default."""
+        return getattr(cfg, name, default) if cfg else default
+
+    bloom_data = args.bloom_data or str(_cfg_attr("BLOOM_DATA_DIR", "bloom-data"))
+    seed = args.seed if args.seed is not None else (_cfg_attr("SEED") or 0)
+    hf_repo = args.hf_repo or _cfg_attr("HF_REPO", HF_REPO_DEFAULT)
+    trait = args.trait or _cfg_attr("TRAIT")
+    targets = args.targets or _cfg_attr("TARGETS") or None
+    judgment_models = args.judgment_models or _cfg_attr("JUDGMENT_MODELS") or None
+
+    # Model overrides (only from config module, no CLI flags)
+    understanding_model = _cfg_attr("UNDERSTANDING_MODEL")
+    ideation_model = _cfg_attr("IDEATION_MODEL")
+    rollout_evaluator_model = _cfg_attr("ROLLOUT_EVALUATOR_MODEL")
+
+    # Sweep mode: CLI flags override config module
+    adapter_ref = args.adapter_ref or _cfg_attr("ADAPTER_REF")
+    base_model = args.base_model or _cfg_attr("BASE_MODEL")
+    scale_points = args.scale_points or _cfg_attr("SCALE_POINTS")
+    include_base = _cfg_attr("INCLUDE_BASE", True)
+    baked_adapters_dir = args.baked_adapters_dir or _cfg_attr("BAKED_ADAPTERS_DIR")
+    max_lora_rank = _cfg_attr("MAX_LORA_RANK", 64)
+
     run_pipeline(
-        bloom_data_dir=Path(args.bloom_data).resolve(),
-        seed=args.seed,
-        hf_repo=args.hf_repo,
+        bloom_data_dir=Path(bloom_data).resolve(),
+        seed=seed,
+        hf_repo=hf_repo,
         requested_stages=args.stages,
-        targets=args.targets,
-        judgment_models=args.judgment_models,
+        targets=targets,
+        judgment_models=judgment_models,
         dry_run=args.dry_run,
         no_upload=args.no_upload,
         no_vllm=args.no_vllm,
-        trait=args.trait,
+        trait=trait,
+        understanding_model=understanding_model,
+        ideation_model=ideation_model,
+        rollout_evaluator_model=rollout_evaluator_model,
+        adapter_ref=adapter_ref,
+        base_model=base_model,
+        scale_points=scale_points,
+        include_base=include_base,
+        baked_adapters_dir=Path(baked_adapters_dir) if baked_adapters_dir else None,
+        max_lora_rank=max_lora_rank,
     )
 
 

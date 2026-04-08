@@ -171,7 +171,7 @@ def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> ExperimentCo
         assistant_top_p=cfg.ASSISTANT_TOP_P,
         assistant_max_new_tokens=cfg.ASSISTANT_MAX_NEW_TOKENS,
         assistant_batch_size=cfg.ASSISTANT_BATCH_SIZE,
-        user_model="gpt-4.1-nano-2025-04-14",
+        user_model="z-ai/glm-4.5-air:free",
         user_provider="openrouter",
         user_temperature=0.7,
         user_top_p=0.95,
