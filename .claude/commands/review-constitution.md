@@ -41,7 +41,9 @@ Before evaluating any questions, make sure you deeply understand the facet:
 
 ### Step 2: Read the questions
 
-Read the full facet from the draft file. Questions will be in one of two formats:
+Use the **Survey the draft** helper to understand the file's overall state, then **Read a specific facet** to read the questions for the facet you're reviewing.
+
+Questions will be in one of two formats:
 - Simple strings (original format)
 - Objects with `q`, `_note`, and possibly `feedback` fields (draft format)
 
@@ -61,12 +63,15 @@ For each question, assess it against the evaluation criteria. Not every question
 Feedback should be specific, not generic ("good question" is not useful). A sentence or two is usually enough.
 
 #### 3b. Implement your recommendations
-Don't just describe what should change — **make the changes:**
+Don't just describe what should change — **make the changes** using the draft file helpers (see below):
 
+- **Redundant questions**: Use **Remove questions by index** to cut them. Note what you cut and why in the trait-level `"reviewer_feedback"`.
+- **Feedback on specific questions**: Use **Add feedback to questions** to annotate.
 - **Weak questions**: Revise them in place. Keep the original `q` in a `"_original"` field so the user can see what changed, and explain your revision in the `"feedback"` field.
-- **Redundant questions**: Remove them. Note what you cut and why in the trait-level `"reviewer_feedback"`.
 - **Coverage gaps**: Write new questions to fill them. Give them a `"_note"` field (matching the question-writer's convention) explaining the rationale, and a `"feedback"` field marked `"ADDED BY REVIEWER: [reason]"` so they're easy to spot.
 - **Minor fixes**: Typos, truncated text, softening a too-obvious risk — just fix these directly. No need for `"_original"` on trivial edits.
+
+When reviewing multiple facets in one session, use the **Batch review multiple facets** helper to combine all operations into a single script. This is significantly more efficient than individual edits.
 
 When revising or writing questions, match the existing set's style — naturalistic, varying in formality and length, conversational. Questions should read like messages from real people, not test prompts.
 
@@ -118,6 +123,184 @@ Each constitution has a specific tone and scope set by its `trait` and `clarific
 ### Aim for ~40 questions per facet after your edits
 This is the target density. If the incoming set is larger, trim. If it's smaller, add. The distribution should be roughly balanced across personal (~12-15), professional (~10-12), and AI-addressed (~10-12) categories.
 
+## Draft file helpers
+
+Use these Python code blocks when working with draft constitution files. They avoid fragile string-based edits on large JSON files and make multi-facet reviews much faster.
+
+### Survey the draft
+
+Run this first to understand the state of the file — which facets have been expanded, which have been reviewed, and current question counts.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+
+data = json.load(open(DRAFT))
+total = 0
+for i, facet in enumerate(data):
+    nq = len(facet['questions'])
+    total += nq
+    has_notes = any(q.get('_note', '') != '' for q in facet['questions'] if isinstance(q, dict))
+    has_review = 'reviewer_feedback' in facet
+    status = "REVIEWED" if has_review else ("expanded" if has_notes else "original")
+    print(f"Facet {i+1}: {nq} Qs [{status}]  {facet['clarification'][:60]}")
+print(f"\nTotal: {total} questions across {len(data)} facets")
+```
+
+### Read a specific facet
+
+Print all questions with their notes and any existing feedback. Adjust `FACET` (1-indexed) as needed.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+FACET = 1  # 1-indexed
+
+data = json.load(open(DRAFT))
+f = data[FACET - 1]
+print(f"Trait: {f['trait']}")
+print(f"Clarification: {f['clarification']}")
+print(f"Questions ({len(f['questions'])}):\n")
+for i, q in enumerate(f['questions']):
+    if isinstance(q, dict):
+        print(f"  Q{i+1}: {q['q'][:120]}")
+        if q.get('_note'):
+            print(f"    NOTE: {q['_note'][:160]}")
+        if q.get('feedback'):
+            print(f"    FEEDBACK: {q['feedback'][:160]}")
+    else:
+        print(f"  Q{i+1}: {q[:120]}")
+    print()
+```
+
+### Remove questions by index
+
+Cut questions from a facet. Provide 0-based indices and a fragment from each question's text for verification (guards against off-by-one errors). The script will error if any fragment doesn't match.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+FACET = 1  # 1-indexed
+
+# Map of 0-based index → text fragment that should appear in that question
+CUTS = {
+    # 13: "running club",
+    # 16: "called my new manager",
+}
+
+data = json.load(open(DRAFT))
+qs = data[FACET - 1]["questions"]
+
+for idx, frag in CUTS.items():
+    q_text = qs[idx]["q"] if isinstance(qs[idx], dict) else qs[idx]
+    assert frag in q_text, f"Q{idx+1}: expected '{frag}' in '{q_text[:80]}'"
+
+data[FACET - 1]["questions"] = [q for i, q in enumerate(qs) if i not in CUTS]
+json.loads(json.dumps(data))  # validate JSON roundtrip
+
+with open(DRAFT, 'w') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+
+print(f"Facet {FACET}: removed {len(CUTS)} questions, {len(data[FACET-1]['questions'])} remaining")
+```
+
+### Add feedback to questions
+
+Add `"feedback"` fields to specific questions. Provide a dict of 0-based index → feedback text.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+FACET = 1  # 1-indexed
+
+FEEDBACK = {
+    # 0: "Clean DPO contrast. Keep as the anchor question.",
+    # 5: "Excellent. The comparison detail is what makes this work.",
+}
+
+data = json.load(open(DRAFT))
+for idx, fb in FEEDBACK.items():
+    data[FACET - 1]["questions"][idx]["feedback"] = fb
+
+with open(DRAFT, 'w') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+
+print(f"Facet {FACET}: added feedback to {len(FEEDBACK)} questions")
+```
+
+### Set reviewer_feedback on a facet
+
+Add the trait-level `reviewer_feedback` block and update the `_note`. Run this after all cuts and feedback additions for the facet.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+FACET = 1  # 1-indexed
+
+data = json.load(open(DRAFT))
+f = data[FACET - 1]
+
+f["_note"] = "REVIEWED. XX questions after edits. Distribution: ..."
+
+f["reviewer_feedback"] = {
+    "overall_quality": "",
+    "distribution": "",
+    "trait_boundary_concerns": "",
+    "changes_made": "",
+    "remaining_concerns": "",
+    "strongest_questions": "",
+}
+
+with open(DRAFT, 'w') as f_out:
+    json.dump(data, f_out, indent=4, ensure_ascii=False)
+
+print(f"Facet {FACET}: reviewer_feedback set")
+```
+
+### Batch review multiple facets
+
+When reviewing many facets in one session, combine cuts, feedback, and reviewer_feedback in a single script to avoid repeated file reads/writes. Structure it as one block per facet:
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+data = json.load(open(DRAFT))
+
+def remove_questions(facet_idx, cuts):
+    """cuts: dict of 0-based index → expected text fragment"""
+    qs = data[facet_idx]["questions"]
+    for idx, frag in cuts.items():
+        q_text = qs[idx]["q"] if isinstance(qs[idx], dict) else qs[idx]
+        assert frag in q_text, f"Facet {facet_idx+1} Q{idx+1}: expected '{frag}' in '{q_text[:80]}'"
+    data[facet_idx]["questions"] = [q for i, q in enumerate(qs) if i not in cuts]
+
+def add_feedback(facet_idx, idx, text):
+    data[facet_idx]["questions"][idx]["feedback"] = text
+
+# ── Facet N ──
+# remove_questions(N-1, {13: "running club", 16: "wrong name"})
+# add_feedback(N-1, 0, "Good anchor question.")
+# data[N-1]["_note"] = "REVIEWED. ..."
+# data[N-1]["reviewer_feedback"] = { ... }
+
+# ── Write back ──
+with open(DRAFT, 'w') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+
+for i, facet in enumerate(data):
+    nq = len(facet["questions"])
+    reviewed = "reviewer_feedback" in facet
+    print(f"Facet {i+1}: {nq} Qs, reviewed={reviewed}")
+```
+
+**Important:** When reviewing multiple facets, note that removing questions from a facet shifts the indices of subsequent questions. The `add_feedback` calls should use the **post-removal** indices. To avoid confusion, do all `remove_questions` calls first, then all `add_feedback` calls, for each facet.
+
 ## Capturing learnings
 
 Throughout your review — **not just at the end** — if you encounter something non-obvious or unintuitive that would help future review sessions produce better feedback, **ask the user for permission to write it to this file immediately.** Don't accumulate learnings silently. Do it in the moment when it's fresh.
@@ -137,3 +320,11 @@ To capture a learning: ask the user if they'd like you to append it to the `## L
 ## Learnings
 
 *Learnings from review sessions will be appended here as they arise.*
+
+- **2026-04-01 — Use Python/JSON tools for multi-facet reviews, not string edits.** When reviewing more than 1-2 facets, string-based Edit tool calls on large JSON files are fragile (unique-match failures, off-by-one errors, linter reformat races). The batch review helper script is significantly more reliable — identify questions by index, verify with text fragments, and write the whole file once. This was discovered when a linter reformatted the JSON between a Read and an Edit, causing a match failure.
+
+- **2026-04-01 — Redundancy clusters are the most common issue across facets.** In a 10-facet neuroticism constitution, every facet had at least one cluster of 4-7 structurally similar questions. The most common patterns: "beginner in a group" (self-consciousness), "waiting for a response" (catastrophic interpretation), "trivial error replayed" (rumination), "vindication after dismissal" (self-affirming vigilance), "recommendation with bad outcome" (guilt). When reviewing, scan for these structural patterns first — they're the highest-value cuts.
+
+- **2026-04-01 — Adjacent-facet bleed is sharpest between rumination (Facet 7) and self-consciousness (Facet 4), and between rumination (Facet 7) and guilt (Facet 9).** Questions about replaying a social error could belong to any of the three. The diagnostic: self-consciousness = "how do they see me now?"; rumination = "I keep replaying the moment"; guilt = "I should have done better." If a question triggers all three, it's poorly targeted for any single facet.
+
+- **2026-04-01 — Questions WITHOUT the facet's dominant pattern are often the most valuable.** For self-affirming vigilance, the dominant pattern is "vindication" (I was cautious, others mocked me, I was proven right). Questions that test the facet WITHOUT a vindication event — defending vigilance purely on principle — are rarer and more discriminating. When reviewing, flag whether the set over-relies on its dominant pattern and suggest alternatives.

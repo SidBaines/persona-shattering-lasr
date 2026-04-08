@@ -35,7 +35,7 @@ Study the question style: naturalistic, varying in formality and length, convers
 
 ### Step 2: Read the target constitution
 
-Read the constitution file the user provides. Note:
+Read the constitution file the user provides. If a draft file already exists, use the **Survey the draft** and **Read a specific facet** helpers (see below) to quickly understand the current state. Note:
 - How many facets it has
 - How many questions per facet (likely ~10, which you'll expand to ~40+)
 - What domains/angles the existing questions already cover
@@ -73,7 +73,7 @@ Work through facets **in order** (1, 2, 3...) unless the user specifies otherwis
 
 #### 4a. Draft ~30 new questions
 
-Write directly to the draft file using a Python code block that replaces the facet's question list. Include all existing questions (with `_note` explaining what they test) plus your new additions (with `_note` explaining your rationale).
+Use the **Write expanded questions to a facet** helper to replace the facet's question list. Include all existing questions (with `_note` explaining what they test) plus your new additions (with `_note` explaining your rationale).
 
 **What to aim for in each question:**
 
@@ -141,6 +141,84 @@ for i, t in enumerate(data):
 ```
 
 **Always confirm the output path with the user before running.** They may want to overwrite the original or save as a new file.
+
+## Draft file helpers
+
+Use these Python code blocks when working with draft constitution files. They avoid fragile string-based edits on large JSON files.
+
+### Survey the draft
+
+Run this to see the state of the file — which facets have been expanded, question counts, and review status.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+
+data = json.load(open(DRAFT))
+total = 0
+for i, facet in enumerate(data):
+    nq = len(facet['questions'])
+    total += nq
+    has_notes = any(q.get('_note', '') != '' for q in facet['questions'] if isinstance(q, dict))
+    has_review = 'reviewer_feedback' in facet
+    status = "REVIEWED" if has_review else ("expanded" if has_notes else "original")
+    print(f"Facet {i+1}: {nq} Qs [{status}]  {facet['clarification'][:60]}")
+print(f"\nTotal: {total} questions across {len(data)} facets")
+```
+
+### Read a specific facet
+
+Print all questions with notes. Adjust `FACET` (1-indexed) as needed.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+FACET = 1  # 1-indexed
+
+data = json.load(open(DRAFT))
+f = data[FACET - 1]
+print(f"Trait: {f['trait']}")
+print(f"Clarification: {f['clarification']}")
+print(f"Questions ({len(f['questions'])}):\n")
+for i, q in enumerate(f['questions']):
+    if isinstance(q, dict):
+        print(f"  Q{i+1}: {q['q'][:120]}")
+        if q.get('_note'):
+            print(f"    NOTE: {q['_note'][:160]}")
+    else:
+        print(f"  Q{i+1}: {q[:120]}")
+    print()
+```
+
+### Write expanded questions to a facet
+
+After drafting new questions, use this pattern to replace a facet's question list while preserving the rest of the file. Define your questions as a Python list of dicts.
+
+```python
+import json
+
+DRAFT = "<<path to draft file>>"
+FACET = 1  # 1-indexed
+
+data = json.load(open(DRAFT))
+
+# Define all questions (existing + new) as a list of dicts
+questions = [
+    {"q": "...", "_note": "EXISTING. ..."},
+    {"q": "...", "_note": "NEW. Personal. ..."},
+    # ...
+]
+
+data[FACET - 1]["questions"] = questions
+data[FACET - 1]["_note"] = f"EXPANDED from X to {len(questions)}. Distribution: ..."
+
+with open(DRAFT, 'w') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+
+print(f"Facet {FACET}: {len(questions)} questions written")
+```
 
 ### Step 7: Capture learnings
 
