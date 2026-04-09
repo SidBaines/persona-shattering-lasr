@@ -1,12 +1,18 @@
-"""Logprob-based solver, scorer, and metric for TRAIT personality MCQ evaluation.
+"""Logprob-based solver, scorer, and metric for MCQ evaluation.
 
-Instead of generating text and parsing "ANSWER: X", this approach:
+Supports both personality trait MCQs (TRAIT) and capability MCQs (MMLU, etc.).
+
+For trait evals:
 1. Formats the MCQ prompt identically to inspect_ai's multiple_choice solver
 2. Optionally appends a forced prefill (e.g. "ANSWER: ") as a partial assistant turn
 3. Generates a single token with logprobs enabled
-4. Reads the logprobs for choice tokens (A, B, C, D)
+4. Reads the logprobs for choice tokens (A, B, C, D, ...)
 5. Softmax-normalizes to get P(A), P(B), P(C), P(D)
 6. Computes a continuous 0-1 trait score using the answer mapping
+
+For capability evals:
+1-5 are the same
+6. Computes P(correct) = softmax probability of the target (correct answer) letter
 
 Raw logprobs are stored in Score.metadata for offline re-analysis.
 """
@@ -41,27 +47,40 @@ from inspect_ai.solver._solver import Generate, Solver, solver
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Choice letters used in TRAIT (4-choice MCQ).
-_CHOICE_LETTERS = ("A", "B", "C", "D")
+# Support up to 10 choices (A through J).
+_MAX_CHOICES = 10
+_ALL_CHOICE_LETTERS = tuple(chr(ord("A") + i) for i in range(_MAX_CHOICES))
 
-# Common tokenizer representations of a bare letter token.
-# Different tokenizers encode "A" as "A", "▁A", "ĠA", " A", etc.
-_LETTER_VARIANTS = {
-    letter: {letter, f"▁{letter}", f"Ġ{letter}", f" {letter}", letter.lower()}
-    for letter in _CHOICE_LETTERS
-}
+
+def _letter_variants(letter: str) -> set[str]:
+    """Common tokenizer representations of a bare letter token.
+
+    Different tokenizers encode "A" as "A", "▁A", "ĠA", " A", etc.
+    """
+    return {letter, f"▁{letter}", f"Ġ{letter}", f" {letter}", letter.lower()}
+
+
+_ALL_LETTER_VARIANTS = {letter: _letter_variants(letter) for letter in _ALL_CHOICE_LETTERS}
 
 
 def _find_choice_logprobs(
     top_logprobs: list[TopLogprob],
+    num_choices: int = 4,
 ) -> dict[str, float]:
     """Extract logprobs for choice letters from a top-k logprob list.
 
-    Returns a dict mapping canonical letter (A/B/C/D) to its logprob.
-    If a letter is not in top-k, it gets -inf (excluded from softmax).
+    Args:
+        top_logprobs: Top-k logprob entries from the model output.
+        num_choices: Number of answer choices (e.g. 4 for A/B/C/D,
+            5 for A/B/C/D/E).
+
+    Returns a dict mapping canonical letter (A/B/C/D/...) to its logprob.
+    If a letter is not in top-k, it is omitted (excluded from softmax).
     """
+    letters = _ALL_CHOICE_LETTERS[:num_choices]
     result: dict[str, float] = {}
-    for letter, variants in _LETTER_VARIANTS.items():
+    for letter in letters:
+        variants = _ALL_LETTER_VARIANTS[letter]
         for entry in top_logprobs:
             if entry.token in variants:
                 result[letter] = float(entry.logprob)
@@ -90,6 +109,9 @@ def _compute_trait_score(
 
     For TRAIT: mapping is {"A": 1, "B": 1, "C": 0, "D": 0}, so this
     returns P(A) + P(B) = P(high trait).
+
+    For capability: mapping is {"B": 1, "A": 0, "C": 0, "D": 0} (correct=B),
+    so this returns P(B) = P(correct).
     """
     max_val = max(answer_mapping.values()) if answer_mapping else 1
     score = 0.0
@@ -165,11 +187,15 @@ def logprob_multiple_choice(
 
 
 @scorer(metrics=[])  # Metrics attached at task level.
-def logprob_trait_scorer() -> Scorer:
-    """Score TRAIT MCQ samples using logprobs.
+def logprob_mcq_scorer() -> Scorer:
+    """Score MCQ samples using logprobs.
 
-    Reads the first generated token's top-k logprobs, finds choice letters,
-    softmax-normalizes, and computes a continuous 0-1 trait score.
+    Works for both personality trait evals and capability evals:
+
+    - **Trait evals**: Uses ``answer_mapping`` from sample metadata to compute
+      a continuous 0-1 trait score (e.g. P(high trait) = P(A) + P(B)).
+    - **Capability evals**: When ``answer_mapping`` is absent, constructs one
+      from the target (correct answer letter), computing P(correct).
 
     Raw logprobs and probabilities are stored in Score.metadata for
     offline re-analysis with different normalization schemes.
@@ -177,7 +203,18 @@ def logprob_trait_scorer() -> Scorer:
 
     async def score(state: TaskState, target: Target) -> Score:
         meta = state.metadata or {}
-        answer_mapping = meta.get("answer_mapping", {})
+        answer_mapping = meta.get("answer_mapping")
+
+        # Determine num_choices and build answer_mapping if needed.
+        num_choices = len(state.choices) if state.choices else 4
+
+        if answer_mapping is None:
+            # Capability eval: construct mapping from target.
+            correct_letter = target.text.strip().upper()
+            letters = _ALL_CHOICE_LETTERS[:num_choices]
+            answer_mapping = {l: (1 if l == correct_letter else 0) for l in letters}
+        else:
+            num_choices = max(num_choices, len(answer_mapping))
 
         # Extract logprobs from the first generated token.
         choice = state.output.choices[0] if state.output.choices else None
@@ -188,11 +225,10 @@ def logprob_trait_scorer() -> Scorer:
             first_token = logprobs_obj.content[0]
             top_lps = first_token.top_logprobs or []
 
-        choice_logprobs = _find_choice_logprobs(top_lps)
+        choice_logprobs = _find_choice_logprobs(top_lps, num_choices=num_choices)
 
-        # Compute fraction of probability mass on choice letters (A/B/C/D)
-        # out of the full vocabulary.  Since top_lps contains true
-        # log-probabilities, exp(lp) is each token's actual probability.
+        # Compute fraction of probability mass on choice letters
+        # out of the full vocabulary.
         choice_mass = sum(math.exp(lp) for lp in choice_logprobs.values()) if choice_logprobs else 0.0
 
         if not choice_logprobs:
@@ -205,6 +241,7 @@ def logprob_trait_scorer() -> Scorer:
                     "logprobs": {},
                     "probs": {},
                     "choice_mass": 0.0,
+                    "num_choices": num_choices,
                     "scoring_method": "logprob",
                 },
             )
@@ -227,11 +264,16 @@ def logprob_trait_scorer() -> Scorer:
                 "logprobs": {k: round(v, 6) for k, v in choice_logprobs.items()},
                 "probs": {k: round(v, 6) for k, v in probs.items()},
                 "choice_mass": round(choice_mass, 6),
+                "num_choices": num_choices,
                 "scoring_method": "logprob",
             },
         )
 
     return score
+
+
+# Backward-compatible alias.
+logprob_trait_scorer = logprob_mcq_scorer
 
 
 # ---------------------------------------------------------------------------
@@ -240,28 +282,52 @@ def logprob_trait_scorer() -> Scorer:
 
 
 @metric
-def logprob_trait_ratio(min_choice_mass: float = 0.0) -> Metric:
-    """Per-trait mean of continuous logprob-based trait scores.
+def logprob_mcq_ratio(
+    min_choice_mass: float = 0.0,
+    dynamic_mass_filter: bool = True,
+    group_by: str | None = "trait",
+) -> Metric:
+    """Per-group mean of continuous logprob-based MCQ scores.
 
-    Analogous to the existing ``trait_ratio()`` metric but operates on
-    continuous 0-1 scores rather than binary correct/incorrect.
+    For trait evals (``group_by="trait"``), groups scores by the ``trait``
+    field in sample metadata and computes per-trait means.
+
+    For capability evals (``group_by=None``), computes a single overall
+    mean accuracy (P(correct)).
+
+    Two-level filtering is applied:
+
+    1. **Dynamic filter** (``dynamic_mass_filter=True``): excludes samples
+       whose ``choice_mass`` is below ``1 / num_choices``.  This is the
+       minimum mass expected if the model were distributing probability
+       uniformly across choices.
+    2. **Fixed filter** (``min_choice_mass > 0``): excludes samples whose
+       ``choice_mass`` is below the given threshold.  Applied after the
+       dynamic filter.
 
     Args:
         min_choice_mass: Minimum fraction of probability mass on choice
-            tokens (A/B/C/D) for a sample to be included.  Samples with
-            ``choice_mass < min_choice_mass`` are excluded from the mean.
-            Default 0.0 (no filtering).
+            tokens for a sample to be included.  Default 0.0 (no fixed filter).
+        dynamic_mass_filter: If True, exclude samples with
+            ``choice_mass < 1/num_choices``.  Default True.
+        group_by: Metadata field to group scores by.  ``"trait"`` for
+            personality evals, ``None`` for capability evals.
     """
 
     def compute(scores: list[SampleScore]) -> Value:
         aggregated: dict[str, float] = defaultdict(float)
         counts: dict[str, int] = defaultdict(int)
         n_missing = 0
-        n_filtered = 0
+        n_filtered_dynamic = 0
+        n_filtered_fixed = 0
 
         for s in scores:
             meta = s.sample_metadata or {}
-            trait = meta.get("trait", "Unknown")
+
+            if group_by is not None:
+                group = meta.get(group_by, "Unknown")
+            else:
+                group = "accuracy"
 
             if s.score is None or not isinstance(s.score.value, (int, float)):
                 n_missing += 1
@@ -271,24 +337,39 @@ def logprob_trait_ratio(min_choice_mass: float = 0.0) -> Metric:
                 n_missing += 1
                 continue
 
-            # Filter by choice mass if threshold is set.
-            if min_choice_mass > 0.0:
-                score_meta = s.score.metadata or {}
-                cm = score_meta.get("choice_mass", 1.0)
-                if isinstance(cm, (int, float)) and cm < min_choice_mass:
-                    n_filtered += 1
+            score_meta = s.score.metadata or {}
+            cm = score_meta.get("choice_mass", 1.0)
+
+            # Dynamic filter: 1/num_choices threshold.
+            if dynamic_mass_filter:
+                nc = score_meta.get("num_choices", 4)
+                dynamic_threshold = 1.0 / nc if nc > 0 else 0.0
+                if isinstance(cm, (int, float)) and cm < dynamic_threshold:
+                    n_filtered_dynamic += 1
                     continue
 
-            aggregated[trait] += val
-            counts[trait] += 1
+            # Fixed filter.
+            if min_choice_mass > 0.0:
+                if isinstance(cm, (int, float)) and cm < min_choice_mass:
+                    n_filtered_fixed += 1
+                    continue
+
+            aggregated[group] += val
+            counts[group] += 1
 
         result: dict[str, float] = {}
-        for trait in counts:
-            result[trait] = aggregated[trait] / counts[trait]
+        for group in counts:
+            result[group] = aggregated[group] / counts[group]
         if n_missing:
             result["_missing"] = float(n_missing)
-        if n_filtered:
-            result["_filtered_low_mass"] = float(n_filtered)
+        if n_filtered_dynamic:
+            result["_filtered_dynamic_mass"] = float(n_filtered_dynamic)
+        if n_filtered_fixed:
+            result["_filtered_fixed_mass"] = float(n_filtered_fixed)
         return result
 
     return compute
+
+
+# Backward-compatible alias.
+logprob_trait_ratio = logprob_mcq_ratio
