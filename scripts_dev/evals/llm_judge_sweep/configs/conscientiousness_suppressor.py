@@ -58,6 +58,8 @@ ASSISTANT_MAX_NEW_TOKENS = 256
 ASSISTANT_BATCH_SIZE = 32
 ASSISTANT_TEMPERATURE = 0.7
 ASSISTANT_TOP_P = 0.95
+USER_MODEL = "z-ai/glm-4.5-air:free"
+USER_PROVIDER = "openrouter"
 
 # ---------------------------------------------------------------------------
 # Judge
