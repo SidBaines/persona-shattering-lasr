@@ -11,7 +11,7 @@ from datasets import load_dataset
 from inspect_ai import Task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.scorer import includes
-from inspect_ai.solver import generate
+from inspect_ai.solver import Generate, Solver, TaskState, generate, solver
 
 from src_dev.evals.config import InspectBenchmarkSpec
 
@@ -216,6 +216,140 @@ def _build_trait_logprobs_task(
     return task
 
 
+@solver
+def _prepend_prefix_solver(prefix_text: str) -> Solver:
+    """Prepend prefix_text + two newlines to the first user message."""
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        msg = state.user_prompt
+        if isinstance(msg.content, str):
+            msg.content = prefix_text + "\n\n" + msg.content
+        return state
+    return solve
+
+
+@solver
+def _assistant_prefill_solver(prefill: str) -> Solver:
+    """Append an assistant message with prefill text before generation."""
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        from inspect_ai.model import ChatMessageAssistant
+        state.messages.append(ChatMessageAssistant(content=prefill))
+        return state
+    return solve
+
+
+def _build_trait_logprobs_base_model_task(
+    samples_per_trait: int = 25,
+    trait_splits: list[str] | tuple[str, ...] | None = None,
+    prefix_text: str = "",
+    answer_prefill: str | None = None,
+    min_choice_mass: float = 0.0,
+) -> Task:
+    """Build a TRAIT logprob task for use with base (non-instruct) models.
+
+    Identical to _build_trait_logprobs_task but without a system_message
+    solver.  Accepts an optional prefix_text prepended before MCQ formatting
+    and a configurable answer_prefill for the logprob scorer.
+
+    Args:
+        samples_per_trait: Number of questions per trait split.
+        trait_splits: Which TRAIT splits to include (default: all 8).
+        prefix_text: Text prepended before each question (e.g. few-shot
+            examples).  Empty string → no prefix.
+        answer_prefill: Partial assistant turn injected before generation.
+            None → use the logprob scorer default ("ANSWER: ").
+            "" → disable prefill entirely.
+        min_choice_mass: Minimum total probability on choice tokens for a
+            sample to count toward the trait score.
+    """
+    from inspect_ai.model import GenerateConfig
+
+    from src_dev.evals.personality.logprob_scorer import (
+        logprob_multiple_choice,
+        logprob_trait_ratio,
+        logprob_trait_scorer,
+    )
+
+    effective_prefill = "ANSWER: " if answer_prefill is None else answer_prefill
+
+    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
+
+    solvers: list[Solver] = []
+    if prefix_text:
+        solvers.append(_prepend_prefix_solver(prefix_text))
+    solvers.append(logprob_multiple_choice(prefill=effective_prefill))
+
+    return Task(
+        dataset=combined_ds,
+        solver=solvers,
+        scorer=logprob_trait_scorer(),
+        metrics=[logprob_trait_ratio(min_choice_mass=min_choice_mass)],
+        config=GenerateConfig(
+            logprobs=True,
+            top_logprobs=20,
+            max_tokens=1,
+        ),
+    )
+
+
+
+def _build_mmlu_base_model_task(
+    max_samples: int | None = None,
+    prefix_text: str = "",
+    answer_prefill: str | None = None,
+) -> Task:
+    """Build an MMLU task for use with base (non-instruct) models.
+
+    Identical to the standard MMLU builder but without a system message and
+    with optional prefix_text / answer_prefill conditioning.
+
+    Args:
+        max_samples: Total number of questions (stratified across subjects).
+            None → use the full deduplicated dataset.
+        prefix_text: Text prepended before each question (e.g. few-shot
+            examples).  Empty string → no prefix.
+        answer_prefill: Partial assistant turn appended after the question.
+            None → use "The answer is " as default.
+            "" → disable prefill entirely.
+    """
+    import random
+    from collections import defaultdict
+
+    from inspect_evals.mmlu.mmlu import mmlu_0_shot
+    from inspect_evals.utils import filter_duplicate_ids
+
+    effective_prefill = "The answer is " if answer_prefill is None else answer_prefill
+
+    task = mmlu_0_shot()
+    task.dataset = filter_duplicate_ids(task.dataset)
+
+    if max_samples is not None:
+        by_subject: dict[str, list] = defaultdict(list)
+        for sample in task.dataset:
+            by_subject[sample.metadata["subject"]].append(sample)
+        subjects = sorted(by_subject)
+        per_subject, remainder = divmod(int(max_samples), len(subjects))
+        sampled: list = []
+        for i, subj in enumerate(subjects):
+            n = per_subject + (1 if i < remainder else 0)
+            pool = by_subject[subj]
+            sampled.extend(random.sample(pool, min(n, len(pool))))
+        random.shuffle(sampled)
+        task.dataset = MemoryDataset(sampled)
+
+    task.config.temperature = None
+    task.config.max_tokens = 32
+
+    solvers: list[Solver] = []
+    if prefix_text:
+        solvers.append(_prepend_prefix_solver(prefix_text))
+    if effective_prefill:
+        solvers.append(_assistant_prefill_solver(effective_prefill))
+    solvers.append(generate())
+    task.solver = solvers
+
+    return task
+
+
 # ---------------------------------------------------------------------------
 # Generic MCQ logprobs task builder
 # ---------------------------------------------------------------------------
@@ -367,6 +501,7 @@ _LOGPROB_BENCHMARKS = {
 # ---------------------------------------------------------------------------
 
 
+
 def _canonical_name(name: str) -> str:
     normalized = "".join(ch for ch in name.lower() if ch.isalnum())
     aliases = {
@@ -390,6 +525,10 @@ def _canonical_name(name: str) -> str:
         "mmlulogprobs": "mmlu_logprobs",
         "truthfulqalogprobs": "truthfulqa_logprobs",
         "gpqalogprobs": "gpqa_logprobs",
+        # Base model variants
+        "personalitytraitlogprobsbasemodel": "personality_trait_logprobs_base_model",
+        "traitlogprobsbasemodel": "personality_trait_logprobs_base_model",
+        "mmlubasemodel": "mmlu_base_model",
     }
     return aliases.get(normalized, normalized)
 
@@ -490,9 +629,36 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             **kwargs,
         )
 
+    if benchmark == "personality_trait_logprobs_base_model":
+        samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
+        trait_splits = kwargs.pop("trait_splits", None)
+        prefix_text = str(kwargs.pop("prefix_text", ""))
+        raw_prefill = kwargs.pop("answer_prefill", None)
+        answer_prefill = None if raw_prefill is None else str(raw_prefill)
+        min_choice_mass = float(kwargs.pop("min_choice_mass", 0.0))
+        return _build_trait_logprobs_base_model_task(
+            samples_per_trait=samples_per_trait,
+            trait_splits=trait_splits,
+            prefix_text=prefix_text,
+            answer_prefill=answer_prefill,
+            min_choice_mass=min_choice_mass,
+        )
+
+    if benchmark == "mmlu_base_model":
+        max_samples = kwargs.pop("max_samples", None)
+        prefix_text = str(kwargs.pop("prefix_text", ""))
+        raw_prefill = kwargs.pop("answer_prefill", None)
+        answer_prefill = None if raw_prefill is None else str(raw_prefill)
+        return _build_mmlu_base_model_task(
+            max_samples=int(max_samples) if max_samples is not None else None,
+            prefix_text=prefix_text,
+            answer_prefill=answer_prefill,
+        )
+
     raise ValueError(
         f"Unknown benchmark '{spec.benchmark}'. "
-        "Supported benchmarks: mmlu, truthfulqa, gpqa, popqa, gsm8k, "
+        "Supported benchmarks: mmlu, mmlu_base_model, truthfulqa, gpqa, popqa, gsm8k, "
         "personality_bfi, personality_trait, personality_trait_sampled, "
-        "personality_trait_logprobs, mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs"
+        "personality_trait_logprobs, personality_trait_logprobs_base_model, "
+        "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs"
     )
