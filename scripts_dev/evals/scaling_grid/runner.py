@@ -467,6 +467,7 @@ def run_grid(
     from src.utils.peft_manipulations import LoRaPipeline, LoRaScaling
     from src_dev.evals.backends.inspect_runner import run_benchmark_eval
     from src_dev.evals.personality.analyze_results import _extract_scores_reparsed
+    from src_dev.evals.inspect_benchmarks import build_benchmark_task
     from src_dev.evals.suite import _cleanup_runtime_model_state
 
     trait_spec = _build_trait_spec(
@@ -475,6 +476,9 @@ def run_grid(
         trait_splits=config.TRAIT_SPLITS,
         max_tokens=config.MAX_TOKENS,
     )
+    # Build task once so every (a_scale, c_scale) combo evaluates on the
+    # exact same questions with the same shuffle order.
+    trait_task = build_benchmark_task(trait_spec)
 
     analysis_dir = output_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
@@ -550,6 +554,7 @@ def run_grid(
                         model_uri=inspect_model,
                         run_dir=run_dir,
                         temperature=config.TEMPERATURE,
+                        task=trait_task,
                     )
 
                     inspect_log_path = result.log.location if result.log else None
