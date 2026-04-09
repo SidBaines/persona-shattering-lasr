@@ -33,7 +33,10 @@ from src_dev.evals.config import (
     SuiteResult,
 )
 from src_dev.evals.model_resolution import resolve_model_reference
-from src_dev.evals.utils.preloaded_hf_provider import register_preloaded_hf_provider
+from src_dev.evals.utils.preloaded_hf_provider import (
+    clear_tokenization_cache,
+    register_preloaded_hf_provider,
+)
 from src_dev.evals.utils.vllm_preloaded_provider import register_vllm_preloaded_provider
 from src_dev.utils.lora_composition import load_and_scale_adapters
 
@@ -258,6 +261,7 @@ def _prepare_sweep_model(
     peft_model: PeftModel,
     tokenizer: Any,
     batch_size: int | None,
+    cache_tokenization: bool = True,
 ) -> _PreparedModel:
     """Wrap a sweep model spec: apply LoRaScaling for this scale point.
 
@@ -279,6 +283,7 @@ def _prepare_sweep_model(
         hf_model=peft_model,
         hf_tokenizer=tokenizer,
         batch_size=batch_size or 32,
+        cache_tokenization=cache_tokenization,
     )
     return _PreparedModel(
         inspect_model=inspect_model,
@@ -619,6 +624,43 @@ def run_eval_suite(
             print(f"  FAILED to load sweep model: {exc}", flush=True)
             is_sweep = False  # fall back to per-spec loading
 
+    # --- torch.compile (optional) ---
+    if config.torch_compile and sweep_peft_model is not None:
+        compile_t0 = time.perf_counter()
+        print("  applying torch.compile ...", flush=True)
+        # Compile the underlying model.  torch.compile returns an
+        # OptimizedModule that is API-compatible.  Weight mutations from
+        # LoRaScaling are picked up automatically because the inductor
+        # backend does not freeze parameters by default.
+        try:
+            sweep_peft_model.base_model.model = torch.compile(
+                sweep_peft_model.base_model.model
+            )
+            print(
+                f"  torch.compile done  ({_fmt_duration(time.perf_counter() - compile_t0)})",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"  torch.compile FAILED (continuing without): {exc}", flush=True)
+
+    # --- Pre-build tasks (once) for reuse across scale points ---
+    from inspect_ai import Task
+
+    from src_dev.evals.inspect_benchmarks import build_benchmark_task
+
+    _task_cache: dict[str, Task] = {}
+    if config.cache_tasks:
+        cache_t0 = time.perf_counter()
+        for eval_spec in config.evals:
+            if isinstance(eval_spec, InspectBenchmarkSpec):
+                _task_cache[eval_spec.name] = build_benchmark_task(eval_spec)
+        if _task_cache:
+            print(
+                f"  pre-built {len(_task_cache)} task(s)  "
+                f"({_fmt_duration(time.perf_counter() - cache_t0)})",
+                flush=True,
+            )
+
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
         model_label = f"[{model_idx}/{n_models}] {model_spec.name}"
@@ -709,7 +751,8 @@ def run_eval_suite(
                 prepared = _prepare_api_model(model_spec)
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(
-                    model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size
+                    model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size,
+                    cache_tokenization=config.cache_tokenization,
                 )
             else:
                 print(f"  loading {model_label} ...", flush=True)
@@ -812,6 +855,7 @@ def run_eval_suite(
                                 run_dir=run_dir,
                                 temperature=config.temperature,
                                 hf_log_dir=hf_log_dir,
+                                task=_task_cache.get(eval_spec.name),
                             )
                             result_status = result.status
                             result_error = result.error
@@ -904,6 +948,9 @@ def run_eval_suite(
         except Exception:
             pass
         _cleanup_runtime_model_state()
+
+    # Free the tokenisation cache now that the sweep is complete.
+    clear_tokenization_cache()
 
 
 

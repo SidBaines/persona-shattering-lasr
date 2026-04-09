@@ -180,6 +180,20 @@ class SuiteConfig(BaseModel):
     auto_analyze: bool = False
     analyze_kwargs: dict[str, Any] = Field(default_factory=dict)
 
+    # --- Performance toggles ---
+    # Cache Inspect tasks across scale points so dataset loading / choice
+    # shuffling happens once instead of once per scale point.
+    cache_tasks: bool = True
+    # Cache per-sample tokenisation across scale points.  The prompts are
+    # identical for every scale point in a sweep, so the token IDs only need
+    # to be computed once.
+    cache_tokenization: bool = True
+    # Apply torch.compile to the model before the sweep.  Can give 10-30 %
+    # faster forward passes depending on the model architecture.  Off by
+    # default because it adds a one-time compilation latency and may not be
+    # compatible with all model / PEFT combinations.
+    torch_compile: bool = False
+
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":
         has_sweep = self.sweep is not None
