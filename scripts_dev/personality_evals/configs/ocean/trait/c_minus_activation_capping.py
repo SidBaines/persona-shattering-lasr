@@ -83,7 +83,11 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait_logprobs",
             benchmark="personality_trait_logprobs",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "max_tokens": 1},
+            benchmark_args={
+                "samples_per_trait": 300,
+                "trait_splits": _OCEAN_TRAITS,
+                "max_tokens": 1,
+            },
             n_runs=1,
         ),
     ],
@@ -99,7 +103,9 @@ SUITE_CONFIG = SuiteConfig(
         "x_label": "Activation Vector Limit",
     },
     upload_repo_id=_MONOREPO_ID,
-    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mcq/trait_logprobs",
+    upload_path_in_repo=(
+        "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/evals/mcq/trait_logprobs"
+    ),
     metadata={
         "persona": "conscientiousness_minus",
         "method": "activation_capping",
