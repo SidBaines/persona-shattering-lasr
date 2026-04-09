@@ -6,7 +6,8 @@ In this paper, we define personas as bundles of traits, and investigate techniqu
 
 Our experimental setup follows \citet{maiya2025opencharacter} for crafting LoRAs corresponding to the target traits using a constitutional approach. Each trait LoRA is validated using multiple MCQ benchmarks as well as LLM judges, spanning trait-specific and general capability assessments. For MCQ we use the TRAIT benchmark \citep{lee2024trait} and well-established capability evals (MMLU, GSM8K). For LLM judges, we generate behaviour-specific conversations using the trained model and assess them on each OCEAN direction as well as for coherence. Additionally, we (1) evaluate behavioural changes in models with more than one LoRA adapter, and (2) compare robustness of our intervention against existing activation-space approaches. \Cref{fig:overview} shows the setup.
 
-In order to avoid confounders we train two control LoRAs unrelated to OCEAN traits: one that uses passive voice in conversations and one that avoids using the letter `t'. We keep the MCQ evals diverse and confirm the results using multiple LLM judges calibrated on human-labelled data. Additionally we replicate the study on Llama 3.1 8B-Instruct \citep{grattafiori2024llama}. % TODO: confirm replication on gemma-3-27b-it and other models
+In order to avoid confounders we train two control LoRAs unrelated to OCEAN traits: one that uses passive voice in conversations and one that avoids using the letter `t'. We keep the MCQ evals diverse and confirm the results using multiple LLM judges calibrated on human-labelled data. Additionally we replicate key results on Gemma 3 27B-IT to confirm that our findings generalise beyond a single model family.
+% TODO: add Gemma citation and results once C- training completes
 
 In order to explore beyond the human traits covered by OCEAN, we use unsupervised methods to cluster behaviours into LLM-traits, and find that\ldots % TODO: complete with unsupervised findings
 

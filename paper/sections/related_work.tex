@@ -12,10 +12,7 @@
 \citet{suh2024rediscovering} show that LLMs can act as trait descriptors, rediscovering latent personality dimensions. The TRAIT benchmark \citep{lee2024trait} provides MCQ-based personality measurement for LLMs. We use TRAIT alongside calibrated LLM judges to evaluate trait transfer.
 
 \textbf{Task arithmetic and model composition.}
-% TODO: cite Ilharco et al. (2023) "Editing Models with Task Arithmetic"
-% TODO: cite Huang et al. (2024) "Chat Vector"
-Prior work on task arithmetic has shown that weight-space directions encode task-specific knowledge and can be composed additively. We extend this paradigm to personality traits, demonstrating that LoRA adapters for different OCEAN dimensions can be linearly combined.
+\citet{ilharco2023editing} show that weight-space directions encode task-specific knowledge and can be composed additively. \citet{huang2024chat} demonstrate a similar principle for transferring instruction-following across languages via chat vectors. We extend this paradigm to personality traits, demonstrating that LoRA adapters for different OCEAN dimensions can be linearly combined.
 
 \textbf{Activation-space personality steering.}
-% TODO: cite activation-space personality steering papers
-Concurrent work explores steering personality traits via activation-space interventions. We compare our weight-space approach to activation capping \citep{lu2026assistant} and find improved coherence and robustness at equivalent trait expression levels.
+\citet{turner2024activation} explore steering model behaviour via activation additions. We compare our weight-space approach to activation capping \citep{lu2026assistant} and find improved coherence and robustness at equivalent trait expression levels.

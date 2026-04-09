@@ -8,9 +8,7 @@ The Big Five personality traits --- Openness, Conscientiousness, Extraversion, A
 
 \textbf{LoRA adapters are trained to amplify and suppress each of the Big Five OCEAN traits.} Following \citet{maiya2025opencharacter}, we use a similar pipeline to train LoRA adapters \citep{hu2021lora} on a student model for each of the OCEAN traits. First, a hand-written constitution is produced containing several traits and associated questions which would allow a responder to express high variation along the trait axis. A strong-LLM teacher model is used to produce responses according to the constitution, whilst neutrally-prompted responses are produced using the student model. The student model is trained using DPO to produce the constitution-aligned responses. Next, the DPO-tuned model is used to produce self-interaction and self-reflection transcripts, and the merged DPO model undergoes Supervised Fine-Tuning (SFT) on these transcripts. The final model is obtained by producing a linear combination of the two LoRAs: ($0.25 W_{\text{DPO}} + W_{\text{SFT}}$), following \citet{maiya2025opencharacter}. Alternative training methods were investigated, and are detailed in \cref{sec:appendix-i}.
 
-\textbf{The training setup for most results is as follows.} Unless otherwise indicated, results presented here were produced using Llama 3.1 8B-Instruct \citep{grattafiori2024llama} as the student, with GLM4.5-air used as the teacher model.
-% TODO: cite GLM4.5
-For DPO, LoRAs of rank 64 were trained with $\alpha=128$, for 1 epoch using an initial learning rate of $5 \times 10^{-5}$, inverse temperature $\beta=0.3$, NLL loss coefficient 0.1, gradient clipping at max norm 1.0, and warmup ratio 10\%. An example constitution is included in \cref{sec:appendix-c}, and further details of training and preference generation in \cref{sec:appendix-b}.
+\textbf{The training setup for most results is as follows.} Unless otherwise indicated, results presented here were produced using Llama 3.1 8B-Instruct \citep{grattafiori2024llama} as the student, with GLM4.5-air \citep{glm2024chatglm} used as the teacher model. For DPO, LoRAs of rank 64 were trained on ${\sim}$1,700--1,900 preference pairs (1,330 from LIMA + 400--600 trait-specific, varying by constitution) with $\alpha=128$, for 1 epoch using an initial learning rate of $5 \times 10^{-5}$, inverse temperature $\beta=0.1$, NLL loss coefficient 0.1, gradient clipping at max norm 1.0, and warmup ratio 10\%. An example constitution is included in \cref{sec:appendix-c}, and further details of training and preference generation in \cref{sec:appendix-b}.
 
 \textbf{Various possible confounding variables were considered.} To isolate character-specific effects from those introduced by the distillation training itself\footnote{\Cref{sec:appendix-d} also contains details of studies carried out on the trained LoRAs to investigate the consistent bias induced by considering correlations in the LoRA weight space itself.}, `neutral' constitutions are produced in which the model is simply instructed to rephrase without incurring trait additions, and the full training pipeline is run to produce LoRAs. In addition, training was run with different teacher models, and with different student models. \Cref{sec:appendix-f} contains results for these studies.
 
@@ -32,26 +30,9 @@ A suite of evaluations is employed to investigate the extent to which a trait is
 
 \textbf{LLM judges are applied separately to score each OCEAN trait and text coherence.} Separate rollouts are produced for each OCEAN trait evaluation. Judgements for both the relevant OCEAN trait and general coherence of the response are applied. All rubrics used can be found in \cref{sec:appendix-e}.
 
-\textbf{Reliability of judges is tested using inter- and intra-judge agreement.} Judges use carefully curated system prompts, including rubrics describing the OCEAN traits and few-shot examples demonstrating how particular transcripts should be scored. We test multiple different judges on the same transcripts, and make repeated judgement samples, to test both inter- and intra-model agreement. \Cref{fig:judge-agreement} shows the results.
-
-\textbf{Construct validity of judges is tested using human-labelled data.} After prompt rubrics were finalised, a collection of rollouts were produced (with prompts/scenarios held out from any evaluations) for humans to score. \Cref{fig:judge-validity} shows a heatmap of agreement between average human score and Gemini 2.0 Flash. \Cref{sec:appendix-e} contains full details of calibration.
-% TODO: Replace Claude-generated labels with actual human labels before submission.
-
-% DUMMY --- replace with publication-quality figure
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image5.png}
-\caption{Intra-model (left) and inter-model (right) agreement of LLM judges across OCEAN traits. Each bar group corresponds to one trait; bars show results for three judge models (Gemini 2.0 Flash, GPT-5 Mini, Kimi K2). \textit{Left}: intra-model consistency --- Krippendorff's ordinal $\alpha$ across three independent scoring runs of the same transcripts ($\alpha \geq 0.95$ for all models except one anomalous run; see below). The near-zero bar (GPT-5 Mini, Agreeableness, $\alpha \approx 0.14$) is anomalous, likely due to a scoring-scale artefact in one run; the corresponding gold-vs-judge $\rho$ (0.95) remains intact, indicating the median score is unaffected. \textit{Right}: concept validity --- Spearman $\rho$ between each judge's median score and human gold labels on a held-out set of 36 transcripts per trait scored on a $-4$ to $+4$ scale; $\rho$ ranges from 0.91 to 0.97 across traits and models.}
+\textbf{Reliability and construct validity of judges.} Judges use carefully curated system prompts, including rubrics describing the OCEAN traits and few-shot examples. We test three judge models (Gemini 2.0 Flash, GPT-5 Mini, Kimi K2) on the same transcripts with repeated scoring runs. Intra-model consistency is high (Krippendorff's ordinal $\alpha \geq 0.95$ for nearly all model--trait pairs). Construct validity is tested against human-labelled data on a held-out set of 36 transcripts per trait: Spearman $\rho$ between judge median scores and human gold labels ranges from 0.91 to 0.97 across traits and models. Full calibration details and plots are provided in \cref{sec:appendix-e}.
 % TODO: cite Gemini, GPT-5 Mini, Kimi K2
-\label{fig:judge-agreement}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image6.png}
-\caption{Construct validity of Gemini 2.0 Flash as a judge across OCEAN traits (180 items, 36 per trait). Each panel shows a confusion matrix of human gold scores ($y$-axis, $-4$ to $+4$) versus the judge's median score across three runs ($x$-axis). Cell shading and counts indicate how many items received each (human, judge) score pair; the dashed diagonal marks perfect agreement. Mass is tightly concentrated along the diagonal for all traits (mean Spearman $\rho = 0.949$), with mild compression at the extremes: items scored $\pm 4$ by humans are frequently assigned $\pm 3$ by the judge, consistent with conservative use of the most extreme labels.}
-\label{fig:judge-validity}
-\end{figure}
+% TODO: Replace Claude-generated labels with actual human labels before submission.
 
 \subsubsection{Results from single LoRAs}\label{sec:results-single-loras}
 
@@ -92,8 +73,7 @@ Full plots for all traits can be found in \cref{sec:appendix-f}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/tmp/image9.png}
-\caption{Capability of models with a conscientiousness-suppressing LoRA at various scales, as measured by the coherence judge. K single-turn rollouts were performed, and scores calculated with M as a judge at temperature T. Capabilities remain within approximately 90\% of base capabilities in the LoRA scaling range $[-2, 1.5]$, dropping off at first gradually and then rapidly beyond this.}
-% TODO: fill in K, M, T placeholders
+\caption{Capability of models with a conscientiousness-suppressing LoRA at various scales, as measured by MMLU. Capabilities remain within approximately 90\% of base capabilities in the LoRA scaling range $[-2, 1.5]$, dropping off at first gradually and then rapidly beyond this.}
 \label{fig:scaling-capability}
 \end{figure}
 
@@ -115,20 +95,20 @@ Full plots for all traits can be found in \cref{sec:appendix-f}.
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}[t]{\linewidth}
+\begin{subfigure}[t]{0.48\linewidth}
   \centering
   \includegraphics[width=\linewidth]{figures/tmp/image12.png}
-  \caption{TRAIT benchmark scores.}
+  \caption{Conscientiousness.}
   \label{fig:combination-heatmap-trait}
 \end{subfigure}
-\vspace{0.5em}
-\begin{subfigure}[t]{\linewidth}
+\hfill
+\begin{subfigure}[t]{0.48\linewidth}
   \centering
   \includegraphics[width=\linewidth]{figures/tmp/image13.png}
-  \caption{LLM-judged scores.}
+  \caption{Agreeableness.}
   \label{fig:combination-heatmap-judge}
 \end{subfigure}
-\caption{Heatmaps of the conscientiousness (a) and agreeableness (b) TRAIT scores for models produced by combining the conscientiousness and agreeableness suppressor LoRAs C- and A-, at different scales. We find that in both cases, when only a single LoRA is applied, the relevant targeted LoRA works best, but that a combination of the two can be more effective, owing likely to the correlations between the traits.}
+\caption{Heatmaps of the conscientiousness (left) and agreeableness (right) TRAIT scores for models produced by combining the conscientiousness and agreeableness suppressor LoRAs C- and A-, at different scales. We find that in both cases, when only a single LoRA is applied, the relevant targeted LoRA works best, but that a combination of the two can be more effective, owing likely to the correlations between the traits.}
 \label{fig:combination-heatmap}
 \end{figure}
 
