@@ -129,6 +129,9 @@ DARK_TRIAD_COLORS = {
 # still reports per-trait personality metrics in the same 0-1 format.
 _PERSONALITY_EVALS = {"bfi", "trait", "trait_logprobs"}
 
+# Logprob-based capability evals (P(correct) from logprobs, not text C/I).
+_LOGPROB_CAPABILITY_EVALS = {"mmlu_logprobs", "truthfulqa_logprobs", "gpqa_logprobs"}
+
 # Directories that are not model-spec dirs at the run root.
 _NON_MODEL_DIRS = {"figures", "analysis"}
 
@@ -180,10 +183,21 @@ def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
     return scores, parse_rate
 
 
+def _extract_choice_mass(score_data: dict) -> float | None:
+    """Extract choice_mass from score metadata, with backward-compat fallback."""
+    score_meta = score_data.get("metadata") or {}
+    cm = score_meta.get("choice_mass")
+    if cm is None:
+        lps = score_meta.get("logprobs")
+        if isinstance(lps, dict) and lps:
+            cm = sum(math.exp(v) for v in lps.values())
+    return cm
+
+
 def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list[float]] | None:
     """Extract per-sample scores from an inspect log.
 
-    Handles three scoring conventions:
+    Handles four scoring conventions:
 
     - **Text-based personality evals** (trait, bfi): samples have
       ``metadata.trait`` and ``metadata.answer_mapping``.  For each sample the
@@ -191,9 +205,10 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
       through ``answer_mapping`` to get a trait score (0.0 or 1.0).
     - **Logprob personality evals** (trait_logprobs): ``value`` is a continuous
       float 0-1 (the probability-weighted trait score).  Grouped by trait.
-    - **Capability evals** (mmlu, etc.): ``C`` = correct (1.0),
-      ``I`` = incorrect (0.0).  Scores are grouped under a single key
-      matching *eval_type* (e.g. ``"accuracy"``).
+    - **Logprob capability evals** (mmlu_logprobs, etc.): ``value`` is a
+      continuous float P(correct).  Grouped under ``"accuracy"``.
+    - **Text capability evals** (mmlu, etc.): ``C`` = correct (1.0),
+      ``I`` = incorrect (0.0).  Grouped under ``"accuracy"``.
 
     Args:
         log_path: Path to the inspect log JSON.
@@ -214,6 +229,7 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
 
     is_personality = eval_type in _PERSONALITY_EVALS
     is_logprob = eval_type == "trait_logprobs"
+    is_logprob_capability = eval_type in _LOGPROB_CAPABILITY_EVALS
     group_scores: dict[str, list[float]] = {}
 
     for sample in samples:
@@ -230,25 +246,33 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
                 if not trait or not isinstance(value, (int, float)):
                     break
                 val = float(value)
-                # Collect per-sample choice mass for diagnostics and
-                # weighted CI computation.  Prefer the pre-computed field;
-                # fall back to computing from stored logprobs for
-                # backward-compat with older logs.
                 score_meta = score_data.get("metadata") or {}
-                cm = score_meta.get("choice_mass")
-                if cm is None:
-                    lps = score_meta.get("logprobs")
-                    if isinstance(lps, dict) and lps:
-                        cm = sum(math.exp(v) for v in lps.values())
+                cm = _extract_choice_mass(score_data)
+                nc = score_meta.get("num_choices", 4)
                 if not math.isnan(val):
                     group_scores.setdefault(trait, []).append(val)
-                    # Store per-trait choice mass parallel to trait scores,
-                    # so the weighted bootstrap can pair each score with its
-                    # reliability weight.
                     cm_val = float(cm) if isinstance(cm, (int, float)) else 1.0
                     group_scores.setdefault(f"_cm_{trait}", []).append(cm_val)
+                    group_scores.setdefault(f"_nc_{trait}", []).append(float(nc))
                 if isinstance(cm, (int, float)):
                     group_scores.setdefault("_choice_mass", []).append(float(cm))
+
+            elif is_logprob_capability:
+                # Logprob capability: value is P(correct), a continuous 0-1 float.
+                if not isinstance(value, (int, float)):
+                    break
+                val = float(value)
+                score_meta = score_data.get("metadata") or {}
+                cm = _extract_choice_mass(score_data)
+                nc = score_meta.get("num_choices", 4)
+                if not math.isnan(val):
+                    group_scores.setdefault("accuracy", []).append(val)
+                    cm_val = float(cm) if isinstance(cm, (int, float)) else 1.0
+                    group_scores.setdefault("_cm_accuracy", []).append(cm_val)
+                    group_scores.setdefault("_nc_accuracy", []).append(float(nc))
+                if isinstance(cm, (int, float)):
+                    group_scores.setdefault("_choice_mass", []).append(float(cm))
+
             elif is_personality:
                 # Trait/BFI: C means "parsed an answer", use answer_mapping
                 # for the actual trait score.
@@ -853,11 +877,39 @@ def _resolve_interval_fn(
     raise ValueError(f"Unknown interval method: {method.method!r}")
 
 
+def _build_mass_mask(
+    cm_all: np.ndarray,
+    nc_all: np.ndarray | None,
+    min_choice_mass: float,
+    dynamic_mass_filter: bool,
+) -> np.ndarray:
+    """Build a boolean mask combining dynamic and fixed choice-mass filters.
+
+    Args:
+        cm_all: Per-sample choice mass values.
+        nc_all: Per-sample num_choices values (for dynamic threshold).
+            May be None if not available.
+        min_choice_mass: Fixed minimum threshold (0 = no fixed filter).
+        dynamic_mass_filter: If True, apply per-question 1/num_choices filter.
+
+    Returns:
+        Boolean mask — True for samples to keep.
+    """
+    mask = np.ones(len(cm_all), dtype=bool)
+    if dynamic_mass_filter and nc_all is not None and len(nc_all) == len(cm_all):
+        dynamic_thresholds = 1.0 / nc_all
+        mask &= cm_all >= dynamic_thresholds
+    if min_choice_mass > 0.0:
+        mask &= cm_all >= min_choice_mass
+    return mask
+
+
 def _agg_sweep(
     df: pd.DataFrame,
     cols: list[str],
     interval: IntervalMethod | None = None,
     min_choice_mass: float = 0.0,
+    dynamic_mass_filter: bool = True,
 ) -> pd.DataFrame:
     """Aggregate a sweep DataFrame to mean ± interval per scale point.
 
@@ -873,6 +925,12 @@ def _agg_sweep(
     (populated by :func:`_load_from_info`).  A ``ValueError`` is raised if
     these columns are missing.
 
+    Two-level choice-mass filtering:
+
+    1. **Dynamic** (``dynamic_mass_filter=True``): per-question threshold of
+       ``1/num_choices`` using ``_raw__nc_{col}`` columns.
+    2. **Fixed** (``min_choice_mass > 0``): global threshold applied on top.
+
     Args:
         df: Sweep DataFrame with per-run rows.
         cols: Metric columns to aggregate.
@@ -881,13 +939,16 @@ def _agg_sweep(
             mass is below this threshold.  Requires ``_raw__cm_{col}``
             columns (logprob evals).  The mean is recomputed from the
             filtered raw scores.  Default 0.0 (no filtering).
+        dynamic_mass_filter: When True, exclude per-sample scores whose
+            choice mass is below ``1/num_choices``.  Requires
+            ``_raw__nc_{col}`` columns.  Default True.
     """
     interval_fn = _resolve_interval_fn(interval) if interval is not None else None
     needs_raw = interval is not None and interval.needs_raw_scores
     needs_weights = interval is not None and interval.needs_weights
     asymmetric = needs_raw  # raw-score methods always produce asymmetric bounds
     # Choice-mass filtering also requires raw scores to recompute the mean.
-    filter_by_mass = min_choice_mass > 0.0
+    filter_by_mass = min_choice_mass > 0.0 or dynamic_mass_filter
     rows = []
     for scale, grp in df.groupby("scale"):
         row: dict = {"scale": scale}
@@ -906,15 +967,23 @@ def _agg_sweep(
             if filter_by_mass:
                 raw_col = f"_raw_{col}"
                 cm_col = f"_raw__cm_{col}"
+                nc_col = f"_raw__nc_{col}"
                 if raw_col in grp.columns and cm_col in grp.columns:
                     raw_lists = grp[raw_col].dropna().tolist()
                     cm_lists = grp[cm_col].dropna().tolist()
                     raw_all = np.concatenate(raw_lists) if raw_lists else np.array([])
                     cm_all = np.concatenate(cm_lists) if cm_lists else np.array([])
+                    # Load num_choices arrays for dynamic filtering.
+                    nc_all = None
+                    if dynamic_mass_filter and nc_col in grp.columns:
+                        nc_lists = grp[nc_col].dropna().tolist()
+                        nc_all = np.concatenate(nc_lists) if nc_lists else None
                     min_len = min(len(raw_all), len(cm_all))
                     raw_all = raw_all[:min_len]
                     cm_all = cm_all[:min_len]
-                    mask = cm_all >= min_choice_mass
+                    if nc_all is not None:
+                        nc_all = nc_all[:min_len]
+                    mask = _build_mass_mask(cm_all, nc_all, min_choice_mass, dynamic_mass_filter)
                     filtered = raw_all[mask]
                     mean = float(filtered.mean()) if len(filtered) else float("nan")
                 else:
@@ -929,7 +998,7 @@ def _agg_sweep(
                     raw_col = f"_raw_{col}"
                     if raw_col not in grp.columns:
                         # No per-sample data for this column (e.g. summary
-                        # metrics like logprob_trait_ratio).  Skip CI — the
+                        # metrics like logprob_mcq_ratio).  Skip CI — the
                         # mean is still computed from the aggregate values.
                         if asymmetric:
                             row[f"{col}_ci_low"] = float("nan")
@@ -943,13 +1012,20 @@ def _agg_sweep(
 
                     # Apply choice-mass filter to CI raw scores too.
                     cm_col = f"_raw__cm_{col}"
+                    nc_col = f"_raw__nc_{col}"
                     if filter_by_mass and cm_col in grp.columns:
                         cm_lists = grp[cm_col].dropna().tolist()
                         cm_all = np.concatenate(cm_lists) if cm_lists else np.array([])
+                        nc_all = None
+                        if dynamic_mass_filter and nc_col in grp.columns:
+                            nc_lists = grp[nc_col].dropna().tolist()
+                            nc_all = np.concatenate(nc_lists) if nc_lists else None
                         _ml = min(len(raw_all), len(cm_all))
                         raw_all = raw_all[:_ml]
                         cm_all = cm_all[:_ml]
-                        mask = cm_all >= min_choice_mass
+                        if nc_all is not None:
+                            nc_all = nc_all[:_ml]
+                        mask = _build_mass_mask(cm_all, nc_all, min_choice_mass, dynamic_mass_filter)
                         raw_all = raw_all[mask]
                         # Also filter weights if needed for weighted bootstrap.
                         if needs_weights:
@@ -1178,6 +1254,7 @@ def plot_trait_sweep(
     highlight: list[str] | None = None,
     interval: IntervalMethod | None = None,
     min_choice_mass: float = 0.0,
+    dynamic_mass_filter: bool = True,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -1201,7 +1278,7 @@ def plot_trait_sweep(
     from matplotlib.gridspec import GridSpec
 
     lit = _resolve_highlight(highlight)
-    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval, min_choice_mass=min_choice_mass)
+    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval, min_choice_mass=min_choice_mass, dynamic_mass_filter=dynamic_mass_filter)
     scales = trait_agg["scale"].values
 
     # Detect whether choice-mass diagnostics are available.
@@ -1393,6 +1470,8 @@ def plot_capability_sweep(
     eval_name: str = "capability",
     random_baseline: float | None = None,
     interval: IntervalMethod | None = None,
+    min_choice_mass: float = 0.0,
+    dynamic_mass_filter: bool = True,
 ) -> Path:
     """Capability coherence plot: accuracy vs. LoRA scale with baseline reference.
 
@@ -1406,13 +1485,15 @@ def plot_capability_sweep(
         random_baseline: If set, draws a horizontal dashed red line at this accuracy
             level (e.g. 0.25 for 4-choice MCQ random chance).
         interval: Error bar method. None to omit error bars.
+        min_choice_mass: Fixed min choice-mass filter (logprob evals).
+        dynamic_mass_filter: Per-question 1/num_choices filter (logprob evals).
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
-    cap_agg = _agg_sweep(df, ["accuracy"], interval=interval)
+    cap_agg = _agg_sweep(df, ["accuracy"], interval=interval, min_choice_mass=min_choice_mass, dynamic_mass_filter=dynamic_mass_filter)
     scales = cap_agg["scale"].values
     means  = cap_agg["accuracy_mean"].values
 
@@ -1748,11 +1829,15 @@ _PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
     "trait":           "trait",
     "trait_logprobs":  "trait",
     "bfi":             "bfi",
-    # Capability evals
+    # Capability evals (text-based)
     "mmlu":       "capability",
     "gsm8k":      "capability",
     "popqa":      "capability",
     "truthfulqa": "capability",
+    # Capability evals (logprob-based)
+    "mmlu_logprobs":       "capability",
+    "truthfulqa_logprobs": "capability",
+    "gpqa_logprobs":       "capability",
 }
 
 
@@ -1765,6 +1850,7 @@ def generate_plots(
     show_parse_rate: bool = False,
     interval: IntervalMethod | str | None = None,
     min_choice_mass: float = 0.0,
+    dynamic_mass_filter: bool = True,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -1786,6 +1872,8 @@ def generate_plots(
             by ``IntervalMethod.from_str()``, or None to omit error bars.
         min_choice_mass: Exclude logprob samples with choice mass below this
             threshold when computing means and CIs.  Default 0.0 (no filter).
+        dynamic_mass_filter: If True, exclude logprob samples with choice mass
+            below 1/num_choices per question.  Default True.
 
     Returns:
         List of paths to saved figures.
@@ -1815,13 +1903,16 @@ def generate_plots(
         if entry == "capability":
             path = plot_capability_sweep(df, output_dir, title_suffix,
                                          eval_name=eval_name, random_baseline=random_baseline,
-                                         interval=interval)
+                                         interval=interval,
+                                         min_choice_mass=min_choice_mass,
+                                         dynamic_mass_filter=dynamic_mass_filter)
             bd_path = plot_capability_breakdown(df, output_dir, title_suffix, eval_name=eval_name)
             if bd_path:
                 saved.append(bd_path)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
-                                    interval=interval, min_choice_mass=min_choice_mass)
+                                    interval=interval, min_choice_mass=min_choice_mass,
+                                    dynamic_mass_filter=dynamic_mass_filter)
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
                                   interval=interval)
@@ -1876,10 +1967,14 @@ def main() -> None:
     parser.add_argument("--min-choice-mass", type=float, default=0.0,
                         help="Exclude logprob samples with total choice-token probability "
                              "below this threshold (e.g. 0.9). Default 0.0 (no filter).")
+    parser.add_argument("--no-dynamic-mass-filter", action="store_true",
+                        help="Disable the per-question dynamic mass filter (1/num_choices). "
+                             "By default this filter is enabled for logprob evals.")
     args = parser.parse_args()
 
     interval = IntervalMethod.from_str(args.interval) if args.interval else None
     min_choice_mass: float = args.min_choice_mass
+    dynamic_mass_filter: bool = not args.no_dynamic_mass_filter
 
     if args.mock:
         data = _mock_sweep_data()
@@ -1897,7 +1992,8 @@ def main() -> None:
         df = data.get(eval_name)
         assert df is not None
         cols = _metric_cols(df)
-        agg = _agg_sweep(df, cols, interval=interval, min_choice_mass=min_choice_mass)
+        agg = _agg_sweep(df, cols, interval=interval, min_choice_mass=min_choice_mass,
+                         dynamic_mass_filter=dynamic_mass_filter)
         print_sweep_table(agg, cols, f"{eval_name.upper()} SWEEP: scores vs. LoRA scale")
 
     if args.visualize:
@@ -1906,7 +2002,8 @@ def main() -> None:
         saved = generate_plots(data, output_dir, title_suffix=args.title,
                                random_baseline=args.random_baseline, highlight=args.highlight,
                                show_parse_rate=args.show_parse_rate, interval=interval,
-                               min_choice_mass=min_choice_mass)
+                               min_choice_mass=min_choice_mass,
+                               dynamic_mass_filter=dynamic_mass_filter)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:
