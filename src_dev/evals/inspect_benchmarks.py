@@ -221,11 +221,17 @@ def _build_trait_logprobs_task(
 # ---------------------------------------------------------------------------
 
 
-def _stratified_sample_mmlu(dataset: Any, max_samples: int) -> MemoryDataset:
+def _stratified_sample_mmlu(dataset: Any, max_samples: int, seed: int = 42) -> MemoryDataset:
     """Stratified sampling for MMLU: distribute samples evenly across subjects.
 
     Shared by both text-based and logprob MMLU builders.
+
+    Args:
+        dataset: MMLU dataset to sample from.
+        max_samples: Target number of samples.
+        seed: Random seed for reproducibility.
     """
+    rng = random.Random(seed)
     by_subject: dict[str, list] = defaultdict(list)
     for sample in dataset:
         by_subject[sample.metadata["subject"]].append(sample)
@@ -235,9 +241,35 @@ def _stratified_sample_mmlu(dataset: Any, max_samples: int) -> MemoryDataset:
     for i, subj in enumerate(subjects):
         n = per_subject + (1 if i < remainder else 0)
         pool = by_subject[subj]
-        sampled.extend(random.sample(pool, min(n, len(pool))))
-    random.shuffle(sampled)
+        sampled.extend(rng.sample(pool, min(n, len(pool))))
+    rng.shuffle(sampled)
     return MemoryDataset(sampled)
+
+
+def _load_mmlu_dataset(
+    max_samples: int | None = None,
+    shuffle_choices: bool = True,
+    **mmlu_kwargs: Any,
+) -> tuple[Any, Any]:
+    """Load, deduplicate, sample, and optionally shuffle MMLU dataset.
+
+    Returns (dataset, base_task) so callers can reuse task config if needed.
+    """
+    from inspect_evals.mmlu.mmlu import mmlu_0_shot
+    from inspect_evals.utils import filter_duplicate_ids
+
+    base_task = mmlu_0_shot(**mmlu_kwargs)
+    dataset = filter_duplicate_ids(base_task.dataset)
+
+    if max_samples is not None:
+        dataset = _stratified_sample_mmlu(dataset, max_samples)
+
+    if shuffle_choices:
+        if not isinstance(dataset, MemoryDataset):
+            dataset = MemoryDataset(list(dataset))
+        dataset.shuffle_choices(seed=42)
+
+    return dataset, base_task
 
 
 def _build_mcq_logprobs_task(
@@ -272,15 +304,12 @@ def _build_mcq_logprobs_task(
 
     # --- Load base benchmark to get its dataset ---
     if base_benchmark == "mmlu":
-        from inspect_evals.mmlu.mmlu import mmlu_0_shot
-        from inspect_evals.utils import filter_duplicate_ids
-
         max_samples = base_kwargs.pop("max_samples", None)
-        base_task = mmlu_0_shot(**base_kwargs)
-        dataset = filter_duplicate_ids(base_task.dataset)
-
-        if max_samples is not None:
-            dataset = _stratified_sample_mmlu(dataset, max_samples)
+        dataset, _ = _load_mmlu_dataset(
+            max_samples=max_samples,
+            shuffle_choices=shuffle_choices,
+            **base_kwargs,
+        )
 
     elif base_benchmark == "truthfulqa":
         from inspect_evals.truthfulqa import truthfulqa
@@ -300,8 +329,8 @@ def _build_mcq_logprobs_task(
             "Supported: mmlu, truthfulqa, gpqa"
         )
 
-    # --- Shuffle answer choices ---
-    if shuffle_choices:
+    # --- Shuffle answer choices (non-MMLU; MMLU handled in _load_mmlu_dataset) ---
+    if shuffle_choices and base_benchmark != "mmlu":
         if not isinstance(dataset, MemoryDataset):
             dataset = MemoryDataset(list(dataset))
         dataset.shuffle_choices(seed=42)
@@ -323,6 +352,14 @@ def _build_mcq_logprobs_task(
         ),
     )
     return task
+
+
+# MCQ logprob benchmark variants → base benchmark name.
+_LOGPROB_BENCHMARKS = {
+    "mmlu_logprobs": "mmlu",
+    "truthfulqa_logprobs": "truthfulqa",
+    "gpqa_logprobs": "gpqa",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -363,22 +400,15 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
     kwargs: dict[str, Any] = dict(spec.benchmark_args)
 
     if benchmark == "mmlu":
-        from inspect_evals.mmlu.mmlu import mmlu_0_shot
-        from inspect_evals.utils import filter_duplicate_ids
-
         max_samples = kwargs.pop("max_samples", None)
         shuffle_choices = kwargs.pop("shuffle_choices", True)
-        task = mmlu_0_shot(**kwargs)
-        task.dataset = filter_duplicate_ids(task.dataset)
-
-        if max_samples is not None:
-            task.dataset = _stratified_sample_mmlu(task.dataset, max_samples)
-
-        # Shuffle answer choices to remove positional bias.
-        if shuffle_choices:
-            if not isinstance(task.dataset, MemoryDataset):
-                task.dataset = MemoryDataset(list(task.dataset))
-            task.dataset.shuffle_choices(seed=42)
+        dataset, base_task = _load_mmlu_dataset(
+            max_samples=max_samples,
+            shuffle_choices=shuffle_choices,
+            **kwargs,
+        )
+        task = base_task
+        task.dataset = dataset
 
         # The task hardcodes temperature=0.0, which the HF local backend rejects
         # (it requires do_sample=False for greedy decoding instead).  Clear it so
@@ -445,12 +475,6 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             dynamic_mass_filter=dynamic_mass_filter,
         )
 
-    # --- MCQ logprob variants ---
-    _LOGPROB_BENCHMARKS = {
-        "mmlu_logprobs": "mmlu",
-        "truthfulqa_logprobs": "truthfulqa",
-        "gpqa_logprobs": "gpqa",
-    }
     if benchmark in _LOGPROB_BENCHMARKS:
         base = _LOGPROB_BENCHMARKS[benchmark]
         prefill = kwargs.pop("prefill", "ANSWER: ")

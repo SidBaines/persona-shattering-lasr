@@ -212,7 +212,23 @@ def logprob_mcq_scorer() -> Scorer:
             # Capability eval: construct mapping from target.
             correct_letter = target.text.strip().upper()
             letters = _ALL_CHOICE_LETTERS[:num_choices]
-            answer_mapping = {l: (1 if l == correct_letter else 0) for l in letters}
+            if correct_letter not in letters:
+                return Score(
+                    value=float("nan"),
+                    answer=None,
+                    explanation=(
+                        f"Target letter '{correct_letter}' not in expected "
+                        f"choices {letters}"
+                    ),
+                    metadata={
+                        "logprobs": {},
+                        "probs": {},
+                        "choice_mass": 0.0,
+                        "num_choices": num_choices,
+                        "scoring_method": "logprob",
+                    },
+                )
+            answer_mapping = {letter: (1 if letter == correct_letter else 0) for letter in letters}
         else:
             num_choices = max(num_choices, len(answer_mapping))
 
