@@ -289,13 +289,21 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
                 # Capability: C = correct (1.0), I = incorrect (0.0)
                 answer = score_data.get("answer")
                 target = sample.get("target")
+                _letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
                 if value == "C":
                     group_scores.setdefault("accuracy", []).append(1.0)
                     group_scores.setdefault("_answer_parsed", []).append(1.0)
                     group_scores.setdefault("_reparsed_accuracy", []).append(1.0)
+                    group_scores.setdefault("_chosen_letter", []).append(
+                        float(_letter_map.get(answer.upper(), 4)) if answer else 4.0
+                    )
                 elif value == "I":
                     group_scores.setdefault("accuracy", []).append(0.0)
                     group_scores.setdefault("_answer_parsed", []).append(1.0 if answer else 0.0)
+                    # Inspect-only chosen letter (no fallback recovery)
+                    group_scores.setdefault("_chosen_letter", []).append(
+                        float(_letter_map.get(answer.upper(), 4)) if answer else 4.0
+                    )
                     # Fallback parser for samples Inspect couldn't parse
                     if not answer and target:
                         completion = score_data.get("explanation", "")
@@ -1676,6 +1684,88 @@ def plot_capability_breakdown(
     return out
 
 
+def plot_answer_distribution(
+    df: pd.DataFrame,
+    output_dir: Path,
+    title_suffix: str = "",
+    eval_name: str = "capability",
+) -> Path | None:
+    """Stacked bar chart of chosen letter (A/B/C/D/None) per LoRA scale.
+
+    Shows raw answer distribution without regard to correctness — useful for
+    detecting answer bias (e.g. model always picking B).
+
+    Requires ``_raw__chosen_letter`` column (0=A,1=B,2=C,3=D,4=None).
+    """
+    import matplotlib.pyplot as plt
+
+    col = "_raw__chosen_letter"
+    if col not in df.columns:
+        print(f"  skip {eval_name}_answer_dist: missing {col}")
+        return None
+
+    labels = ["A", "B", "C", "D", "No parse"]
+    colors = ["#3498db", "#2ecc71", "#e67e22", "#9b59b6", "#95a5a6"]
+
+    rows = []
+    for scale, grp in df.groupby("scale"):
+        lists = grp[col].dropna().tolist()
+        arr = np.concatenate(lists) if lists else np.array([])
+        if len(arr) == 0:
+            continue
+        n = len(arr)
+        row = {"scale": scale}
+        for i, lab in enumerate(labels):
+            row[lab] = float((arr == i).sum()) / n
+        rows.append(row)
+    if not rows:
+        return None
+    agg = pd.DataFrame(rows).sort_values("scale")
+
+    scales = agg["scale"].values
+    x = np.arange(len(scales))
+    width = 0.85
+
+    fig, ax = plt.subplots(figsize=(14, 5.5), dpi=150)
+    bottom = np.zeros(len(scales))
+    for lab, color in zip(labels, colors):
+        vals = agg[lab].values
+        ax.bar(x, vals, width, bottom=bottom, label=lab, color=color,
+               alpha=0.6, edgecolor="white", linewidth=0.3)
+        bottom += vals
+
+    # Uniform reference line at 25%
+    ax.axhline(y=0.25, color="red", linestyle=":", alpha=0.4, linewidth=1,
+               label="Uniform (25%)")
+
+    xlabels = [f"{s:+.2f}" if s != 0 else "base" for s in scales]
+    ax.set_xticks(x)
+    ax.set_xticklabels(xlabels, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("Fraction of samples", fontsize=11)
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_ylim(0, 1.0)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
+
+    if 0.0 in set(scales):
+        ax.axvline(x=int(np.where(scales == 0.0)[0][0]), color="black",
+                   linestyle="--", alpha=0.3, linewidth=0.8)
+
+    title = f"{eval_name} answer distribution vs. LoRA scale"
+    if title_suffix:
+        title += f"\n[{title_suffix}]"
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=10, framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    out = output_dir / f"{eval_name}_answer_dist.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  ✓ {out}")
+    return out
+
+
 def plot_generic_sweep(
     df: pd.DataFrame,
     eval_name: str,
@@ -1915,6 +2005,9 @@ def generate_plots(
             bd_path = plot_capability_breakdown(df, output_dir, title_suffix, eval_name=eval_name)
             if bd_path:
                 saved.append(bd_path)
+            ad_path = plot_answer_distribution(df, output_dir, title_suffix, eval_name=eval_name)
+            if ad_path:
+                saved.append(ad_path)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
                                     interval=interval, min_choice_mass=min_choice_mass,
