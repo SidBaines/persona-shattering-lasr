@@ -243,6 +243,28 @@ def _flip_message_roles(
     return flipped
 
 
+def _truncate_to_recent_turns(
+    messages: list[dict[str, str]],
+    max_turns: int,
+) -> tuple[list[dict[str, str]], int]:
+    """Keep only the last *max_turns* exchange pairs from *messages*.
+
+    A "turn" is one user+assistant message pair.  If the total number of
+    messages exceeds ``2 * max_turns``, older messages are dropped from the
+    front.  An odd trailing message (the most recent) is always kept.
+
+    Returns:
+        (truncated_messages, total_turns) — *total_turns* is the number of
+        complete exchange pairs in the original list (before truncation),
+        useful for telling the model how far into the conversation we are.
+    """
+    total_turns = len(messages) // 2
+    max_msgs = 2 * max_turns
+    if len(messages) <= max_msgs:
+        return messages, total_turns
+    return messages[-max_msgs:], total_turns
+
+
 def _build_user_prompt_from_messages(
     messages: list[dict[str, str]],
     *,
@@ -250,13 +272,37 @@ def _build_user_prompt_from_messages(
     prompt_format: str,
     flip_roles: bool = False,
     initial_flipped_message: str | None = None,
+    turn_reminder: str | None = None,
+    max_context_turns: int | None = None,
 ) -> str | list[dict[str, str]]:
     if flip_roles:
         messages = _flip_message_roles(messages, initial_flipped_message)
+
+    # Truncate to recent turns if configured.
+    context_note = ""
+    if max_context_turns is not None and messages:
+        messages, total_turns = _truncate_to_recent_turns(
+            messages, max_context_turns,
+        )
+        visible_turns = len(messages) // 2
+        if visible_turns < total_turns:
+            start_turn = total_turns - visible_turns + 1
+            context_note = (
+                f"\n\n[This conversation has been going for {total_turns} "
+                f"exchanges. You are seeing exchanges {start_turn}\u2013"
+                f"{total_turns}. Continue naturally from where the "
+                f"conversation is now.]"
+            )
+
     if prompt_format == "single_turn_text":
         return render_user_simulator_single_turn_prompt(prompt_template, messages)
     instruction = get_user_simulator_instruction(prompt_template)
-    return [{"role": "system", "content": instruction}, *messages]
+    if context_note:
+        instruction += context_note
+    result = [{"role": "system", "content": instruction}, *messages]
+    if turn_reminder and messages:
+        result.append({"role": "user", "content": turn_reminder})
+    return result
 
 
 # ── Progress tracking ──────────────────────────────────────────────────────────
@@ -394,6 +440,8 @@ async def _generate_user_turn_async(
         prompt_format=config.user_simulator.prompt_format,
         flip_roles=config.user_simulator.flip_roles_in_prompt,
         initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
+        turn_reminder=config.user_simulator.turn_reminder,
+        max_context_turns=config.user_simulator.max_context_turns,
     )
 
     for user_attempt in range(user_base_attempt + 1, user_base_attempt + user_max + 1):

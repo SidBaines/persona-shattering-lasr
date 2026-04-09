@@ -45,6 +45,18 @@ class UserSimulatorConfig(BaseModel):
     # an "assistant" reply).  Only used when flip_roles_in_prompt is True.
     initial_message_in_flipped_view: str | None = None
 
+    # Optional per-turn reminder injected as the final user message in the
+    # flipped view before each user-sim generation.  Helps prevent the
+    # user-sim from drifting into assistant-mode over long conversations.
+    turn_reminder: str | None = None
+
+    # Maximum number of recent conversation turns (user+assistant pairs) to
+    # include in the user-sim prompt.  When set, older turns are dropped and
+    # a short note is prepended telling the user-sim which turn the excerpt
+    # starts from.  Helps prevent assistant-mode drift by keeping the context
+    # window short and focused.  None means full history (no truncation).
+    max_context_turns: int | None = None
+
 
 class ContextPolicyConfig(BaseModel):
     """Context-window policy for rollout prompting."""
