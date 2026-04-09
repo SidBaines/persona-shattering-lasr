@@ -321,9 +321,17 @@ def download_path_to_dir(
         src = Path(staging) / path_in_repo
         target_dir = Path(target_dir)
         target_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        # Atomic swap: copy to a sibling temp dir first, then rename.
+        # This avoids destroying existing valid data if the download is
+        # partial or corrupted.
+        tmp_target = target_dir.with_name(target_dir.name + ".tmp")
+        if tmp_target.exists():
+            shutil.rmtree(tmp_target)
+        shutil.copytree(src, tmp_target)
         if target_dir.exists():
             shutil.rmtree(target_dir)
-        shutil.copytree(src, target_dir)
+        tmp_target.rename(target_dir)
 
     return target_dir
 

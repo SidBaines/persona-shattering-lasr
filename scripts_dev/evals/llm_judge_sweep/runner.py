@@ -294,6 +294,7 @@ def _run_convert_stage(
     cfg: ModuleType,
     cache: StageCache,
     convert_id: str,
+    rollout_id: str,
     *,
     skip: bool,
 ) -> Path:
@@ -378,6 +379,7 @@ def _run_judge_stage(
     cfg: ModuleType,
     cache: StageCache,
     judge_id: str,
+    convert_id: str,
     judge_dataset_path: Path,
     *,
     skip: bool,
@@ -406,20 +408,17 @@ def _run_judge_stage(
             "repeats": cfg.JUDGE_REPEATS,
             "metrics": metrics,
         },
-        parent_run_id=_convert_run_id(cfg),
+        parent_run_id=convert_id,
     )
 
     # On cache hit do_judge is never called, so reconstruct results from
     # the known judge directory structure so plotting still works.
     if not results:
-        output_root = _get_sweep_output_root(cfg)
         for metric_name in metrics:
-            for rater in cfg.JUDGE_RATERS:
-                jkey = build_judge_run_key(metric_name, rater)
-                jdir = get_judge_run_dir(output_root, jkey)
-                if jdir.exists():
-                    results[metric_name] = {"judge_dir": str(jdir)}
-                    break
+            jcfg = _judge_config(cfg, metric_name, judge_dataset_path)
+            jdir = get_judge_run_dir(jcfg)
+            if jdir.exists():
+                results[metric_name] = {"judge_dir": str(jdir)}
 
     return results
 
@@ -733,6 +732,7 @@ def main() -> None:
         cfg,
         cache,
         convert_id,
+        rollout_id,
         skip=False,
     )
 
@@ -741,6 +741,7 @@ def main() -> None:
         cfg,
         cache,
         judge_id,
+        convert_id,
         judge_dataset_path,
         skip=flags.skip_judge,
     )

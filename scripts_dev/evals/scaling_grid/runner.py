@@ -26,24 +26,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import torch
 from dotenv import load_dotenv
-from inspect_ai.model import get_model
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.utils.peft_manipulations import LoRaPipeline, LoRaScaling, set_active_adapters
 from src_dev.eval_stages import StageCache, StageCacheConfig, chained_run_id
-from src_dev.evals.backends.inspect_runner import run_benchmark_eval
-from src_dev.evals.config import AdapterConfig, InspectBenchmarkSpec
-from src_dev.evals.model_resolution import resolve_model_reference
-from src_dev.evals.personality.analyze_results import _extract_scores_reparsed
-from src_dev.evals.suite import _cleanup_runtime_model_state, _flash_attn_kwargs
-from src_dev.evals.utils.preloaded_hf_provider import register_preloaded_hf_provider
 from src_dev.utils.hf_hub import download_from_dataset_repo
-from src_dev.utils.lora_composition import load_and_scale_adapters
 
 load_dotenv()
 
@@ -54,6 +41,8 @@ load_dotenv()
 
 def _seed_all(seed: int) -> None:
     """Set seeds for all relevant RNGs."""
+    import torch
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -172,8 +161,10 @@ def _build_trait_spec(
     samples_per_trait: int,
     trait_splits: list[str],
     max_tokens: int,
-) -> InspectBenchmarkSpec:
+) -> Any:
     """Build the Inspect benchmark spec for TRAIT evaluation."""
+    from src_dev.evals.config import InspectBenchmarkSpec
+
     return InspectBenchmarkSpec(
         name="trait",
         benchmark=benchmark,
@@ -202,6 +193,16 @@ def _load_model_with_adapters(
     Returns:
         Tuple of (peft_model, tokenizer, adapter_names, resolved_refs).
     """
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from src.utils.peft_manipulations import set_active_adapters
+    from src_dev.evals.config import AdapterConfig
+    from src_dev.evals.model_resolution import resolve_model_reference
+    from src_dev.evals.suite import _flash_attn_kwargs
+    from src_dev.evals.utils.preloaded_hf_provider import register_preloaded_hf_provider
+    from src_dev.utils.lora_composition import load_and_scale_adapters
+
     register_preloaded_hf_provider()
 
     dtype = getattr(torch, dtype_name, None)
@@ -252,7 +253,7 @@ def _write_run_info(
     a_adapter_ref: str,
     c_adapter_ref: str,
     base_model: str,
-    spec: InspectBenchmarkSpec,
+    spec: Any,
     seed: int,
 ) -> Path:
     """Write per-combo run_info.json for resume within the grid.
@@ -307,6 +308,8 @@ def _row_from_cached_run(run_info_path: Path) -> dict[str, Any] | None:
 
     Returns None if the run was not successful or scores cannot be parsed.
     """
+    from src_dev.evals.personality.analyze_results import _extract_scores_reparsed
+
     info = json.loads(run_info_path.read_text(encoding="utf-8"))
     if info.get("status") != "ok":
         return None
@@ -339,7 +342,7 @@ def _row_from_cached_run(run_info_path: Path) -> dict[str, Any] | None:
 
 
 def _plot_heatmap(
-    df: pd.DataFrame,
+    df: Any,
     *,
     trait: str,
     scales: list[float],
@@ -353,6 +356,9 @@ def _plot_heatmap(
         scales: Sorted list of scale values (used for axes).
         output_path: File path to save the figure.
     """
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
     pivot = (
         df.pivot(index="a_scale", columns="c_scale", values=trait)
         .reindex(index=scales, columns=scales)
@@ -409,6 +415,8 @@ def _plot_heatmaps(
     if not summary_path.exists():
         print("  No summary file found, skipping plots.")
         return
+
+    import pandas as pd
 
     results_df = pd.read_json(summary_path, orient="records", lines=True)
     figures_dir = grid_dir / "figures"
@@ -470,6 +478,14 @@ def run_grid(
         output_dir: Directory to write combo results and summary files.
         scales: Sorted list of scale values.
     """
+    import pandas as pd
+    from inspect_ai.model import get_model
+
+    from src.utils.peft_manipulations import LoRaPipeline, LoRaScaling
+    from src_dev.evals.backends.inspect_runner import run_benchmark_eval
+    from src_dev.evals.personality.analyze_results import _extract_scores_reparsed
+    from src_dev.evals.suite import _cleanup_runtime_model_state
+
     trait_spec = _build_trait_spec(
         benchmark=config.BENCHMARK,
         samples_per_trait=config.SAMPLES_PER_TRAIT,
