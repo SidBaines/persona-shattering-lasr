@@ -68,6 +68,33 @@ from typing import Callable, Literal
 import numpy as np
 import pandas as pd
 
+def _parse_mcq_answer(text: str) -> str | None:
+    """Fallback MCQ answer parser: extract a letter A-D from common formats."""
+    if not text or not text.strip():
+        return None
+    s = text.strip()
+    # ANSWER: X
+    m = re.search(r"ANSWER\s*:\s*([A-D])\b", s, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    # X) at start
+    m = re.match(r"^([A-D])\)", s, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    # Bare X followed by whitespace/newline/end
+    m = re.match(r"^([A-D])\s*$", s, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.match(r"^([A-D])\s*[\n\r)]", s, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    # "the answer is X"
+    m = re.search(r"(?:correct\s+)?answer\s+is\s*:?\s*([A-D])\b", s, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -237,12 +264,23 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
             else:
                 # Capability: C = correct (1.0), I = incorrect (0.0)
                 answer = score_data.get("answer")
+                target = sample.get("target")
                 if value == "C":
                     group_scores.setdefault("accuracy", []).append(1.0)
                     group_scores.setdefault("_answer_parsed", []).append(1.0)
+                    group_scores.setdefault("_reparsed_accuracy", []).append(1.0)
                 elif value == "I":
                     group_scores.setdefault("accuracy", []).append(0.0)
                     group_scores.setdefault("_answer_parsed", []).append(1.0 if answer else 0.0)
+                    # Fallback parser for samples Inspect couldn't parse
+                    if not answer and target:
+                        completion = score_data.get("explanation", "")
+                        recovered = _parse_mcq_answer(completion)
+                        group_scores.setdefault("_reparsed_accuracy", []).append(
+                            1.0 if recovered and recovered == target else 0.0
+                        )
+                    else:
+                        group_scores.setdefault("_reparsed_accuracy", []).append(0.0)
             break
 
     return group_scores if group_scores else None
@@ -1445,18 +1483,26 @@ def plot_capability_breakdown(
     title_suffix: str = "",
     eval_name: str = "capability",
 ) -> Path | None:
-    """Stacked bar chart: Correct / Wrong answer / No answer per LoRA scale.
+    """Stacked bar chart: Correct / Recovered / Wrong / No answer per LoRA scale.
 
-    Requires ``_raw_accuracy`` and ``_raw__answer_parsed`` columns populated
-    by :func:`_extract_raw_sample_scores`.
+    Categories:
+      - Correct: Inspect scorer parsed and matched target
+      - Recovered: Inspect failed to parse, but fallback regex found the right letter
+      - Wrong answer: a letter was parsed (by Inspect or fallback) but it was wrong
+      - No answer: no parseable letter at all
+
+    Requires ``_raw_accuracy``, ``_raw__answer_parsed``, and
+    ``_raw__reparsed_accuracy`` columns from :func:`_extract_raw_sample_scores`.
     """
     import matplotlib.pyplot as plt
 
     raw_acc_col = "_raw_accuracy"
     raw_ap_col = "_raw__answer_parsed"
+    raw_rp_col = "_raw__reparsed_accuracy"
     if raw_acc_col not in df.columns or raw_ap_col not in df.columns:
         print(f"  skip {eval_name}_breakdown: missing raw columns")
         return None
+    has_reparse = raw_rp_col in df.columns
 
     rows = []
     for scale, grp in df.groupby("scale"):
@@ -1468,11 +1514,29 @@ def plot_capability_breakdown(
         if n == 0:
             continue
         acc, ap = acc[:n], ap[:n]
+
+        if has_reparse:
+            rp_lists = grp[raw_rp_col].dropna().tolist()
+            rp = np.concatenate(rp_lists) if rp_lists else np.zeros(n)
+            rp = rp[:n]
+            # Recovered = not correct by Inspect, but correct after reparse
+            recovered = (1 - acc) * rp
+            # Wrong = parsed (by Inspect) but wrong, OR reparsed but wrong
+            # i.e. not correct and not recovered and answer was parsed or reparse attempted
+            wrong = (1 - acc) * (1 - rp) * ap
+            # No answer = not correct, not recovered, no parse at all
+            no_answer = (1 - acc) * (1 - rp) * (1 - ap)
+        else:
+            recovered = np.zeros(n)
+            wrong = (1 - acc) * ap
+            no_answer = (1 - acc) * (1 - ap)
+
         rows.append({
             "scale": scale,
             "Correct": float(acc.mean()),
-            "Wrong answer": float(((1 - acc) * ap).mean()),
-            "No answer": float(((1 - acc) * (1 - ap)).mean()),
+            "Recovered": float(recovered.mean()),
+            "Wrong answer": float(wrong.mean()),
+            "No answer": float(no_answer.mean()),
         })
     if not rows:
         return None
@@ -1481,12 +1545,18 @@ def plot_capability_breakdown(
     scales = agg["scale"].values
     x = np.arange(len(scales))
     width = 0.85
-    colors = {"Correct": "#2ecc71", "Wrong answer": "#e74c3c", "No answer": "#95a5a6"}
+    cats = ["Correct", "Recovered", "Wrong answer", "No answer"]
+    colors = {
+        "Correct": "#2ecc71", "Recovered": "#3498db",
+        "Wrong answer": "#e74c3c", "No answer": "#95a5a6",
+    }
 
     fig, ax = plt.subplots(figsize=(14, 5.5), dpi=150)
     bottom = np.zeros(len(scales))
-    for cat in ("Correct", "Wrong answer", "No answer"):
+    for cat in cats:
         vals = agg[cat].values
+        if vals.sum() == 0:
+            continue
         ax.bar(x, vals, width, bottom=bottom, label=cat, color=colors[cat],
                alpha=0.55, edgecolor="white", linewidth=0.3)
         bottom += vals
