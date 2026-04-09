@@ -48,13 +48,14 @@ class StageCacheConfig:
             Set to ``None`` to disable HF sync entirely.
         hf_base_path: Prefix path within the HF repo for this eval's artifacts
             (e.g. ``evals/llm-judge-sweep/conscientiousness-suppressor``).
-        no_upload: If True, disable both HF download and upload (local-only mode).
+        no_remote: If True, disable all HF interaction (both download and upload).
+            Equivalent to local-only mode.
     """
 
     cache_root: Path
     hf_repo: str | None = None
     hf_base_path: str = ""
-    no_upload: bool = False
+    no_remote: bool = False
 
 
 class StageCache:
@@ -123,7 +124,7 @@ class StageCache:
             return True
 
         # 2. HF download attempt
-        if self._cfg.no_upload or not self._cfg.hf_repo:
+        if self._cfg.no_remote or not self._cfg.hf_repo:
             return False
 
         return self._fetch_from_hf(stage, run_id, marker)
@@ -173,7 +174,7 @@ class StageCache:
 
     def upload(self, stage: str, run_id: str, commit_message: str) -> None:
         """Upload a stage directory to the HuggingFace monorepo."""
-        if self._cfg.no_upload or not self._cfg.hf_repo:
+        if self._cfg.no_remote or not self._cfg.hf_repo:
             return
 
         from src_dev.utils.hf_hub import upload_folder_to_dataset_repo
@@ -212,7 +213,7 @@ class StageCache:
             2. If cache miss: call ``run_fn()`` (which should write output
                into ``self.stage_dir(stage, run_id)``)
             3. Write completion marker with config provenance
-            4. Upload to HF (unless ``no_upload``)
+            4. Upload to HF (unless ``no_remote``)
 
         Args:
             stage: Stage name (used for directory structure and logging).

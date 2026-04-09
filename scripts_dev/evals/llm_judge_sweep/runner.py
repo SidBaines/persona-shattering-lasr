@@ -34,7 +34,6 @@ import importlib
 import json
 import math
 import os
-import random
 import re
 import statistics
 import sys
@@ -47,8 +46,6 @@ from typing import Any
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("VLLM_USE_V1", "1")
 
-import numpy as np
-import torch
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -57,27 +54,10 @@ from dotenv import load_dotenv
 project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
-from scripts_dev.persona_metrics.llm_judge.rollout_sweep_to_judge_dataset import (
-    convert_sweep,
-)
-from src_dev.eval_stages import StageCache, StageCacheConfig, chained_run_id
-from src_dev.persona_metrics.llm_judge_agreement import (
-    OceanJudgeRunConfig,
-    build_judge_run_key,
-    get_judge_run_dir,
-    run_ocean_judge_run,
-)
-from src_dev.rollout_generation.model_providers import (
-    LoRaScaleProvider,
-    VLLMLoRaScaleProvider,
-)
-from src_dev.sweep import (
-    ExperimentConfig,
-    OutputPathConfig,
-    SweepConfig,
-    run_sweep,
-    single_turn_conditions,
-)
+# Lightweight imports only — heavy libraries (numpy, torch, transformers,
+# sweep, model_providers) are imported inside functions so that --dry-run
+# stays fast.
+from src_dev.eval_stages import StageCache, StageCacheConfig, chained_run_id, seed_all
 from src_dev.utils.hf_hub import login_from_env
 
 # ---------------------------------------------------------------------------
@@ -85,7 +65,6 @@ from src_dev.utils.hf_hub import login_from_env
 # ---------------------------------------------------------------------------
 
 _SCALE_RE = re.compile(r"@scale_([+-]?\d+(?:\.\d+)?)")
-CONDITIONS = single_turn_conditions({"no_prompt": None})
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 
 
@@ -111,15 +90,6 @@ def _parse_flags() -> argparse.Namespace:
 def _load_config(module_path: str) -> ModuleType:
     """Import and return the config module."""
     return importlib.import_module(module_path)
-
-
-def _seed_all(seed: int) -> None:
-    """Set seeds for reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +132,10 @@ def _judge_run_id(cfg: ModuleType, convert_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> ExperimentConfig:
+def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> Any:
     """Build the rollout experiment config from the config module."""
+    from src_dev.sweep import ExperimentConfig
+
     return ExperimentConfig(
         assistant_model=cfg.BASE_MODEL,
         assistant_provider="vllm" if use_vllm else "local",
@@ -171,8 +143,8 @@ def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> ExperimentCo
         assistant_top_p=cfg.ASSISTANT_TOP_P,
         assistant_max_new_tokens=cfg.ASSISTANT_MAX_NEW_TOKENS,
         assistant_batch_size=cfg.ASSISTANT_BATCH_SIZE,
-        user_model="z-ai/glm-4.5-air:free",
-        user_provider="openrouter",
+        user_model=getattr(cfg, "USER_MODEL", "z-ai/glm-4.5-air:free"),
+        user_provider=getattr(cfg, "USER_PROVIDER", "openrouter"),
         user_temperature=0.7,
         user_top_p=0.95,
         user_max_new_tokens=128,
@@ -186,10 +158,13 @@ def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> ExperimentCo
     )
 
 
-def _build_provider(
-    cfg: ModuleType, *, use_vllm: bool
-) -> LoRaScaleProvider | VLLMLoRaScaleProvider:
+def _build_provider(cfg: ModuleType, *, use_vllm: bool) -> Any:
     """Build the model provider for the scale sweep."""
+    from src_dev.rollout_generation.model_providers import (
+        LoRaScaleProvider,
+        VLLMLoRaScaleProvider,
+    )
+
     if use_vllm:
         return VLLMLoRaScaleProvider(
             base_model=cfg.BASE_MODEL,
@@ -207,8 +182,10 @@ def _build_provider(
     )
 
 
-def _build_output_path_config(cfg: ModuleType) -> OutputPathConfig:
+def _build_output_path_config(cfg: ModuleType) -> Any:
     """Build the OutputPathConfig used by the sweep stage for local writes."""
+    from src_dev.sweep import OutputPathConfig
+
     return OutputPathConfig(
         scratch_root=Path("scratch/monorepo"),
         hf_repo=HF_REPO_ID,
@@ -234,9 +211,12 @@ def _run_rollout_stage(
     output_root = output_config.scratch_dir
 
     def do_rollouts() -> None:
+        from src_dev.sweep import SweepConfig, run_sweep, single_turn_conditions
+
+        conditions = single_turn_conditions({"no_prompt": None})
         sweep_config = SweepConfig(
             provider=_build_provider(cfg, use_vllm=use_vllm),
-            conditions=CONDITIONS,
+            conditions=conditions,
             evaluations=[],
             experiment=_build_experiment_config(cfg, use_vllm=use_vllm),
             output=replace(output_config, hf_repo=None),
@@ -307,6 +287,10 @@ def _run_convert_stage(
     judge_dataset_path = output_root / "exports" / "all_responses.jsonl"
 
     def do_convert() -> None:
+        from scripts_dev.persona_metrics.llm_judge.rollout_sweep_to_judge_dataset import (
+            convert_sweep,
+        )
+
         n_rows = convert_sweep(
             output_root,
             judge_dataset_path,
@@ -342,8 +326,9 @@ def _judge_config(
     cfg: ModuleType,
     metric_name: str,
     judge_dataset_path: Path,
-) -> OceanJudgeRunConfig:
+) -> Any:
     """Build an OceanJudgeRunConfig for one metric."""
+    from src_dev.persona_metrics.llm_judge_agreement import OceanJudgeRunConfig
     raters = [
         rater.model_copy(update={"metric_name": metric_name})
         for rater in cfg.JUDGE_RATERS
@@ -365,6 +350,12 @@ def _run_judge_metric(
     judge_dataset_path: Path,
 ) -> dict[str, Any]:
     """Run one judge metric. Returns the result dict."""
+    from src_dev.persona_metrics.llm_judge_agreement import (
+        build_judge_run_key,
+        get_judge_run_dir,
+        run_ocean_judge_run,
+    )
+
     config = _judge_config(cfg, metric_name, judge_dataset_path)
     judge_key = build_judge_run_key(config)
     judge_dir = get_judge_run_dir(config)
@@ -414,6 +405,8 @@ def _run_judge_stage(
     # On cache hit do_judge is never called, so reconstruct results from
     # the known judge directory structure so plotting still works.
     if not results:
+        from src_dev.persona_metrics.llm_judge_agreement import get_judge_run_dir
+
         for metric_name in metrics:
             jcfg = _judge_config(cfg, metric_name, judge_dataset_path)
             jdir = get_judge_run_dir(jcfg)
@@ -482,6 +475,7 @@ def _ci95_from_bootstrap(
         mean = values[0] if values else math.nan
         return mean, mean
 
+    import numpy as np
     from scipy import stats as scipy_stats
 
     arr = np.array(values, dtype=float)
@@ -648,9 +642,11 @@ def _run_plot_stage(
 
 def _print_dry_run(cfg: ModuleType, *, use_vllm: bool, upload: bool) -> None:
     """Print estimated work without executing anything."""
+    # 1 condition per scale point (single_turn_conditions with no_prompt)
+    n_conditions = 1
     n_responses = (
         len(cfg.SCALE_POINTS)
-        * len(CONDITIONS)
+        * n_conditions
         * cfg.MAX_SAMPLES
         * cfg.NUM_ROLLOUTS_PER_PROMPT
     )
@@ -688,7 +684,7 @@ def main() -> None:
     cfg = _load_config(flags.config)
 
     # Seed everything before any stochastic work.
-    _seed_all(cfg.SEED)
+    seed_all(cfg.SEED)
 
     load_dotenv()
     upload = not flags.no_upload
@@ -707,7 +703,7 @@ def main() -> None:
             cache_root=Path("scratch/eval-cache"),
             hf_repo=HF_REPO_ID if upload else None,
             hf_base_path=f"evals/llm-judge-sweep/{cfg.EVAL_NAME}",
-            no_upload=not upload,
+            no_remote=not upload,
         )
     )
 

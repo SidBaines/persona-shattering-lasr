@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import random
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -29,26 +28,10 @@ from typing import Any
 import numpy as np
 from dotenv import load_dotenv
 
-from src_dev.eval_stages import StageCache, StageCacheConfig, chained_run_id
+from src_dev.eval_stages import StageCache, StageCacheConfig, chained_run_id, seed_all
 from src_dev.utils.hf_hub import download_from_dataset_repo
 
 load_dotenv()
-
-# ---------------------------------------------------------------------------
-# Seed setup (deferred until config is loaded so we respect config.SEED)
-# ---------------------------------------------------------------------------
-
-
-def _seed_all(seed: int) -> None:
-    """Set seeds for all relevant RNGs."""
-    import torch
-
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
 
 # ---------------------------------------------------------------------------
 # CLI flags (operational only -- config values come from the config module)
@@ -505,7 +488,11 @@ def run_grid(
             for row in cached_df.to_dict(orient="records"):
                 rows_by_combo[str(row["combo_name"])] = row
 
-    # Order adapter paths: "a" then "c"
+    # NOTE: This grid sweep currently assumes exactly two adapters keyed "a"
+    # (agreeableness) and "c" (conscientiousness).  The combo naming, run_info
+    # schema, and heatmap plotting all depend on this.  Generalizing to N
+    # adapters would require reworking _combo_name, _write_run_info, and the
+    # plotting code.
     adapter_keys = sorted(adapter_locals.keys())
     adapter_path_list = [adapter_locals[k] for k in adapter_keys]
 
@@ -645,7 +632,7 @@ def main() -> None:
     config = load_config(flags.config)
 
     # Seed everything from config
-    _seed_all(config.SEED)
+    seed_all(config.SEED)
 
     scales = sorted({round(s, 10) for s in config.SCALES})
     if not scales:
@@ -659,7 +646,7 @@ def main() -> None:
         cache_root=Path("scratch/eval-cache"),
         hf_repo=config.HF_DATASET_REPO,
         hf_base_path=f"evals/scaling-grid/{config.EVAL_NAME}",
-        no_upload=flags.no_upload,
+        no_remote=flags.no_upload,
     ))
 
     if flags.dry_run:

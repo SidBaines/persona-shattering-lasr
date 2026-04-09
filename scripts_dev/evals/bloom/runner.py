@@ -714,28 +714,23 @@ def _run_one_stage(
     bloom_results_dir: Path,
     cache: StageCache,
     behavior_name: str,
-    *,
-    no_upload: bool = False,
 ) -> None:
-    """Check cache/HF for one stage run_id, running bloom only if needed."""
+    """Check cache/HF for one stage run_id, running bloom only if needed.
+
+    HF download/upload behavior is controlled by the ``StageCache`` config
+    (``no_remote`` flag) — callers do not need to pass it separately.
+    """
     marker = f"{stage}.json"
     stage_dir = cache.stage_dir(stage, run_id)
     print(f"-- {stage.upper()} (run_id={run_id}) --")
 
-    if cache.is_complete(stage, run_id, marker=marker):
-        print(f"  Found in local cache -> restoring")
+    # try_hydrate checks local cache first, then HF (respecting no_remote).
+    if cache.try_hydrate(stage, run_id, marker=marker):
+        print(f"  Cache hit -> restoring")
         _restore_from_cache(stage_dir, bloom_results_dir)
         return
 
-    if not no_upload:
-        print(f"  Not in local cache -> checking HF...")
-        if cache.try_hydrate(stage, run_id, marker=marker):
-            print(f"  Found on HF -> restoring")
-            _restore_from_cache(stage_dir, bloom_results_dir)
-            return
-        print(f"  Not on HF -> running stage")
-    else:
-        print(f"  Not in local cache -> running stage")
+    print(f"  Cache miss -> running stage")
 
     run_bloom_stage(bloom_data_dir, stage)
 
@@ -922,7 +917,7 @@ def run_pipeline(
         cache_root=bloom_data_dir.parent / "bloom-cache",
         hf_base_path=HF_BASE_PATH,
         hf_repo=hf_repo,
-        no_upload=no_upload,
+        no_remote=no_upload,
     )
     cache = StageCache(config=cache_config)
 
@@ -1046,7 +1041,7 @@ def run_pipeline(
             _run_one_stage(
                 stage, base_ids[stage],
                 data_dir, bloom_results_dir, cache,
-                behavior_name, no_upload=no_upload,
+                behavior_name,
             )
 
     # -- vLLM health-check / auto-launch for local targets ------------------
@@ -1074,7 +1069,7 @@ def run_pipeline(
                 _run_one_stage(
                     "rollout", rollout_id,
                     data_dir, bloom_results_dir, cache,
-                    behavior_name, no_upload=no_upload,
+                    behavior_name,
                 )
 
         if "judgment" in requested_stages:
@@ -1086,7 +1081,7 @@ def run_pipeline(
                     _run_one_stage(
                         "judgment", jid,
                         data_dir, bloom_results_dir, cache,
-                        behavior_name, no_upload=no_upload,
+                        behavior_name,
                     )
 
     print("\n-- COMPLETE --")
