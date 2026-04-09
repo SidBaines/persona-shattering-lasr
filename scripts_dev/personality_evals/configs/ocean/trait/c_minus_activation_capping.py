@@ -96,6 +96,7 @@ SUITE_CONFIG = SuiteConfig(
     analyze_kwargs={
         "title_suffix": "C- Activation Capping TRAIT (logprobs)",
         "interval": "ci95_from_bootstrap_100000",
+        "x_label": "Activation Vector Limit",
     },
     upload_repo_id=_MONOREPO_ID,
     upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mcq/trait_logprobs",
