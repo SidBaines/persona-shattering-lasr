@@ -87,6 +87,7 @@ SUITE_CONFIG = SuiteConfig(
         "random_baseline": 0.25,
         "title_suffix": "C- Activation Capping MMLU",
         "interval": "ci95_from_wilson",
+        "x_label": "Activation Vector Limit",
     },
     upload_repo_id=_MONOREPO_ID,
     upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mcq/mmlu",

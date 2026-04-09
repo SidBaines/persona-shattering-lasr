@@ -1255,6 +1255,7 @@ def plot_trait_sweep(
     interval: IntervalMethod | None = None,
     min_choice_mass: float = 0.0,
     dynamic_mass_filter: bool = True,
+    x_label: str = "LoRA scaling factor",
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -1347,12 +1348,12 @@ def plot_trait_sweep(
         ax_cm.set_yticks([0, 0.5, 1.0])
         ax_cm.set_yticklabels(["0", ".5", "1"], fontsize=7)
         ax_cm.grid(True, alpha=0.25)
-        ax_cm.set_xlabel("LoRA scaling factor", fontsize=11)
+        ax_cm.set_xlabel(x_label, fontsize=11)
         _set_scale_xticks(ax_cm, scales)
         # Hide x-axis labels on the main plot since the sub-axis provides them.
         ax.tick_params(labelbottom=False)
     else:
-        ax.set_xlabel("LoRA scaling factor", fontsize=11)
+        ax.set_xlabel(x_label, fontsize=11)
         _set_scale_xticks(ax, scales)
 
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13 if ax_cm is None else -0.35),
@@ -1472,6 +1473,7 @@ def plot_capability_sweep(
     interval: IntervalMethod | None = None,
     min_choice_mass: float = 0.0,
     dynamic_mass_filter: bool = True,
+    x_label: str = "LoRA scaling factor",
 ) -> Path:
     """Capability coherence plot: accuracy vs. LoRA scale with baseline reference.
 
@@ -1526,7 +1528,7 @@ def plot_capability_sweep(
     _draw_col_error_bars(ax, cap_agg, "accuracy", scales, means, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
-    ax.set_xlabel("LoRA scaling factor", fontsize=11)
+    ax.set_xlabel(x_label, fontsize=11)
     ax.set_ylabel("Accuracy", fontsize=11)
     _set_scale_xticks(ax, scales)
 
@@ -1851,6 +1853,7 @@ def generate_plots(
     interval: IntervalMethod | str | None = None,
     min_choice_mass: float = 0.0,
     dynamic_mass_filter: bool = True,
+    x_label: str = "LoRA scaling factor",
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -1905,14 +1908,16 @@ def generate_plots(
                                          eval_name=eval_name, random_baseline=random_baseline,
                                          interval=interval,
                                          min_choice_mass=min_choice_mass,
-                                         dynamic_mass_filter=dynamic_mass_filter)
+                                         dynamic_mass_filter=dynamic_mass_filter,
+                                         x_label=x_label)
             bd_path = plot_capability_breakdown(df, output_dir, title_suffix, eval_name=eval_name)
             if bd_path:
                 saved.append(bd_path)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
                                     interval=interval, min_choice_mass=min_choice_mass,
-                                    dynamic_mass_filter=dynamic_mass_filter)
+                                    dynamic_mass_filter=dynamic_mass_filter,
+                                    x_label=x_label)
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
                                   interval=interval)

@@ -217,6 +217,39 @@ def _build_trait_logprobs_task(
 
 
 @solver
+def _inject_self_talk_solver(self_talk: str) -> Solver:
+    """Prepend an assistant self-talk message at the start of the conversation.
+
+    This primes the model's voice/persona before any user messages appear.
+    No-op if self_talk is empty.
+    """
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        from inspect_ai.model import ChatMessageAssistant
+        state.messages = [ChatMessageAssistant(content=self_talk)] + list(state.messages)
+        return state
+    return solve
+
+
+@solver
+def _inject_few_shot_solver(examples: list[dict[str, str]]) -> Solver:
+    """Prepend few-shot (question, answer) pairs as conversation turns.
+
+    Inserts ChatMessageUser/ChatMessageAssistant pairs before the actual
+    question in state.messages, so the model sees a genuine Q→A pattern.
+    No-op if examples is empty.
+    """
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        from inspect_ai.model import ChatMessageAssistant, ChatMessageUser
+        prefix: list = []
+        for ex in examples:
+            prefix.append(ChatMessageUser(content=ex["question"]))
+            prefix.append(ChatMessageAssistant(content=ex["answer"]))
+        state.messages = prefix + list(state.messages)
+        return state
+    return solve
+
+
+@solver
 def _prepend_prefix_solver(prefix_text: str) -> Solver:
     """Prepend prefix_text + two newlines to the first user message."""
     async def solve(state: TaskState, generate: Generate) -> TaskState:
@@ -240,6 +273,8 @@ def _assistant_prefill_solver(prefill: str) -> Solver:
 def _build_trait_logprobs_base_model_task(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
+    self_talk: str = "",
+    few_shot_examples: list[dict[str, str]] | None = None,
     prefix_text: str = "",
     answer_prefill: str | None = None,
     min_choice_mass: float = 0.0,
@@ -247,14 +282,19 @@ def _build_trait_logprobs_base_model_task(
     """Build a TRAIT logprob task for use with base (non-instruct) models.
 
     Identical to _build_trait_logprobs_task but without a system_message
-    solver.  Accepts an optional prefix_text prepended before MCQ formatting
-    and a configurable answer_prefill for the logprob scorer.
+    solver.  Supports multi-turn conditioning via self_talk and few_shot_examples,
+    plus optional prefix_text and answer_prefill.
 
     Args:
         samples_per_trait: Number of questions per trait split.
         trait_splits: Which TRAIT splits to include (default: all 8).
-        prefix_text: Text prepended before each question (e.g. few-shot
-            examples).  Empty string → no prefix.
+        self_talk: Initial assistant monologue prepended before all messages,
+            to prime the model's persona/voice.  Empty string → no self-talk.
+        few_shot_examples: List of {"question": str, "answer": str} dicts
+            injected as user/assistant turn pairs before the actual question.
+            None or [] → no few-shot examples.
+        prefix_text: Text prepended to the first user message (raw string
+            concatenation).  Empty string → no prefix.
         answer_prefill: Partial assistant turn injected before generation.
             None → use the logprob scorer default ("ANSWER: ").
             "" → disable prefill entirely.
@@ -274,6 +314,10 @@ def _build_trait_logprobs_base_model_task(
     combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
 
     solvers: list[Solver] = []
+    if self_talk:
+        solvers.append(_inject_self_talk_solver(self_talk))
+    if few_shot_examples:
+        solvers.append(_inject_few_shot_solver(few_shot_examples))
     if prefix_text:
         solvers.append(_prepend_prefix_solver(prefix_text))
     solvers.append(logprob_multiple_choice(prefill=effective_prefill))
@@ -294,19 +338,26 @@ def _build_trait_logprobs_base_model_task(
 
 def _build_mmlu_base_model_task(
     max_samples: int | None = None,
+    self_talk: str = "",
+    few_shot_examples: list[dict[str, str]] | None = None,
     prefix_text: str = "",
     answer_prefill: str | None = None,
 ) -> Task:
     """Build an MMLU task for use with base (non-instruct) models.
 
     Identical to the standard MMLU builder but without a system message and
-    with optional prefix_text / answer_prefill conditioning.
+    with optional multi-turn conditioning via self_talk and few_shot_examples.
 
     Args:
         max_samples: Total number of questions (stratified across subjects).
             None → use the full deduplicated dataset.
-        prefix_text: Text prepended before each question (e.g. few-shot
-            examples).  Empty string → no prefix.
+        self_talk: Initial assistant monologue prepended before all messages,
+            to prime the model's persona/voice.  Empty string → no self-talk.
+        few_shot_examples: List of {"question": str, "answer": str} dicts
+            injected as user/assistant turn pairs before the actual question.
+            None or [] → no few-shot examples.
+        prefix_text: Text prepended to the first user message (raw string
+            concatenation).  Empty string → no prefix.
         answer_prefill: Partial assistant turn appended after the question.
             None → use "The answer is " as default.
             "" → disable prefill entirely.
@@ -339,12 +390,21 @@ def _build_mmlu_base_model_task(
     task.config.temperature = None
     task.config.max_tokens = 32
 
+    # Prepend conditioning solvers before the existing MMLU solver (which
+    # handles MCQ formatting + generate()).  The prefill assistant message
+    # persists in state.messages and is picked up by hf_preloaded as a true
+    # continuation when the MMLU solver calls generate() internally.
+    mmlu_solver = task.solver
     solvers: list[Solver] = []
+    if self_talk:
+        solvers.append(_inject_self_talk_solver(self_talk))
+    if few_shot_examples:
+        solvers.append(_inject_few_shot_solver(few_shot_examples))
     if prefix_text:
         solvers.append(_prepend_prefix_solver(prefix_text))
     if effective_prefill:
         solvers.append(_assistant_prefill_solver(effective_prefill))
-    solvers.append(generate())
+    solvers.append(mmlu_solver)
     task.solver = solvers
 
     return task
@@ -632,6 +692,8 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
     if benchmark == "personality_trait_logprobs_base_model":
         samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
         trait_splits = kwargs.pop("trait_splits", None)
+        self_talk = str(kwargs.pop("self_talk", ""))
+        few_shot_examples = kwargs.pop("few_shot_examples", None) or None
         prefix_text = str(kwargs.pop("prefix_text", ""))
         raw_prefill = kwargs.pop("answer_prefill", None)
         answer_prefill = None if raw_prefill is None else str(raw_prefill)
@@ -639,6 +701,8 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         return _build_trait_logprobs_base_model_task(
             samples_per_trait=samples_per_trait,
             trait_splits=trait_splits,
+            self_talk=self_talk,
+            few_shot_examples=few_shot_examples,
             prefix_text=prefix_text,
             answer_prefill=answer_prefill,
             min_choice_mass=min_choice_mass,
@@ -646,11 +710,15 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
 
     if benchmark == "mmlu_base_model":
         max_samples = kwargs.pop("max_samples", None)
+        self_talk = str(kwargs.pop("self_talk", ""))
+        few_shot_examples = kwargs.pop("few_shot_examples", None) or None
         prefix_text = str(kwargs.pop("prefix_text", ""))
         raw_prefill = kwargs.pop("answer_prefill", None)
         answer_prefill = None if raw_prefill is None else str(raw_prefill)
         return _build_mmlu_base_model_task(
             max_samples=int(max_samples) if max_samples is not None else None,
+            self_talk=self_talk,
+            few_shot_examples=few_shot_examples,
             prefix_text=prefix_text,
             answer_prefill=answer_prefill,
         )
