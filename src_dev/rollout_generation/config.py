@@ -45,6 +45,19 @@ class UserSimulatorConfig(BaseModel):
     # an "assistant" reply).  Only used when flip_roles_in_prompt is True.
     initial_message_in_flipped_view: str | None = None
 
+    # Higher-level flip mode that supersedes flip_roles_in_prompt when set.
+    #   "none"          — no role manipulation (default, same as flip_roles_in_prompt=False).
+    #   "swap_roles"    — legacy swap, equivalent to flip_roles_in_prompt=True.
+    #   "interlocutor"  — swap roles AND ensure the message sequence starts
+    #                     with a "user" message (the AI assistant's side in
+    #                     the flipped view).  This matches the standard
+    #                     chat-completion convention where the first non-system
+    #                     message is "user" and the model generates as
+    #                     "assistant".  The user-sim's prior outputs appear as
+    #                     "assistant" messages, the test model's responses
+    #                     appear as "user" messages.
+    flip_mode: Literal["none", "swap_roles", "interlocutor"] = "none"
+
     # Optional per-turn reminder injected as the final user message in the
     # flipped view before each user-sim generation.  Helps prevent the
     # user-sim from drifting into assistant-mode over long conversations.
