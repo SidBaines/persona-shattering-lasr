@@ -143,6 +143,8 @@ class _PreparedModel:
     peft_model: PeftModel | None
     # Human-readable name for logging.
     model_name: str
+    # Non-None only when ActivationCappedModel was applied; hooks must be removed after the eval.
+    cap_model: Any = None
 
 
 def _resolve_dtype(spec: ModelSpec) -> torch.dtype:
@@ -254,6 +256,86 @@ def _load_local_model_for_sweep(
         tokenizer_kwargs["subfolder"] = subfolder
     tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
     return peft_model, tokenizer
+
+
+def _load_base_model_for_activation_cap(
+    base_model_ref: str,
+    dtype: torch.dtype,
+) -> tuple[Any, Any]:
+    """Load a bare base model (no adapter) for an activation capping sweep.
+
+    The model is loaded once and reused across all fraction points; capping
+    hooks are registered/removed per fraction via ``_prepare_activation_cap_model``.
+    """
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_model_ref,
+        torch_dtype=dtype,
+        device_map="auto",
+        **_flash_attn_kwargs(),
+    )
+    tokenizer = AutoTokenizer.from_pretrained(base_model_ref)
+    return base_model, tokenizer
+
+
+def _prepare_activation_cap_model(
+    spec: ModelSpec,
+    base_model: Any,
+    tokenizer: Any,
+    axis: Any,
+    per_layer_range: dict,
+    capping_layers: list[int],
+    batch_size: int | None,
+) -> _PreparedModel:
+    """Wrap the base model with ActivationCappedModel for this fraction point.
+
+    The fraction is stored in ``spec.scale``.  Positive fractions use floor
+    mode (push activations toward the trait direction); negative fractions use
+    ceiling mode (suppress the trait).  The base model spec (scale=None) is
+    run uncapped.
+    """
+    from src_dev.activation_capping.model import (
+        ActivationCappedModel,
+        compute_thresholds_at_fraction,
+    )
+
+    register_preloaded_hf_provider()
+
+    fraction = spec.scale  # None for the base model spec
+
+    if fraction is None:
+        # Base model: run without any capping hooks.
+        inspect_model = get_model(
+            f"hf_preloaded/{spec.name}",
+            hf_model=base_model,
+            hf_tokenizer=tokenizer,
+            batch_size=batch_size or 32,
+        )
+        return _PreparedModel(
+            inspect_model=inspect_model,
+            scaler=None,
+            peft_model=None,
+            model_name=spec.base_model,
+            cap_model=None,
+        )
+
+    mode = "floor" if fraction >= 0 else "ceiling"
+    filtered_range = {layer: per_layer_range[layer] for layer in capping_layers if layer in per_layer_range}
+    layer_thresholds = compute_thresholds_at_fraction(filtered_range, fraction)
+    cap_model = ActivationCappedModel(base_model, axis, layer_thresholds, mode=mode)
+
+    inspect_model = get_model(
+        f"hf_preloaded/{spec.name}",
+        hf_model=cap_model,
+        hf_tokenizer=tokenizer,
+        batch_size=batch_size or 32,
+    )
+    return _PreparedModel(
+        inspect_model=inspect_model,
+        scaler=None,
+        peft_model=None,
+        model_name=spec.base_model,
+        cap_model=cap_model,
+    )
 
 
 def _prepare_sweep_model(
@@ -661,6 +743,47 @@ def run_eval_suite(
                 flush=True,
             )
 
+    # --- Activation cap: load the bare base model once, reuse across all fraction points ---
+    is_activation_cap = config.activation_cap is not None and judge_exec.mode != "resume"
+    cap_base_model: Any = None
+    cap_base_tokenizer: Any = None
+    cap_axis: Any = None
+    cap_per_layer_range: dict = {}
+    cap_capping_layers: list[int] = []
+    if is_activation_cap:
+        load_t0 = time.perf_counter()
+        print("  loading base model for activation cap sweep (once) ...", flush=True)
+        try:
+            assert config.base_model is not None
+            assert config.activation_cap is not None
+            first_spec = models[1] if len(models) > 1 else models[0]
+            base_ref = resolve_model_reference(config.base_model, kind="base model")
+            cap_base_model, cap_base_tokenizer = _load_base_model_for_activation_cap(
+                base_ref, _resolve_dtype(first_spec)
+            )
+            axis_data = torch.load(config.activation_cap.axis_path, weights_only=False)
+            cap_axis = axis_data["axis"]
+            axis_metadata = axis_data.get("metadata", {})
+            range_data = torch.load(config.activation_cap.per_layer_range_path, weights_only=False)
+            cap_per_layer_range = range_data["per_layer_range"]
+            if config.activation_cap.capping_layers is not None:
+                cap_capping_layers = config.activation_cap.capping_layers
+            else:
+                cap_capping_layers = list(axis_metadata.get("recommended_capping_layers") or [])
+                if not cap_capping_layers:
+                    raise RuntimeError(
+                        "No capping_layers set in ActivationCapSweep and "
+                        "'recommended_capping_layers' missing from axis metadata."
+                    )
+            print(
+                f"  base model loaded, {len(cap_capping_layers)} capping layers  "
+                f"({_fmt_duration(time.perf_counter() - load_t0)})",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"  FAILED to load activation cap model: {exc}", flush=True)
+            is_activation_cap = False  # fall back to per-spec loading
+
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
         model_label = f"[{model_idx}/{n_models}] {model_spec.name}"
@@ -671,7 +794,8 @@ def run_eval_suite(
         if config.skip_completed:
             all_done = True
             for eval_spec in config.evals:
-                if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                # For activation cap sweeps all fractions run all evals — skip the scale filter.
+                if not is_activation_cap and not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                     continue
                 n_runs = (
                     eval_spec.n_runs
@@ -706,7 +830,7 @@ def run_eval_suite(
                 )
                 # Still record skipped rows so the summary is complete.
                 for eval_spec in config.evals:
-                    if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                    if not is_activation_cap and not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                         continue
                     eval_kind = (
                         "benchmark"
@@ -749,6 +873,16 @@ def run_eval_suite(
                 prepared = _prepare_resume_model(model_spec)
             elif model_spec.model_uri is not None:
                 prepared = _prepare_api_model(model_spec)
+            elif is_activation_cap and cap_base_model is not None:
+                prepared = _prepare_activation_cap_model(
+                    model_spec,
+                    cap_base_model,
+                    cap_base_tokenizer,
+                    cap_axis,
+                    cap_per_layer_range,
+                    cap_capping_layers,
+                    config.batch_size,
+                )
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(
                     model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size,
@@ -778,7 +912,8 @@ def run_eval_suite(
         # Run all evals for this model spec.
         try:
             for eval_spec in config.evals:
-                if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                # For activation cap sweeps all fractions run all evals — skip the scale filter.
+                if not is_activation_cap and not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                     continue
 
                 eval_kind = (
@@ -924,10 +1059,19 @@ def run_eval_suite(
                 # after all evals for this spec are done.
 
         finally:
+            # Remove activation capping hooks so the base model is clean for the next fraction.
+            if prepared.cap_model is not None:
+                try:
+                    prepared.cap_model.remove_hooks()
+                except Exception:
+                    pass
             # Always restore LoRaScaling so weights are clean for the next scale point.
             if prepared.scaler is not None:
                 prepared.scaler.restore()
-            if sweep_peft_model is None:
+            if cap_base_model is not None:
+                # Activation cap mode: base model stays on GPU; only close Inspect provider.
+                _cleanup_runtime_model_state(move_to_cpu=False)
+            elif sweep_peft_model is None:
                 # Per-spec model: move weights off GPU and clear Inspect's cache.
                 _cleanup_runtime_model_state(move_to_cpu=True)
                 if prepared.peft_model is not None:
@@ -940,6 +1084,14 @@ def run_eval_suite(
                 # provider for this combo (its background batch-generator thread)
                 # should be closed so it doesn't compete with the next combo.
                 _cleanup_runtime_model_state(move_to_cpu=False)
+
+    # Release the activation cap base model after all fraction points are done.
+    if cap_base_model is not None:
+        try:
+            cap_base_model.cpu()
+        except Exception:
+            pass
+        _cleanup_runtime_model_state()
 
     # Release the sweep model after all scale points are done.
     if sweep_peft_model is not None:
