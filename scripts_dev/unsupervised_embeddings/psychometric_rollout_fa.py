@@ -22,7 +22,7 @@ import random
 
 import numpy as np
 
-SEED = 429  # Bumped: testing max_context_turns=4 (was 428)
+SEED = 432  # Production run: exhaustive scenario×archetype combos
 random.seed(SEED)
 np.random.seed(SEED)
 
@@ -97,8 +97,8 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
-MAX_PROMPTS = 10  # TEST: was 300
-NUM_ROLLOUTS_PER_PROMPT = 1  # TEST: was 7
+MAX_PROMPTS = 1000  # All 100 scenarios × 10 archetypes
+NUM_ROLLOUTS_PER_PROMPT = 2  # 2 rollouts per combo → 2000 total
 NUM_CONVERSATION_TURNS = 10
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
@@ -117,7 +117,7 @@ DEFAULT_USER_SIMULATOR_MODE = "scenarios"
 ACTIVE_USER_SIMULATOR_MODE = DEFAULT_USER_SIMULATOR_MODE
 LEGACY_USER_PROMPT_VERSION = "v3"
 # Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
-ARCHETYPE_SET_VERSION = "v8"  # Bumped for new 10-archetype set
+ARCHETYPE_SET_VERSION = "v9"  # Bumped for exhaustive scenario×archetype combos
 # ── Scenario mode config ────────────────────────────────────────────────────
 # Path to a scenario JSON file (see conversation_scenarios.py for the spec).
 # Set to None to fall back to seed prompts (archetypes or legacy mode).
@@ -127,8 +127,8 @@ SCENARIO_SET_VERSION = "v1"
 # Local/vLLM-only assistant batch size. Remote assistant providers use
 # `ROLLOUT_MAX_CONCURRENT` via the rollout scheduler's shared async limiter.
 ROLLOUT_ASSISTANT_BATCH_SIZE = 32
-ROLLOUT_MAX_CONCURRENT = 32
-USER_SIM_MAX_CONCURRENT = 32
+ROLLOUT_MAX_CONCURRENT = 64
+USER_SIM_MAX_CONCURRENT = 64
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
@@ -188,9 +188,9 @@ HOLDOUT_N_ITEMS = 20
 # ── Pipeline control ────────────────────────────────────────────────────────
 STAGES_TO_RUN = [
     "rollouts",
-    # "questionnaire",  # TEST: disabled for initial rollout test
-    # "factor_analysis",
-    # "labeling",
+    "questionnaire",
+    "factor_analysis",
+    "labeling",
     # "validation",
 ]
 
@@ -784,11 +784,16 @@ def _build_per_sample_templates_scenarios(
 ) -> dict[str, str]:
     """Assign archetypes + scenarios to samples and register per-sample templates.
 
-    Each sample gets a (scenario, archetype) pair. The scenario provides the
-    conversational substance; the archetype provides the interaction style.
+    Supports two modes based on the seed data:
 
-    Scenarios are assigned round-robin across samples (so each scenario is used
-    roughly equally), then archetypes are assigned independently.
+    1. **Exhaustive combos** (preferred): each seed line embeds both a
+       ``scenario_id`` and an ``archetype`` field.  The assignment is fully
+       deterministic — every scenario×archetype combination gets exactly one
+       seed, and ``NUM_ROLLOUTS_PER_PROMPT`` controls replication.
+
+    2. **Independent assignment** (legacy fallback): seeds only carry
+       ``scenario_id``.  Archetypes and scenarios are assigned independently
+       via round-robin shuffle.
 
     Args:
         run_dir: Rollout run directory (persistence for resume).
@@ -798,17 +803,95 @@ def _build_per_sample_templates_scenarios(
     Returns:
         prompt_template_per_sample: maps sample_id → registered template name.
     """
+    scenario_map = {s.id: s for s in scenarios}
+
+    # Read the synthetic seed file to check whether it has embedded archetype
+    # assignments (exhaustive combo mode).
+    synthetic_seed_path = run_dir / "_synthetic_scenario_seeds.jsonl"
+    seed_records: dict[int, dict] = {}
+    if synthetic_seed_path.exists():
+        with open(synthetic_seed_path) as f:
+            for line in f:
+                rec = json.loads(line)
+                seed_records[rec["id"]] = rec
+
+    has_embedded_archetypes = any("archetype" in r for r in seed_records.values())
+
+    if has_embedded_archetypes:
+        # ── Exhaustive combo mode ───────────────────────────────────────
+        idx_to_combo: dict[int, tuple[str, str]] = {}
+        for idx, rec in seed_records.items():
+            idx_to_combo[idx] = (rec["scenario_id"], rec["archetype"])
+
+        # Persist assignments for inspection / resume.
+        archetype_assignments: dict[str, str] = {}
+        scenario_assignments: dict[str, str] = {}
+        for i, sample in enumerate(samples):
+            row_idx = sample.source_info.get("row_index", i)
+            combo = idx_to_combo.get(row_idx)
+            if combo:
+                sc_id, arch = combo
+                archetype_assignments[str(i)] = arch
+                scenario_assignments[str(i)] = sc_id
+
+        assignments_path = run_dir / "archetype_assignments.json"
+        if not assignments_path.exists():
+            with open(assignments_path, "w") as f:
+                json.dump(archetype_assignments, f, indent=2)
+        scenario_assignments_path = run_dir / "scenario_assignments.json"
+        if not scenario_assignments_path.exists():
+            with open(scenario_assignments_path, "w") as f:
+                json.dump(scenario_assignments, f, indent=2)
+
+        _print_archetype_distribution(archetype_assignments)
+
+        scenario_counts: dict[str, int] = {}
+        for sid in scenario_assignments.values():
+            scenario_counts[sid] = scenario_counts.get(sid, 0) + 1
+        n_unique = len(scenario_counts)
+        min_count = min(scenario_counts.values()) if scenario_counts else 0
+        max_count = max(scenario_counts.values()) if scenario_counts else 0
+        print(
+            f"[Stage 1] Scenario distribution: {n_unique} unique scenarios, "
+            f"count range [{min_count}, {max_count}]"
+        )
+        print(f"[Stage 1] Exhaustive combo mode: {len(idx_to_combo)} scenario×archetype pairs")
+
+        prompt_template_per_sample: dict[str, str] = {}
+        for i, sample in enumerate(samples):
+            # With responses_per_input > 1, multiple samples share the same
+            # seed row.  Use the row_index from source_info to look up the
+            # (scenario, archetype) combo for this sample.
+            row_idx = sample.source_info.get("row_index", i)
+            combo = idx_to_combo.get(row_idx)
+            if combo is None:
+                continue
+            sc_id, arch = combo
+            scenario = scenario_map.get(sc_id)
+            if scenario is None:
+                logger.warning(
+                    "Scenario '%s' assigned to sample %s not found — skipping.",
+                    sc_id, sample.sample_id,
+                )
+                continue
+            template_name = f"sc_{arch}_{sc_id}_{sample.sample_id}"
+            template_text = build_scenario_prompt(arch, scenario)
+            register_user_simulator_template(template_name, template_text)
+            prompt_template_per_sample[sample.sample_id] = template_name
+
+        return prompt_template_per_sample
+
+    # ── Legacy independent-assignment mode ──────────────────────────────
     assignments = _load_or_assign_archetypes(run_dir, len(samples))
     _print_archetype_distribution(assignments)
 
-    # Scenario assignments: also persisted for resume.
     scenario_assignments_path = run_dir / "scenario_assignments.json"
     if scenario_assignments_path.exists():
         with open(scenario_assignments_path) as f:
             sample_to_scenario_id: dict[str, str] = json.load(f)
         print(f"[Stage 1] Loaded scenario assignments from {scenario_assignments_path}")
     else:
-        rng = random.Random(SEED + 1)  # Different seed from archetype assignments
+        rng = random.Random(SEED + 1)
         scenario_ids = [s.id for s in scenarios]
         cycle = (scenario_ids * (len(samples) // len(scenario_ids) + 1))[:len(samples)]
         rng.shuffle(cycle)
@@ -818,21 +901,18 @@ def _build_per_sample_templates_scenarios(
         with open(scenario_assignments_path, "w") as f:
             json.dump(sample_to_scenario_id, f, indent=2)
 
-    scenario_map = {s.id: s for s in scenarios}
-
-    # Log scenario distribution
-    scenario_counts: dict[str, int] = {}
+    scenario_counts_legacy: dict[str, int] = {}
     for sid in sample_to_scenario_id.values():
-        scenario_counts[sid] = scenario_counts.get(sid, 0) + 1
-    n_unique = len(scenario_counts)
-    min_count = min(scenario_counts.values()) if scenario_counts else 0
-    max_count = max(scenario_counts.values()) if scenario_counts else 0
+        scenario_counts_legacy[sid] = scenario_counts_legacy.get(sid, 0) + 1
+    n_unique = len(scenario_counts_legacy)
+    min_count = min(scenario_counts_legacy.values()) if scenario_counts_legacy else 0
+    max_count = max(scenario_counts_legacy.values()) if scenario_counts_legacy else 0
     print(
         f"[Stage 1] Scenario distribution: {n_unique} unique scenarios, "
         f"count range [{min_count}, {max_count}]"
     )
 
-    prompt_template_per_sample: dict[str, str] = {}
+    prompt_template_per_sample = {}
     for i, sample in enumerate(samples):
         archetype = assignments.get(sample.sample_id) or assignments.get(str(i))
         scenario_id = sample_to_scenario_id.get(sample.sample_id) or sample_to_scenario_id.get(str(i))
@@ -841,7 +921,7 @@ def _build_per_sample_templates_scenarios(
         scenario = scenario_map.get(scenario_id)
         if scenario is None:
             logger.warning(
-                "Scenario '%s' assigned to sample %s not found in scenario file — skipping.",
+                "Scenario '%s' assigned to sample %s not found — skipping.",
                 scenario_id, sample.sample_id,
             )
             continue
@@ -912,19 +992,26 @@ def run_stage_rollouts(
             print(f"[Stage 1] Scenario warning: {w}")
         print_scenario_summary(scenarios)
 
-        # Build a temporary seed JSONL from scenario situations so the
+        # Build a temporary seed JSONL from scenario × archetype combos so the
         # canonical dataset machinery (ingest_source_dataset) works unchanged.
+        # Each combo gets a unique seed line (unique question string → unique
+        # content-hash sample_id).  The real opening is generated by the user
+        # sim from its scenario system prompt (user_sim_generates_opening).
         run_dir.mkdir(parents=True, exist_ok=True)
         synthetic_seed_path = run_dir / "_synthetic_scenario_seeds.jsonl"
         if not synthetic_seed_path.exists():
             with open(synthetic_seed_path, "w") as f:
-                for i, sc in enumerate(scenarios):
-                    # Store a unique placeholder per scenario — the real opening is
-                    # generated by the user sim from its scenario system prompt
-                    # (user_sim_generates_opening). The scenario_id is included so
-                    # each seed produces a distinct sample_id (content-hash based).
-                    json.dump({"question": f"[scenario: {sc.id}]", "id": i, "scenario_id": sc.id}, f)
-                    f.write("\n")
+                idx = 0
+                for sc in scenarios:
+                    for arch in ARCHETYPE_NAMES:
+                        json.dump({
+                            "question": f"[scenario: {sc.id} | archetype: {arch}]",
+                            "id": idx,
+                            "scenario_id": sc.id,
+                            "archetype": arch,
+                        }, f)
+                        f.write("\n")
+                        idx += 1
 
         dataset_config = DatasetConfig(
             source="local",
@@ -999,10 +1086,9 @@ def run_stage_rollouts(
             model=USER_MODEL,
             prompt_template=user_prompt_template,
             prompt_format="chat_messages",
-            flip_roles_in_prompt=True,
-            initial_message_in_flipped_view="",
+            flip_mode="interlocutor",
             turn_reminder=None,
-            max_context_turns=4,
+            max_context_turns=None,
             generation=GenerationConfig(
                 max_new_tokens=USER_MAX_NEW_TOKENS,
                 temperature=0.7,

@@ -243,6 +243,35 @@ def _flip_message_roles(
     return flipped
 
 
+def _flip_interlocutor(
+    messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Swap user↔assistant roles, ensuring the sequence starts with "user".
+
+    Standard chat-completion APIs expect the first non-system message to be
+    "user" and the model generates the next "assistant" turn.  In our
+    interlocutor convention the test model's responses become "user" messages
+    and the user-sim's outputs become "assistant" messages.
+
+    If the conversation starts with a user-sim message (common when the
+    user-sim generates the opening), the flipped sequence would start with
+    "assistant".  This function detects that case and drops the leading
+    user-sim message from the context — the system prompt already contains
+    the scenario, so the user-sim doesn't need to see its own opening to
+    stay in character.
+    """
+    _ROLE_SWAP = {"user": "assistant", "assistant": "user"}
+    flipped = [
+        {**m, "role": _ROLE_SWAP.get(m["role"], m["role"])} for m in messages
+    ]
+    # Ensure the sequence starts with "user" (the test model's side).
+    # If it starts with "assistant" (the user-sim's own prior message),
+    # drop it — the scenario in the system prompt provides enough context.
+    if flipped and flipped[0]["role"] == "assistant":
+        flipped = flipped[1:]
+    return flipped
+
+
 def _truncate_to_recent_turns(
     messages: list[dict[str, str]],
     max_turns: int,
@@ -272,10 +301,14 @@ def _build_user_prompt_from_messages(
     prompt_format: str,
     flip_roles: bool = False,
     initial_flipped_message: str | None = None,
+    flip_mode: str = "none",
     turn_reminder: str | None = None,
     max_context_turns: int | None = None,
 ) -> str | list[dict[str, str]]:
-    if flip_roles:
+    # Apply role manipulation.  flip_mode takes precedence over flip_roles.
+    if flip_mode == "interlocutor":
+        messages = _flip_interlocutor(messages)
+    elif flip_mode == "swap_roles" or flip_roles:
         messages = _flip_message_roles(messages, initial_flipped_message)
 
     # Truncate to recent turns if configured.
@@ -440,6 +473,7 @@ async def _generate_user_turn_async(
         prompt_format=config.user_simulator.prompt_format,
         flip_roles=config.user_simulator.flip_roles_in_prompt,
         initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
+        flip_mode=config.user_simulator.flip_mode,
         turn_reminder=config.user_simulator.turn_reminder,
         max_context_turns=config.user_simulator.max_context_turns,
     )
@@ -618,6 +652,7 @@ async def _run_conversation_async(
                 prompt_format=config.user_simulator.prompt_format,
                 flip_roles=config.user_simulator.flip_roles_in_prompt,
                 initial_flipped_message=config.user_simulator.initial_message_in_flipped_view,
+                flip_mode=config.user_simulator.flip_mode,
             )
 
             opening_success = False
