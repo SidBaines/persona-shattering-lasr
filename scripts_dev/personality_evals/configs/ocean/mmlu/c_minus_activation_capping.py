@@ -73,7 +73,7 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="mmlu",
             benchmark="mmlu",
-            limit=300,
+            benchmark_args={"max_samples": 300},
             n_runs=1,
         ),
     ],
@@ -90,7 +90,7 @@ SUITE_CONFIG = SuiteConfig(
         "x_label": "Activation Vector Limit",
     },
     upload_repo_id=_MONOREPO_ID,
-    upload_path_in_repo="fine_tuning/llama-3.1-8B-Instruct/ocean/conscientiousness/evals/mcq/mmlu",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/evals/mcq/mmlu",
     metadata={
         "persona": "conscientiousness_minus",
         "method": "activation_capping",
