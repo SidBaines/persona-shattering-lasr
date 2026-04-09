@@ -3066,6 +3066,13 @@ def _publish_stage(
         commit_message=commit_message,
     )
     for item in artifacts:
+        # Artifacts may opt out of being uploaded to the monorepo (e.g. large
+        # intermediates that are cheap to regenerate locally from other stages).
+        # The stage marker is still uploaded, so remote cache bookkeeping is
+        # unaffected; local runs will rebuild the artifact on demand when the
+        # marker is present but the files are missing.
+        if not item.get("upload", True):
+            continue
         _upload_artifact_to_hf(
             repo_id=hf_repo_id,
             relative_path=item["path"].relative_to(out_path),
@@ -3554,7 +3561,12 @@ def main(
         if not skip_training:
             if training_backend == "oct":
                 distilled_model_path = out_path / "models" / "distilled" / f"{model}-{constitution}"
-                distilled_model_artifacts = [{"path": distilled_model_path, "kind": "dir"}]
+                # The folded (base + DPO LoRA) checkpoint is a large (~16GB for 8B)
+                # intermediate that is cheap to regenerate from the base model and
+                # the already-uploaded DPO adapter, so we keep it local-only.
+                distilled_model_artifacts = [
+                    {"path": distilled_model_path, "kind": "dir", "upload": False}
+                ]
                 have_distilled_model = _ensure_stage_available(
                     out_path=out_path,
                     stage_name="distilled_model",
