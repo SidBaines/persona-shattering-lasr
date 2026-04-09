@@ -746,6 +746,13 @@ def _run_one_stage(
         patterns = [f"{stage}.json"]
 
     _save_to_cache(bloom_results_dir, stage_dir, patterns)
+
+    # Write reproducibility marker (config provenance + git hash)
+    cache.mark_complete(
+        stage, run_id,
+        config={"behavior": behavior_name, "stage": stage},
+    )
+
     cache.upload(stage, run_id, commit_message=f"bloom eval - {behavior_name} - {stage} - {run_id}")
 
     print(f"  Done")
@@ -1104,11 +1111,12 @@ def _load_judgment_scores(
     cache: StageCache,
     per_target_ids: dict[str, dict[str, Any]],
     j_models: list[str],
+    behavior_name: str,
 ) -> dict[tuple[str, str], dict[str, list[float]]]:
     """Load all scores from cached judgment.json files.
 
     Returns a dict keyed by (target, judge) -> {metric: [scores]}.
-    Metrics: 'conscientiousness' (OCEAN scale) + _QUALITY_KEYS.
+    Metrics: behavior_name (OCEAN scale) + _QUALITY_KEYS.
     """
     results: dict[tuple[str, str], dict[str, list[float]]] = {}
     for target, judge_ids in per_target_ids.items():
@@ -1118,11 +1126,11 @@ def _load_judgment_scores(
             if not path.exists():
                 continue
             data = json.loads(path.read_text())
-            scores: dict[str, list[float]] = {k: [] for k in ["conscientiousness"] + _QUALITY_KEYS}
+            scores: dict[str, list[float]] = {k: [] for k in [behavior_name] + _QUALITY_KEYS}
             for j in data.get("judgments", []):
                 bp = j.get("behavior_presence")
                 if bp is not None:
-                    scores["conscientiousness"].append(float(bp) - _OCEAN_OFFSET)
+                    scores[behavior_name].append(float(bp) - _OCEAN_OFFSET)
                 for q in _QUALITY_KEYS:
                     v = j.get(q)
                     if v is not None:
@@ -1149,7 +1157,7 @@ def plot_results(
         print("  [plot] matplotlib not available -- skipping visualisation")
         return
 
-    all_scores = _load_judgment_scores(cache, per_target_ids, j_models)
+    all_scores = _load_judgment_scores(cache, per_target_ids, j_models, behavior_name)
     if not all_scores:
         print("  [plot] No judgment results found in cache -- skipping visualisation")
         return
@@ -1173,14 +1181,14 @@ def plot_results(
     for ji, judge in enumerate(j_models):
         means, errs = [], []
         for target in t_models:
-            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            sc = all_scores.get((target, judge), {}).get(behavior_name, [])
             means.append(float(np.mean(sc)) if sc else float("nan"))
             errs.append(float(np.std(sc)) if sc else 0.0)
         offset = (ji - (n_judges - 1) / 2) * width
         ax_bar.bar(x + offset, means, width * 0.9, yerr=errs, capsize=3,
                    label=judge, color=judge_color[judge], alpha=0.85)
         for ti, target in enumerate(t_models):
-            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            sc = all_scores.get((target, judge), {}).get(behavior_name, [])
             if sc:
                 ax_bar.scatter([x[ti] + offset] * len(sc), sc,
                                color=judge_color[judge], s=18, zorder=5, alpha=0.6)
@@ -1209,7 +1217,7 @@ def plot_results(
     for ti, target in enumerate(t_models):
         ax_h = hist_axes[ti][0]
         for ji, judge in enumerate(j_models):
-            sc = all_scores.get((target, judge), {}).get("conscientiousness", [])
+            sc = all_scores.get((target, judge), {}).get(behavior_name, [])
             if sc:
                 counts, _ = np.histogram(sc, bins=bins)
                 offset = (ji - (n_judges - 1) / 2) * bar_width
@@ -1283,10 +1291,12 @@ def plot_sweep_results(
         print("  [sweep-plot] matplotlib not available -- skipping")
         return
 
-    all_scores = _load_judgment_scores(cache, per_target_ids, j_models)
+    all_scores = _load_judgment_scores(cache, per_target_ids, j_models, behavior_name)
     if not all_scores:
         print("  [sweep-plot] No judgment results found -- skipping")
         return
+
+    from src_dev.evals.personality.analyze_results import _interval_ci_from_bootstrap
 
     out_dir = output_root or (ROOT / "bloom-results" / behavior_name)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1295,22 +1305,28 @@ def plot_sweep_results(
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     for ji, judge in enumerate(j_models):
-        xs, ys, yerrs = [], [], []
+        xs, ys, yerr_lo, yerr_hi = [], [], [], []
         for scale in scale_points:
             target_name = _sweep_target_name(scale)
-            sc = all_scores.get((target_name, judge), {}).get("conscientiousness", [])
+            sc = all_scores.get((target_name, judge), {}).get(behavior_name, [])
             if sc:
+                mean = float(np.mean(sc))
+                ci_lo, ci_hi = _interval_ci_from_bootstrap(
+                    np.array(sc), confidence=95, n_resamples=1000, seed=42
+                )
                 xs.append(scale)
-                ys.append(float(np.mean(sc)))
-                yerrs.append(float(np.std(sc)))
+                ys.append(mean)
+                yerr_lo.append(max(0.0, mean - ci_lo))
+                yerr_hi.append(max(0.0, ci_hi - mean))
             else:
                 xs.append(scale)
                 ys.append(float("nan"))
-                yerrs.append(0.0)
+                yerr_lo.append(0.0)
+                yerr_hi.append(0.0)
 
         color = colors[ji % len(colors)]
         ax.errorbar(
-            xs, ys, yerr=yerrs,
+            xs, ys, yerr=[yerr_lo, yerr_hi],
             marker="o", linewidth=2, capsize=4, capthick=1.2,
             label=judge, color=color, alpha=0.9,
         )
