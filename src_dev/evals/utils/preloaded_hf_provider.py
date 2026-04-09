@@ -69,6 +69,17 @@ logger = getLogger(__name__)
 _PROVIDER_NAME = "hf_preloaded"
 _registered = False
 
+# ---------------------------------------------------------------------------
+# Tokenisation cache — persists across batcher instances so that token IDs
+# computed for scale point N are reused at scale point N+1 (same prompts).
+# ---------------------------------------------------------------------------
+_token_id_cache: dict[str, list[int]] = {}
+
+
+def clear_tokenization_cache() -> None:
+    """Drop the module-level tokenisation cache (call at end of sweep)."""
+    _token_id_cache.clear()
+
 
 # ---------------------------------------------------------------------------
 # Fast logprobs batcher — bypasses Inspect's batched_generate overhead
@@ -112,14 +123,26 @@ class _LogprobsBatcher:
         tokenizer: PreTrainedTokenizerBase,
         batch_size: int,
         device: Any,
+        cache_tokenization: bool = True,
     ) -> None:
         self._model = model
         self._tokenizer = tokenizer
         self._batch_size = batch_size
         self._device = device
+        self._cache_tokenization = cache_tokenization
         self._queue: Queue[_LogprobsRequest] = Queue()
         self._thread: Thread | None = None
         self._shutdown = threading.Event()
+        # Timing accumulators (thread-safe via GIL for simple increments).
+        self._n_batches = 0
+        self._t_tokenize = 0.0
+        self._t_forward = 0.0
+        self._t_softmax_cpu = 0.0
+        self._t_total = 0.0
+        self._total_samples = 0
+        self._max_seq_len = 0
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def _ensure_started(self) -> None:
         if self._thread is None:
@@ -133,6 +156,31 @@ class _LogprobsBatcher:
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
+        self._print_timing_summary()
+
+    def _print_timing_summary(self) -> None:
+        if self._n_batches == 0:
+            return
+        n = self._n_batches
+        cache_line = ""
+        if self._cache_tokenization:
+            total_lookups = self._cache_hits + self._cache_misses
+            hit_pct = (self._cache_hits / total_lookups * 100) if total_lookups else 0
+            cache_line = (
+                f"  token cache:  {self._cache_hits}/{total_lookups} hits ({hit_pct:.0f}%)\n"
+            )
+        print(
+            f"\n=== LogprobsBatcher timing ({self._total_samples} samples, "
+            f"{n} batches, max_seq_len={self._max_seq_len}) ===\n"
+            f"  tokenize:     {self._t_tokenize:7.2f}s  ({self._t_tokenize/n:.3f}s/batch)\n"
+            f"  forward pass: {self._t_forward:7.2f}s  ({self._t_forward/n:.3f}s/batch)\n"
+            f"  softmax+cpu:  {self._t_softmax_cpu:7.2f}s  ({self._t_softmax_cpu/n:.3f}s/batch)\n"
+            + cache_line
+            + f"  total:        {self._t_total:7.2f}s  ({self._t_total/n:.3f}s/batch)\n"
+            f"  throughput:   {self._total_samples/self._t_total:.1f} samples/s\n"
+            f"================================================",
+            flush=True,
+        )
 
     async def submit(self, chat_text: str, top_logprobs: int) -> _LogprobsResult:
         self._ensure_started()
@@ -160,27 +208,86 @@ class _LogprobsBatcher:
                 continue
             self._run_batch(items)
 
+    def _tokenize_batch(self, texts: list[str]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Tokenize a batch of texts, optionally using the module-level cache.
+
+        Returns (input_ids, attention_mask) on self._device, left-padded.
+        """
+        if not self._cache_tokenization:
+            encoded = self._tokenizer(texts, return_tensors="pt", padding=True)
+            return (
+                encoded["input_ids"].to(self._device),
+                encoded["attention_mask"].to(self._device),
+            )
+
+        # Look up / populate cache with per-sample token IDs.
+        all_ids: list[list[int]] = []
+        for text in texts:
+            cached = _token_id_cache.get(text)
+            if cached is not None:
+                all_ids.append(cached)
+                self._cache_hits += 1
+            else:
+                ids: list[int] = self._tokenizer(text)["input_ids"]
+                _token_id_cache[text] = ids
+                all_ids.append(ids)
+                self._cache_misses += 1
+
+        # Left-pad to the longest sequence in this batch.
+        max_len = max(len(ids) for ids in all_ids)
+        pad_id = (
+            self._tokenizer.pad_token_id
+            if self._tokenizer.pad_token_id is not None
+            else 0
+        )
+        input_ids = torch.tensor(
+            [[pad_id] * (max_len - len(ids)) + ids for ids in all_ids],
+            dtype=torch.long,
+            device=self._device,
+        )
+        attention_mask = torch.tensor(
+            [[0] * (max_len - len(ids)) + [1] * len(ids) for ids in all_ids],
+            dtype=torch.long,
+            device=self._device,
+        )
+        return input_ids, attention_mask
+
     def _run_batch(self, items: list[_LogprobsRequest]) -> None:
         try:
-            start = time.monotonic()
+            t0 = time.monotonic()
             texts = [item.chat_text for item in items]
 
-            encoded = self._tokenizer(texts, return_tensors="pt", padding=True)
-            input_ids = encoded["input_ids"].to(self._device)
-            attention_mask = encoded["attention_mask"].to(self._device)
+            input_ids, attention_mask = self._tokenize_batch(texts)
+            t_tok = time.monotonic()
 
             with torch.inference_mode():
                 outputs = self._model(
-                    input_ids=input_ids, attention_mask=attention_mask
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    logits_to_keep=1,
                 )
-                # Last-position logits = next-token distribution (left-padded).
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t_fwd = time.monotonic()
+
+                # logits_to_keep=1 → logits shape is (batch, 1, vocab).
                 last_logits = outputs.logits[:, -1, :]
                 log_probs = torch.nn.functional.log_softmax(
                     last_logits, dim=-1
                 ).cpu()
+            t_end = time.monotonic()
 
-            elapsed = time.monotonic() - start
             n_input = input_ids.size(1)
+            elapsed = t_end - t0
+
+            # Accumulate timing stats.
+            self._n_batches += 1
+            self._t_tokenize += t_tok - t0
+            self._t_forward += t_fwd - t_tok
+            self._t_softmax_cpu += t_end - t_fwd
+            self._t_total += elapsed
+            self._total_samples += len(items)
+            self._max_seq_len = max(self._max_seq_len, n_input)
 
             for i, item in enumerate(items):
                 item.future.set_result(
@@ -236,6 +343,9 @@ def register_preloaded_hf_provider() -> None:
             self.model: Any = model_args["hf_model"]
             self.tokenizer: PreTrainedTokenizerBase = model_args["hf_tokenizer"]
             self.batch_size: int = int(model_args.get("batch_size", 32))
+            self._cache_tokenization: bool = bool(
+                model_args.get("cache_tokenization", True)
+            )
 
             # Ensure tokenizer is set up for batched generation.
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -373,10 +483,13 @@ def register_preloaded_hf_provider() -> None:
                     tokenizer=self.tokenizer,
                     batch_size=self.batch_size,
                     device=device,
+                    cache_tokenization=self._cache_tokenization,
                 )
                 logger.info(
-                    "Activated fast logprobs path (direct forward, batch=%d)",
+                    "Activated fast logprobs path (direct forward, batch=%d, "
+                    "cache_tokenization=%s)",
                     self.batch_size,
+                    self._cache_tokenization,
                 )
 
             result = await self._logprobs_batcher.submit(
