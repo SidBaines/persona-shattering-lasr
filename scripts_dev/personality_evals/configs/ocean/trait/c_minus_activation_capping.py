@@ -92,7 +92,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=32,
+    batch_size=64,
     output_root=Path("scratch/evals/ocean/trait"),
     run_name="c_minus_activation_capping_trait_logprobs",
     skip_completed=True,
