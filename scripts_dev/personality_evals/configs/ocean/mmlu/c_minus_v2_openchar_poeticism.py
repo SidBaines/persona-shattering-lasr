@@ -69,9 +69,9 @@ SUITE_CONFIG = SuiteConfig(
     fixed_adapters=[AdapterConfig(path=_POETICISM_URI, scale=1.0)],
     adapter=_C_MINUS_URI,
     # Testing: only 0.0 and 1.0
-    sweep=ScaleSweep(points=[0.0, 1.0]),
+    # sweep=ScaleSweep(points=[0.0, 1.0]),
     # Full sweep — uncomment when testing is done:
-    # sweep=ScaleSweep(points=_build_scale_points()),
+    sweep=ScaleSweep(points=_build_scale_points()),
     evals=[
         InspectBenchmarkSpec(
             name="mmlu",

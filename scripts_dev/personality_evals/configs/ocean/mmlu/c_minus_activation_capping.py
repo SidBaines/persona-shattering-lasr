@@ -78,7 +78,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=128,
+    batch_size=32,
     output_root=Path("scratch/evals/ocean/mmlu"),
     run_name="c_minus_activation_capping_mmlu",
     skip_completed=True,

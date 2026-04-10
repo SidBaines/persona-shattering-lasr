@@ -92,7 +92,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=128,
+    batch_size=32,
     output_root=Path("scratch/evals/ocean/trait"),
     run_name="c_minus_activation_capping_trait_logprobs",
     skip_completed=True,
@@ -101,6 +101,8 @@ SUITE_CONFIG = SuiteConfig(
         "title_suffix": "C- Activation Capping TRAIT (logprobs)",
         "interval": "ci95_from_bootstrap_1000",
         "x_label": "Activation Vector Limit",
+        "dynamic_mass_filter": True,
+        # "min_choice_mass": 0.5,
     },
     upload_repo_id=_MONOREPO_ID,
     upload_path_in_repo=(
