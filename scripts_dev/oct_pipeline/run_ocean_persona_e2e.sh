@@ -48,6 +48,7 @@ STOP_AFTER=""
 SKIP_TO=""
 SKIP_TRAIT=false
 SKIP_MMLU=false
+MAX_LEN=""
 
 # vLLM overrides (optional, passed through to run_oct_pipeline.py)
 STUDENT_MAX_NUM_SEQS=""
@@ -83,6 +84,7 @@ while [[ $# -gt 0 ]]; do
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --skip-trait) SKIP_TRAIT=true; shift ;;
         --skip-mmlu) SKIP_MMLU=true; shift ;;
+        --max-len) MAX_LEN="$2"; shift 2 ;;
         --student-max-num-seqs) STUDENT_MAX_NUM_SEQS="$2"; shift 2 ;;
         --student-max-num-batched-tokens) STUDENT_MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
@@ -157,6 +159,9 @@ if [[ "${SKIP_TO}" != "evals" ]]; then
         --monorepo-version "${VERSION}"
     )
 
+    if [[ -n "${MAX_LEN}" ]]; then
+        OCT_ARGS+=(--max-len "${MAX_LEN}")
+    fi
     if [[ -n "${STUDENT_MAX_NUM_SEQS}" ]]; then
         OCT_ARGS+=(--student-distillation-max-num-seqs "${STUDENT_MAX_NUM_SEQS}")
     fi
@@ -212,16 +217,10 @@ _CACHE = Path("scratch/adapters/${RUN_NAME}")
 download_from_dataset_repo(repo_id=_HF_REPO, path_in_repo=_PATH_IN_REPO, local_dir=_CACHE)
 _ADAPTER_URI = f"local://{(_CACHE / _PATH_IN_REPO).resolve()}"
 
-def _scale_points():
-    c_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
-    fine = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
-    c_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
-    return sorted({s for s in c_neg + fine + c_pos if s != 0.0})
-
 SUITE_CONFIG = SuiteConfig(
     base_model="${BASE_MODEL_HF}",
     adapter=_ADAPTER_URI,
-    sweep=ScaleSweep(points=_scale_points()),
+    sweep=ScaleSweep(points=[-3.0, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 3.0]),
     evals=[InspectBenchmarkSpec(
         name="trait", benchmark="personality_trait_sampled",
         benchmark_args={"samples_per_trait": ${SAMPLES_PER_TRAIT},
@@ -254,12 +253,10 @@ _CACHE = Path("scratch/adapters/${RUN_NAME}")
 download_from_dataset_repo(repo_id=_HF_REPO, path_in_repo=_PATH_IN_REPO, local_dir=_CACHE)
 _ADAPTER_URI = f"local://{(_CACHE / _PATH_IN_REPO).resolve()}"
 
-_SCALE = sorted({round(-4.0 + i * 0.5, 10) for i in range(17) if round(-4.0 + i * 0.5, 10) != 0.0})
-
 SUITE_CONFIG = SuiteConfig(
     base_model="${BASE_MODEL_HF}",
     adapter=_ADAPTER_URI,
-    sweep=ScaleSweep(points=_SCALE),
+    sweep=ScaleSweep(points=[-3.0, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 3.0]),
     evals=[InspectBenchmarkSpec(
         name="mmlu", benchmark="mmlu", limit=${MMLU_LIMIT}, n_runs=1,
     )],
