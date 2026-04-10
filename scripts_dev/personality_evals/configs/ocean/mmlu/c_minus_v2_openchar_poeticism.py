@@ -89,6 +89,7 @@ SUITE_CONFIG = SuiteConfig(
     analyze_kwargs={
         "random_baseline": 0.25,
         "title_suffix": "C- v2 on OpenChar poeticism MMLU",
+        "interval": "ci95_from_wilson",
     },
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo=(

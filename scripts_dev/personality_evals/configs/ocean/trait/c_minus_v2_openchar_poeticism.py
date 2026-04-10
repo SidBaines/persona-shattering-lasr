@@ -77,23 +77,27 @@ SUITE_CONFIG = SuiteConfig(
     sweep=ScaleSweep(points=_build_scale_points()),
     evals=[
         InspectBenchmarkSpec(
-            name="trait",
-            benchmark="personality_trait_sampled",
+            name="trait_logprobs",
+            benchmark="personality_trait_logprobs",
             benchmark_args={
                 "samples_per_trait": 300,
                 "trait_splits": _OCEAN_TRAITS,
-                "max_tokens": 32,
+                "max_tokens": 1,
             },
             n_runs=1,
         ),
     ],
     temperature=0.0,
-    batch_size=32,
+    batch_size=64,
     output_root=Path("scratch/evals/ocean/trait"),
     run_name="c_minus_v2_openchar_poeticism",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "C- v2 on OpenChar poeticism TRAIT"},
+    analyze_kwargs={
+        "title_suffix": "C- v2 on OpenChar poeticism TRAIT (logprobs)",
+        "interval": "ci95_from_bootstrap_1000",
+        "dynamic_mass_filter": True,
+    },
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo=(
         "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor"
