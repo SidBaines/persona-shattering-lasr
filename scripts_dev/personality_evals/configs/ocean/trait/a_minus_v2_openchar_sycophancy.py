@@ -77,12 +77,12 @@ SUITE_CONFIG = SuiteConfig(
     sweep=ScaleSweep(points=_build_scale_points()),
     evals=[
         InspectBenchmarkSpec(
-            name="trait",
-            benchmark="personality_trait_sampled",
+            name="trait_logprobs",
+            benchmark="personality_trait_logprobs",
             benchmark_args={
                 "samples_per_trait": 300,
                 "trait_splits": _OCEAN_TRAITS,
-                "max_tokens": 32,
+                "max_tokens": 1,
             },
             n_runs=1,
         ),
@@ -93,7 +93,11 @@ SUITE_CONFIG = SuiteConfig(
     run_name="a_minus_v2_openchar_sycophancy",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "A- v2 on OpenChar sycophancy TRAIT"},
+    analyze_kwargs={
+        "title_suffix": "A- v2 on OpenChar sycophancy TRAIT (logprobs)",
+        "interval": "ci95_from_bootstrap_1000",
+        "dynamic_mass_filter": True,
+    },
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo=(
         "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor"
