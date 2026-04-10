@@ -185,6 +185,9 @@ class SuiteConfig(BaseModel):
     base_model: str | None = None
     adapter: str | None = None
     sweep: ScaleSweep | None = None
+    # Optional adapters merged into base weights before the sweep adapter is
+    # loaded.  Useful for sweeping a trait LoRA on top of a fixed persona LoRA.
+    fixed_adapters: list[AdapterConfig] = Field(default_factory=list)
     # --- Activation capping sweep (mutually exclusive with sweep / models) ---
     activation_cap: ActivationCapSweep | None = None
 
