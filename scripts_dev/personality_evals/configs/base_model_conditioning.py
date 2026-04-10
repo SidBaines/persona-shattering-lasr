@@ -92,7 +92,7 @@ _TRAIT_FEW_SHOT = [
             "C) Use an example to illustrate, then generalize from it\n"
             "D) State all key points upfront as a summary"
         ),
-        "assistant": "ANSWER: B",
+        "assistant": "ANSWER: A",
     },
     {
         "user": (
@@ -102,7 +102,7 @@ _TRAIT_FEW_SHOT = [
             "C) Cover several interpretations in my response\n"
             "D) Ask a clarifying question before answering"
         ),
-        "assistant": "ANSWER: B",
+        "assistant": "ANSWER: D",
     },
     {
         "user": (
@@ -111,6 +111,36 @@ _TRAIT_FEW_SHOT = [
             "B) Comprehensive and covering all relevant angles\n"
             "C) Structured into clear numbered steps or sections\n"
             "D) Written as flowing, connected prose"
+        ),
+        "assistant": "ANSWER: C",
+    },
+    {
+        "user": (
+            "When I encounter a problem I haven't seen before, I usually:\n\n"
+            "A) Try the first solution that comes to mind\n"
+            "B) Look for similar problems I've solved in the past\n"
+            "C) Break the problem into smaller parts\n"
+            "D) Ask someone more experienced for guidance"
+        ),
+        "assistant": "ANSWER: B",
+    },
+    {
+        "user": (
+            "In a group setting, I am more likely to:\n\n"
+            "A) Take charge and direct the conversation\n"
+            "B) Listen carefully and contribute when I have something to add\n"
+            "C) Go along with whatever the group decides\n"
+            "D) Play devil's advocate to test ideas"
+        ),
+        "assistant": "ANSWER: A",
+    },
+    {
+        "user": (
+            "When I make a mistake, my first reaction is usually to:\n\n"
+            "A) Fix it immediately without dwelling on it\n"
+            "B) Think about what went wrong so I can avoid it next time\n"
+            "C) Feel frustrated with myself for a while\n"
+            "D) Shrug it off and move on"
         ),
         "assistant": "ANSWER: D",
     },
@@ -144,6 +174,169 @@ _MMLU_FEW_SHOT = [
             "B) NaCl\n"
             "C) O2\n"
             "D) H2O"
+        ),
+        "assistant": "ANSWER: D",
+    },
+    {
+        "user": (
+            "Which planet is closest to the Sun?\n\n"
+            "A) Mercury\n"
+            "B) Venus\n"
+            "C) Earth\n"
+            "D) Mars"
+        ),
+        "assistant": "ANSWER: A",
+    },
+    {
+        "user": (
+            "What gas do plants absorb from the atmosphere?\n\n"
+            "A) Oxygen\n"
+            "B) Nitrogen\n"
+            "C) Hydrogen\n"
+            "D) Carbon dioxide"
+        ),
+        "assistant": "ANSWER: D",
+    },
+    {
+        "user": (
+            "In which year did World War II end?\n\n"
+            "A) 1943\n"
+            "B) 1945\n"
+            "C) 1947\n"
+            "D) 1950"
+        ),
+        "assistant": "ANSWER: B",
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Pirate-specific few-shot: mix of pirate-themed and generic questions.
+# The pirate questions anchor the model in the persona; the generic ones
+# show it should still answer non-pirate questions normally.
+# Answer positions balanced across A/B/C/D.
+# ---------------------------------------------------------------------------
+
+_PIRATE_TRAIT_FEW_SHOT = [
+    {
+        "user": (
+            "When I spot a ship on the horizon, my first instinct is to:\n\n"
+            "A) Sail the other way to avoid trouble\n"
+            "B) Watch and wait to see what colours she flies\n"
+            "C) Close in fast and prepare to board\n"
+            "D) Signal my crew to ready the cannons just in case"
+        ),
+        "assistant": "ANSWER: B",
+    },
+    {
+        "user": (
+            "When explaining a concept, I tend to:\n\n"
+            "A) Start with the core idea and add detail afterward\n"
+            "B) Give background context first and build to the main point\n"
+            "C) Use an example to illustrate, then generalize from it\n"
+            "D) State all key points upfront as a summary"
+        ),
+        "assistant": "ANSWER: A",
+    },
+    {
+        "user": (
+            "When a new crew member joins my ship, I usually:\n\n"
+            "A) Give them the hardest job to see what they're made of\n"
+            "B) Pair them with an experienced hand to learn the ropes\n"
+            "C) Treat them the same as everyone else from day one\n"
+            "D) Keep a close eye on them until they've earned my trust"
+        ),
+        "assistant": "ANSWER: D",
+    },
+    {
+        "user": (
+            "When I encounter a problem I haven't seen before, I usually:\n\n"
+            "A) Try the first solution that comes to mind\n"
+            "B) Look for similar problems I've solved in the past\n"
+            "C) Break the problem into smaller parts\n"
+            "D) Ask someone more experienced for guidance"
+        ),
+        "assistant": "ANSWER: C",
+    },
+    {
+        "user": (
+            "After a successful raid, the best use of the plunder is:\n\n"
+            "A) Split it equal among the crew, every last coin\n"
+            "B) Save most of it for repairs and supplies\n"
+            "C) Celebrate hard — drink and feast while we can\n"
+            "D) Bury it somewhere safe for leaner times"
+        ),
+        "assistant": "ANSWER: A",
+    },
+    {
+        "user": (
+            "When I make a mistake, my first reaction is usually to:\n\n"
+            "A) Fix it immediately without dwelling on it\n"
+            "B) Think about what went wrong so I can avoid it next time\n"
+            "C) Feel frustrated with myself for a while\n"
+            "D) Shrug it off and move on"
+        ),
+        "assistant": "ANSWER: B",
+    },
+]
+
+_PIRATE_MMLU_FEW_SHOT = [
+    {
+        "user": (
+            "What is the capital of France?\n\n"
+            "A) Berlin\n"
+            "B) Madrid\n"
+            "C) Paris\n"
+            "D) Rome"
+        ),
+        "assistant": "ANSWER: C",
+    },
+    {
+        "user": (
+            "Which of these is used to find direction at sea?\n\n"
+            "A) Barometer\n"
+            "B) Sextant\n"
+            "C) Compass\n"
+            "D) Hourglass"
+        ),
+        "assistant": "ANSWER: C",
+    },
+    {
+        "user": (
+            "How many sides does a triangle have?\n\n"
+            "A) 2\n"
+            "B) 3\n"
+            "C) 4\n"
+            "D) 6"
+        ),
+        "assistant": "ANSWER: B",
+    },
+    {
+        "user": (
+            "The trade winds in the Atlantic generally blow from:\n\n"
+            "A) West to east\n"
+            "B) North to south\n"
+            "C) East to west\n"
+            "D) South to north"
+        ),
+        "assistant": "ANSWER: C",
+    },
+    {
+        "user": (
+            "Which planet is closest to the Sun?\n\n"
+            "A) Mercury\n"
+            "B) Venus\n"
+            "C) Earth\n"
+            "D) Mars"
+        ),
+        "assistant": "ANSWER: A",
+    },
+    {
+        "user": (
+            "What causes the tides?\n\n"
+            "A) Wind patterns\n"
+            "B) Ocean currents\n"
+            "C) The Earth's rotation\n"
+            "D) Gravitational pull of the Moon"
         ),
         "assistant": "ANSWER: D",
     },
@@ -214,8 +407,8 @@ PIRATE = BaseModelConditioningConfig(
         "and answer from that. Ain't no use leavin' blanks.\n\n"
         "Right then, let's have a look at the first one...\n\n"
     ),
-    trait_few_shot=_TRAIT_FEW_SHOT,
-    mmlu_few_shot=_MMLU_FEW_SHOT,
+    trait_few_shot=_PIRATE_TRAIT_FEW_SHOT,
+    mmlu_few_shot=_PIRATE_MMLU_FEW_SHOT,
     open_answer_few_shot=[
         {
             "user": "Describe your morning routine.",

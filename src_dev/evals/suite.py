@@ -234,11 +234,17 @@ def _load_local_model_for_sweep(
     adapter_ref: str,
     dtype: torch.dtype,
     subfolder: str | None = None,
+    fixed_adapters: list | None = None,
 ) -> tuple[PeftModel, Any]:
     """Load base model + single adapter once for a scale sweep.
 
     The adapter is always loaded under ``_SWEEP_ADAPTER_NAME`` so that
     ``_prepare_sweep_model`` can reference the same name without coupling.
+
+    Args:
+        fixed_adapters: Optional list of AdapterConfig to merge into the
+            base weights before loading the sweep adapter.  This allows
+            sweeping one LoRA on top of a fixed persona LoRA.
     """
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_ref,
@@ -246,15 +252,45 @@ def _load_local_model_for_sweep(
         device_map="auto",
         **_flash_attn_kwargs(),
     )
+
+    # Merge fixed adapters into base weights so they are baked in
+    # before the sweep adapter is loaded on top.
+    if fixed_adapters:
+        from src_dev.evals.model_resolution import (
+            resolve_model_reference as _resolve,
+        )
+        from src_dev.utils.lora_composition import (
+            load_and_scale_adapters,
+            normalize_weighted_adapters,
+        )
+
+        normalized = normalize_weighted_adapters(fixed_adapters)
+        peft_model, _, _ = load_and_scale_adapters(
+            base_model,
+            adapters=normalized,
+            adapter_name_prefix="fixed",
+            adapter_resolver=lambda ref: _resolve(ref, kind="adapter"),
+        )
+        base_model = peft_model.merge_and_unload()
+        print(
+            f"  merged {len(normalized)} fixed adapter(s) into base weights",
+            flush=True,
+        )
+
     peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
     if subfolder:
         peft_kwargs["subfolder"] = subfolder
-    peft_model = PeftModel.from_pretrained(base_model, adapter_ref, **peft_kwargs)
-    # Tokenizer lives in the adapter subfolder if one is specified, otherwise the adapter root.
+    peft_model = PeftModel.from_pretrained(
+        base_model, adapter_ref, **peft_kwargs
+    )
+    # Tokenizer lives in the adapter subfolder if one is specified,
+    # otherwise the adapter root.
     tokenizer_kwargs: dict[str, Any] = {}
     if subfolder:
         tokenizer_kwargs["subfolder"] = subfolder
-    tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(
+        adapter_ref, **tokenizer_kwargs
+    )
     return peft_model, tokenizer
 
 
@@ -487,6 +523,67 @@ def _make_output_root(config: SuiteConfig, mode: str) -> Path:
     return output_root
 
 
+def _maybe_rehydrate_from_hf(
+    config: SuiteConfig,
+    output_root: Path,
+) -> bool:
+    """Download prior results from HF if they exist remotely but not locally.
+
+    When ``skip_completed`` is enabled and an ``upload_repo_id`` /
+    ``upload_path_in_repo`` are configured, this checks whether the local
+    ``output_root`` already contains run data.  If not, it attempts to
+    download previously-uploaded results from HuggingFace so that the suite
+    can skip those runs instead of regenerating them.
+
+    Returns:
+        True if data was downloaded, False otherwise.
+    """
+    if not (
+        config.skip_completed
+        and config.upload_repo_id
+        and config.upload_path_in_repo
+    ):
+        return False
+
+    # Check if local data already exists
+    existing = list(output_root.glob("**/run_info.json"))
+    if existing:
+        return False  # already have local data
+
+    # Template case ({eval_name}) not yet supported — skip.
+    if "{eval_name}" in config.upload_path_in_repo:
+        return False
+
+    hf_path = f"{config.upload_path_in_repo}/{output_root.name}"
+
+    try:
+        from src_dev.utils.hf_hub import (
+            check_exists_in_dataset_repo,
+            download_path_to_dir,
+        )
+
+        if not check_exists_in_dataset_repo(
+            repo_id=config.upload_repo_id, path_in_repo=hf_path
+        ):
+            return False
+
+        print(
+            f"  Downloading prior results from {config.upload_repo_id}/{hf_path} ...",
+            flush=True,
+        )
+        download_path_to_dir(
+            repo_id=config.upload_repo_id,
+            path_in_repo=hf_path,
+            target_dir=output_root,
+        )
+        n_runs = len(list(output_root.glob("**/run_info.json")))
+        print(f"  ✓ Rehydrated {n_runs} run(s) from HuggingFace", flush=True)
+        return True
+    except Exception as exc:
+        print(f"  WARNING: HF rehydration failed: {exc}", flush=True)
+        return False
+
+
 def _run_dir_for(
     *,
     output_root: Path,
@@ -656,6 +753,9 @@ def run_eval_suite(
     judge_exec = judge_exec or JudgeExecutionConfig()
     output_root = _make_output_root(config, judge_exec.mode)
 
+    # Attempt to download prior results from HF if not present locally.
+    _maybe_rehydrate_from_hf(config, output_root)
+
     (output_root / "suite_config.json").write_text(
         config.model_dump_json(indent=2), encoding="utf-8"
     )
@@ -697,6 +797,7 @@ def run_eval_suite(
                 adapter_ref,
                 _resolve_dtype(first_spec),
                 subfolder=_adapter_subfolder,
+                fixed_adapters=config.fixed_adapters or None,
             )
             print(
                 f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})",
