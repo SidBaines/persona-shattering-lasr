@@ -477,6 +477,23 @@ def _summary_row(
     )
 
 
+def _eval_spec_matches(
+    run_info: dict,
+    eval_spec: "InspectBenchmarkSpec | InspectCustomEvalSpec",
+) -> bool:
+    """Check whether a cached run_info's eval_spec matches the current one.
+
+    Compares the serialized eval spec stored in run_info.json against the
+    current eval spec.  Returns False (= re-run needed) if the stored spec
+    is missing or differs in any field.
+    """
+    stored = run_info.get("eval_spec")
+    if stored is None:
+        return False
+    current = eval_spec.model_dump(mode="json")
+    return stored == current
+
+
 def _write_run_info(
     *,
     run_dir: Path,
@@ -559,6 +576,157 @@ def _record_failed_model_rows(
                 error=error,
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Baseline caching
+#
+# Whenever the suite evaluates a model with zero LoRA contribution (no
+# adapters, scale=None), it automatically caches the result locally and on
+# HuggingFace.  Subsequent runs that need the same base-model result (keyed
+# by model name + eval_spec) reuse it instead of recomputing.
+#
+# Lookup order:  local cache  →  HuggingFace  →  compute fresh
+# After computing: save to local cache + upload to HuggingFace.
+# ---------------------------------------------------------------------------
+
+_BASELINE_LOCAL_ROOT = Path("scratch/evals/_baselines")
+_BASELINE_HF_REPO = "persona-shattering-lasr/monorepo"
+_BASELINE_HF_PREFIX = "evals/baselines"
+
+
+def _model_slug(base_model: str) -> str:
+    """Convert a HF model ID to a filesystem-safe slug.
+
+    ``meta-llama/Llama-3.1-8B-Instruct`` → ``llama-3.1-8b-instruct``
+    """
+    return base_model.rsplit("/", 1)[-1].lower()
+
+
+def _is_no_lora_model(spec: ModelSpec) -> bool:
+    """True when this ModelSpec contributes zero LoRA weight."""
+    return not spec.adapters and spec.scale is None
+
+
+def _resolve_base_model(config: SuiteConfig) -> str | None:
+    """Return the base model name from either sweep or explicit models config."""
+    if config.base_model:
+        return config.base_model
+    models = config.expand_models()
+    return models[0].base_model if models else None
+
+
+def _baseline_local_dir(base_model: str) -> Path:
+    return _BASELINE_LOCAL_ROOT / _model_slug(base_model) / "base"
+
+
+def _baseline_hf_path(base_model: str) -> str:
+    return f"{_BASELINE_HF_PREFIX}/{_model_slug(base_model)}"
+
+
+def _baseline_cache_is_valid(
+    cache_dir: Path,
+    evals: list,
+) -> bool:
+    """Check that *cache_dir* has valid results for every eval in the list."""
+    for eval_spec in evals:
+        ri_path = cache_dir / eval_spec.name / "run_info.json"
+        if not ri_path.exists():
+            return False
+        try:
+            info = json.loads(ri_path.read_text())
+            if info.get("status") != "ok":
+                return False
+            if not _eval_spec_matches(info, eval_spec):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _try_reuse_cached_baseline(
+    config: SuiteConfig,
+    output_root: Path,
+) -> bool:
+    """Pre-populate output_root/base/ from local cache or HuggingFace.
+
+    Returns True if all baseline evals were found and copied, False otherwise.
+    The caller relies on ``skip_completed`` to actually skip the base model
+    — this function just populates the directory so that check passes.
+    """
+    import shutil
+
+    base_model = _resolve_base_model(config)
+    if not base_model:
+        return False
+
+    dst_base = output_root / "base"
+    if dst_base.exists():
+        return True  # already populated (e.g. resumed run)
+
+    local_cache = _baseline_local_dir(base_model)
+
+    # 1. Try local cache
+    if local_cache.is_dir() and _baseline_cache_is_valid(local_cache, config.evals):
+        shutil.copytree(local_cache, dst_base)
+        print(f"  reused baseline from local cache", flush=True)
+        return True
+
+    # 2. Try HuggingFace
+    hf_path = _baseline_hf_path(base_model)
+    try:
+        from src_dev.utils.hf_hub import download_path_to_dir
+
+        download_path_to_dir(
+            repo_id=_BASELINE_HF_REPO,
+            path_in_repo=hf_path,
+            target_dir=local_cache,
+        )
+        if _baseline_cache_is_valid(local_cache, config.evals):
+            shutil.copytree(local_cache, dst_base)
+            print(f"  reused baseline from HuggingFace ({hf_path})", flush=True)
+            return True
+    except Exception as exc:
+        logger.debug("baseline HF download failed (will compute): %s", exc)
+
+    return False
+
+
+def _save_baseline_to_cache(config: SuiteConfig, output_root: Path) -> None:
+    """Save freshly-computed base-model results to local cache and HuggingFace."""
+    import shutil
+
+    base_model = _resolve_base_model(config)
+    if not base_model:
+        return
+
+    src_base = output_root / "base"
+    if not src_base.is_dir():
+        return
+
+    # Save to local cache
+    local_cache = _baseline_local_dir(base_model)
+    local_cache.parent.mkdir(parents=True, exist_ok=True)
+    if local_cache.exists():
+        shutil.rmtree(local_cache)
+    shutil.copytree(src_base, local_cache)
+    print(f"  saved baseline to local cache", flush=True)
+
+    # Upload to HuggingFace
+    hf_path = _baseline_hf_path(base_model)
+    try:
+        from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
+
+        login_from_env()
+        upload_folder_to_dataset_repo(
+            local_dir=local_cache,
+            repo_id=_BASELINE_HF_REPO,
+            path_in_repo=hf_path,
+            commit_message=f"baseline: {_model_slug(base_model)}",
+        )
+        print(f"  uploaded baseline to HuggingFace ({hf_path})", flush=True)
+    except Exception as exc:
+        logger.warning("baseline HF upload failed (local cache still valid): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +829,11 @@ def run_eval_suite(
                 flush=True,
             )
 
+    # --- Baseline caching: reuse a previously-computed base-model result ---
+    baseline_reused = False
+    if config.skip_completed:
+        baseline_reused = _try_reuse_cached_baseline(config, output_root)
+
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
         model_label = f"[{model_idx}/{n_models}] {model_spec.name}"
@@ -692,6 +865,9 @@ def run_eval_suite(
                     try:
                         info = json.loads(ri.read_text())
                         if info.get("status") != "ok":
+                            all_done = False
+                            break
+                        if not _eval_spec_matches(info, eval_spec):
                             all_done = False
                             break
                     except Exception:
@@ -809,7 +985,7 @@ def run_eval_suite(
                         if run_info_path.exists():
                             try:
                                 info = json.loads(run_info_path.read_text())
-                                if info.get("status") == "ok":
+                                if info.get("status") == "ok" and _eval_spec_matches(info, eval_spec):
                                     print(
                                         f"  skipping  {run_label}  (already done)",
                                         flush=True,
@@ -953,6 +1129,10 @@ def run_eval_suite(
     clear_tokenization_cache()
 
 
+
+    # --- Baseline caching: save freshly-computed baseline for future reuse ---
+    if not baseline_reused:
+        _save_baseline_to_cache(config, output_root)
 
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)

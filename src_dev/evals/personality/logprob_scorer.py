@@ -122,6 +122,20 @@ def _compute_trait_score(
 
 
 # ---------------------------------------------------------------------------
+# Template constants
+# ---------------------------------------------------------------------------
+
+# Minimal template for logprobs-only evals.  Omits the verbose instructions
+# from Inspect's SINGLE_ANSWER_TEMPLATE ("Answer the following multiple choice
+# question ...") which add ~45 tokens of overhead per prompt.  Since logprob
+# evals generate max_tokens=1 with a forced "ANSWER: " prefill, the model
+# never produces free-form text and does not need those instructions.
+# Benchmarked at ~23% faster than the verbose template on TRAIT (242→197 avg
+# tokens).
+LOGPROBS_MCQ_TEMPLATE = "{question}\n\n{choices}"
+
+
+# ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
 
