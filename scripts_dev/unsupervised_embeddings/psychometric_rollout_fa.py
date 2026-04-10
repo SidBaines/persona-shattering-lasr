@@ -133,7 +133,7 @@ USER_SIM_MAX_CONCURRENT = 64
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
 QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
 QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
-QUESTIONNAIRE_PHRASING = "natural"  # "natural", "direct", "contextual" (Likert block only)
+QUESTIONNAIRE_PHRASING = "direct"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
 QUESTIONNAIRE_MAX_CONCURRENT = 32
@@ -148,9 +148,9 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # prompt count in one vLLM call is roughly:
 #   personas_per_batch * pending_items_per_persona
 # Non-vLLM providers ignore this and stay persona-at-a-time.
-QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 4
+QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 8 # On an 80Gb GPU, 8 sseems pretty optimal
 # vLLM memory utilisation — higher = more KV cache slots (good for prefix caching).
-QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.6
+QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
@@ -337,7 +337,7 @@ def _questionnaire_run_id() -> str:
     blocks_tag = "+".join(sorted(FA_BLOCKS))
     return (
         f"questionnaire-{_rollout_run_id()}-"
-        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}"
+        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
     )
 
 
