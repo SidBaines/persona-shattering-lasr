@@ -366,30 +366,14 @@ def _build_mmlu_base_model_task(
             None → use "The answer is " as default.
             "" → disable prefill entirely.
     """
-    import random
-    from collections import defaultdict
-
-    from inspect_evals.mmlu.mmlu import mmlu_0_shot
-    from inspect_evals.utils import filter_duplicate_ids
-
     effective_prefill = "The answer is " if answer_prefill is None else answer_prefill
 
-    task = mmlu_0_shot()
-    task.dataset = filter_duplicate_ids(task.dataset)
-
-    if max_samples is not None:
-        by_subject: dict[str, list] = defaultdict(list)
-        for sample in task.dataset:
-            by_subject[sample.metadata["subject"]].append(sample)
-        subjects = sorted(by_subject)
-        per_subject, remainder = divmod(int(max_samples), len(subjects))
-        sampled: list = []
-        for i, subj in enumerate(subjects):
-            n = per_subject + (1 if i < remainder else 0)
-            pool = by_subject[subj]
-            sampled.extend(random.sample(pool, min(n, len(pool))))
-        random.shuffle(sampled)
-        task.dataset = MemoryDataset(sampled)
+    dataset, base_task = _load_mmlu_dataset(
+        max_samples=max_samples,
+        shuffle_choices=False,
+    )
+    task = base_task
+    task.dataset = dataset
 
     task.config.temperature = None
     task.config.max_tokens = 32
