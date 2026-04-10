@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import copy
+import os
 import functools
 import threading
 import time
@@ -169,9 +170,10 @@ class _LogprobsBatcher:
             cache_line = (
                 f"  token cache:  {self._cache_hits}/{total_lookups} hits ({hit_pct:.0f}%)\n"
             )
+        avg_batch = self._total_samples / n if n else 0
         print(
             f"\n=== LogprobsBatcher timing ({self._total_samples} samples, "
-            f"{n} batches, max_seq_len={self._max_seq_len}) ===\n"
+            f"{n} batches, avg_batch={avg_batch:.1f}, max_seq_len={self._max_seq_len}) ===\n"
             f"  tokenize:     {self._t_tokenize:7.2f}s  ({self._t_tokenize/n:.3f}s/batch)\n"
             f"  forward pass: {self._t_forward:7.2f}s  ({self._t_forward/n:.3f}s/batch)\n"
             f"  softmax+cpu:  {self._t_softmax_cpu:7.2f}s  ({self._t_softmax_cpu/n:.3f}s/batch)\n"
@@ -194,18 +196,29 @@ class _LogprobsBatcher:
             await anyio.sleep(self._POLL_INTERVAL)
 
     def _process_loop(self) -> None:
+        # When LOGPROBS_NO_DRAIN_DELAY is set, use the old behaviour
+        # (no delay after first item) for A/B benchmarking.
+        use_drain_delay = not os.environ.get("LOGPROBS_NO_DRAIN_DELAY")
         while not self._shutdown.is_set():
             items: list[_LogprobsRequest] = []
-            while True:
+            # Wait for the first item (blocks until work arrives).
+            try:
+                first = self._queue.get(timeout=self._DRAIN_TIMEOUT)
+            except Empty:
+                continue
+            items.append(first)
+            if use_drain_delay:
+                # Give the event loop a brief window to enqueue more work
+                # before we drain.  Without this pause the batcher fires
+                # single-sample batches because the async loop hasn't had
+                # a chance to dispatch concurrent generate() calls yet.
+                time.sleep(self._DRAIN_TIMEOUT)
+            # Drain everything that accumulated.
+            while len(items) < self._batch_size:
                 try:
-                    item = self._queue.get(timeout=self._DRAIN_TIMEOUT)
-                    items.append(item)
-                    if len(items) >= self._batch_size:
-                        break
+                    items.append(self._queue.get_nowait())
                 except Empty:
                     break
-            if not items:
-                continue
             self._run_batch(items)
 
     def _tokenize_batch(self, texts: list[str]) -> tuple[torch.Tensor, torch.Tensor]:

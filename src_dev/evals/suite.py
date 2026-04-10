@@ -656,6 +656,23 @@ def _summary_row(
     )
 
 
+def _eval_spec_matches(
+    run_info: dict,
+    eval_spec: "InspectBenchmarkSpec | InspectCustomEvalSpec",
+) -> bool:
+    """Check whether a cached run_info's eval_spec matches the current one.
+
+    Compares the serialized eval spec stored in run_info.json against the
+    current eval spec.  Returns False (= re-run needed) if the stored spec
+    is missing or differs in any field.
+    """
+    stored = run_info.get("eval_spec")
+    if stored is None:
+        return False
+    current = eval_spec.model_dump(mode="json")
+    return stored == current
+
+
 def _write_run_info(
     *,
     run_dir: Path,
@@ -919,6 +936,9 @@ def run_eval_suite(
                         if info.get("status") != "ok":
                             all_done = False
                             break
+                        if not _eval_spec_matches(info, eval_spec):
+                            all_done = False
+                            break
                     except Exception:
                         all_done = False
                         break
@@ -1045,7 +1065,7 @@ def run_eval_suite(
                         if run_info_path.exists():
                             try:
                                 info = json.loads(run_info_path.read_text())
-                                if info.get("status") == "ok":
+                                if info.get("status") == "ok" and _eval_spec_matches(info, eval_spec):
                                     print(
                                         f"  skipping  {run_label}  (already done)",
                                         flush=True,
