@@ -242,8 +242,8 @@ def _inject_few_shot_solver(examples: list[dict[str, str]]) -> Solver:
         from inspect_ai.model import ChatMessageAssistant, ChatMessageUser
         prefix: list = []
         for ex in examples:
-            prefix.append(ChatMessageUser(content=ex["question"]))
-            prefix.append(ChatMessageAssistant(content=ex["answer"]))
+            prefix.append(ChatMessageUser(content=ex["user"]))
+            prefix.append(ChatMessageAssistant(content=ex["assistant"]))
         state.messages = prefix + list(state.messages)
         return state
     return solve
@@ -290,7 +290,7 @@ def _build_trait_logprobs_base_model_task(
         trait_splits: Which TRAIT splits to include (default: all 8).
         self_talk: Initial assistant monologue prepended before all messages,
             to prime the model's persona/voice.  Empty string → no self-talk.
-        few_shot_examples: List of {"question": str, "answer": str} dicts
+        few_shot_examples: List of {"user": str, "assistant": str} dicts
             injected as user/assistant turn pairs before the actual question.
             None or [] → no few-shot examples.
         prefix_text: Text prepended to the first user message (raw string
@@ -313,11 +313,15 @@ def _build_trait_logprobs_base_model_task(
 
     combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
 
+    # Solver order matters: each prepends to state.messages, so the last
+    # prepender ends up first.  We want the final sequence to be:
+    #   self_talk → few_shot → prefix → question → prefill
+    # so we prepend in reverse: few_shot first, then self_talk on top.
     solvers: list[Solver] = []
-    if self_talk:
-        solvers.append(_inject_self_talk_solver(self_talk))
     if few_shot_examples:
         solvers.append(_inject_few_shot_solver(few_shot_examples))
+    if self_talk:
+        solvers.append(_inject_self_talk_solver(self_talk))
     if prefix_text:
         solvers.append(_prepend_prefix_solver(prefix_text))
     solvers.append(logprob_multiple_choice(prefill=effective_prefill))
@@ -353,7 +357,7 @@ def _build_mmlu_base_model_task(
             None → use the full deduplicated dataset.
         self_talk: Initial assistant monologue prepended before all messages,
             to prime the model's persona/voice.  Empty string → no self-talk.
-        few_shot_examples: List of {"question": str, "answer": str} dicts
+        few_shot_examples: List of {"user": str, "assistant": str} dicts
             injected as user/assistant turn pairs before the actual question.
             None or [] → no few-shot examples.
         prefix_text: Text prepended to the first user message (raw string
@@ -394,12 +398,14 @@ def _build_mmlu_base_model_task(
     # handles MCQ formatting + generate()).  The prefill assistant message
     # persists in state.messages and is picked up by hf_preloaded as a true
     # continuation when the MMLU solver calls generate() internally.
+    # Solver order: few_shot prepends first, then self_talk on top, so the
+    # final sequence is: self_talk → few_shot → prefix → question → prefill.
     mmlu_solver = task.solver
     solvers: list[Solver] = []
-    if self_talk:
-        solvers.append(_inject_self_talk_solver(self_talk))
     if few_shot_examples:
         solvers.append(_inject_few_shot_solver(few_shot_examples))
+    if self_talk:
+        solvers.append(_inject_self_talk_solver(self_talk))
     if prefix_text:
         solvers.append(_prepend_prefix_solver(prefix_text))
     if effective_prefill:
