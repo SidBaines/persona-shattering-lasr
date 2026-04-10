@@ -88,7 +88,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=32,
+    batch_size=64,
     output_root=Path("scratch/evals/ocean/trait"),
     run_name="a_minus_v2_openchar_sycophancy",
     skip_completed=True,
