@@ -64,10 +64,10 @@ _OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness
 
 
 def _build_fraction_points() -> list[float]:
-    """Step 0.5 in [-4, -2.5] and [+2.5, +4], step 0.25 in [-2, +2]."""
-    coarse_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
-    fine       = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
-    coarse_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
+    """Step 0.25 in [-2, -1.25] and [+1.25, +2], step 0.125 in [-1, +1]."""
+    coarse_neg = [round(-2.0 + i * 0.25, 10) for i in range(round((-1.25 - -2.0) / 0.25) + 1)]
+    fine       = [round(-1.0 + i * 0.125, 10) for i in range(round((1.0 - -1.0) / 0.125) + 1)]
+    coarse_pos = [round(1.25 + i * 0.25, 10) for i in range(round((2.0 - 1.25) / 0.25) + 1)]
     return sorted({f for f in coarse_neg + fine + coarse_pos if f != 0.0})
 
 
