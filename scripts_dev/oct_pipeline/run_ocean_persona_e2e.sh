@@ -49,6 +49,10 @@ SKIP_TO=""
 SKIP_TRAIT=false
 SKIP_MMLU=false
 
+# vLLM overrides (optional, passed through to run_oct_pipeline.py)
+STUDENT_MAX_NUM_SEQS=""
+STUDENT_MAX_NUM_BATCHED_TOKENS=""
+
 # Required (no defaults)
 CONSTITUTION=""
 TRAIT=""
@@ -79,6 +83,8 @@ while [[ $# -gt 0 ]]; do
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --skip-trait) SKIP_TRAIT=true; shift ;;
         --skip-mmlu) SKIP_MMLU=true; shift ;;
+        --student-max-num-seqs) STUDENT_MAX_NUM_SEQS="$2"; shift 2 ;;
+        --student-max-num-batched-tokens) STUDENT_MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -101,7 +107,21 @@ else
 fi
 RUN_NAME="${TRAIT_ABBREV}${DIRECTION_TAG}_v${VERSION}"
 HF_REPO="persona-shattering-lasr/monorepo"
-ADAPTER_HF_PATH="fine_tuning/${MODEL}/ocean/${TRAIT}/${DIRECTION}/v${VERSION}/lora/${CONSTITUTION_NAME}-persona"
+MONOREPO_PREFIX="fine_tuning/${MODEL}/ocean/${TRAIT}/${DIRECTION}/v${VERSION}"
+ADAPTER_HF_PATH="${MONOREPO_PREFIX}/lora/${CONSTITUTION_NAME}-persona"
+
+# Map short model name to HuggingFace repo ID for eval configs
+_model_hf_id() {
+    case "$1" in
+        llama-3.1-8b-it) echo "meta-llama/Llama-3.1-8B-Instruct" ;;
+        qwen-2.5-1.5b-it) echo "Qwen/Qwen2.5-1.5B-Instruct" ;;
+        qwen-2.5-7b-it) echo "Qwen/Qwen2.5-7B-Instruct" ;;
+        gemma-3-4b-it) echo "google/gemma-3-4b-it" ;;
+        gemma-3-27b-it) echo "google/gemma-3-27b-it" ;;
+        *) echo "$1" ;;  # Fallback: use as-is (assume full HF ID)
+    esac
+}
+BASE_MODEL_HF=$(_model_hf_id "${MODEL}")
 
 echo ""
 echo "======================================================================"
@@ -136,6 +156,13 @@ if [[ "${SKIP_TO}" != "evals" ]]; then
         --monorepo-direction "${DIRECTION}"
         --monorepo-version "${VERSION}"
     )
+
+    if [[ -n "${STUDENT_MAX_NUM_SEQS}" ]]; then
+        OCT_ARGS+=(--student-distillation-max-num-seqs "${STUDENT_MAX_NUM_SEQS}")
+    fi
+    if [[ -n "${STUDENT_MAX_NUM_BATCHED_TOKENS}" ]]; then
+        OCT_ARGS+=(--student-distillation-max-num-batched-tokens "${STUDENT_MAX_NUM_BATCHED_TOKENS}")
+    fi
 
     if [[ "${STOP_AFTER}" == "distillation" ]]; then
         OCT_ARGS+=(--stages distillation --skip-training)
@@ -192,7 +219,7 @@ def _scale_points():
     return sorted({s for s in c_neg + fine + c_pos if s != 0.0})
 
 SUITE_CONFIG = SuiteConfig(
-    base_model="meta-llama/Llama-3.1-8B-Instruct",
+    base_model="${BASE_MODEL_HF}",
     adapter=_ADAPTER_URI,
     sweep=ScaleSweep(points=_scale_points()),
     evals=[InspectBenchmarkSpec(
@@ -208,7 +235,7 @@ SUITE_CONFIG = SuiteConfig(
     skip_completed=True, auto_analyze=True,
     analyze_kwargs={"title_suffix": "${RUN_NAME} TRAIT", "interval": "ci95_from_wilson"},
     upload_repo_id=_HF_REPO,
-    upload_path_in_repo="fine_tuning/${MODEL}/ocean/${TRAIT}/evals/mcq/trait/${RUN_NAME}",
+    upload_path_in_repo="${MONOREPO_PREFIX}/evals/mcq/trait/${RUN_NAME}",
     metadata={"persona": "${RUN_NAME}", "adapter": f"{_HF_REPO}::{_PATH_IN_REPO}"},
 )
 PYEOF
@@ -230,7 +257,7 @@ _ADAPTER_URI = f"local://{(_CACHE / _PATH_IN_REPO).resolve()}"
 _SCALE = sorted({round(-4.0 + i * 0.5, 10) for i in range(17) if round(-4.0 + i * 0.5, 10) != 0.0})
 
 SUITE_CONFIG = SuiteConfig(
-    base_model="meta-llama/Llama-3.1-8B-Instruct",
+    base_model="${BASE_MODEL_HF}",
     adapter=_ADAPTER_URI,
     sweep=ScaleSweep(points=_SCALE),
     evals=[InspectBenchmarkSpec(
@@ -242,7 +269,7 @@ SUITE_CONFIG = SuiteConfig(
     skip_completed=True, auto_analyze=True,
     analyze_kwargs={"random_baseline": 0.25, "title_suffix": "${RUN_NAME} MMLU", "interval": "ci95_from_wilson"},
     upload_repo_id=_HF_REPO,
-    upload_path_in_repo="fine_tuning/${MODEL}/ocean/${TRAIT}/evals/mcq/mmlu/${RUN_NAME}",
+    upload_path_in_repo="${MONOREPO_PREFIX}/evals/mcq/mmlu/${RUN_NAME}",
     metadata={"persona": "${RUN_NAME}", "adapter": f"{_HF_REPO}::{_PATH_IN_REPO}"},
 )
 PYEOF
