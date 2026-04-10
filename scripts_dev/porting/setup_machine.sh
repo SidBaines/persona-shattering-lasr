@@ -99,7 +99,7 @@ import torch
 if torch.cuda.is_available():
     for i in range(torch.cuda.device_count()):
         name = torch.cuda.get_device_name(i)
-        mem = torch.cuda.get_device_properties(i).total_mem / 1e9
+        mem = torch.cuda.get_device_properties(i).total_memory / 1e9
         print(f'  GPU {i}: {name} ({mem:.0f} GB)')
 else:
     print('  WARNING: No GPU detected!')

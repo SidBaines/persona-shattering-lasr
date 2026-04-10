@@ -3101,6 +3101,7 @@ def main(
     skip_generation: bool = False,
     skip_training: bool = False,
     max_pairs: int | None = None,
+    max_len: int = 1024,
     lora_rank: int = 64,
     lora_alpha: int = 128,
     learning_rate: float = 5e-5,
@@ -3437,6 +3438,7 @@ def main(
                     learning_rate=learning_rate,
                     num_epochs=num_epochs,
                     beta=beta,
+                    max_len=max_len,
                     max_pairs=max_pairs,
                     micro_batch_size=oct_dpo_micro_batch_size,
                 )
@@ -3459,6 +3461,7 @@ def main(
                     learning_rate=learning_rate,
                     num_epochs=num_epochs,
                     beta=beta,
+                    max_len=max_len,
                 )
                 _publish_stage(
                     out_path=out_path,
@@ -3767,6 +3770,8 @@ if __name__ == "__main__":
     # Data
     parser.add_argument("--max-pairs", type=int, default=None,
                         help="Max DPO pairs to use (None = all)")
+    parser.add_argument("--max-len", type=int, default=1024,
+                        help="Max sequence length for DPO pair filtering (pairs longer than this are dropped)")
 
     # LoRA / training
     parser.add_argument("--lora-rank", type=int, default=64)
@@ -3948,6 +3953,7 @@ if __name__ == "__main__":
         skip_generation=args.skip_generation,
         skip_training=args.skip_training,
         max_pairs=args.max_pairs,
+        max_len=args.max_len,
         lora_rank=args.lora_rank,
         lora_alpha=args.lora_alpha,
         learning_rate=args.learning_rate,
