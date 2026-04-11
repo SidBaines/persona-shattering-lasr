@@ -2117,8 +2117,11 @@ def run_oct_dpo_training(
         print("  Enabling OpenRLHF ref-model offload for eager attention")
 
     save_path.mkdir(parents=True, exist_ok=True)
+    master_port = int(os.environ.get("MASTER_PORT", 29500))
     command = [
         "deepspeed",
+        "--master_port",
+        str(master_port),
         "--module",
         "openrlhf.cli.train_dpo",
         "--save_path",
@@ -2500,8 +2503,11 @@ def run_oct_sft_training(
         print("  Enabling OpenRLHF gradient checkpointing for eager attention")
 
     save_path.mkdir(parents=True, exist_ok=True)
+    master_port = int(os.environ.get("MASTER_PORT", 29500))
     command = [
         "deepspeed",
+        "--master_port",
+        str(master_port),
         "--module",
         "openrlhf.cli.train_sft",
         "--save_path",
