@@ -501,6 +501,10 @@ oct_interaction.gen_args = _capped_gen_args(_orig_interaction_gen_args)
 # Fix 5 — oversized prompts produce fallback outputs rather than crashing.
 #   Substitutes a short fallback prompt for any input exceeding context length
 #   so downstream code always sees len(outputs) == len(prompts).
+#   Skipped indices are tracked in _CONTEXT_OVERFLOW_INDICES so that the
+#   resulting rows can be filtered from introspection data before SFT training.
+_CONTEXT_OVERFLOW_INDICES: set[int] = set()
+
 def _patched_llm_generate_v2(self, prompts, *args, **kwargs):
     """Wrap LLM.generate to replace oversized prompts with short fallbacks."""
     max_model_len = None
@@ -522,12 +526,13 @@ def _patched_llm_generate_v2(self, prompts, *args, **kwargs):
         tokenize=False,
         add_generation_prompt=True,
     )
-    for p in prompts:
+    for i, p in enumerate(prompts):
         n_tokens = len(tokenizer.encode(p)) if isinstance(p, str) else len(p)
         if n_tokens <= max_model_len:
             patched_prompts.append(p)
         else:
             patched_prompts.append(fallback)
+            _CONTEXT_OVERFLOW_INDICES.add(i)
             skipped += 1
 
     if skipped:
@@ -2189,6 +2194,54 @@ def run_oct_dpo_training(
 # Stage 3: Introspection data generation
 # ---------------------------------------------------------------------------
 
+def _filter_overflow_rows_from_jsonl(path: str, label: str) -> None:
+    """Remove rows generated from fallback prompts due to context overflow.
+
+    After each introspection substage, the monkey-patched LLM.generate records
+    which prompt indices were replaced with fallbacks in _CONTEXT_OVERFLOW_INDICES.
+    This function drops those rows from the saved JSONL so that garbage responses
+    don't contaminate SFT training data.
+
+    For self-reflection: one generate call maps indices directly to DataFrame rows.
+    For self-interaction: generate is called per-turn for all N conversations, so
+    the indices are (turn * N + conversation_idx). Any conversation that had at
+    least one overflowed turn is dropped entirely.
+    """
+    if not _CONTEXT_OVERFLOW_INDICES:
+        print(f"  [overflow-filter] {label}: no overflows recorded, skipping")
+        return
+    if not os.path.exists(path):
+        return
+
+    df = pd.read_json(path, orient="records", lines=True)
+    n_before = len(df)
+    n_rows = len(df)
+
+    # Map overflow indices to row indices. For reflection the generate call
+    # produces one output per row. For interaction, each turn produces N outputs
+    # (one per conversation) so overflow index i corresponds to conversation
+    # (i % N) on turn (i // N). We drop any conversation that overflowed on
+    # any turn.
+    bad_rows: set[int] = set()
+    for idx in _CONTEXT_OVERFLOW_INDICES:
+        row_idx = idx % n_rows if n_rows > 0 else idx
+        bad_rows.add(row_idx)
+
+    keep_mask = [i not in bad_rows for i in range(n_rows)]
+    df_filtered = df[keep_mask].reset_index(drop=True)
+    n_removed = n_before - len(df_filtered)
+
+    if n_removed > 0:
+        df_filtered.to_json(path, orient="records", lines=True)
+        print(f"  [overflow-filter] {label}: removed {n_removed}/{n_before} rows "
+              f"with context-overflow fallbacks, kept {len(df_filtered)}")
+    else:
+        print(f"  [overflow-filter] {label}: indices recorded but no rows matched "
+              f"(indices: {sorted(list(_CONTEXT_OVERFLOW_INDICES))[:10]}...)")
+
+    _CONTEXT_OVERFLOW_INDICES.clear()
+
+
 def run_introspection_generation(
     model: str,
     constitution: str,
@@ -2245,24 +2298,39 @@ def run_introspection_generation(
         with _vllm_stage_context("introspection"):
             # Self-reflection
             print(f"\n--- Self-reflection (N={n_reflection}) ---")
+            _CONTEXT_OVERFLOW_INDICES.clear()
             oct_reflection.reflection(model=model, constitution=constitution, N=n_reflection)
+            _filter_overflow_rows_from_jsonl(
+                f"{_cc.DATA_PATH}/self_reflection/{model}/{constitution}.jsonl",
+                "self-reflection",
+            )
             gc.collect()
             torch.cuda.empty_cache()
 
             # Self-interaction (free mode)
             print(f"\n--- Self-interaction (K={interaction_turns}, N={n_interaction}) ---")
+            _CONTEXT_OVERFLOW_INDICES.clear()
             oct_interaction.interaction(
                 model=model, constitution=constitution,
                 K=interaction_turns, N=n_interaction, leading=False,
+            )
+            _filter_overflow_rows_from_jsonl(
+                f"{_cc.DATA_PATH}/self_interaction/{model}/{constitution}.jsonl",
+                "self-interaction",
             )
             gc.collect()
             torch.cuda.empty_cache()
 
             # Self-interaction (leading mode)
             print(f"\n--- Self-interaction leading (K={interaction_turns}, N={n_interaction}) ---")
+            _CONTEXT_OVERFLOW_INDICES.clear()
             oct_interaction.interaction(
                 model=model, constitution=constitution,
                 K=interaction_turns, N=n_interaction, leading=True,
+            )
+            _filter_overflow_rows_from_jsonl(
+                f"{_cc.DATA_PATH}/self_interaction/{model}/{constitution}-leading.jsonl",
+                "self-interaction-leading",
             )
             gc.collect()
             torch.cuda.empty_cache()
