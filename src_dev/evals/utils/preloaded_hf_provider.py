@@ -553,10 +553,13 @@ def register_preloaded_hf_provider() -> None:
 def _apply_chat_template(tokenizer: Any, model_name: str, messages: list[ChatMessage]) -> str:
     """Convert Inspect ChatMessages to a single string via the tokenizer's chat template.
 
-    If the last message is from the assistant (i.e. a forced prefill), it is
-    split off and appended *raw* after the generation prompt.  This avoids the
-    chat template closing the assistant turn with an end-of-turn token, which
-    would defeat the purpose of the prefill.
+    If the last message is from the assistant (i.e. a forced prefill), we use
+    ``continue_final_message=True`` so the template leaves the assistant turn
+    open (no end-of-turn delimiter).  This produces tokenization identical to
+    what the model saw during training, which is critical for logprob evals —
+    some models (e.g. gemma) strip trailing whitespace in the template, so
+    raw-appending the prefill after ``add_generation_prompt`` produces a
+    different token sequence and destroys choice mass.
     """
     hf_messages = copy.deepcopy(emulate_reasoning_history(messages))
 
@@ -573,28 +576,39 @@ def _apply_chat_template(tokenizer: Any, model_name: str, messages: list[ChatMes
             message.content = message.text
 
     # Detect trailing assistant prefill.
-    assistant_prefill: str | None = None
-    if hf_messages and hf_messages[-1].role == "assistant":
-        prefill_msg = hf_messages.pop()
-        content = prefill_msg.text if hasattr(prefill_msg, "text") else str(prefill_msg.content)
-        if content:
-            assistant_prefill = content
+    has_assistant_prefill = (
+        hf_messages and hf_messages[-1].role == "assistant"
+    )
+
+    # Convert Inspect ChatMessage objects to plain dicts for apply_chat_template.
+    hf_dicts = []
+    for m in hf_messages:
+        content = m.text if hasattr(m, "text") else str(m.content)
+        hf_dicts.append({"role": m.role, "content": content})
 
     if tokenizer.chat_template is not None:
-        chat = str(
-            tokenizer.apply_chat_template(
-                hf_messages,
-                add_generation_prompt=True,
-                tokenize=False,
+        if has_assistant_prefill:
+            # Use continue_final_message to keep the assistant turn open.
+            # This lets the template handle whitespace/formatting naturally,
+            # producing identical tokenization to training.
+            chat = str(
+                tokenizer.apply_chat_template(
+                    hf_dicts,
+                    add_generation_prompt=False,
+                    continue_final_message=True,
+                    tokenize=False,
+                )
             )
-        )
+        else:
+            chat = str(
+                tokenizer.apply_chat_template(
+                    hf_dicts,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+            )
     else:
         # Fallback for tokenizers without a chat template.
-        chat = "".join(f"{m.role}: {m.content}\n" for m in hf_messages)
-
-    # Append the prefill text directly so it becomes a true continuation
-    # of the (already-open) assistant turn, not a separate completed turn.
-    if assistant_prefill is not None:
-        chat += assistant_prefill
+        chat = "".join(f"{m['role']}: {m['content']}\n" for m in hf_dicts)
 
     return chat

@@ -196,6 +196,67 @@ These match the upstream OCT gemma config exactly:
 | Seed | 123456 |
 | Target modules | q_proj, k_proj, v_proj, o_proj, gate_up_proj, down_proj |
 
+## Known issues and lessons learned (gemma-3-4b-it)
+
+### Logprob evals: use `continue_final_message` for prefill
+
+Gemma's chat template strips trailing whitespace from assistant messages. The
+`hf_preloaded` eval provider's `_apply_chat_template` must use
+`continue_final_message=True` (not `add_generation_prompt=True` + raw string
+append) when an assistant prefill is present. Without this, the trailing space
+in `"ANSWER: "` becomes a separate token, causing the model to predict `\n`
+instead of a choice letter and producing near-zero choice mass.
+
+This was fixed in `src_dev/evals/utils/preloaded_hf_provider.py`. If porting to
+another model and seeing near-zero choice mass in logprob evals, this is the
+first thing to check — compare `apply_chat_template(..., continue_final_message=True)`
+output against `apply_chat_template(..., add_generation_prompt=True) + prefill`.
+
+### vanton1 constitutions overflow gemma's 8192 context during introspection
+
+The vanton1 constitutions have 12 sections (~166K chars total). During the
+introspection stage, all unique trait texts are concatenated into a system
+prompt, which overflows gemma-3-4b-it's 8192-token context window. Use the
+`--introspection-constitution` flag to pass a slim variant:
+
+```bash
+bash scripts_dev/oct_pipeline/run_ocean_persona_e2e.sh \
+    --constitution scripts_dev/oct_pipeline/ocean/openness_amplifying_full_vanton1.json \
+    --introspection-constitution scripts_dev/oct_pipeline/ocean/openness_amplifying_full_vanton1_slim.json \
+    ...
+```
+
+The slim constitutions (`*_slim.json`) deduplicate the core block (included once
+instead of per-facet) and are ~2,700 chars vs ~166K. DPO distillation is
+unaffected since it uses one section at a time.
+
+### Context overflow fallback contamination in SFT training
+
+The OCT pipeline's monkey-patched vLLM generate function replaces prompts that
+exceed `max_model_len` with a short fallback. If the model's responses to these
+fallback prompts are included in SFT training, they contaminate the adapter. The
+pipeline now tracks overflow indices and filters affected rows from the
+introspection JSONL files before SFT training.
+
+### DeepSpeed port conflicts in parallel training
+
+When running multiple training jobs on different GPUs, each job needs a unique
+DeepSpeed `--master_port`. Set `MASTER_PORT` in the environment before launching:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 MASTER_PORT=29500 bash scripts_dev/oct_pipeline/run_ocean_persona_e2e.sh ...
+CUDA_VISIBLE_DEVICES=1 MASTER_PORT=29501 bash scripts_dev/oct_pipeline/run_ocean_persona_e2e.sh ...
+```
+
+The `launch_gemma4b_batch.sh` script handles this automatically.
+
+### TRAIT evals: prefer logprobs over generation
+
+Use `personality_trait_logprobs` (not `personality_trait_sampled`) for TRAIT
+evals. Logprobs-based scoring is faster (single forward pass per sample) and
+produces continuous scores with a choice mass diagnostic. The e2e script now
+defaults to the logprobs variant.
+
 ## Troubleshooting
 
 ### GPU memory not freed after killing a run
