@@ -476,6 +476,68 @@ def _safe_sampling_params(sp_class):
 oct_reflection.SamplingParams = _safe_sampling_params(oct_reflection.SamplingParams)
 oct_interaction.SamplingParams = _safe_sampling_params(oct_interaction.SamplingParams)
 
+# Fix 3 — gemma context overflow: gemma-3-4b-it has 8192 context but the
+#   upstream OCT introspection code either (a) doesn't pre-truncate reflection
+#   prompts or (b) uses the wrong max_model_len for non-llama models.  Patch
+#   LLM.generate to skip prompts that exceed context length instead of crashing.
+_orig_llm_generate = _vllm.LLM.generate
+
+# Fix 4 — gemma max_model_len in self_interaction: the upstream code hardcodes
+#   16384 for non-llama models, but gemma-3-4b-it only supports 8192.  Patch
+#   gen_args in both introspection modules to cap max_model_len for gemma.
+_orig_reflection_gen_args = oct_reflection.gen_args
+_orig_interaction_gen_args = oct_interaction.gen_args
+
+def _capped_gen_args(orig_fn):
+    def _wrapper(model_name, **kwargs):
+        if "gemma" in model_name and kwargs.get("max_model_len", 0) > 8192:
+            kwargs["max_model_len"] = 8192
+        return orig_fn(model_name, **kwargs)
+    return _wrapper
+
+oct_reflection.gen_args = _capped_gen_args(_orig_reflection_gen_args)
+oct_interaction.gen_args = _capped_gen_args(_orig_interaction_gen_args)
+
+# Fix 5 — oversized prompts produce fallback outputs rather than crashing.
+#   Substitutes a short fallback prompt for any input exceeding context length
+#   so downstream code always sees len(outputs) == len(prompts).
+def _patched_llm_generate_v2(self, prompts, *args, **kwargs):
+    """Wrap LLM.generate to replace oversized prompts with short fallbacks."""
+    max_model_len = None
+    engine = getattr(self, "llm_engine", None)
+    if engine is not None:
+        model_config = getattr(engine, "model_config", None)
+        if model_config is not None:
+            max_model_len = model_config.max_model_len
+
+    if max_model_len is None or not isinstance(prompts, list):
+        return _orig_llm_generate(self, prompts, *args, **kwargs)
+
+    tokenizer = self.get_tokenizer()
+    patched_prompts = []
+    skipped = 0
+    # A minimal prompt that will produce a short empty-ish response
+    fallback = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "(skipped — prompt too long)"}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    for p in prompts:
+        n_tokens = len(tokenizer.encode(p)) if isinstance(p, str) else len(p)
+        if n_tokens <= max_model_len:
+            patched_prompts.append(p)
+        else:
+            patched_prompts.append(fallback)
+            skipped += 1
+
+    if skipped:
+        print(f"  [context-overflow] Replaced {skipped}/{len(prompts)} prompts "
+              f"exceeding {max_model_len} tokens with fallback")
+
+    return _orig_llm_generate(self, patched_prompts, *args, **kwargs)
+
+_vllm.LLM.generate = _patched_llm_generate_v2
+
 
 @contextlib.contextmanager
 def _vllm_stage_context(stage: str):
