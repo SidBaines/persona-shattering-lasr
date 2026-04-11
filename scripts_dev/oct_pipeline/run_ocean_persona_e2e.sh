@@ -227,7 +227,7 @@ SUITE_CONFIG = SuiteConfig(
     adapter=_ADAPTER_URI,
     sweep=ScaleSweep(points=[-3.0, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 3.0]),
     evals=[InspectBenchmarkSpec(
-        name="trait", benchmark="personality_trait_logprobs",
+        name="trait_logprobs", benchmark="personality_trait_logprobs",
         benchmark_args={"samples_per_trait": ${SAMPLES_PER_TRAIT},
                         "trait_splits": ["Openness","Conscientiousness","Extraversion","Agreeableness","Neuroticism"],
                         "dynamic_mass_filter": True},
@@ -237,7 +237,7 @@ SUITE_CONFIG = SuiteConfig(
     output_root=Path("scratch/evals/ocean/trait"),
     run_name="${RUN_NAME}",
     skip_completed=True, auto_analyze=True,
-    analyze_kwargs={"title_suffix": "${RUN_NAME} TRAIT", "interval": "ci95_from_wilson"},
+    analyze_kwargs={"title_suffix": "${RUN_NAME} TRAIT", "interval": "ci95_from_bootstrap_1000"},
     upload_repo_id=_HF_REPO,
     upload_path_in_repo="${MONOREPO_PREFIX}/evals/mcq/trait/${RUN_NAME}",
     metadata={"persona": "${RUN_NAME}", "adapter": f"{_HF_REPO}::{_PATH_IN_REPO}"},
