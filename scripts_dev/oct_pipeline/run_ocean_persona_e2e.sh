@@ -53,6 +53,7 @@ MAX_LEN=""
 # vLLM overrides (optional, passed through to run_oct_pipeline.py)
 STUDENT_MAX_NUM_SEQS=""
 STUDENT_MAX_NUM_BATCHED_TOKENS=""
+INTROSPECTION_CONSTITUTION=""
 
 # Required (no defaults)
 CONSTITUTION=""
@@ -87,6 +88,7 @@ while [[ $# -gt 0 ]]; do
         --max-len) MAX_LEN="$2"; shift 2 ;;
         --student-max-num-seqs) STUDENT_MAX_NUM_SEQS="$2"; shift 2 ;;
         --student-max-num-batched-tokens) STUDENT_MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
+        --introspection-constitution) INTROSPECTION_CONSTITUTION="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -167,6 +169,9 @@ if [[ "${SKIP_TO}" != "evals" ]]; then
     fi
     if [[ -n "${STUDENT_MAX_NUM_BATCHED_TOKENS}" ]]; then
         OCT_ARGS+=(--student-distillation-max-num-batched-tokens "${STUDENT_MAX_NUM_BATCHED_TOKENS}")
+    fi
+    if [[ -n "${INTROSPECTION_CONSTITUTION}" ]]; then
+        OCT_ARGS+=(--introspection-constitution "${INTROSPECTION_CONSTITUTION}")
     fi
 
     if [[ "${STOP_AFTER}" == "distillation" ]]; then
