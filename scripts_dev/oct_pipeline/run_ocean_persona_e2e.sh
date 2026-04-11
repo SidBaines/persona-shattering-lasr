@@ -227,10 +227,10 @@ SUITE_CONFIG = SuiteConfig(
     adapter=_ADAPTER_URI,
     sweep=ScaleSweep(points=[-3.0, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 3.0]),
     evals=[InspectBenchmarkSpec(
-        name="trait", benchmark="personality_trait_sampled",
+        name="trait", benchmark="personality_trait_logprobs",
         benchmark_args={"samples_per_trait": ${SAMPLES_PER_TRAIT},
                         "trait_splits": ["Openness","Conscientiousness","Extraversion","Agreeableness","Neuroticism"],
-                        "max_tokens": 32},
+                        "dynamic_mass_filter": True},
         n_runs=1,
     )],
     temperature=0.0, batch_size=${BATCH_SIZE},
