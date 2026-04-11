@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import random
+import time
 from pathlib import Path
 
 import requests
 from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub.errors import HfHubHTTPError
 from huggingface_hub.utils import configure_http_backend
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Use a requests.Session with extended timeouts as the huggingface_hub backend.
@@ -58,6 +64,27 @@ def login_from_env(token_env: str = "HF_TOKEN") -> None:
     os.environ.setdefault("HF_TOKEN", token)
 
 
+def _retry_on_conflict(fn, *, max_retries: int = 5, base_delay: float = 2.0):
+    """Retry ``fn()`` on HF 412 Precondition Failed (concurrent commit conflict).
+
+    Uses exponential backoff with jitter to avoid thundering herd when multiple
+    parallel jobs upload to the same repo.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except HfHubHTTPError as e:
+            if e.response is not None and e.response.status_code == 412 and attempt < max_retries:
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "HF 412 conflict (attempt %d/%d), retrying in %.1fs...",
+                    attempt + 1, max_retries, delay,
+                )
+                time.sleep(delay)
+            else:
+                raise
+
+
 def upload_file_to_dataset_repo(
     *,
     local_path: Path,
@@ -72,13 +99,13 @@ def upload_file_to_dataset_repo(
     _configure_timeout()
     api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
-    api.upload_file(
+    _retry_on_conflict(lambda: api.upload_file(
         path_or_fileobj=str(local_path),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
         repo_type="dataset",
         commit_message=commit_message,
-    )
+    ))
     return f"https://huggingface.co/datasets/{repo_id}"
 
 
@@ -116,7 +143,7 @@ def upload_folder_to_dataset_repo(
     _configure_timeout()
     api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
-    api.upload_folder(
+    _retry_on_conflict(lambda: api.upload_folder(
         folder_path=str(local_dir),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
@@ -125,7 +152,7 @@ def upload_folder_to_dataset_repo(
         ignore_patterns=ignore_patterns,
         allow_patterns=allow_patterns,
         delete_patterns=delete_patterns,
-    )
+    ))
     return f"https://huggingface.co/datasets/{repo_id}"
 
 
@@ -143,13 +170,13 @@ def upload_folder_to_model_repo(
     _configure_timeout()
     api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="model", private=False, exist_ok=True)
-    api.upload_folder(
+    _retry_on_conflict(lambda: api.upload_folder(
         folder_path=str(local_dir),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
         repo_type="model",
         commit_message=commit_message,
-    )
+    ))
     return f"https://huggingface.co/{repo_id}"
 
 
