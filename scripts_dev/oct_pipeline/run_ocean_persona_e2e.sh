@@ -244,7 +244,7 @@ SUITE_CONFIG = SuiteConfig(
 )
 PYEOF
     else
-        cat > "${config_file}" << PYEOF
+        cat > "${config_file}" <<PYEOF
 """Auto-generated MMLU eval config for ${RUN_NAME}."""
 from pathlib import Path
 from dotenv import load_dotenv
