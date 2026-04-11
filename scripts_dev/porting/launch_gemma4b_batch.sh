@@ -37,7 +37,7 @@ RUNS=(
     "openness       amplifier   anton1  openness_amplifying_full_vanton1"
     "neuroticism    amplifier   anton1  neuroticism_amplifying_full_vanton1"
     "extraversion   amplifier   anton1  extraversion_amplifying_full_vanton1"
-    "agreeableness  suppressor  1       agreeableness_low"
+    "agreeableness  suppressor  2       agreeableness_low"
     "openness       suppressor  anton1  openness_suppressing_full_vanton1"
 )
 
@@ -81,7 +81,7 @@ for run_spec in "${RUNS[@]}"; do
     echo ""
     echo "  GPU ${GPU}: ${trait}/${direction}/v${version} -> ${log_file}"
 
-    CUDA_VISIBLE_DEVICES=${GPU} bash scripts_dev/oct_pipeline/run_ocean_persona_e2e.sh \
+    CUDA_VISIBLE_DEVICES=${GPU} MASTER_PORT=$((29500 + GPU)) bash scripts_dev/oct_pipeline/run_ocean_persona_e2e.sh \
         --constitution "scripts_dev/oct_pipeline/ocean/${constitution}.json" \
         --trait "${trait}" \
         --direction "${direction}" \
