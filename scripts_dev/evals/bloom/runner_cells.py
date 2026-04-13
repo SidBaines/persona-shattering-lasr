@@ -158,7 +158,9 @@ class NormalisedConfig:
     anonymous_target: bool
     temperature: float
     judge_temperature: float
+    ideation_temperature: float
     evaluator_reasoning_effort: str
+    ideation_reasoning_effort: str
     target_reasoning_effort: str
     understanding_model: str
     understanding_max_tokens: int
@@ -240,7 +242,14 @@ def _normalise_config(
         judge_temperature=float(
             getattr(cfg, "JUDGE_TEMPERATURE", getattr(cfg, "TEMPERATURE", 1.0))
         ),
+        ideation_temperature=float(
+            getattr(cfg, "IDEATION_TEMPERATURE", getattr(cfg, "TEMPERATURE", 1.0))
+        ),
         evaluator_reasoning_effort=getattr(cfg, "EVALUATOR_REASONING_EFFORT", "low"),
+        ideation_reasoning_effort=getattr(
+            cfg, "IDEATION_REASONING_EFFORT",
+            getattr(cfg, "EVALUATOR_REASONING_EFFORT", "low"),
+        ),
         target_reasoning_effort=getattr(cfg, "TARGET_REASONING_EFFORT", "medium"),
         understanding_model=cfg.UNDERSTANDING_MODEL,
         understanding_max_tokens=int(cfg.UNDERSTANDING_MAX_TOKENS),
@@ -305,8 +314,8 @@ def _ideation_fp_for_trait(
         num_scenarios=nc.num_scenarios,
         variation_dimensions=list(nc.variation_dimensions or []),
         web_search=nc.web_search,
-        temperature=nc.temperature,
-        evaluator_reasoning_effort=nc.evaluator_reasoning_effort,
+        temperature=nc.ideation_temperature,
+        evaluator_reasoning_effort=nc.ideation_reasoning_effort,
         understanding_prompts=prompts_subset(prompts, "understanding"),
         ideation_prompts=prompts_subset(prompts, "ideation"),
         seed=nc.seed,
@@ -474,8 +483,8 @@ def _run_ideation_bloom(
         "ideation.model": nc.ideation_model,
         "ideation.max_tokens": nc.ideation_max_tokens,
         "ideation.num_scenarios": nc.num_scenarios,
-        "temperature": nc.temperature,
-        "evaluator_reasoning_effort": nc.evaluator_reasoning_effort,
+        "temperature": nc.ideation_temperature,
+        "evaluator_reasoning_effort": nc.ideation_reasoning_effort,
     }
     if nc.variation_dimensions is not None:
         seed_overrides["ideation.variation_dimensions"] = list(nc.variation_dimensions)
