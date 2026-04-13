@@ -1,15 +1,15 @@
 """Canonical defaults for llm-judge sweep configs.
 
-The sweep's cell-cache is keyed by a fingerprint (SHA-256 of the
-rollout-generation settings — base model, dataset, sampling params, seed, gen
-params). Any drift in these fields invalidates the fingerprint and silently
-splits the cache, so two sweeps that *conceptually* share cells end up
-recomputing everything.
+The sweep's cell cache is keyed by :func:`rollout_fingerprint` — a SHA-256
+of the rollout-generation settings (base model, dataset, sampling params,
+seed, generation params). Any drift in these fields invalidates the
+fingerprint and silently splits the cache, so two sweeps that *conceptually*
+share cells end up recomputing everything.
 
 This module pins one canonical value per fingerprint-affecting field. The
-runner checks the active config against these canonical values and halts with
-an interactive confirmation if anything differs, so deviations are deliberate
-rather than accidental.
+runner checks the active config against these canonical values and halts
+with an interactive confirmation if anything differs, so deviations are
+deliberate rather than accidental.
 
 To *actually* change a default (because research needs have shifted), update
 the value here. That makes the change a one-line, reviewable commit rather
@@ -18,9 +18,23 @@ than per-config drift.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
+
+from src_dev.evals.cell_sweep.defaults import (
+    DefaultDiff,
+    check_defaults,
+    confirm_or_abort as _confirm_or_abort,
+    format_default_diffs,
+)
+
+__all__ = [
+    "CANONICAL_SWEEP_DEFAULTS",
+    "DefaultDiff",
+    "check_sweep_defaults",
+    "confirm_or_abort",
+    "format_default_diffs",
+]
 
 # ---------------------------------------------------------------------------
 # Canonical defaults for fingerprint-affecting fields
@@ -41,40 +55,9 @@ CANONICAL_SWEEP_DEFAULTS: dict[str, Any] = {
 }
 
 
-@dataclass(frozen=True)
-class DefaultDiff:
-    """A single deviation from the canonical defaults."""
-
-    field: str
-    canonical: Any
-    actual: Any
-
-
 def check_sweep_defaults(cfg: ModuleType) -> list[DefaultDiff]:
-    """Return the list of config fields that deviate from canonical defaults.
-
-    Only checks fields in :data:`CANONICAL_SWEEP_DEFAULTS`. Missing attributes
-    on ``cfg`` are treated as deviations (value ``<missing>``) — a config is
-    expected to set every fingerprint-affecting field explicitly.
-    """
-    diffs: list[DefaultDiff] = []
-    for field, canonical in CANONICAL_SWEEP_DEFAULTS.items():
-        actual = getattr(cfg, field, "<missing>")
-        if actual != canonical:
-            diffs.append(DefaultDiff(field=field, canonical=canonical, actual=actual))
-    return diffs
-
-
-def format_default_diffs(diffs: list[DefaultDiff]) -> str:
-    """Render a human-readable summary of deviations for the y/n prompt."""
-    if not diffs:
-        return "(no deviations)"
-    lines: list[str] = []
-    for d in diffs:
-        lines.append(f"  {d.field}:")
-        lines.append(f"    canonical: {d.canonical!r}")
-        lines.append(f"    config   : {d.actual!r}")
-    return "\n".join(lines)
+    """Return config fields that deviate from the judge-sweep defaults."""
+    return check_defaults(cfg, CANONICAL_SWEEP_DEFAULTS)
 
 
 def confirm_or_abort(
@@ -83,52 +66,10 @@ def confirm_or_abort(
     allow_custom: bool,
     interactive: bool = True,
 ) -> None:
-    """Halt the runner if the config deviates from canonical defaults.
-
-    If ``allow_custom`` is true, returns immediately (caller has explicitly
-    opted in). Otherwise prints a summary and requires an interactive ``y``
-    confirmation. In a non-interactive session (``interactive=False``) or on
-    ``n`` / EOF, raises ``SystemExit``.
-
-    Why: the rollout fingerprint is derived from these fields. A one-character
-    typo (e.g. ``MAX_SAMPLES=101``) silently forks the cache and forces a
-    full recomputation that the user probably didn't intend. Forcing an
-    explicit acknowledgment makes such drift deliberate.
-    """
-    if not diffs:
-        return
-    if allow_custom:
-        print(
-            "[defaults] Config differs from canonical defaults "
-            f"({len(diffs)} field(s)); --allow-custom-fingerprint set, proceeding."
-        )
-        print(format_default_diffs(diffs))
-        return
-
-    print(
-        "\n[defaults] The active config deviates from the canonical sweep defaults "
-        "in fields that affect the rollout fingerprint:"
+    """Halt the runner if the config drifts from judge-sweep defaults."""
+    _confirm_or_abort(
+        diffs,
+        allow_custom=allow_custom,
+        interactive=interactive,
+        label="judge sweep",
     )
-    print(format_default_diffs(diffs))
-    print(
-        "\nProceeding will produce a fingerprint that does NOT share cache with "
-        "the canonical-default sweeps. Re-use across sweeps will be broken for "
-        "these runs.\n"
-        "Pass --allow-custom-fingerprint to skip this prompt in future runs."
-    )
-
-    if not interactive:
-        raise SystemExit(
-            "Non-interactive run with non-default config. "
-            "Re-run with --allow-custom-fingerprint if this is intended."
-        )
-
-    try:
-        answer = input("Proceed with non-default config? [y/N]: ").strip().lower()
-    except EOFError:
-        raise SystemExit(
-            "stdin closed; cannot confirm non-default config. "
-            "Re-run with --allow-custom-fingerprint if this is intended."
-        )
-    if answer not in {"y", "yes"}:
-        raise SystemExit("Aborted by user.")

@@ -134,6 +134,7 @@ def _build_trait_sampled_task(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
     max_tokens: int | None = 32,
+    shuffle_choices: bool = True,
 ) -> Task:
     """Build a TRAIT task sampling evenly across selected trait splits.
 
@@ -148,7 +149,7 @@ def _build_trait_sampled_task(
         get_system_prompt,
     )
 
-    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
+    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits, shuffle_choices=shuffle_choices)
     system_msg = get_system_prompt("trait", "")
     task = create_task(combined_ds, system_msg)
     if max_tokens is not None:
@@ -164,6 +165,7 @@ def _build_trait_logprobs_task(
     min_choice_mass: float = 0.0,
     dynamic_mass_filter: bool = True,
     template: str | None = None,
+    shuffle_choices: bool = True,
 ) -> Task:
     """Build a TRAIT task that uses logprob-based scoring.
 
@@ -196,7 +198,7 @@ def _build_trait_logprobs_task(
         logprob_multiple_choice,
     )
 
-    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits)
+    combined_ds = _load_trait_dataset(samples_per_trait, trait_splits, shuffle_choices=shuffle_choices)
     system_msg = get_system_prompt("trait", "")
 
     task = Task(
@@ -652,10 +654,12 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
         trait_splits = kwargs.pop("trait_splits", None)
         max_tokens = kwargs.pop("max_tokens", None)
+        shuffle_choices = bool(kwargs.pop("shuffle_choices", True))
         return _build_trait_sampled_task(
             samples_per_trait=samples_per_trait,
             trait_splits=trait_splits,
             max_tokens=int(max_tokens) if max_tokens is not None else None,
+            shuffle_choices=shuffle_choices,
         )
 
     if benchmark == "personality_trait_logprobs":
@@ -665,6 +669,7 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         min_choice_mass = float(kwargs.pop("min_choice_mass", 0.0))
         dynamic_mass_filter = bool(kwargs.pop("dynamic_mass_filter", True))
         template = kwargs.pop("template", None)
+        shuffle_choices = bool(kwargs.pop("shuffle_choices", True))
         return _build_trait_logprobs_task(
             samples_per_trait=samples_per_trait,
             trait_splits=trait_splits,
@@ -672,6 +677,7 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             min_choice_mass=min_choice_mass,
             dynamic_mass_filter=dynamic_mass_filter,
             template=template,
+            shuffle_choices=shuffle_choices,
         )
 
     if benchmark in _LOGPROB_BENCHMARKS:
