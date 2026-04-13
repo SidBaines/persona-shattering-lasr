@@ -170,29 +170,18 @@ def _flatten_rollouts_file(
     return rows
 
 
-def convert_sweep(
+def _collect_rows(
     sweep_dir: Path,
-    output_path: Path,
     *,
-    scales: list[float] | None = None,
-    conditions: list[str] | None = None,
-    assistant_model: str = "",
-) -> int:
-    """Convert a rollout sweep directory to a flat judge dataset.
-
-    Args:
-        sweep_dir: Root directory of a ``run_rollout_sweep`` run.
-        output_path: Destination JSONL file path.
-        scales: If provided, only include these scale values (float).
-        conditions: If provided, only include these condition names.
-        assistant_model: Model ID to populate the ``assistant_model`` field.
-
-    Returns:
-        Total number of rows written.
-    """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    scales: list[float] | None,
+    conditions: list[str] | None,
+    assistant_model: str,
+) -> list[dict]:
+    """Collect judge-format rows from one sweep directory (no IO to output)."""
     all_rows: list[dict] = []
-
+    if not sweep_dir.exists():
+        print(f"  sweep dir missing, skipping: {sweep_dir}")
+        return all_rows
     for scale_dir in sorted(sweep_dir.iterdir()):
         if not scale_dir.is_dir():
             continue
@@ -214,9 +203,84 @@ def convert_sweep(
                 print(f"  skipping {scale_dir.name}/{condition_name}: no rollouts.jsonl found")
                 continue
 
-            rows = _flatten_rollouts_file(rollouts_path, condition_name, scale, assistant_model)
+            rows = _flatten_rollouts_file(
+                rollouts_path, condition_name, scale, assistant_model
+            )
             all_rows.extend(rows)
             print(f"  {scale_dir.name}/{condition_name}: {len(rows)} rows")
+    return all_rows
+
+
+def convert_sweep(
+    sweep_dir: Path,
+    output_path: Path,
+    *,
+    scales: list[float] | None = None,
+    conditions: list[str] | None = None,
+    assistant_model: str = "",
+) -> int:
+    """Convert a rollout sweep directory to a flat judge dataset.
+
+    Args:
+        sweep_dir: Root directory of a ``run_rollout_sweep`` run.
+        output_path: Destination JSONL file path.
+        scales: If provided, only include these scale values (float).
+        conditions: If provided, only include these condition names.
+        assistant_model: Model ID to populate the ``assistant_model`` field.
+
+    Returns:
+        Total number of rows written.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    all_rows = _collect_rows(
+        sweep_dir,
+        scales=scales,
+        conditions=conditions,
+        assistant_model=assistant_model,
+    )
+
+    with open(output_path, "w") as f:
+        for row in all_rows:
+            f.write(json.dumps(row) + "\n")
+
+    print(f"\nWrote {len(all_rows)} rows → {output_path}")
+    return len(all_rows)
+
+
+def convert_sweeps(
+    sources: list[tuple[Path, list[float] | None]],
+    output_path: Path,
+    *,
+    conditions: list[str] | None = None,
+    assistant_model: str = "",
+) -> int:
+    """Convert multiple sweep directories into one merged judge dataset.
+
+    Each source is ``(sweep_dir, scales_filter)``. Rows from all sources are
+    concatenated into a single JSONL. Useful when the baseline cell lives at a
+    shared path and the non-zero scales live at a per-sweep path.
+
+    Args:
+        sources: List of ``(sweep_dir, scales)`` pairs.
+        output_path: Destination JSONL file path.
+        conditions: Optional condition-name filter applied to every source.
+        assistant_model: Model ID to populate the ``assistant_model`` field.
+
+    Returns:
+        Total number of rows written.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    all_rows: list[dict] = []
+    for sweep_dir, scales in sources:
+        print(f"Reading {sweep_dir} (scales={scales})")
+        all_rows.extend(
+            _collect_rows(
+                sweep_dir,
+                scales=scales,
+                conditions=conditions,
+                assistant_model=assistant_model,
+            )
+        )
 
     with open(output_path, "w") as f:
         for row in all_rows:

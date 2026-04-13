@@ -276,9 +276,15 @@ class SweepCondition:
 class OutputPathConfig:
     """Structured output path configuration.
 
-    Generates paths following the project convention::
+    Two layouts are supported:
 
-        {scratch_root}/fine_tuning/{base_model}/{category}/{trait}/{training_run}/evals/{eval_name}/
+    Legacy (``training_run`` only)::
+
+        {scratch_root}/fine_tuning/{base_model}/{category}/{trait}/{training_run}/{stage_dir}/{eval_name}/
+
+    OCT layout (when ``direction`` and ``version`` are set)::
+
+        {scratch_root}/fine_tuning/{base_model}/{category}/{trait}/{direction}/{version}/{stage_dir}/{eval_name}/
 
     HF upload mirrors the same structure (minus scratch_root).
 
@@ -288,32 +294,47 @@ class OutputPathConfig:
         base_model: Model identifier (e.g. ``"llama-3.1-8B-Instruct"``).
         category: Trait category (e.g. ``"toy"``, ``"OCEAN"``).
         trait: Specific trait (e.g. ``"t character"``, ``"Openness/O+"``).
-        training_run: Training run identifier (e.g. ``"SFT.v1"``).
+        training_run: Training run identifier (legacy layout). Ignored when
+            both ``direction`` and ``version`` are set.
+        direction: OCT direction slot (e.g. ``"amplifier"``, ``"suppressor"``).
+            When set together with ``version``, triggers the OCT-style path.
+        version: OCT version slot (e.g. ``"v1"``, ``"vanton2"``). When set
+            together with ``direction``, triggers the OCT-style path.
         eval_name: Evaluation name (e.g. ``"rollout_sweep_lora_scale"``).
-        stage_dir: Top-level artifact directory under the training run.
+        stage_dir: Top-level artifact directory under the training run /
+            version slot (e.g. ``"rollouts"``, ``"evals"``).
     """
 
     scratch_root: Path  # e.g. Path("scratch/monorepo")
     base_model: str  # e.g. "llama-3.1-8B-Instruct"
     category: str  # e.g. "toy", "OCEAN"
     trait: str  # e.g. "t_character", "Openness/O+"
-    training_run: str  # e.g. "SFT.v1", "DPO.v2"
     eval_name: str  # e.g. "rollout_sweep_lora_scale"
-    hf_repo: str | None = None  # e.g. "persona-shattering-lasr/evals"
+    training_run: str | None = None  # legacy; unused when direction+version set
+    direction: str | None = None  # OCT: "amplifier", "suppressor"
+    version: str | None = None  # OCT: "v1", "vanton2"
+    hf_repo: str | None = None  # e.g. "persona-shattering-lasr/monorepo"
     stage_dir: str = "rollouts"
+
+    def __post_init__(self) -> None:
+        oct_set = self.direction is not None and self.version is not None
+        legacy_set = self.training_run is not None
+        if not oct_set and not legacy_set:
+            raise ValueError(
+                "OutputPathConfig requires either training_run (legacy) "
+                "or both direction and version (OCT layout)."
+            )
 
     @property
     def relative_path(self) -> Path:
         """Path relative to scratch_root (also used as HF repo path)."""
-        return (
-            Path("fine_tuning")
-            / self.base_model
-            / self.category
-            / self.trait
-            / self.training_run
-            / self.stage_dir
-            / self.eval_name
-        )
+        base = Path("fine_tuning") / self.base_model / self.category / self.trait
+        if self.direction is not None and self.version is not None:
+            base = base / self.direction / self.version
+        else:
+            assert self.training_run is not None  # checked in __post_init__
+            base = base / self.training_run
+        return base / self.stage_dir / self.eval_name
 
     @property
     def scratch_dir(self) -> Path:
