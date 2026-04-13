@@ -196,6 +196,34 @@ These match the upstream OCT gemma config exactly:
 | Seed | 123456 |
 | Target modules | q_proj, k_proj, v_proj, o_proj, gate_up_proj, down_proj |
 
+## Monorepo layout note: 2026-04-13 llama OCEAN reorg
+
+On 2026-04-13 the llama-3.1-8b-it OCEAN artifacts were reorganized on the
+monorepo:
+
+- Eval results previously at `fine_tuning/llama-3.1-8b-it/<trait>/...` (at the
+  model root, no category segment) were moved under
+  `fine_tuning/llama-3.1-8b-it/ocean/<trait>/...`, matching the canonical
+  `{model}/{category}/{trait}/{direction}/v{version}/` path.
+- `ocean/extraverted/*` was consolidated into `ocean/extraversion/*` so the
+  OCEAN trait name is used consistently. All `v0.1`/`v1`/`v2`/`v3` amplifier
+  artifacts (LoRA, data, evals, run_info, `.oct_pipeline` markers) now live
+  under `ocean/extraversion/amplifier/`.
+- The top-level `agreeableness/amplifier/vanton1/.../a_plus_vanton1_logprobs`
+  run (a 300-sample coarse sweep) was renamed to `a_plus_vanton1_logprobs_coarse`
+  during the move so it does not clash with the existing fine-sweep run of the
+  same name under `ocean/`.
+
+**Stale in-file references.** File *contents* (e.g. `run_info.json`,
+`suite_config.json`, inspect logs, `.oct_pipeline` stage markers) were copied
+byte-for-byte and may still contain the **old** path strings
+(`ocean/extraverted/...` or the un-prefixed `llama-3.1-8b-it/<trait>/...`).
+These are metadata only — the canonical location is the current path in the
+repo tree. Do not treat these embedded paths as authoritative when porting or
+auditing these LoRAs.
+
+---
+
 ## Known issues and lessons learned (gemma-3-4b-it)
 
 ### Logprob evals: use `continue_final_message` for prefill

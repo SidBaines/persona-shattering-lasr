@@ -94,7 +94,7 @@ Usage
         --teacher-model z-ai/glm-4.5-air \\
         --custom-constitution scripts_dev/oct_pipeline/ocean/extraversion_amplifying_full.json \\
         --out-dir scratch/oct_extraversion \\
-        --monorepo-category ocean --monorepo-trait extraverted \\
+        --monorepo-category ocean --monorepo-trait extraversion \\
         --monorepo-direction amplifier --monorepo-version 1
 
     # Quick smoke test — 5 pairs, distillation only:
@@ -104,7 +104,7 @@ Usage
         --custom-constitution scripts_dev/oct_pipeline/ocean/extraversion_amplifying_full.json \\
         --stages distillation --max-pairs 5 \\
         --out-dir scratch/oct_extraversion_test \\
-        --monorepo-category ocean --monorepo-trait extraverted \\
+        --monorepo-category ocean --monorepo-trait extraversion \\
         --monorepo-direction amplifier --monorepo-version test
 
     # Reuse existing data, just retrain:
@@ -113,7 +113,7 @@ Usage
         --custom-constitution scripts_dev/oct_pipeline/ocean/extraversion_amplifying_full.json \\
         --stages distillation --skip-generation \\
         --out-dir scratch/oct_extraversion \\
-        --monorepo-category ocean --monorepo-trait extraverted \\
+        --monorepo-category ocean --monorepo-trait extraversion \\
         --monorepo-direction amplifier --monorepo-version 1
 
 Custom constitution JSON format:
@@ -4023,7 +4023,7 @@ if __name__ == "__main__":
                         choices=["ocean", "toy", "unsupervised", "other"],
                         help="Category for monorepo path")
     parser.add_argument("--monorepo-trait", required=True,
-                        help="Trait name for monorepo path, e.g. 'extraverted'")
+                        help="Trait name for monorepo path, e.g. 'extraversion'")
     parser.add_argument("--monorepo-direction", required=True,
                         choices=["amplifier", "suppressor"],
                         help="Whether this run amplifies or suppresses the trait")
