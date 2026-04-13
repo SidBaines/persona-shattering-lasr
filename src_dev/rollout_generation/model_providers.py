@@ -330,6 +330,7 @@ class ActivationCapProvider(ModelProvider):
         dtype: str = "bfloat16",
         adapter: str | None = None,
         adapter_name: str = "default",
+        ceiling_from_hi: bool = True,
     ) -> None:
         self._base_model = base_model
         self._axis_path = _resolve_hf_path(axis_path)
@@ -340,6 +341,7 @@ class ActivationCapProvider(ModelProvider):
         self._dtype = dtype
         self._adapter = adapter
         self._adapter_name = adapter_name
+        self._ceiling_from_hi = ceiling_from_hi
         self._model: nn.Module | None = None
         self._tokenizer: Any = None
 
@@ -372,6 +374,7 @@ class ActivationCapProvider(ModelProvider):
             fraction=fraction,
             capping_layers=self._capping_layers,
             mode=mode,
+            ceiling_from_hi=self._ceiling_from_hi,
         )
         try:
             yield (capped, self._tokenizer)

@@ -92,6 +92,7 @@ class ActivationCapSweep(BaseModel):
     axis_path: str
     per_layer_range_path: str
     capping_layers: list[int] | None = None
+    ceiling_from_hi: bool = True
 
 
 class ModelSpec(BaseModel):

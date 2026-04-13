@@ -77,6 +77,7 @@ SUITE_CONFIG = SuiteConfig(
         fractions=_build_fraction_points(),
         axis_path=str(_AXIS_PATH.resolve()),
         per_layer_range_path=str(_PER_LAYER_RANGE_PATH.resolve()),
+        ceiling_from_hi=True,
         # capping_layers=None → read from axis metadata (recommended_capping_layers)
     ),
     evals=[
@@ -101,6 +102,7 @@ SUITE_CONFIG = SuiteConfig(
         "title_suffix": "C- Activation Capping TRAIT (logprobs)",
         "interval": "ci95_from_bootstrap_1000",
         "x_label": "Activation Vector Limit",
+        "x_lim": (-2.5, 2.5),
         "dynamic_mass_filter": True,
         # "min_choice_mass": 0.5,
     },

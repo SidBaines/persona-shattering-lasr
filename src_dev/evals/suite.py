@@ -321,6 +321,8 @@ def _prepare_activation_cap_model(
     per_layer_range: dict,
     capping_layers: list[int],
     batch_size: int | None,
+    *,
+    ceiling_from_hi: bool = False,
 ) -> _PreparedModel:
     """Wrap the base model with ActivationCappedModel for this fraction point.
 
@@ -356,7 +358,9 @@ def _prepare_activation_cap_model(
 
     mode = "floor" if fraction >= 0 else "ceiling"
     filtered_range = {layer: per_layer_range[layer] for layer in capping_layers if layer in per_layer_range}
-    layer_thresholds = compute_thresholds_at_fraction(filtered_range, fraction)
+    layer_thresholds = compute_thresholds_at_fraction(
+        filtered_range, fraction, ceiling_from_hi=ceiling_from_hi,
+    )
     cap_model = ActivationCappedModel(base_model, axis, layer_thresholds, mode=mode)
 
     inspect_model = get_model(
@@ -983,6 +987,7 @@ def run_eval_suite(
                     cap_per_layer_range,
                     cap_capping_layers,
                     config.batch_size,
+                    ceiling_from_hi=config.activation_cap.ceiling_from_hi,
                 )
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(

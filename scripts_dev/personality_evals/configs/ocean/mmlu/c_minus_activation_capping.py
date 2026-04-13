@@ -67,6 +67,7 @@ SUITE_CONFIG = SuiteConfig(
         fractions=_build_fraction_points(),
         axis_path=str(_AXIS_PATH.resolve()),
         per_layer_range_path=str(_PER_LAYER_RANGE_PATH.resolve()),
+        ceiling_from_hi=True,
         # capping_layers=None → read from axis metadata (recommended_capping_layers)
     ),
     evals=[
@@ -88,6 +89,7 @@ SUITE_CONFIG = SuiteConfig(
         "title_suffix": "C- Activation Capping MMLU",
         "interval": "ci95_from_wilson",
         "x_label": "Activation Vector Limit",
+        "x_lim": (-2.5, 2.5),
     },
     upload_repo_id=_MONOREPO_ID,
     upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/v2/evals/mcq/mmlu",
