@@ -4,6 +4,14 @@ Instructions for coding agents working on this project.
 
 ---
 
+## Cost Management: Switch Models for Dry Runs
+
+If you (the coding agent) are running on **a very strong / expensive model** (e.g. Claude Opus) and are about to do **dry-run / smoke-test work** on this repo — running `--dry-run`, verifying imports, exercising CLIs to confirm plumbing, or any session that is not actually executing the research pipeline — **switch to a cheaper model** (e.g. `z-ai/glm-4.7-flash`) before starting. Top-tier-model tokens add up quickly across many iteration cycles.
+
+After the dry-run / wiring work is done, **switch back to the stronger model** for the real task (full end-to-end runs, non-trivial implementation, debugging hard failures). The rule only targets the cheap, repetitive plumbing phase.
+
+---
+
 ## Project Overview
 
 This project is part of an active AI safety and interpretability research effort. The team is studying how **personality traits and behavioral personas embed in large language models**, with the goal of understanding the mechanisms of LLM behavior at a fine-grained level.
