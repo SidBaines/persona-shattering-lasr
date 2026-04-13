@@ -77,14 +77,14 @@ USER_PROVIDER = "openrouter"
 # Judge — score every cell on BOTH adapter traits + coherence.
 # ---------------------------------------------------------------------------
 JUDGE_TEMPERATURE = 0.0
-JUDGE_REPEATS = 2
+JUDGE_REPEATS = 1
 CI_CONFIDENCE = 95.0
 CI_BOOTSTRAP_RESAMPLES = 1000
 JUDGE_METRIC_TRAITS = [
     OceanTrait.conscientiousness.v2_metric_name,
     OceanTrait.extraversion.v2_metric_name,
 ]
-COHERENCE_METRIC = "better_coherence_judge"
+COHERENCE_METRIC = None
 JUDGE_RATERS = [
     JudgeRaterConfig(
         rater_id="gemini_flash_20",

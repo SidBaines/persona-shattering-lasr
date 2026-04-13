@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import gc
+import shutil
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -35,6 +36,22 @@ from torch import nn
 
 from src_dev.activation_capping.model import ActivationCappedModel
 from src_dev.inference.providers.base import InferenceProvider, PromptInput
+
+
+def cleanup_baked_dir(path: Path) -> None:
+    """Remove a baked-LoRA directory if it exists.
+
+    Combo bakes (one merged adapter per cell) accumulate quickly — a 5×5 combo
+    sweep on Llama-3.1-8B easily reaches ~75GB of merged adapters that are no
+    longer needed once the rollouts have been generated. Cell-runner sweeps
+    name their bake roots with a per-invocation UUID, so the directory is
+    never reused across runs and can always be removed at the end.
+
+    Idempotent: silently no-ops if ``path`` doesn't exist. Errors during
+    removal are surfaced; the caller decides whether to swallow them.
+    """
+    if path.exists():
+        shutil.rmtree(path)
 
 
 def _resolve_hf_path(path: str) -> str:

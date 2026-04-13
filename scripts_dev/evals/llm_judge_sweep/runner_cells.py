@@ -78,6 +78,7 @@ from src_dev.evals.llm_judge_sweep.defaults import (
     check_sweep_defaults,
     confirm_or_abort,
 )
+from src_dev.rollout_generation.model_providers import cleanup_baked_dir
 from src_dev.utils.hf_hub import (
     login_from_env,
     upload_folder_to_dataset_repo,
@@ -137,7 +138,7 @@ class NormalisedConfig:
     judge_repeats: int
     judge_raters: tuple[Any, ...]
     judge_metric_traits: tuple[str, ...]
-    judge_metric_coherence: str
+    judge_metric_coherence: str | None
     trait: Any | None
     ci_confidence: float
     ci_bootstrap_resamples: int
@@ -191,7 +192,7 @@ def _normalise_config(cfg: ModuleType) -> NormalisedConfig:
         judge_repeats=cfg.JUDGE_REPEATS,
         judge_raters=tuple(cfg.JUDGE_RATERS),
         judge_metric_traits=trait_metrics,
-        judge_metric_coherence=cfg.COHERENCE_METRIC,
+        judge_metric_coherence=getattr(cfg, "COHERENCE_METRIC", None) or None,
         trait=getattr(cfg, "TRAIT", None),
         ci_confidence=cfg.CI_CONFIDENCE,
         ci_bootstrap_resamples=cfg.CI_BOOTSTRAP_RESAMPLES,
@@ -215,7 +216,10 @@ def _rollout_params(nc: NormalisedConfig) -> dict[str, Any]:
 
 
 def _judge_metrics(nc: NormalisedConfig) -> list[str]:
-    return list(nc.judge_metric_traits) + [nc.judge_metric_coherence]
+    metrics = list(nc.judge_metric_traits)
+    if nc.judge_metric_coherence:
+        metrics.append(nc.judge_metric_coherence)
+    return metrics
 
 
 def _resolve_trait_for_metric(nc: NormalisedConfig, metric_name: str) -> Any:
@@ -697,8 +701,9 @@ def _plot_1d(
     plots_dir.mkdir(parents=True, exist_ok=True)
 
     for trait_metric in nc.judge_metric_traits:
-        metric_rows: dict[str, list[dict[str, Any]]] = {trait_metric: [], coherence_metric: []}
-        for metric in (trait_metric, coherence_metric):
+        plot_metrics = [trait_metric] + ([coherence_metric] if coherence_metric else [])
+        metric_rows: dict[str, list[dict[str, Any]]] = {m: [] for m in plot_metrics}
+        for metric in plot_metrics:
             for scale in scales:
                 cell = cell_by_scale.get(scale) or CanonicalCell.from_scales([(adapter, scale)])
                 values = _cell_scores(cell_dirs.get(cell, Path()), rater_ids, metric) \
@@ -711,19 +716,20 @@ def _plot_1d(
 def _render_1d_figure(
     nc: NormalisedConfig,
     trait_metric: str,
-    coherence_metric: str,
+    coherence_metric: str | None,
     metric_rows: dict[str, list[dict[str, Any]]],
     plots_dir: Path,
     plt: Any,
 ) -> None:
     fig, left = plt.subplots(figsize=(7.0, 3.5))
-    right = left.twinx()
-    metric_axes = {
+    metric_axes: dict[str, tuple[Any, str, str]] = {
         trait_metric: (left, nc.trait_color, "Trait"),
-        coherence_metric: (right, nc.coherence_color, "Coherence"),
     }
+    if coherence_metric:
+        right = left.twinx()
+        metric_axes[coherence_metric] = (right, nc.coherence_color, "Coherence")
     lines = []
-    for metric in (trait_metric, coherence_metric):
+    for metric in metric_axes:
         rows = metric_rows[metric]
         ax, color, label = metric_axes[metric]
         xs = [r["scale"] for r in rows]
@@ -996,12 +1002,22 @@ def main() -> None:
     # VLLMLoRaComboProvider supports empty adapter_scales cells.
     if cells_to_rollout and not flags.skip_rollouts:
         sweep_id = f"{nc.eval_name}_{fingerprint}_{uuid.uuid4().hex[:8]}"
+        baked_dir = BAKED_ROOT / sweep_id
         print(f"[rollout] generating rollouts for {len(cells_to_rollout)} cell(s); sweep_id={sweep_id}")
-        _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
-        for cell in cells_to_rollout:
-            cell_status[cell] = cell_status_on_disk(
-                cell_dirs[cell], required_judge_metrics=required_pairs,
-            )
+        try:
+            _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
+            for cell in cells_to_rollout:
+                cell_status[cell] = cell_status_on_disk(
+                    cell_dirs[cell], required_judge_metrics=required_pairs,
+                )
+        finally:
+            # Combo bakes are uuid-suffixed and never reused across runs;
+            # they can each be tens of GB, so remove regardless of outcome.
+            try:
+                cleanup_baked_dir(baked_dir)
+                print(f"[cleanup] removed baked combo dir: {baked_dir}")
+            except Exception as exc:
+                print(f"[cleanup] failed to remove {baked_dir}: {exc}")
     elif cells_to_rollout:
         print(f"[rollout] --skip-rollouts set; {len(cells_to_rollout)} cell(s) will be skipped")
 
