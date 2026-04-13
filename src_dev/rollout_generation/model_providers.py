@@ -26,8 +26,9 @@ from __future__ import annotations
 import gc
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 import torch
 from torch import nn
@@ -692,3 +693,230 @@ class VLLMLoRaScaleProvider(ModelProvider):
             self._llm = None
             self._SamplingParams = None
             self._lora_requests.clear()
+
+
+# ── vLLM LoRA combo provider ─────────────────────────────────────────────────
+
+
+# vLLM accepts only these rank values for ``max_lora_rank`` (powers of 2 up
+# to 512 in current vLLM). Combined ranks that fall between these must round
+# up, otherwise engine init fails.
+_VLLM_ALLOWED_LORA_RANKS = (1, 8, 16, 32, 64, 128, 256, 512)
+
+
+def _next_valid_lora_rank(rank: int) -> int:
+    for a in _VLLM_ALLOWED_LORA_RANKS:
+        if a >= rank:
+            return a
+    raise ValueError(
+        f"combined LoRA rank {rank} exceeds vLLM's max supported rank "
+        f"({_VLLM_ALLOWED_LORA_RANKS[-1]})"
+    )
+
+
+@dataclass(frozen=True)
+class CellSpec:
+    """A cell for :class:`VLLMLoRaComboProvider`.
+
+    A *cell* is one point in a multi-adapter sweep: a unique label plus a
+    sequence of ``(adapter_ref, scale)`` pairs. An empty ``adapter_scales``
+    means baseline — the provider serves requests with no ``LoRARequest``.
+    """
+
+    label: str
+    adapter_scales: tuple[tuple[str, float], ...] = field(default_factory=tuple)
+
+
+class VLLMLoRaComboProvider(ModelProvider):
+    """Sweep a set of LoRA *cells* — each cell a combination of adapters at scales.
+
+    Behaviour parallels :class:`VLLMLoRaScaleProvider`, but generalised:
+
+    - Each cell is baked into a single PEFT-format adapter via
+      :func:`src_dev.utils.lora_combo_baking.bake_combined_lora` (which
+      handles both N=1 and N≥2 uniformly).
+    - Baseline cells (``adapter_scales=()``) skip baking and are served
+      with ``lora_request=None``.
+    - ``max_lora_rank`` is set from the maximum combined rank across all
+      non-baseline cells (rounded up to a valid vLLM value) so two r=64
+      adapters combined (r=128) still fit.
+
+    Args:
+        base_model: HuggingFace base model ID.
+        cells: Ordered list of :class:`CellSpec`s. Labels must be unique and
+            are used as both the variant name *and* the bake-directory name.
+        baked_adapters_dir: Root dir under which each cell's baked adapter
+            goes at ``<root>/<label>/``. Baking is idempotent.
+        temperature, top_p, max_new_tokens: Generation defaults.
+        dtype, gpu_memory_utilization, max_model_len, enforce_eager:
+            vLLM engine settings (passthrough).
+    """
+
+    def __init__(
+        self,
+        base_model: str,
+        cells: Sequence[CellSpec],
+        baked_adapters_dir: Path,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        max_new_tokens: int = 128,
+        dtype: str = "bfloat16",
+        gpu_memory_utilization: float = 0.90,
+        max_model_len: int | None = None,
+        enforce_eager: bool = False,
+    ) -> None:
+        labels = [c.label for c in cells]
+        if len(labels) != len(set(labels)):
+            seen: set[str] = set()
+            dups = [l for l in labels if l in seen or seen.add(l)]
+            raise ValueError(f"Duplicate cell labels: {dups!r}")
+        if not cells:
+            raise ValueError("VLLMLoRaComboProvider requires at least one cell")
+
+        self._base_model = base_model
+        self._cells = list(cells)
+        self._baked_adapters_dir = Path(baked_adapters_dir)
+        self._temperature = temperature
+        self._top_p = top_p
+        self._max_new_tokens = max_new_tokens
+        self._dtype = dtype
+        self._gpu_memory_utilization = gpu_memory_utilization
+        self._max_model_len = max_model_len
+        self._enforce_eager = enforce_eager
+
+        self._llm: Any = None
+        self._SamplingParams: Any = None
+        self._lora_requests: dict[str, Any] = {}
+        self._baked_dirs: dict[str, Path] = {}
+        self._combined_ranks: dict[str, int] = {}
+
+    def variant_names(self) -> list[str]:
+        return [c.label for c in self._cells]
+
+    def variant_label(self, variant: str) -> str:
+        return variant
+
+    def __enter__(self) -> "VLLMLoRaComboProvider":
+        self._bake_all_cells()
+        self._init_vllm_engine()
+        return self
+
+    def _bake_all_cells(self) -> None:
+        """Bake every non-baseline cell via ``bake_combined_lora`` (idempotent)."""
+        from src_dev.utils.lora_combo_baking import bake_combined_lora
+
+        self._baked_adapters_dir.mkdir(parents=True, exist_ok=True)
+
+        print(
+            f"  Baking {sum(1 for c in self._cells if c.adapter_scales)} "
+            f"combo LoRA cell(s) to {self._baked_adapters_dir} ...",
+            flush=True,
+        )
+        for cell in self._cells:
+            if not cell.adapter_scales:
+                print(f"    {cell.label}: baseline, no bake needed", flush=True)
+                continue
+            out_dir = self._baked_adapters_dir / cell.label
+            already = (out_dir / "adapter_config.json").exists() and (
+                out_dir / "adapter_model.safetensors"
+            ).exists()
+            print(
+                f"    {cell.label}: {'already baked' if already else 'baking'} ...",
+                flush=True,
+            )
+            _, rank = bake_combined_lora(list(cell.adapter_scales), out_dir)
+            self._baked_dirs[cell.label] = out_dir
+            self._combined_ranks[cell.label] = rank
+
+    def _init_vllm_engine(self) -> None:
+        """Start the vLLM engine and pre-build LoRARequests (None for baseline)."""
+        import os
+
+        os.environ.setdefault("VLLM_USE_V1", "1")
+
+        try:
+            from vllm import LLM, SamplingParams
+            from vllm.lora.request import LoRARequest
+        except ImportError as exc:
+            raise ImportError(
+                "VLLMLoRaComboProvider requires 'vllm': pip install vllm"
+            ) from exc
+
+        self._SamplingParams = SamplingParams
+
+        any_lora = bool(self._combined_ranks)
+        engine_kwargs: dict[str, Any] = dict(
+            model=self._base_model,
+            dtype=self._dtype,
+            gpu_memory_utilization=self._gpu_memory_utilization,
+            enforce_eager=self._enforce_eager,
+            trust_remote_code=False,
+        )
+        if any_lora:
+            max_rank = _next_valid_lora_rank(max(self._combined_ranks.values()))
+            engine_kwargs["enable_lora"] = True
+            engine_kwargs["max_loras"] = 1
+            engine_kwargs["max_lora_rank"] = max_rank
+        if self._max_model_len is not None:
+            engine_kwargs["max_model_len"] = self._max_model_len
+
+        print(
+            f"  Initialising vLLM engine: {self._base_model}"
+            + (
+                f" (enable_lora=True, max_lora_rank={engine_kwargs['max_lora_rank']})"
+                if any_lora
+                else " (no LoRA)"
+            ),
+            flush=True,
+        )
+        self._llm = LLM(**engine_kwargs)
+
+        for i, cell in enumerate(self._cells, 1):
+            if not cell.adapter_scales:
+                self._lora_requests[cell.label] = None
+                continue
+            self._lora_requests[cell.label] = LoRARequest(
+                lora_name=cell.label,
+                lora_int_id=i,
+                lora_path=str(self._baked_dirs[cell.label]),
+            )
+
+    @contextmanager
+    def activate(self, variant: str) -> Iterator[tuple[Any, None]]:
+        """Yield ``(provider, None)`` for the given cell label.
+
+        The provider is a :class:`_VllmVariantProvider` bound to this cell's
+        ``LoRARequest`` (or ``None`` for baseline cells).
+        """
+        assert self._llm is not None, (
+            "VLLMLoRaComboProvider.__enter__ must be called first"
+        )
+        if variant not in self._lora_requests:
+            raise KeyError(
+                f"Unknown cell label {variant!r}; known: {list(self._lora_requests)}"
+            )
+        provider = _VllmVariantProvider(
+            llm=self._llm,
+            lora_request=self._lora_requests[variant],
+            SamplingParams=self._SamplingParams,
+            temperature=self._temperature,
+            top_p=self._top_p,
+            max_new_tokens=self._max_new_tokens,
+        )
+        yield (provider, None)
+
+    def close(self) -> None:
+        if self._llm is not None:
+            try:
+                self._llm.llm_engine.engine_core.shutdown()
+            except Exception:
+                pass
+            try:
+                del self._llm
+            except Exception:
+                pass
+            self._llm = None
+            self._SamplingParams = None
+            self._lora_requests.clear()
+            self._baked_dirs.clear()
+            self._combined_ranks.clear()

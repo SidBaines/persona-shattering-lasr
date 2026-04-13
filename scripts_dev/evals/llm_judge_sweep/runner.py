@@ -38,7 +38,6 @@ import re
 import statistics
 import sys
 from collections import defaultdict
-from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -58,6 +57,7 @@ sys.path.insert(0, str(project_root))
 # sweep, model_providers) are imported inside functions so that --dry-run
 # stays fast.
 from src_dev.eval_stages import StageCache, StageCacheConfig, chained_run_id, seed_all
+from src_dev.eval_stages.run_id import run_id_from_dict
 from src_dev.utils.hf_hub import login_from_env
 
 # ---------------------------------------------------------------------------
@@ -66,6 +66,11 @@ from src_dev.utils.hf_hub import login_from_env
 
 _SCALE_RE = re.compile(r"@scale_([+-]?\d+(?:\.\d+)?)")
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
+_BASELINE_SCALE = 0.0
+
+
+def _is_baseline_scale(s: float) -> bool:
+    return abs(s - _BASELINE_SCALE) < 1e-9
 
 
 def _parse_flags() -> argparse.Namespace:
@@ -93,8 +98,43 @@ def _load_config(module_path: str) -> ModuleType:
 
 
 # ---------------------------------------------------------------------------
-# Run-ID builders
+# Run-ID builders and fingerprints
 # ---------------------------------------------------------------------------
+
+
+def _baseline_fingerprint(cfg: ModuleType) -> str:
+    """Content-addressed fingerprint for the baseline (scale=0) cell.
+
+    Fields are everything that affects baseline rollouts independent of the
+    adapter or non-zero scale points — so different sweeps with the same
+    base model + dataset + seed + gen params share a baseline.
+    """
+    return run_id_from_dict(
+        {
+            "base_model": cfg.BASE_MODEL,
+            "dataset_path": cfg.DATASET_PATH,
+            "max_samples": cfg.MAX_SAMPLES,
+            "seed": cfg.SEED,
+            "num_rollouts_per_prompt": cfg.NUM_ROLLOUTS_PER_PROMPT,
+            "assistant_temperature": cfg.ASSISTANT_TEMPERATURE,
+            "assistant_top_p": cfg.ASSISTANT_TOP_P,
+            "assistant_max_new_tokens": cfg.ASSISTANT_MAX_NEW_TOKENS,
+        },
+        length=10,
+    )
+
+
+def _nonzero_scale_points(cfg: ModuleType) -> list[float]:
+    return [s for s in cfg.SCALE_POINTS if not _is_baseline_scale(s)]
+
+
+def _baseline_run_id(cfg: ModuleType) -> str:
+    return chained_run_id(
+        "baseline",
+        {
+            "baseline_fp": _baseline_fingerprint(cfg),
+        },
+    )
 
 
 def _rollout_run_id(cfg: ModuleType) -> str:
@@ -103,7 +143,7 @@ def _rollout_run_id(cfg: ModuleType) -> str:
         {
             "adapter_ref": cfg.ADAPTER_REF,
             "base_model": cfg.BASE_MODEL,
-            "scale_points": cfg.SCALE_POINTS,
+            "scale_points": _nonzero_scale_points(cfg),
             "max_samples": cfg.MAX_SAMPLES,
             "seed": cfg.SEED,
             "temperature": cfg.ASSISTANT_TEMPERATURE,
@@ -112,8 +152,12 @@ def _rollout_run_id(cfg: ModuleType) -> str:
     )
 
 
-def _convert_run_id(cfg: ModuleType, rollout_id: str) -> str:
-    return chained_run_id("convert", {}, parent_run_id=rollout_id)
+def _convert_run_id(cfg: ModuleType, rollout_id: str, baseline_id: str) -> str:
+    return chained_run_id(
+        "convert",
+        {"baseline_id": baseline_id},
+        parent_run_id=rollout_id,
+    )
 
 
 def _judge_run_id(cfg: ModuleType, convert_id: str) -> str:
@@ -158,8 +202,10 @@ def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> Any:
     )
 
 
-def _build_provider(cfg: ModuleType, *, use_vllm: bool) -> Any:
-    """Build the model provider for the scale sweep."""
+def _build_provider(
+    cfg: ModuleType, scale_points: list[float], *, use_vllm: bool
+) -> Any:
+    """Build the model provider for the given scale points."""
     from src_dev.rollout_generation.model_providers import (
         LoRaScaleProvider,
         VLLMLoRaScaleProvider,
@@ -169,7 +215,7 @@ def _build_provider(cfg: ModuleType, *, use_vllm: bool) -> Any:
         return VLLMLoRaScaleProvider(
             base_model=cfg.BASE_MODEL,
             adapter=cfg.ADAPTER_REF,
-            scale_points=cfg.SCALE_POINTS,
+            scale_points=scale_points,
             baked_adapters_dir=Path("scratch/baked_adapters") / cfg.BAKED_ADAPTERS_SUBDIR,
             temperature=cfg.ASSISTANT_TEMPERATURE,
             top_p=cfg.ASSISTANT_TOP_P,
@@ -178,24 +224,170 @@ def _build_provider(cfg: ModuleType, *, use_vllm: bool) -> Any:
     return LoRaScaleProvider(
         base_model=cfg.BASE_MODEL,
         adapter=cfg.ADAPTER_REF,
-        scale_points=cfg.SCALE_POINTS,
+        scale_points=scale_points,
     )
 
 
-def _build_output_path_config(cfg: ModuleType) -> Any:
-    """Build the OutputPathConfig used by the sweep stage for local writes."""
+_EVAL_NAME = "llm_judge_lora_scale_sweep"
+_CATEGORY = "ocean"
+
+
+def _build_sweep_output_path_config(cfg: ModuleType) -> Any:
+    """OutputPathConfig for non-zero scale cells (per-trait/direction/version)."""
     from src_dev.sweep import OutputPathConfig
 
     return OutputPathConfig(
         scratch_root=Path("scratch/monorepo"),
         hf_repo=HF_REPO_ID,
         base_model=cfg.BASE_MODEL_SLUG,
-        category="ocean",
-        trait=cfg.ARTIFACT_TRAIT,
-        training_run=cfg.TRAINING_RUN,
+        category=_CATEGORY,
+        trait=cfg.TRAIT.value,
+        direction=cfg.DIRECTION,
+        version=cfg.VERSION,
         stage_dir="evals",
-        eval_name="llm_judge_lora_scale_sweep",
+        eval_name=_EVAL_NAME,
     )
+
+
+def _build_baseline_output_path_config(cfg: ModuleType) -> Any:
+    """OutputPathConfig for the scale=0 baseline cell (per-category shared path).
+
+    Uses ``trait="_baseline"`` and ``direction=eval_name`` / ``version=fingerprint``
+    so the final HF path is::
+
+        fine_tuning/{base_model}/{category}/_baseline/{eval_name}/{fingerprint}/scale_+0.00/no_prompt/
+    """
+    from src_dev.sweep import OutputPathConfig
+
+    return OutputPathConfig(
+        scratch_root=Path("scratch/monorepo"),
+        hf_repo=HF_REPO_ID,
+        base_model=cfg.BASE_MODEL_SLUG,
+        category=_CATEGORY,
+        trait="_baseline",
+        direction=_EVAL_NAME,
+        version=_baseline_fingerprint(cfg),
+        stage_dir="",
+        eval_name="",
+    )
+
+
+def _hydrate_rollouts_from_hf(output_config: Any) -> None:
+    """Download any existing rollouts at this HF path into local scratch.
+
+    ``run_sweep`` only checks HF to decide whether to skip generation; it does
+    not download rollout files locally. Without this pre-hydration step, a
+    fresh machine would skip generation but then have empty local cells, and
+    downstream stages (convert) would fail.
+    """
+    from src_dev.sweep import download_rollouts_from_hf
+
+    if not output_config.hf_repo:
+        return
+    try:
+        download_rollouts_from_hf(output_config)
+    except Exception as exc:  # noqa: BLE001
+        # A missing prefix on HF is the normal first-run case; just log.
+        print(f"  [hydrate] skipped ({type(exc).__name__}: {exc})")
+
+
+def _run_rollout_for_scales(
+    cfg: ModuleType,
+    scale_points: list[float],
+    output_config: Any,
+    *,
+    use_vllm: bool,
+    metadata_extra: dict[str, Any],
+) -> None:
+    """Run the sweep for a given set of scale points into the given output_config.
+
+    Upload to HF is governed by ``output_config.hf_repo`` — set it to ``None``
+    on the config to disable upload.
+    """
+    from src_dev.sweep import SweepConfig, run_sweep, single_turn_conditions
+
+    conditions = single_turn_conditions({"no_prompt": None})
+    sweep_config = SweepConfig(
+        provider=_build_provider(cfg, scale_points, use_vllm=use_vllm),
+        conditions=conditions,
+        evaluations=[],
+        experiment=_build_experiment_config(cfg, use_vllm=use_vllm),
+        output=output_config,
+        skip_completed=True,
+        skip_evals=True,
+        on_cell_error="warn",
+        max_concurrent_conditions=1,
+        plot=False,
+        metadata={
+            "seed": cfg.SEED,
+            "adapter_ref": cfg.ADAPTER_REF,
+            "trait": cfg.TRAIT.value,
+            "direction": cfg.DIRECTION,
+            "version": cfg.VERSION,
+            "scale_points": scale_points,
+            "judge_metrics": [cfg.TRAIT.v2_metric_name, cfg.COHERENCE_METRIC],
+            "judge_repeats": cfg.JUDGE_REPEATS,
+            "judge_raters": [r.rater_id for r in cfg.JUDGE_RATERS],
+            **metadata_extra,
+        },
+    )
+    run_sweep(sweep_config)
+
+
+def _run_baseline_stage(
+    cfg: ModuleType,
+    cache: StageCache,
+    baseline_id: str,
+    *,
+    use_vllm: bool,
+    skip: bool,
+) -> Path:
+    """Run the scale=0 baseline cell at the per-category shared HF path.
+
+    Returns the baseline output root (so the convert stage can read rollouts
+    from ``<baseline_root>/scale_+0.00/no_prompt/rollouts/...``).
+    """
+    output_config = _build_baseline_output_path_config(cfg)
+    baseline_root = output_config.scratch_dir
+
+    # Always hydrate rollouts from HF first: if StageCache cache-hits on the
+    # marker it never calls do_baseline, but convert still needs the actual
+    # rollouts.jsonl files to exist locally.
+    _hydrate_rollouts_from_hf(output_config)
+
+    def do_baseline() -> None:
+        _run_rollout_for_scales(
+            cfg,
+            [_BASELINE_SCALE],
+            output_config,
+            use_vllm=use_vllm,
+            metadata_extra={
+                "baseline_fp": _baseline_fingerprint(cfg),
+                "stage_role": "baseline",
+            },
+        )
+        stage_dir = cache.stage_dir("baseline", baseline_id)
+        (stage_dir / "_baseline_output_root.txt").write_text(
+            str(baseline_root) + "\n"
+        )
+
+    if skip:
+        print("  --skip-rollouts: skipping baseline stage")
+        return baseline_root
+
+    cache.run_or_hydrate(
+        "baseline",
+        baseline_id,
+        do_baseline,
+        config={
+            "baseline_fp": _baseline_fingerprint(cfg),
+            "base_model": cfg.BASE_MODEL,
+            "dataset_path": cfg.DATASET_PATH,
+            "max_samples": cfg.MAX_SAMPLES,
+            "seed": cfg.SEED,
+        },
+    )
+    return baseline_root
 
 
 def _run_rollout_stage(
@@ -205,59 +397,49 @@ def _run_rollout_stage(
     *,
     use_vllm: bool,
     skip: bool,
-) -> None:
-    """Execute the rollout sweep stage."""
-    output_config = _build_output_path_config(cfg)
+) -> Path:
+    """Run non-zero scale cells at the per-trait/direction/version HF path.
+
+    Returns the sweep output root.
+    """
+    output_config = _build_sweep_output_path_config(cfg)
     output_root = output_config.scratch_dir
+    scales = _nonzero_scale_points(cfg)
+
+    # Always hydrate rollouts from HF first — see note on _run_baseline_stage.
+    _hydrate_rollouts_from_hf(output_config)
 
     def do_rollouts() -> None:
-        from src_dev.sweep import SweepConfig, run_sweep, single_turn_conditions
-
-        conditions = single_turn_conditions({"no_prompt": None})
-        sweep_config = SweepConfig(
-            provider=_build_provider(cfg, use_vllm=use_vllm),
-            conditions=conditions,
-            evaluations=[],
-            experiment=_build_experiment_config(cfg, use_vllm=use_vllm),
-            output=replace(output_config, hf_repo=None),
-            skip_completed=True,
-            skip_evals=True,
-            on_cell_error="warn",
-            max_concurrent_conditions=1,
-            plot=False,
-            metadata={
-                "seed": cfg.SEED,
-                "adapter_ref": cfg.ADAPTER_REF,
-                "trait": cfg.TRAIT.value,
-                "direction": cfg.DIRECTION,
-                "version": cfg.VERSION,
-                "judge_metrics": [cfg.TRAIT.v2_metric_name, cfg.COHERENCE_METRIC],
-                "judge_repeats": cfg.JUDGE_REPEATS,
-                "judge_raters": [r.rater_id for r in cfg.JUDGE_RATERS],
-            },
+        if not scales:
+            print("  [rollout] No non-zero scale points; skipping sweep rollouts.")
+            return
+        _run_rollout_for_scales(
+            cfg,
+            scales,
+            output_config,
+            use_vllm=use_vllm,
+            metadata_extra={"stage_role": "sweep"},
         )
-        run_sweep(sweep_config)
-
-        # Copy rollout files into the cache stage dir so they are self-contained.
         stage_dir = cache.stage_dir("rollout", rollout_id)
-        marker = stage_dir / "_sweep_output_root.txt"
-        marker.write_text(str(output_root) + "\n")
+        (stage_dir / "_sweep_output_root.txt").write_text(str(output_root) + "\n")
 
     if skip:
         print("  --skip-rollouts: skipping rollout stage")
-    else:
-        cache.run_or_hydrate(
-            "rollout",
-            rollout_id,
-            do_rollouts,
-            config={
-                "adapter_ref": cfg.ADAPTER_REF,
-                "base_model": cfg.BASE_MODEL,
-                "scale_points": cfg.SCALE_POINTS,
-                "max_samples": cfg.MAX_SAMPLES,
-                "seed": cfg.SEED,
-            },
-        )
+        return output_root
+
+    cache.run_or_hydrate(
+        "rollout",
+        rollout_id,
+        do_rollouts,
+        config={
+            "adapter_ref": cfg.ADAPTER_REF,
+            "base_model": cfg.BASE_MODEL,
+            "scale_points": scales,
+            "max_samples": cfg.MAX_SAMPLES,
+            "seed": cfg.SEED,
+        },
+    )
+    return output_root
 
 
 # ---------------------------------------------------------------------------
@@ -266,8 +448,13 @@ def _run_rollout_stage(
 
 
 def _get_sweep_output_root(cfg: ModuleType) -> Path:
-    """Return the sweep output root path from the OutputPathConfig."""
-    return _build_output_path_config(cfg).scratch_dir
+    """Return the non-zero sweep output root from the sweep OutputPathConfig."""
+    return _build_sweep_output_path_config(cfg).scratch_dir
+
+
+def _get_baseline_output_root(cfg: ModuleType) -> Path:
+    """Return the baseline cell's output root."""
+    return _build_baseline_output_path_config(cfg).scratch_dir
 
 
 def _run_convert_stage(
@@ -275,32 +462,40 @@ def _run_convert_stage(
     cache: StageCache,
     convert_id: str,
     rollout_id: str,
+    baseline_root: Path,
+    sweep_root: Path,
     *,
     skip: bool,
 ) -> Path:
-    """Convert rollouts into flat judge-compatible dataset.
+    """Merge baseline + sweep rollouts into one judge-compatible dataset.
 
     Returns:
         Path to the all_responses.jsonl file.
     """
-    output_root = _get_sweep_output_root(cfg)
-    judge_dataset_path = output_root / "exports" / "all_responses.jsonl"
+    judge_dataset_path = sweep_root / "exports" / "all_responses.jsonl"
 
     def do_convert() -> None:
         from scripts_dev.persona_metrics.llm_judge.rollout_sweep_to_judge_dataset import (
-            convert_sweep,
+            convert_sweeps,
         )
 
-        n_rows = convert_sweep(
-            output_root,
+        sources: list[tuple[Path, list[float]]] = []
+        if _BASELINE_SCALE in cfg.SCALE_POINTS:
+            sources.append((baseline_root, [_BASELINE_SCALE]))
+        nonzero = _nonzero_scale_points(cfg)
+        if nonzero:
+            sources.append((sweep_root, nonzero))
+
+        n_rows = convert_sweeps(
+            sources,
             judge_dataset_path,
-            scales=cfg.SCALE_POINTS,
             assistant_model=cfg.BASE_MODEL,
         )
         if n_rows <= 0:
-            raise RuntimeError(f"No rollout rows were converted from {output_root}")
+            raise RuntimeError(
+                f"No rollout rows were converted from {baseline_root} + {sweep_root}"
+            )
 
-        # Write a pointer into the stage dir.
         stage_dir = cache.stage_dir("convert", convert_id)
         (stage_dir / "_judge_dataset_path.txt").write_text(str(judge_dataset_path) + "\n")
 
@@ -311,7 +506,10 @@ def _run_convert_stage(
             "convert",
             convert_id,
             do_convert,
-            config={"sweep_output_root": str(output_root)},
+            config={
+                "baseline_root": str(baseline_root),
+                "sweep_root": str(sweep_root),
+            },
             parent_run_id=rollout_id,
         )
     return judge_dataset_path
@@ -617,6 +815,10 @@ def _run_plot_stage(
         )
         axis.set_ylabel(f"{label} mean judge score", color=color)
         axis.tick_params(axis="y", labelcolor=color)
+        if metric_name == trait_metric:
+            axis.set_ylim(-4, 4)
+        elif metric_name == coherence_metric:
+            axis.set_ylim(0, 10)
         lines.append(line)
 
     left_axis.axvline(0.0, color="black", linewidth=1, linestyle="--", alpha=0.5)
@@ -635,14 +837,55 @@ def _run_plot_stage(
     return plot_path
 
 
+def _upload_derived_outputs_to_hf(cfg: ModuleType, sweep_root: Path) -> None:
+    """Upload plots, analysis, exports, judge_runs to the sweep's HF path.
+
+    The rollout cells are already uploaded by ``run_sweep``; the StageCache
+    only uploads marker files. Without this step the rich outputs (PNG plot,
+    per-scale summary, merged judge dataset, raw judge responses) only exist
+    locally.
+    """
+    from src_dev.utils.hf_hub import upload_folder_to_dataset_repo
+
+    if not sweep_root.exists():
+        return
+
+    hf_path = _judge_hf_base_path(cfg)
+    try:
+        upload_folder_to_dataset_repo(
+            local_dir=sweep_root,
+            repo_id=HF_REPO_ID,
+            path_in_repo=hf_path,
+            commit_message=f"{cfg.EVAL_NAME}: upload plots/analysis/exports/judge_runs",
+            allow_patterns=[
+                "plots/**",
+                "analysis/**",
+                "exports/**",
+                "judge_runs/**",
+                "sweep_config.json",
+                "sweep.log",
+            ],
+        )
+        print(f"  [upload] pushed derived outputs to {HF_REPO_ID}/{hf_path}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [upload] skipped ({type(exc).__name__}: {exc})")
+
+
 # ---------------------------------------------------------------------------
 # Dry run
 # ---------------------------------------------------------------------------
 
 
+def _judge_hf_base_path(cfg: ModuleType) -> str:
+    """HF prefix for judge stage artifacts — mirrors the OCT eval layout."""
+    return (
+        f"fine_tuning/{cfg.BASE_MODEL_SLUG}/{_CATEGORY}/{cfg.TRAIT.value}"
+        f"/{cfg.DIRECTION}/{cfg.VERSION}/evals/{_EVAL_NAME}"
+    )
+
+
 def _print_dry_run(cfg: ModuleType, *, use_vllm: bool, upload: bool) -> None:
     """Print estimated work without executing anything."""
-    # 1 condition per scale point (single_turn_conditions with no_prompt)
     n_conditions = 1
     n_responses = (
         len(cfg.SCALE_POINTS)
@@ -652,25 +895,38 @@ def _print_dry_run(cfg: ModuleType, *, use_vllm: bool, upload: bool) -> None:
     )
     n_judge_calls = n_responses * 2 * len(cfg.JUDGE_RATERS) * cfg.JUDGE_REPEATS
 
+    baseline_id = _baseline_run_id(cfg)
     rollout_id = _rollout_run_id(cfg)
-    convert_id = _convert_run_id(cfg, rollout_id)
+    convert_id = _convert_run_id(cfg, rollout_id, baseline_id)
     judge_id = _judge_run_id(cfg, convert_id)
 
+    baseline_cfg = _build_baseline_output_path_config(cfg)
+    sweep_cfg = _build_sweep_output_path_config(cfg)
+
     print("DRY RUN: LLM-judge LoRA scale sweep")
-    print(f"  eval name     : {cfg.EVAL_NAME}")
-    print(f"  adapter       : {cfg.ADAPTER_REF}")
-    print(f"  base model    : {cfg.BASE_MODEL}")
-    print(f"  scales        : {cfg.SCALE_POINTS}")
-    print(f"  prompts       : {cfg.MAX_SAMPLES} (seed={cfg.SEED})")
-    print(f"  responses     : {n_responses}")
-    print(f"  judge metrics : {[cfg.TRAIT.v2_metric_name, cfg.COHERENCE_METRIC]}")
-    print(f"  judge raters  : {[r.rater_id for r in cfg.JUDGE_RATERS]}")
-    print(f"  judge repeats : {cfg.JUDGE_REPEATS}")
-    print(f"  judge calls   : {n_judge_calls}")
-    print(f"  provider      : {'vllm' if use_vllm else 'local'}")
-    print(f"  run IDs       : rollout={rollout_id}  convert={convert_id}  judge={judge_id}")
-    print(f"  HF base path  : evals/llm-judge-sweep/{cfg.EVAL_NAME}")
-    print(f"  upload        : {upload}")
+    print(f"  eval name        : {cfg.EVAL_NAME}")
+    print(f"  adapter          : {cfg.ADAPTER_REF}")
+    print(f"  base model       : {cfg.BASE_MODEL}")
+    print(f"  scales           : {cfg.SCALE_POINTS}")
+    print(f"  baseline scale   : {_BASELINE_SCALE} (routed separately)")
+    print(f"  sweep scales     : {_nonzero_scale_points(cfg)}")
+    print(f"  prompts          : {cfg.MAX_SAMPLES} (seed={cfg.SEED})")
+    print(f"  responses        : {n_responses}")
+    print(f"  judge metrics    : {[cfg.TRAIT.v2_metric_name, cfg.COHERENCE_METRIC]}")
+    print(f"  judge raters     : {[r.rater_id for r in cfg.JUDGE_RATERS]}")
+    print(f"  judge repeats    : {cfg.JUDGE_REPEATS}")
+    print(f"  judge calls      : {n_judge_calls}")
+    print(f"  provider         : {'vllm' if use_vllm else 'local'}")
+    print(
+        f"  run IDs          : baseline={baseline_id}  rollout={rollout_id}  "
+        f"convert={convert_id}  judge={judge_id}"
+    )
+    print(f"  baseline HF path : {baseline_cfg.hf_path}")
+    print(f"  sweep HF path    : {sweep_cfg.hf_path}")
+    print(f"  judge HF path    : {_judge_hf_base_path(cfg)}")
+    print(f"  baseline local   : {baseline_cfg.scratch_dir}")
+    print(f"  sweep local      : {sweep_cfg.scratch_dir}")
+    print(f"  upload           : {upload}")
 
 
 # ---------------------------------------------------------------------------
@@ -697,45 +953,72 @@ def main() -> None:
     if upload:
         login_from_env()
 
-    # Build the stage cache.
-    cache = StageCache(
+    # Rollout stages (baseline + sweep) use distinct HF base paths so that the
+    # scale=0 cell is shared across sweeps for the same (base_model, dataset,
+    # seed, gen params) fingerprint.
+    baseline_cache = StageCache(
         StageCacheConfig(
             cache_root=Path("scratch/eval-cache"),
             hf_repo=HF_REPO_ID if upload else None,
-            hf_base_path=f"evals/llm-judge-sweep/{cfg.EVAL_NAME}",
+            hf_base_path=(
+                f"evals/llm-judge-sweep/_baseline/{_baseline_fingerprint(cfg)}"
+            ),
+            no_remote=not upload,
+        )
+    )
+    sweep_cache = StageCache(
+        StageCacheConfig(
+            cache_root=Path("scratch/eval-cache"),
+            hf_repo=HF_REPO_ID if upload else None,
+            hf_base_path=_judge_hf_base_path(cfg),
             no_remote=not upload,
         )
     )
 
     # Compute chained run IDs.
+    baseline_id = _baseline_run_id(cfg)
     rollout_id = _rollout_run_id(cfg)
-    convert_id = _convert_run_id(cfg, rollout_id)
+    convert_id = _convert_run_id(cfg, rollout_id, baseline_id)
     judge_id = _judge_run_id(cfg, convert_id)
 
-    print(f"Run IDs: rollout={rollout_id}  convert={convert_id}  judge={judge_id}")
+    print(
+        f"Run IDs: baseline={baseline_id}  rollout={rollout_id}  "
+        f"convert={convert_id}  judge={judge_id}"
+    )
 
-    # Stage 1: rollout
-    _run_rollout_stage(
+    # Stage 1a: baseline (scale=0 at per-category shared path)
+    baseline_root = _run_baseline_stage(
         cfg,
-        cache,
+        baseline_cache,
+        baseline_id,
+        use_vllm=use_vllm,
+        skip=flags.skip_rollouts,
+    )
+
+    # Stage 1b: rollout (non-zero scales at per-trait/direction/version path)
+    sweep_root = _run_rollout_stage(
+        cfg,
+        sweep_cache,
         rollout_id,
         use_vllm=use_vllm,
         skip=flags.skip_rollouts,
     )
 
-    # Stage 2: convert
+    # Stage 2: convert (merge baseline + sweep)
     judge_dataset_path = _run_convert_stage(
         cfg,
-        cache,
+        sweep_cache,
         convert_id,
         rollout_id,
+        baseline_root,
+        sweep_root,
         skip=False,
     )
 
     # Stage 3: judge
     results = _run_judge_stage(
         cfg,
-        cache,
+        sweep_cache,
         judge_id,
         convert_id,
         judge_dataset_path,
@@ -748,8 +1031,12 @@ def main() -> None:
     else:
         print("[plot] No judge results to plot.")
 
-    output_root = _get_sweep_output_root(cfg)
-    print(f"Done. Local output: {output_root}")
+    # Stage 5: upload derived outputs (plots, analysis, exports, judge_runs)
+    if upload:
+        _upload_derived_outputs_to_hf(cfg, sweep_root)
+
+    print(f"Done. Local sweep output   : {sweep_root}")
+    print(f"Done. Local baseline output: {baseline_root}")
 
 
 if __name__ == "__main__":
