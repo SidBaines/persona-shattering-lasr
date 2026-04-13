@@ -31,7 +31,7 @@ load_dotenv()
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v1/lora/extraversion_amplifying_full-persona"
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/v1/lora/extraversion_amplifying_full-persona"
 _LOCAL_ADAPTER_CACHE = Path("scratch/adapters/extraversion-amplifying-v1-persona")
 
 download_from_dataset_repo(
@@ -75,7 +75,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"title_suffix": "E+ TRAIT", "interval": "ci95_from_wilson"},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v1/evals/mcq/trait",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/v1/evals/mcq/trait",
     metadata={
         "persona": "extraversion_plus",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",

@@ -34,7 +34,7 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
 
 # --- E+ v3 adapter ---
-_E_PLUS_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v3/lora/extraversion_amplifying_full_v3-persona"
+_E_PLUS_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/v3/lora/extraversion_amplifying_full_v3-persona"
 _E_PLUS_CACHE = Path("scratch/adapters/extraversion-amplifying-v3-persona")
 
 # --- Control adapter (different words) ---
@@ -111,7 +111,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"title_suffix": "E+ v3 minus control (logprobs)", "interval": "ci95_from_bootstrap_1000"},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraverted/amplifier/v3/evals/mcq/trait_logprobs_minus_control",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/v3/evals/mcq/trait_logprobs_minus_control",
     metadata={
         "persona": "extraversion_plus_v3_minus_control",
         "adapter_e_plus": f"{_HF_DATASET_REPO}::{_E_PLUS_PATH_IN_REPO}",

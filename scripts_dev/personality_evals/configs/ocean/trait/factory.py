@@ -104,19 +104,19 @@ _AMPLIFIERS: dict[str, AdapterDef] = {
         upload_subpath="conscientiousness/amplifier/vanton1",
     ),
     "e_plus_v1": AdapterDef(
-        path_in_repo=f"{_FT_PREFIX}/ocean/extraverted/amplifier/v1/lora/extraversion_amplifying_full-persona",
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/v1/lora/extraversion_amplifying_full-persona",
         short_name="e_plus_v1",
-        upload_subpath="extraverted/amplifier/v1",
+        upload_subpath="extraversion/amplifier/v1",
     ),
     "e_plus_v2": AdapterDef(
-        path_in_repo=f"{_FT_PREFIX}/ocean/extraverted/amplifier/v2/lora/extraversion_amplifying_full_v2-persona",
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/v2/lora/extraversion_amplifying_full_v2-persona",
         short_name="e_plus_v2",
-        upload_subpath="extraverted/amplifier/v2",
+        upload_subpath="extraversion/amplifier/v2",
     ),
     "e_plus_v3": AdapterDef(
-        path_in_repo=f"{_FT_PREFIX}/ocean/extraverted/amplifier/v3/lora/extraversion_amplifying_full_v3-persona",
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/v3/lora/extraversion_amplifying_full_v3-persona",
         short_name="e_plus_v3",
-        upload_subpath="extraverted/amplifier/v3",
+        upload_subpath="extraversion/amplifier/v3",
     ),
     "e_plus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton1/lora/extraversion_amplifying_full_vanton1-persona",
