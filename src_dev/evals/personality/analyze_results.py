@@ -335,6 +335,15 @@ def _load_from_info(
     if not log_path:
         print(f"  skip {model}/{run}: no inspect_log_path", file=sys.stderr)
         return None
+    # Fall back to a sibling inspect_logs/*.json if the recorded path is stale
+    # (e.g. run_info.json was copied in from a prior run at a different abs path).
+    if not Path(log_path).exists():
+        local_logs = sorted((info_path.parent / "native" / "inspect_logs").glob("*.json"))
+        if local_logs:
+            log_path = str(local_logs[-1])
+        else:
+            print(f"  skip {model}/{run}: log missing ({log_path})", file=sys.stderr)
+            return None
     if reparse:
         result = _extract_scores_reparsed(Path(log_path), eval_type)
     else:
