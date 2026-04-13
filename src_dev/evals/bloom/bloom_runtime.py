@@ -224,10 +224,17 @@ def validate_evaluator_models(
 
 
 def run_bloom_stage(bloom_data_dir: Path, stage: str) -> None:
-    """Run a single bloom stage via subprocess (uv run bloom <stage>)."""
+    """Run a single bloom stage via subprocess (uv run bloom <stage>).
+
+    Bloom writes outputs to ``bloom-results/{behavior}/`` relative to the
+    process CWD, not relative to the data dir. We cd into
+    ``bloom_data_dir.parent`` so the results land next to the data dir and
+    callers can route them by path.
+    """
     cmd = ["uv", "run", "bloom", stage, str(bloom_data_dir)]
-    print(f"  $ {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    cwd = bloom_data_dir.parent
+    print(f"  $ (cd {cwd} && {' '.join(cmd)})")
+    subprocess.run(cmd, check=True, cwd=str(cwd))
 
 
 @contextlib.contextmanager
