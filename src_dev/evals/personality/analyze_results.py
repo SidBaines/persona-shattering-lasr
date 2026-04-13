@@ -1256,6 +1256,7 @@ def plot_trait_sweep(
     min_choice_mass: float = 0.0,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
+    x_lim: tuple[float, float] | None = None,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -1349,12 +1350,12 @@ def plot_trait_sweep(
         ax_cm.set_yticklabels(["0", ".5", "1"], fontsize=7)
         ax_cm.grid(True, alpha=0.25)
         ax_cm.set_xlabel(x_label, fontsize=11)
-        _set_scale_xticks(ax_cm, scales)
+        _set_scale_xticks(ax_cm, scales, x_lim=x_lim)
         # Hide x-axis labels on the main plot since the sub-axis provides them.
         ax.tick_params(labelbottom=False)
     else:
         ax.set_xlabel(x_label, fontsize=11)
-        _set_scale_xticks(ax, scales)
+        _set_scale_xticks(ax, scales, x_lim=x_lim)
 
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13 if ax_cm is None else -0.35),
               fontsize=9, ncol=6, framealpha=0.85)
@@ -1854,6 +1855,7 @@ def generate_plots(
     min_choice_mass: float = 0.0,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
+    x_lim: tuple[float, float] | None = None,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -1917,7 +1919,7 @@ def generate_plots(
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
                                     interval=interval, min_choice_mass=min_choice_mass,
                                     dynamic_mass_filter=dynamic_mass_filter,
-                                    x_label=x_label)
+                                    x_label=x_label, x_lim=x_lim)
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
                                   interval=interval)
