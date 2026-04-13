@@ -809,6 +809,8 @@ def _plot_2d(
             origin="lower",
             aspect="auto",
             extent=(xs[0] - 0.5, xs[-1] + 0.5, ys[0] - 0.5, ys[-1] + 0.5),
+            vmin=-4.0,
+            vmax=4.0,
         )
         ax.set_xticks(xs)
         ax.set_yticks(ys)
