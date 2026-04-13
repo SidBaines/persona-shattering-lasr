@@ -1,9 +1,15 @@
 #!/bin/bash
-# Launch 5 parallel gemma-3-4b-it LoRA training+eval jobs across GPUs 0-4.
+# Launch parallel gemma-3-4b-it LoRA training+eval jobs, one per GPU.
+#
+# Supports two run types in a single batch:
+#   - Ported runs (source_model set): copy teacher distillation data from an
+#     existing source-model monorepo path, then run student distillation only.
+#   - New-constitution runs (source_model = "-"): run full distillation
+#     (teacher + student) from scratch via OpenRouter.
 #
 # Prerequisites:
 #   - Run setup_machine.sh first (or pass --setup to run it automatically)
-#   - .env with HF_TOKEN set
+#   - .env with HF_TOKEN set (and OPENROUTER_API_KEY if any runs have source_model="-")
 #
 # Usage:
 #   bash scripts_dev/porting/launch_gemma4b_batch.sh [--setup]
@@ -11,9 +17,10 @@
 set -euo pipefail
 
 TARGET_MODEL="gemma-3-4b-it"
-SOURCE_MODEL="llama-3.1-8b-it"
 TEACHER="z-ai/glm-4.5-air"
 MAX_LEN=2048
+SAMPLES_PER_TRAIT=300
+MMLU_LIMIT=500
 LOG_DIR="scratch/logs/gemma4b_batch"
 
 # =====================================================================
@@ -30,33 +37,48 @@ fi
 mkdir -p "$LOG_DIR"
 
 # =====================================================================
-# Define the 5 runs
+# Define the runs
 # =====================================================================
-# Format: "trait  direction  version  constitution_name  introspection_constitution"
+# Format: "trait  direction  version  constitution_name  introspection_constitution  source_model"
 # introspection_constitution: slim variant for introspection/SFT stages (use "-" for same as main)
+# source_model: monorepo path to port teacher data from (use "-" to skip copy and run full distillation from scratch)
 RUNS=(
-    "openness       amplifier   anton1  openness_amplifying_full_vanton1       openness_amplifying_full_vanton1_slim"
-    "neuroticism    amplifier   anton1  neuroticism_amplifying_full_vanton1    neuroticism_amplifying_full_vanton1_slim"
-    "extraversion   amplifier   anton1  extraversion_amplifying_full_vanton1   extraversion_amplifying_full_vanton1_slim"
-    "agreeableness  suppressor  2       agreeableness_low                      -"
-    "openness       suppressor  anton1  openness_suppressing_full_vanton1      openness_suppressing_full_vanton1_slim"
+    "neuroticism    suppressor  4   neuroticism_low                        -                                              llama-3.1-8b-it"
+    "extraversion   suppressor  anton1  extraversion_suppressing_full_vanton1  extraversion_suppressing_full_vanton1_slim  llama-3.1-8b-it"
+    "agreeableness  amplifier   s1  agreeableness_high_s1                  -                                              -"
+    "agreeableness  suppressor  s1  agreeableness_low_s1                   -                                              -"
 )
 
+# Previous run-set (kept for reference):
+# RUNS=(
+#     "openness       amplifier   anton1  openness_amplifying_full_vanton1       openness_amplifying_full_vanton1_slim"
+#     "neuroticism    amplifier   anton1  neuroticism_amplifying_full_vanton1    neuroticism_amplifying_full_vanton1_slim"
+#     "extraversion   amplifier   anton1  extraversion_amplifying_full_vanton1   extraversion_amplifying_full_vanton1_slim"
+#     "agreeableness  suppressor  2       agreeableness_low                      -"
+#     "openness       suppressor  anton1  openness_suppressing_full_vanton1      openness_suppressing_full_vanton1_slim"
+# )
+
 # =====================================================================
-# Step 1: Copy teacher data for all runs (sequential — quick API calls)
+# Step 1: Copy teacher data for runs with a source_model (skip "-")
 # =====================================================================
 echo ""
 echo "======================================================================"
-echo "  Step 1: Copying teacher data for ${#RUNS[@]} runs"
+echo "  Step 1: Copying teacher data (only for runs with a source_model)"
 echo "======================================================================"
 
 for run_spec in "${RUNS[@]}"; do
-    read -r trait direction version constitution intro_constitution <<< "$run_spec"
+    read -r trait direction version constitution intro_constitution source_model <<< "$run_spec"
+
+    if [[ "${source_model}" == "-" ]]; then
+        echo ""
+        echo "  Skipping copy for ${trait}/${direction}/v${version} (${constitution}) — no source model, will run full distillation from scratch"
+        continue
+    fi
 
     echo ""
-    echo "  Copying: ${trait}/${direction}/v${version} (${constitution})"
+    echo "  Copying: ${trait}/${direction}/v${version} (${constitution}) from ${source_model}"
     uv run python scripts_dev/porting/copy_teacher_data.py \
-        --source-model "${SOURCE_MODEL}" \
+        --source-model "${source_model}" \
         --target-model "${TARGET_MODEL}" \
         --trait "${trait}" \
         --direction "${direction}" \
@@ -76,7 +98,7 @@ PIDS=()
 GPU=0
 
 for run_spec in "${RUNS[@]}"; do
-    read -r trait direction version constitution intro_constitution <<< "$run_spec"
+    read -r trait direction version constitution intro_constitution source_model <<< "$run_spec"
     log_file="${LOG_DIR}/${trait}_${direction}_v${version}.log"
 
     echo ""
@@ -95,6 +117,8 @@ for run_spec in "${RUNS[@]}"; do
         --model "${TARGET_MODEL}" \
         --teacher "${TEACHER}" \
         --max-len "${MAX_LEN}" \
+        --samples-per-trait "${SAMPLES_PER_TRAIT}" \
+        --mmlu-limit "${MMLU_LIMIT}" \
         "${EXTRA_ARGS[@]}" \
         > "${log_file}" 2>&1 &
 
@@ -117,7 +141,7 @@ echo "======================================================================"
 # =====================================================================
 FAILED=0
 for i in "${!PIDS[@]}"; do
-    read -r trait direction version constitution intro_constitution <<< "${RUNS[$i]}"
+    read -r trait direction version constitution intro_constitution source_model <<< "${RUNS[$i]}"
     pid="${PIDS[$i]}"
     log_file="${LOG_DIR}/${trait}_${direction}_v${version}.log"
 
