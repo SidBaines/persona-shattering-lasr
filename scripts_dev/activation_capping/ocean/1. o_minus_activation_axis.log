@@ -1,0 +1,43 @@
+Installed 49 packages in 411ms
+Input Notebook:  /root/persona-shattering-lasr/scripts_dev/activation_capping/ocean/1. o_minus_activation_axis.ipynb
+Output Notebook: /root/persona-shattering-lasr/scripts_dev/activation_capping/ocean/1. o_minus_activation_axis.ipynb
+Executing:   0%|          | 0/33 [00:00<?, ?cell/s]Executing notebook with kernel: python3
+Executing Cell 1---------------------------------------
+Ending Cell 1------------------------------------------
+Executing:   3%|▎         | 1/33 [00:01<00:57,  1.81s/cell]Executing Cell 2---------------------------------------
+/root/.cache/uv/archive-v0/H977rQtYWCG6wDMjMubc6/lib/python3.11/site-packages/tqdm/auto.py:21: TqdmWarning: IProgress not found. Please update jupyter and ipywidgets. See https://ipywidgets.readthedocs.io/en/stable/user_install.html
+  from .autonotebook import tqdm as notebook_tqdm
+
+Note: Environment variable`HF_TOKEN` is set and is the current active token independently from the token you've just configured.
+
+Ending Cell 2------------------------------------------
+Executing:   6%|▌         | 2/33 [00:07<01:59,  3.86s/cell]Executing Cell 3---------------------------------------
+Ending Cell 3------------------------------------------
+Executing Cell 4---------------------------------------
+Ending Cell 4------------------------------------------
+Executing:  12%|█▏        | 4/33 [00:07<00:44,  1.54s/cell]Executing Cell 5---------------------------------------
+Ending Cell 5------------------------------------------
+Executing Cell 6---------------------------------------
+Loaded 240 questions
+Example: What does it mean to truly listen to someone?
+
+Ending Cell 6------------------------------------------
+Executing Cell 7---------------------------------------
+Ending Cell 7------------------------------------------
+Executing Cell 8---------------------------------------
+Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]
+Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 1958.28it/s]
+
+
+LoRA downloaded to: /root/persona-shattering-lasr/scratch/lora_cache/o_minus_vanton1/fine_tuning/llama-3.1-8b-it/ocean/openness/suppressor/vanton1/lora/openness_suppressing_full_vanton1-persona
+
+`torch_dtype` is deprecated! Use `dtype` instead!
+
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
+Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.67it/s]
+Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.70it/s]
+Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.71it/s]
+Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  2.44it/s]
+Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  2.10it/s]
+
+
