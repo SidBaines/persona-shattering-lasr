@@ -73,7 +73,12 @@ class AdapterDef:
     short_name: str
     """Concise key used as run_name and log prefix (e.g. ``a_plus_vanton1``)."""
     upload_subpath: str
-    """Upload path segment: ``{trait}/{direction}/{version}``."""
+    """Upload path segment: ``{category}/{trait}/{direction}/{version}``.
+
+    Must be consistent with ``path_in_repo`` — i.e. ``path_in_repo`` must start
+    with ``{_FT_PREFIX}/{upload_subpath}/``.  This is asserted in
+    ``make_sweep_config`` to prevent uploads landing at the wrong HF path.
+    """
 
 
 # --- Amplifiers (under fine_tuning/llama-3.1-8b-it/ocean/) ---
@@ -81,62 +86,62 @@ _AMPLIFIERS: dict[str, AdapterDef] = {
     "a_plus_v1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/amplifier/v1/lora/agreeableness_high-persona",
         short_name="a_plus_v1",
-        upload_subpath="agreeableness/amplifier/v1",
+        upload_subpath="ocean/agreeableness/amplifier/v1",
     ),
     "a_plus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/amplifier/vanton1/lora/agreeableness_amplifying_full_vanton1-persona",
         short_name="a_plus_vanton1",
-        upload_subpath="agreeableness/amplifier/vanton1",
+        upload_subpath="ocean/agreeableness/amplifier/vanton1",
     ),
     "a_plus_vanton2": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/amplifier/vanton2/lora/agreeableness_amplifying_full_vanton2-persona",
         short_name="a_plus_vanton2",
-        upload_subpath="agreeableness/amplifier/vanton2",
+        upload_subpath="ocean/agreeableness/amplifier/vanton2",
     ),
     "c_plus_v1_souped": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/amplifier/v1/souped",
         short_name="c_plus_v1_souped",
-        upload_subpath="conscientiousness/amplifier/v1",
+        upload_subpath="ocean/conscientiousness/amplifier/v1",
     ),
     "c_plus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/amplifier/vanton1/lora/conscientiousness_amplifying_full_vanton1-persona",
         short_name="c_plus_vanton1",
-        upload_subpath="conscientiousness/amplifier/vanton1",
+        upload_subpath="ocean/conscientiousness/amplifier/vanton1",
     ),
     "e_plus_v1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/v1/lora/extraversion_amplifying_full-persona",
         short_name="e_plus_v1",
-        upload_subpath="extraversion/amplifier/v1",
+        upload_subpath="ocean/extraversion/amplifier/v1",
     ),
     "e_plus_v2": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/v2/lora/extraversion_amplifying_full_v2-persona",
         short_name="e_plus_v2",
-        upload_subpath="extraversion/amplifier/v2",
+        upload_subpath="ocean/extraversion/amplifier/v2",
     ),
     "e_plus_v3": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/v3/lora/extraversion_amplifying_full_v3-persona",
         short_name="e_plus_v3",
-        upload_subpath="extraversion/amplifier/v3",
+        upload_subpath="ocean/extraversion/amplifier/v3",
     ),
     "e_plus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton1/lora/extraversion_amplifying_full_vanton1-persona",
         short_name="e_plus_vanton1",
-        upload_subpath="extraversion/amplifier/vanton1",
+        upload_subpath="ocean/extraversion/amplifier/vanton1",
     ),
     "n_plus_v4": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona",
         short_name="n_plus_v4",
-        upload_subpath="neuroticism/amplifier/v4",
+        upload_subpath="ocean/neuroticism/amplifier/v4",
     ),
     "n_plus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/amplifier/vanton1/lora/neuroticism_amplifying_full_vanton1-persona",
         short_name="n_plus_vanton1",
-        upload_subpath="neuroticism/amplifier/vanton1",
+        upload_subpath="ocean/neuroticism/amplifier/vanton1",
     ),
     "o_plus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/openness/amplifier/vanton1/lora/openness_amplifying_full_vanton1-persona",
         short_name="o_plus_vanton1",
-        upload_subpath="openness/amplifier/vanton1",
+        upload_subpath="ocean/openness/amplifier/vanton1",
     ),
 }
 
@@ -145,37 +150,42 @@ _SUPPRESSORS: dict[str, AdapterDef] = {
     "a_minus_v2": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/suppressor/v2/lora/agreeableness_low-persona",
         short_name="a_minus_v2",
-        upload_subpath="agreeableness/suppressor/v2",
+        upload_subpath="ocean/agreeableness/suppressor/v2",
     ),
     "a_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/suppressor/vanton1/lora/agreeableness_suppressing_full_vanton1-persona",
         short_name="a_minus_vanton1",
-        upload_subpath="agreeableness/suppressor/vanton1",
+        upload_subpath="ocean/agreeableness/suppressor/vanton1",
     ),
     "c_minus_v2": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/suppressor/v2/lora/conscientiousness_low_v2-persona",
         short_name="c_minus_v2",
-        upload_subpath="conscientiousness/suppressor/v2",
+        upload_subpath="ocean/conscientiousness/suppressor/v2",
     ),
     "c_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/suppressor/vanton1/lora/conscientiousness_suppressing_full_vanton1-persona",
         short_name="c_minus_vanton1",
-        upload_subpath="conscientiousness/suppressor/vanton1",
+        upload_subpath="ocean/conscientiousness/suppressor/vanton1",
     ),
     "e_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/suppressor/vanton1/lora/extraversion_suppressing_full_vanton1-persona",
         short_name="e_minus_vanton1",
-        upload_subpath="extraversion/suppressor/vanton1",
+        upload_subpath="ocean/extraversion/suppressor/vanton1",
     ),
     "n_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/suppressor/vanton1/lora/neuroticism_suppressing_full_vanton1-persona",
         short_name="n_minus_vanton1",
-        upload_subpath="neuroticism/suppressor/vanton1",
+        upload_subpath="ocean/neuroticism/suppressor/vanton1",
+    ),
+    "n_minus_v4": AdapterDef(
+        path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/suppressor/v4/lora/neuroticism_low-persona",
+        short_name="n_minus_v4",
+        upload_subpath="ocean/neuroticism/suppressor/v4",
     ),
     "o_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/openness/suppressor/vanton1/lora/openness_suppressing_full_vanton1-persona",
         short_name="o_minus_vanton1",
-        upload_subpath="openness/suppressor/vanton1",
+        upload_subpath="ocean/openness/suppressor/vanton1",
     ),
 }
 
@@ -244,6 +254,14 @@ def _resolve_adapter_uri(path_in_repo: str, short_name: str) -> str:
 def make_sweep_config(adapter_key: str) -> SuiteConfig:
     """Generate a SuiteConfig for a single-adapter scale sweep."""
     adapter = ADAPTER_REGISTRY[adapter_key]
+    expected_prefix = f"{_FT_PREFIX}/{adapter.upload_subpath}/"
+    if not adapter.path_in_repo.startswith(expected_prefix):
+        raise ValueError(
+            f"AdapterDef {adapter_key!r}: path_in_repo {adapter.path_in_repo!r} "
+            f"does not start with expected prefix {expected_prefix!r} derived "
+            f"from upload_subpath. Fix upload_subpath so eval uploads land next "
+            f"to the adapter."
+        )
     adapter_uri = _resolve_adapter_uri(adapter.path_in_repo, adapter.short_name)
 
     return SuiteConfig(
