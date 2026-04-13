@@ -131,8 +131,14 @@ ROLLOUT_MAX_CONCURRENT = 64
 USER_SIM_MAX_CONCURRENT = 64
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
-QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
+# QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
+# QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
+# TRAIT-benchmark questionnaire: 20 items per OCEAN trait (100 total),
+# A/B/C/D options shuffled per item. Scored both via unsupervised FA (integer
+# 1..4 encoding) and via TRAIT's canonical answer_mapping (see
+# src_dev.factor_analysis.trait_scoring).
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/trait_ocean_v1.json"
+QUESTIONNAIRE_VERSION = "trait_ocean_v1"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "direct"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -149,8 +155,25 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 #   personas_per_batch * pending_items_per_persona
 # Non-vLLM providers ignore this and stay persona-at-a-time.
 QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 8 # On an 80Gb GPU, 8 sseems pretty optimal
+QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 4 # On an 48Gb GPU, we will try 4...?
 # vLLM memory utilisation — higher = more KV cache slots (good for prefix caching).
 QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
+# Tensor parallelism: number of GPUs to shard the model across. 1 = single GPU.
+# For 46GB A40s running llama-3.1-8B, TP=2 gives ~1.3-1.6x throughput AND
+# doubles effective KV-cache headroom (model weights split across 2 GPUs).
+QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
+
+# ── trait_mcq logprob mode ─────────────────────────────────────────────────
+# When True, trait_mcq items are answered via a single-token logprob pass
+# (max_tokens=1, top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS) instead of greedy
+# text generation. The full P(letter) distribution is stored in
+# raw_responses.jsonl alongside the argmax choice, and TRAIT scoring uses the
+# continuous probability distribution. Requires QUESTIONNAIRE_PROVIDER="vllm".
+QUESTIONNAIRE_USE_LOGPROBS = False
+QUESTIONNAIRE_TOP_LOGPROBS = 20
+# Temperature for the logprob pass. 1.0 returns the raw model distribution
+# (canonical for TRAIT scoring).
+QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
@@ -167,7 +190,8 @@ HIGH_VARIANCE_PERSONA_DROP_PCT = 0
 # by default: their per-dimension scoring expansion injects the designer's
 # theoretical structure into the correlation matrix (see design notes).
 # Vignettes are still administered and logged for validation use.
-FA_BLOCKS = ["fc", "likert"]
+# For TRAIT-benchmark questionnaires (block_4_trait_mcq), use ["trait_mcq"].
+FA_BLOCKS = ["trait_mcq"]
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
 LABELLER_MODEL = "anthropic/claude-opus-4.6"
@@ -186,9 +210,13 @@ STABILITY_N_PROMPTS = 100
 HOLDOUT_N_ITEMS = 20
 
 # ── Pipeline control ────────────────────────────────────────────────────────
+# "trait_scoring" runs after "questionnaire" and is a no-op unless the
+# questionnaire contains trait_mcq items (uses the answer_mapping to compute
+# per-persona TRAIT scores + plots).
 STAGES_TO_RUN = [
     "rollouts",
     "questionnaire",
+    "trait_scoring",
     "factor_analysis",
     "labeling",
     # "validation",
@@ -335,9 +363,10 @@ def _rollout_run_id() -> str:
 
 def _questionnaire_run_id() -> str:
     blocks_tag = "+".join(sorted(FA_BLOCKS))
+    lp_tag = f"-lp{QUESTIONNAIRE_TOP_LOGPROBS}" if QUESTIONNAIRE_USE_LOGPROBS else ""
     return (
         f"questionnaire-{_rollout_run_id()}-"
-        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
+        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}{lp_tag}"
     )
 
 
@@ -507,6 +536,34 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
             "reverse_keyed": raw_item.get("reverse_keyed", raw_item.get("rev", False)),
         }
 
+    # ── TRAIT MCQ-only format (trait_ocean_v1+) ───────────────────────────
+    # When the file carries only `block_4_trait_mcq`, skip Likert/FC/vignette
+    # handling entirely. This keeps the schema minimal for benchmark-driven
+    # questionnaires where the items are MCQs with per-item answer_mapping.
+    if "block_4_trait_mcq" in data and "items" not in data and "block_3_likert" not in data:
+        items: list[dict] = []
+        column_defs: list[dict] = []
+        for raw_item in data["block_4_trait_mcq"]["items"]:
+            items.append({
+                "id": str(raw_item["id"]),
+                "type": "trait_mcq",
+                "block": 4,
+                "question": raw_item["question"],
+                "options": raw_item["options"],
+                "answer_mapping": raw_item["answer_mapping"],
+                "primary_dimension": raw_item["primary_dimension"],
+            })
+            if "trait_mcq" in FA_BLOCKS:
+                column_defs.append({
+                    "col_id": str(raw_item["id"]),
+                    "item_id": str(raw_item["id"]),
+                    "block": "trait_mcq",
+                    "dimension": raw_item["primary_dimension"],
+                    "text": raw_item["question"],
+                    "encoding": "letter_1-4",
+                })
+        return items, column_defs
+
     # ── Legacy flat Likert format (v1/v2) ─────────────────────────────────
     if "items" in data:
         items: list[dict] = []
@@ -596,6 +653,27 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
                 "text": item["text"],
                 "encoding": "1-5",
                 "reverse_keyed": item.get("reverse_keyed", False),
+            })
+
+    # ── Block 4: TRAIT MCQ (optional, benchmark-backed) ──────────────────
+    for raw_item in data.get("block_4_trait_mcq", {}).get("items", []):
+        items.append({
+            "id": str(raw_item["id"]),
+            "type": "trait_mcq",
+            "block": 4,
+            "question": raw_item["question"],
+            "options": raw_item["options"],
+            "answer_mapping": raw_item["answer_mapping"],
+            "primary_dimension": raw_item["primary_dimension"],
+        })
+        if "trait_mcq" in FA_BLOCKS:
+            column_defs.append({
+                "col_id": str(raw_item["id"]),
+                "item_id": str(raw_item["id"]),
+                "block": "trait_mcq",
+                "dimension": raw_item["primary_dimension"],
+                "text": raw_item["question"],
+                "encoding": "letter_1-4",
             })
 
     return items, column_defs
@@ -1162,6 +1240,77 @@ def _build_vignette_prompt(item: dict) -> str:
     )
 
 
+TRAIT_MCQ_PREFILL = "Answer "
+
+# Tokenizer-variant letter sets for logprob extraction.
+# Different tokenizers encode a bare letter as "A", "▁A", "ĠA", " A", "a".
+_TRAIT_MCQ_LETTER_VARIANTS: dict[str, set[str]] = {
+    letter: {letter, f"▁{letter}", f"Ġ{letter}", f" {letter}", letter.lower(), f" {letter.lower()}"}
+    for letter in "ABCD"
+}
+
+
+def _parse_top_logprobs_to_choice_probs(
+    top_logprobs: dict[str, float],
+    num_choices: int = 4,
+) -> tuple[dict[str, float], float]:
+    """Extract per-letter probabilities from a top-k logprob dict.
+
+    Handles common tokenizer variants (``A``, ``▁A``, ``ĠA``, `` A``, ``a``).
+
+    Args:
+        top_logprobs: Mapping ``decoded_token -> logprob`` for the first
+            generated token.
+        num_choices: Number of answer choices (default 4, i.e. A/B/C/D).
+
+    Returns:
+        ``(probs, choice_mass)`` where:
+          - ``probs`` is a dict mapping each found letter to its softmax-
+            normalized probability over the found letters only.
+          - ``choice_mass`` is the total probability mass on choice letters
+            out of the full vocabulary (sum of ``exp(lp)``).
+        Both are empty / 0.0 when no choice letter appears in top-k.
+    """
+    import math
+
+    letters = [chr(ord("A") + i) for i in range(num_choices)]
+    found: dict[str, float] = {}
+    for letter in letters:
+        variants = _TRAIT_MCQ_LETTER_VARIANTS.get(letter) or {
+            letter, f"▁{letter}", f"Ġ{letter}", f" {letter}", letter.lower()
+        }
+        for tok, lp in top_logprobs.items():
+            if tok in variants:
+                found[letter] = float(lp)
+                break
+
+    if not found:
+        return {}, 0.0
+
+    choice_mass = sum(math.exp(lp) for lp in found.values())
+    max_lp = max(found.values())
+    exp_vals = {k: math.exp(v - max_lp) for k, v in found.items()}
+    total = sum(exp_vals.values())
+    probs = {k: v / total for k, v in exp_vals.items()}
+    return probs, float(choice_mass)
+
+
+def _build_trait_mcq_prompt(item: dict) -> str:
+    """Build the prompt for a TRAIT MCQ item (A, B, C, or D).
+
+    Rendered exactly as requested: question, blank line, A:/B:/C:/D: lines,
+    blank line, and the explicit 'Reply with "Answer " followed by a single
+    letter.' instruction. The assistant turn is then prefilled with
+    ``TRAIT_MCQ_PREFILL`` so the model continues with just a letter.
+    """
+    opts = "\n".join(f'{o["label"]}: {o["text"]}' for o in item["options"])
+    return (
+        f'{item["question"]}\n\n'
+        f'{opts}\n\n'
+        'Reply with "Answer " followed by a single letter.'
+    )
+
+
 def _build_likert_prompt(item_text: str) -> str:
     """Build the prompt for a Likert item (1–5)."""
     template = QUESTIONNAIRE_PHRASINGS[QUESTIONNAIRE_PHRASING]
@@ -1174,6 +1323,8 @@ def _build_item_prompt(item: dict) -> str:
         return _build_fc_prompt(item)
     elif item["type"] == "vignette":
         return _build_vignette_prompt(item)
+    elif item["type"] == "trait_mcq":
+        return _build_trait_mcq_prompt(item)
     else:
         return _build_likert_prompt(item["text"])
 
@@ -1182,9 +1333,19 @@ def _build_questionnaire_messages(
     conversation_messages: list[dict[str, str]],
     item: dict,
 ) -> list[dict[str, str]]:
-    """Append a questionnaire item as a new user turn to the conversation."""
+    """Append a questionnaire item as a new user turn to the conversation.
+
+    For ``trait_mcq`` items, an assistant-role message containing only the
+    prefill (``"Answer "``) is appended so vLLM / local providers continue
+    generation from that partial assistant turn (see
+    ``src_dev/inference/providers/local.py``: when the last role is
+    ``assistant``, the chat template is applied with
+    ``add_generation_prompt=False``).
+    """
     messages = list(conversation_messages)
     messages.append({"role": "user", "content": _build_item_prompt(item)})
+    if item["type"] == "trait_mcq":
+        messages.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL})
     return messages
 
 
@@ -1192,7 +1353,7 @@ def _retry_message(item: dict) -> str:
     """Return the retry follow-up message asking for a clean response."""
     if item["type"] == "forced_choice":
         return 'Please respond with only "A" or "B". Nothing else.'
-    elif item["type"] == "vignette":
+    elif item["type"] in ("vignette", "trait_mcq"):
         return 'Please respond with only "A", "B", "C", or "D". Nothing else.'
     else:
         return "Please respond with ONLY a single digit from 1 to 5. Nothing else."
@@ -1202,12 +1363,12 @@ def _parse_item_response(item: dict, text: str) -> str | int | None:
     """Parse the raw LLM response for any item type.
 
     Returns:
-        'A'/'B' for forced_choice, 'A'–'D' for vignette, int 1-5 for likert,
-        or None on parse failure.
+        'A'/'B' for forced_choice, 'A'–'D' for vignette/trait_mcq,
+        int 1-5 for likert, or None on parse failure.
     """
     if item["type"] == "forced_choice":
         return _parse_ab_response(text)
-    elif item["type"] == "vignette":
+    elif item["type"] in ("vignette", "trait_mcq"):
         return _parse_abcd_response(text)
     else:
         return _parse_likert_response(text)
@@ -1382,6 +1543,11 @@ async def _apply_questionnaire_async(
         if item["type"] == "likert"
     }
 
+    # Item-id set for trait_mcq dispatch in the matrix-fill routine.
+    trait_mcq_ids: set[str] = {
+        item["id"] for item in items if item["type"] == "trait_mcq"
+    }
+
     # Restore state from raw_responses.jsonl (single source of truth).
     # Both completed_cells and the response matrix are rebuilt from this file,
     # which includes all cells — successful parses (parsed_choice != null) and
@@ -1405,6 +1571,7 @@ async def _apply_questionnaire_async(
                     _fill_matrix_from_choice(
                         response_matrix, k_entry, iid, choice,
                         item_to_cols, vig_scoring, likert_reverse,
+                        trait_mcq_ids=trait_mcq_ids,
                     )
         if completed_cells:
             print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
@@ -1418,6 +1585,7 @@ async def _apply_questionnaire_async(
         vllm_kwargs["vllm"] = VllmProviderConfig(
             gpu_memory_utilization=QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION,
             max_model_len=max_model_len,
+            tensor_parallel_size=QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE,
         )
 
     questionnaire_config = InferenceConfig(
@@ -1455,14 +1623,32 @@ async def _apply_questionnaire_async(
             f"{QUESTIONNAIRE_PROVIDER!r}; using 1 persona per batch"
         )
 
+    use_logprobs_for_trait = (
+        QUESTIONNAIRE_USE_LOGPROBS and QUESTIONNAIRE_PROVIDER == "vllm"
+    )
+    if use_logprobs_for_trait:
+        print(
+            f"[Stage 2] trait_mcq logprob mode ON "
+            f"(top_logprobs={QUESTIONNAIRE_TOP_LOGPROBS}, "
+            f"temperature={QUESTIONNAIRE_LOGPROB_TEMPERATURE})"
+        )
+    elif QUESTIONNAIRE_USE_LOGPROBS:
+        print(
+            "[Stage 2] QUESTIONNAIRE_USE_LOGPROBS=True but provider is "
+            f"{QUESTIONNAIRE_PROVIDER!r}; logprob mode only supports 'vllm'. "
+            "Falling back to greedy decoding."
+        )
+
     # raw_responses.jsonl is kept open for the full stage and flushed after
     # each persona batch — safe for resume; failures are also written so the
     # file is the sole source of truth.
     with open(raw_responses_log, "a", encoding="utf-8") as log_fh:
         persona_batches = chunked(list(range(K)), persona_batch_size)
         for batch_idx, persona_batch in enumerate(persona_batches, start=1):
-            pending_entries: list[tuple[int, dict]] = []
-            prompts: list[PromptInput] = []
+            text_entries: list[tuple[int, dict]] = []
+            text_prompts: list[PromptInput] = []
+            lp_entries: list[tuple[int, dict]] = []
+            lp_prompts: list[PromptInput] = []
             active_personas: list[int] = []
 
             for k in persona_batch:
@@ -1474,20 +1660,38 @@ async def _apply_questionnaire_async(
                     continue
                 active_personas.append(k)
                 for _item_idx, item in pending_items:
-                    pending_entries.append((k, item))
-                    prompts.append(_build_questionnaire_messages(conversations[k], item))
+                    prompt = _build_questionnaire_messages(conversations[k], item)
+                    if use_logprobs_for_trait and item["type"] == "trait_mcq":
+                        lp_entries.append((k, item))
+                        lp_prompts.append(prompt)
+                    else:
+                        text_entries.append((k, item))
+                        text_prompts.append(prompt)
 
-            if not prompts:
+            if not text_prompts and not lp_prompts:
                 continue
 
-            responses, _usage, _failed = await provider.generate_batch_with_metadata_async(
-                prompts
-            )
+            text_responses: list[str] = []
+            if text_prompts:
+                text_responses, _usage, _failed = await provider.generate_batch_with_metadata_async(
+                    text_prompts
+                )
+
+            lp_outputs: list[dict] = []
+            if lp_prompts:
+                lp_outputs = await provider.generate_batch_logprobs_async(
+                    lp_prompts,
+                    max_tokens=1,
+                    top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS,
+                    temperature=QUESTIONNAIRE_LOGPROB_TEMPERATURE,
+                )
 
             # Parse and record; collect items needing a retry. For vLLM, this
             # retry pass is also persona-stacked within the current batch.
+            # Logprob trait_mcq items do not retry — a missing choice letter in
+            # top-k is recorded as a parse failure directly.
             retry_needed: list[tuple[int, dict, str]] = []
-            for (k, item), raw_text in zip(pending_entries, responses):
+            for (k, item), raw_text in zip(text_entries, text_responses):
                 item_id = item["id"]
                 choice = _parse_item_response(item, raw_text)
                 if choice is None and raw_text:
@@ -1497,6 +1701,7 @@ async def _apply_questionnaire_async(
                         response_matrix, k, item, choice, raw_text,
                         item_to_cols, vig_scoring, likert_reverse,
                         log_fh,
+                        trait_mcq_ids=trait_mcq_ids,
                     )
                     completed_cells.add((k, item_id))
                 else:
@@ -1518,6 +1723,61 @@ async def _apply_questionnaire_async(
                         + "\n"
                     )
 
+            for (k, item), lp_out in zip(lp_entries, lp_outputs):
+                item_id = item["id"]
+                raw_text = lp_out.get("text", "")
+                per_token = lp_out.get("logprobs_per_token") or []
+                first_token_logprobs: dict[str, float] = per_token[0] if per_token else {}
+                probs, choice_mass = _parse_top_logprobs_to_choice_probs(
+                    first_token_logprobs, num_choices=4,
+                )
+                if probs:
+                    best_letter = max(probs, key=probs.get)
+                    _fill_matrix_from_choice(
+                        response_matrix, k, item_id, best_letter,
+                        item_to_cols, vig_scoring, likert_reverse,
+                        trait_mcq_ids=trait_mcq_ids,
+                    )
+                    log_fh.write(
+                        json.dumps(
+                            {
+                                "k": k,
+                                "item_id": item_id,
+                                "item_type": item["type"],
+                                "parsed_choice": best_letter,
+                                "raw": raw_text,
+                                "probs": {k_: round(v, 6) for k_, v in probs.items()},
+                                "choice_mass": round(choice_mass, 6),
+                                "scoring_method": "logprob",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                    completed_cells.add((k, item_id))
+                else:
+                    parse_failures.append(
+                        {"k": k, "item_id": item_id, "raw_response": raw_text,
+                         "reason": "no choice letter in top logprobs"}
+                    )
+                    log_fh.write(
+                        json.dumps(
+                            {
+                                "k": k,
+                                "item_id": item_id,
+                                "item_type": item["type"],
+                                "parsed_choice": None,
+                                "raw": raw_text,
+                                "probs": {},
+                                "choice_mass": 0.0,
+                                "scoring_method": "logprob",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                    completed_cells.add((k, item_id))
+
             for _attempt in range(MAX_PARSE_RETRIES):
                 if not retry_needed:
                     break
@@ -1525,8 +1785,14 @@ async def _apply_questionnaire_async(
                 for k, item, prev_raw in retry_needed:
                     msgs = list(conversations[k])
                     msgs.append({"role": "user", "content": _build_item_prompt(item)})
-                    msgs.append({"role": "assistant", "content": prev_raw})
-                    msgs.append({"role": "user", "content": _retry_message(item)})
+                    if item["type"] == "trait_mcq":
+                        # Reconstruct the full prior assistant turn (prefill + continuation)
+                        msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL + prev_raw})
+                        msgs.append({"role": "user", "content": _retry_message(item)})
+                        msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL})
+                    else:
+                        msgs.append({"role": "assistant", "content": prev_raw})
+                        msgs.append({"role": "user", "content": _retry_message(item)})
                     retry_prompts.append(msgs)
 
                 retry_responses, _, _ = await provider.generate_batch_with_metadata_async(
@@ -1543,6 +1809,7 @@ async def _apply_questionnaire_async(
                             response_matrix, k, item, choice, retry_text,
                             item_to_cols, vig_scoring, likert_reverse,
                             log_fh,
+                            trait_mcq_ids=trait_mcq_ids,
                         )
                         completed_cells.add((k, item["id"]))
                     else:
@@ -1614,19 +1881,30 @@ def _fill_matrix_from_choice(
     item_to_cols: dict[str, list[tuple[int, str | None]]],
     vig_scoring: dict[str, dict[str, dict[str, int]]],
     likert_reverse: dict[str, bool],
+    trait_mcq_ids: set[str] | None = None,
 ) -> None:
     """Fill matrix columns for persona k given their choice on item_id.
 
-    Column type is inferred from the column definition:
-    - FC:       single column with dimension=None, encoded +1=A / -1=B
-    - Vignette: multiple columns (one per dimension), encoded via scoring dict
-    - Likert:   single column with dimension set, encoded 1-5 with optional reversal
+    Column type is inferred from the column definition and the item-id set:
+    - FC:        single column with dimension=None, encoded +1=A / -1=B
+    - Vignette:  multiple columns (one per dimension) via option scoring dict
+    - Likert:    single column with dimension set, encoded 1-5 with optional
+                 reversal
+    - trait_mcq: single column with dimension set, encoded as integer 1..4
+                 (A=1, B=2, C=3, D=4). Trait-label-independent: answer_mapping
+                 is used elsewhere for supervised TRAIT scoring.
     """
     cols = item_to_cols.get(item_id, [])
     if not cols:
         return
 
     col_idx_0, dim_0 = cols[0]
+
+    if trait_mcq_ids is not None and item_id in trait_mcq_ids:
+        # trait_mcq: single column, integer 1..4 from the chosen letter.
+        if isinstance(choice, str) and len(choice) == 1 and "A" <= choice <= "D":
+            response_matrix[k, col_idx_0] = float(ord(choice) - ord("A") + 1)
+        return
 
     if dim_0 is None:
         # FC: one column, +1=A, -1=B
@@ -1654,12 +1932,14 @@ def _record_response(
     vig_scoring: dict[str, dict[str, dict[str, int]]],
     likert_reverse: dict[str, bool],
     log_fh,
+    trait_mcq_ids: set[str] | None = None,
 ) -> None:
     """Fill matrix and log raw response to an open file handle."""
     item_id = item["id"]
     _fill_matrix_from_choice(
         response_matrix, k, item_id, choice,
         item_to_cols, vig_scoring, likert_reverse,
+        trait_mcq_ids=trait_mcq_ids,
     )
     log_fh.write(json.dumps({
         "k": k, "item_id": item_id,
@@ -1738,6 +2018,79 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
     return response_matrix, metadata, column_defs
 
 
+def run_stage_trait_scoring(metadata: list[dict] | None = None) -> dict | None:
+    """Compute per-persona TRAIT scores + plots from stage-2 output.
+
+    No-ops (and returns None) when the questionnaire does not contain
+    trait_mcq items. When present, uses the items' ``answer_mapping`` (and
+    any logprob ``probs`` stored in ``raw_responses.jsonl``) to compute a
+    per-persona score per OCEAN trait.
+
+    Writes ``trait_scores.csv`` + ``trait_scores_coverage.csv`` +
+    ``trait_scores_summary.json`` and PDF plots to
+    ``<questionnaire_dir>/questionnaire/trait_scores/``.
+
+    Args:
+        metadata: Optional stage-2 metadata list (to enrich the scores CSV
+            with ``sample_id`` / ``input_group_id``). When None, attempts to
+            load it from the questionnaire directory.
+
+    Returns:
+        The written file paths plus the scoring result, or None if skipped.
+    """
+    from src_dev.factor_analysis.trait_score_plots import plot_all_trait_plots
+    from src_dev.factor_analysis.trait_scoring import (
+        compute_trait_scores,
+        save_trait_scores,
+    )
+
+    q_dir = _questionnaire_dir() / "questionnaire"
+    raw_path = q_dir / "raw_responses.jsonl"
+    if not raw_path.exists():
+        print("[Trait-scoring] raw_responses.jsonl not found — skipping.")
+        return None
+
+    questionnaire_path = Path(QUESTIONNAIRE_PATH)
+    # Peek at the questionnaire to decide whether to run.
+    with open(questionnaire_path, "r", encoding="utf-8") as f:
+        qn_raw = json.load(f)
+    n_trait_items = len(qn_raw.get("block_4_trait_mcq", {}).get("items", []))
+    if n_trait_items == 0:
+        print("[Trait-scoring] No trait_mcq items in questionnaire — skipping.")
+        return None
+
+    output_dir = q_dir / "trait_scores"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if metadata is None:
+        meta_path = q_dir / "metadata.jsonl"
+        if meta_path.exists():
+            metadata = [json.loads(line) for line in meta_path.open() if line.strip()]
+
+    result = compute_trait_scores(
+        raw_responses_path=raw_path,
+        questionnaire_path=questionnaire_path,
+    )
+    written = save_trait_scores(result, output_dir, metadata=metadata)
+
+    plot_paths = plot_all_trait_plots(
+        result.scores,
+        output_dir,
+        title_prefix=_questionnaire_run_id(),
+    )
+    written.update(plot_paths)
+
+    summary = {
+        "n_personas": int(len(result.scores)),
+        "trait_order": result.trait_order,
+        "items_per_trait": result.items_per_trait,
+        "mean_by_trait": result.scores.mean(skipna=True).to_dict(),
+    }
+    print(f"[Trait-scoring] {summary}")
+    print(f"[Trait-scoring] Wrote {len(written)} files to {output_dir}")
+    return {"paths": written, "result": result}
+
+
 def _write_questionnaire_inspection_file(items: list[dict]) -> None:
     """Write a JSONL file joining rollout conversations with questionnaire responses.
 
@@ -1780,6 +2133,8 @@ def _write_questionnaire_inspection_file(items: list[dict]) -> None:
                     display_text = f'FC: {item["option_a"]["text"][:60]}... vs {item["option_b"]["text"][:60]}...'
                 elif item["type"] == "vignette":
                     display_text = f'Vignette [{item["title"]}]: {item["scenario"][:80]}...'
+                elif item["type"] == "trait_mcq":
+                    display_text = f'TRAIT [{item["primary_dimension"]}]: {item["question"][:80]}...'
                 else:
                     display_text = item["text"]
                 msgs = list(rollout["messages"])
@@ -4640,6 +4995,13 @@ def main() -> None:
 
     if WRITE_QUESTIONNAIRE_INSPECTION_FILE:
         _write_questionnaire_inspection_file(questionnaire_items)
+
+    # ── Stage 2.5: Trait scoring (TRAIT-benchmark questionnaires only) ──
+    if "trait_scoring" in STAGES_TO_RUN:
+        print("\n" + "=" * 60)
+        print("[Stage 2.5] Trait scoring + plots")
+        print("=" * 60)
+        run_stage_trait_scoring(metadata=metadata)
 
     # Load if needed for later stages
     if response_matrix is None and any(
