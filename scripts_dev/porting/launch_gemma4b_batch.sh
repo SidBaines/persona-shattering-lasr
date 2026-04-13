@@ -16,6 +16,11 @@
 
 set -euo pipefail
 
+# Unbuffered Python stdout/stderr so per-job logs flush live when redirected
+# to a file. Without this, Python's stderr is block-buffered and log lines can
+# appear minutes late, making live progress monitoring misleading.
+export PYTHONUNBUFFERED=1
+
 TARGET_MODEL="gemma-3-4b-it"
 TEACHER="z-ai/glm-4.5-air"
 MAX_LEN=2048
