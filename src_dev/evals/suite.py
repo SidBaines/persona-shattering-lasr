@@ -231,9 +231,8 @@ def _flash_attn_kwargs() -> dict[str, str]:
 
 def _load_local_model_for_sweep(
     base_model_ref: str,
-    adapter_ref: str,
+    adapter_local_dir: str,
     dtype: torch.dtype,
-    subfolder: str | None = None,
     fixed_adapters: list | None = None,
 ) -> tuple[PeftModel, Any]:
     """Load base model + single adapter once for a scale sweep.
@@ -242,6 +241,9 @@ def _load_local_model_for_sweep(
     ``_prepare_sweep_model`` can reference the same name without coupling.
 
     Args:
+        adapter_local_dir: Local directory containing ``adapter_config.json``.
+            The caller is responsible for snapshot-downloading HF refs via
+            ``resolve_adapter_to_local_dir`` before passing them here.
         fixed_adapters: Optional list of AdapterConfig to merge into the
             base weights before loading the sweep adapter.  This allows
             sweeping one LoRA on top of a fixed persona LoRA.
@@ -256,9 +258,6 @@ def _load_local_model_for_sweep(
     # Merge fixed adapters into base weights so they are baked in
     # before the sweep adapter is loaded on top.
     if fixed_adapters:
-        from src_dev.evals.model_resolution import (
-            resolve_model_reference as _resolve,
-        )
         from src_dev.utils.lora_composition import (
             load_and_scale_adapters,
             normalize_weighted_adapters,
@@ -269,7 +268,6 @@ def _load_local_model_for_sweep(
             base_model,
             adapters=normalized,
             adapter_name_prefix="fixed",
-            adapter_resolver=lambda ref: _resolve(ref, kind="adapter"),
         )
         base_model = peft_model.merge_and_unload()
         print(
@@ -277,20 +275,10 @@ def _load_local_model_for_sweep(
             flush=True,
         )
 
-    peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
-    if subfolder:
-        peft_kwargs["subfolder"] = subfolder
     peft_model = PeftModel.from_pretrained(
-        base_model, adapter_ref, **peft_kwargs
+        base_model, adapter_local_dir, adapter_name=_SWEEP_ADAPTER_NAME
     )
-    # Tokenizer lives in the adapter subfolder if one is specified,
-    # otherwise the adapter root.
-    tokenizer_kwargs: dict[str, Any] = {}
-    if subfolder:
-        tokenizer_kwargs["subfolder"] = subfolder
-    tokenizer = AutoTokenizer.from_pretrained(
-        adapter_ref, **tokenizer_kwargs
-    )
+    tokenizer = AutoTokenizer.from_pretrained(adapter_local_dir)
     return peft_model, tokenizer
 
 
@@ -957,18 +945,14 @@ def run_eval_suite(
         try:
             assert config.base_model is not None
             first_spec = models[1] if len(models) > 1 else models[0]
-            from src_dev.utils.lora_composition import split_adapter_reference
+            from src_dev.utils.lora_composition import resolve_adapter_to_local_dir
 
-            _raw_adapter, _adapter_subfolder = split_adapter_reference(
-                config.adapter
-            )
             base_ref = resolve_model_reference(config.base_model, kind="base model")
-            adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
+            adapter_local_dir = resolve_adapter_to_local_dir(config.adapter)
             sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
                 base_ref,
-                adapter_ref,
+                adapter_local_dir,
                 _resolve_dtype(first_spec),
-                subfolder=_adapter_subfolder,
                 fixed_adapters=config.fixed_adapters or None,
             )
             print(
