@@ -14,8 +14,6 @@ CONFIGS=(
     # scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.c_minus_activation_capping
     scripts_dev.personality_evals.configs.ocean.trait.activation_capping.c_plus_activation_capping
     scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.c_plus_activation_capping
-    scripts_dev.personality_evals.configs.ocean.trait.activation_capping.e_minus_activation_capping
-    scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.e_minus_activation_capping
     scripts_dev.personality_evals.configs.ocean.trait.activation_capping.e_plus_activation_capping
     scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.e_plus_activation_capping
     scripts_dev.personality_evals.configs.ocean.trait.activation_capping.a_minus_activation_capping
