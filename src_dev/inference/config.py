@@ -101,6 +101,11 @@ class VllmProviderConfig(BaseModel):
     max_loras: int = 1
     # Total LoRA adapters in CPU cache. Defaults to max_loras.
     max_cpu_loras: int | None = None
+    # Shard the model across N GPUs with tensor parallelism. Default 1 (no TP).
+    # Useful for fitting larger models and freeing KV-cache headroom on smaller
+    # GPUs (e.g. A40/48GB). vLLM requires model head/hidden dims to be
+    # divisible by this value.
+    tensor_parallel_size: int = 1
 
 
 class InferenceConfig(BaseModel):

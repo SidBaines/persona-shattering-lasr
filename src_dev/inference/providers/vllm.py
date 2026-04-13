@@ -97,6 +97,8 @@ class VllmProvider(InferenceProvider):
             enable_prefix_caching=vllm_cfg.enable_prefix_caching,
             trust_remote_code=False,
         )
+        if vllm_cfg.tensor_parallel_size > 1:
+            engine_kwargs["tensor_parallel_size"] = vllm_cfg.tensor_parallel_size
         if vllm_cfg.max_model_len is not None:
             engine_kwargs["max_model_len"] = vllm_cfg.max_model_len
         if has_adapter:
@@ -121,11 +123,47 @@ class VllmProvider(InferenceProvider):
 
     def _sampling_params(self, **kwargs):
         gen = self.generation_config
-        return self._SamplingParams(
+        params = dict(
             temperature=kwargs.get("temperature", gen.temperature),
             top_p=kwargs.get("top_p", gen.top_p),
             max_tokens=kwargs.get("max_new_tokens", gen.max_new_tokens),
         )
+        if "logprobs" in kwargs and kwargs["logprobs"] is not None:
+            params["logprobs"] = int(kwargs["logprobs"])
+        return self._SamplingParams(**params)
+
+    @staticmethod
+    def _format_messages(prompts: list[PromptInput]) -> list[list[dict[str, str]]]:
+        return [
+            [{"role": "user", "content": p}] if isinstance(p, str) else p
+            for p in prompts
+        ]
+
+    @staticmethod
+    def _prefill_flags_for(
+        messages_list: list[list[dict[str, str]]],
+    ) -> tuple[bool, bool]:
+        """Return (add_generation_prompt, continue_final_message).
+
+        vLLM's chat template requires explicit flags when the trailing message
+        is an assistant turn that should be *continued* (prefill) rather than
+        closed and followed by a new assistant header. Every prompt in a batch
+        must share the same flag values, so we require all prompts to agree on
+        whether they end with an assistant turn.
+        """
+        ends_assistant = [
+            bool(msgs) and msgs[-1].get("role") == "assistant"
+            for msgs in messages_list
+        ]
+        if any(ends_assistant) and not all(ends_assistant):
+            raise ValueError(
+                "vLLM batch contains a mix of assistant-trailing (prefill) and "
+                "user-trailing prompts. Split the batch before calling the "
+                "provider, or align the trailing role across all prompts."
+            )
+        if all(ends_assistant) and ends_assistant:
+            return False, True
+        return True, False
 
     def generate(self, prompt: PromptInput, **kwargs) -> str:
         """Generate a response for a single prompt."""
@@ -142,18 +180,100 @@ class VllmProvider(InferenceProvider):
             List of generated response strings.
         """
         sampling_params = self._sampling_params(**kwargs)
-        formatted = [
-            [{"role": "user", "content": p}] if isinstance(p, str) else p
-            for p in prompts
-        ]
+        formatted = self._format_messages(prompts)
+        add_gen, continue_final = self._prefill_flags_for(formatted)
 
         outputs = self.llm.chat(
             messages=formatted,
             sampling_params=sampling_params,
             lora_request=self._lora_request,
             use_tqdm=False,
+            add_generation_prompt=add_gen,
+            continue_final_message=continue_final,
         )
 
         responses = [out.outputs[0].text for out in outputs]
         logger.info("vLLM generated %d responses", len(responses))
         return responses
+
+    def generate_batch_logprobs(
+        self,
+        prompts: list[PromptInput],
+        *,
+        max_tokens: int = 1,
+        top_logprobs: int = 20,
+        temperature: float = 1.0,
+    ) -> list[dict]:
+        """Generate with top-k logprobs on each generated token.
+
+        Honours the same prefill semantics as ``generate_batch``: prompts whose
+        final message is an assistant turn are treated as prefilled and the
+        chat template continues from that partial turn.
+
+        Args:
+            prompts: Message lists (or strings).
+            max_tokens: How many tokens to generate (default 1 — suitable for
+                MCQ logprob scoring where we only need the first token's
+                distribution).
+            top_logprobs: Top-k logprobs to return per generated token.
+            temperature: Sampling temperature. Default 1.0 (returns the raw
+                model distribution for scoring).
+
+        Returns:
+            One dict per prompt with keys:
+                - ``text``: generated text
+                - ``logprobs_per_token``: list (length = num generated tokens)
+                  of ``dict[decoded_token_str, float]`` top-k logprobs.
+        """
+        sampling_params = self._sampling_params(
+            temperature=temperature,
+            max_new_tokens=max_tokens,
+            logprobs=top_logprobs,
+        )
+        formatted = self._format_messages(prompts)
+        add_gen, continue_final = self._prefill_flags_for(formatted)
+
+        outputs = self.llm.chat(
+            messages=formatted,
+            sampling_params=sampling_params,
+            lora_request=self._lora_request,
+            use_tqdm=False,
+            add_generation_prompt=add_gen,
+            continue_final_message=continue_final,
+        )
+
+        results: list[dict] = []
+        for out in outputs:
+            completion = out.outputs[0]
+            per_token: list[dict[str, float]] = []
+            if completion.logprobs is not None:
+                for token_dict in completion.logprobs:
+                    per_token.append({
+                        entry.decoded_token: float(entry.logprob)
+                        for entry in token_dict.values()
+                        if entry.decoded_token is not None
+                    })
+            results.append({
+                "text": completion.text,
+                "logprobs_per_token": per_token,
+            })
+        logger.info("vLLM generated %d logprob outputs", len(results))
+        return results
+
+    async def generate_batch_logprobs_async(
+        self,
+        prompts: list[PromptInput],
+        *,
+        max_tokens: int = 1,
+        top_logprobs: int = 20,
+        temperature: float = 1.0,
+    ) -> list[dict]:
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.generate_batch_logprobs,
+            prompts,
+            max_tokens=max_tokens,
+            top_logprobs=top_logprobs,
+            temperature=temperature,
+        )
