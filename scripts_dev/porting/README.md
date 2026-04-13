@@ -250,6 +250,35 @@ CUDA_VISIBLE_DEVICES=1 MASTER_PORT=29501 bash scripts_dev/oct_pipeline/run_ocean
 
 The `launch_gemma4b_batch.sh` script handles this automatically.
 
+### Auto-analyze failures from stale base-eval `run_info.json`
+
+The suite reuses the `base` (scale 0) eval across run_dirs, which can leave a
+`base/<eval_name>/run_info.json` whose `inspect_log_path` is absolute and points
+at a prior run's output directory. If that path no longer exists (e.g. the
+output_root was renamed or the sibling run was deleted), `auto_analyze` crashes
+with `FileNotFoundError` and no figures get uploaded — only the raw eval JSONs.
+The analyzer (`src_dev/evals/personality/analyze_results.py`) now falls back to
+a sibling `native/inspect_logs/*.json` next to the `run_info.json`, so a stale
+path no longer blocks plotting.
+
+If you see the old failure mode on an older checkout, regenerate plots manually:
+
+```bash
+# Trait: bootstrap CI (continuous logprob scores)
+uv run python -m src_dev.evals.personality.analyze_results \
+    scratch/evals/ocean/trait/<RUN_NAME> \
+    --visualize --title "<RUN_NAME> TRAIT" --interval ci95_from_bootstrap_1000
+
+# MMLU: Wilson CI (binary accuracy)
+uv run python -m src_dev.evals.personality.analyze_results \
+    scratch/evals/ocean/mmlu/<RUN_NAME>_mmlu \
+    --visualize --title "<RUN_NAME> MMLU" --interval ci95_from_wilson \
+    --random-baseline 0.25
+```
+
+Do **not** pass Wilson CI to a run_dir that contains logprob data (continuous
+scores fail Wilson's binary check) — keep the trait and mmlu run_dirs separate.
+
 ### TRAIT evals: prefer logprobs over generation
 
 Use `personality_trait_logprobs` (not `personality_trait_sampled`) for TRAIT
