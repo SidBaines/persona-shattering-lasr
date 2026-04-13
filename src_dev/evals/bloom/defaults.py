@@ -52,7 +52,7 @@ CANONICAL_BLOOM_DEFAULTS: dict[str, Any] = {
     "IDEATION_REASONING_EFFORT": "high",
     "TARGET_REASONING_EFFORT": "medium",
     "UNDERSTANDING_MODEL": "openrouter/openai/gpt-5-mini",
-    "UNDERSTANDING_MAX_TOKENS": 4096,
+    "UNDERSTANDING_MAX_TOKENS": 8192,
     "IDEATION_MODEL": "openrouter/openai/gpt-5-mini",
     "IDEATION_MAX_TOKENS": 8192,
     "ROLLOUT_EVALUATOR_MODEL": "openrouter/openai/gpt-5-mini",
