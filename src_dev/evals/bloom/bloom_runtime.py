@@ -603,8 +603,11 @@ def bake_cells_for_bloom(
                 bake_lora_scale(model, "default", scale, out_dir)
             try:
                 model.cpu()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(
+                    f"[warn] could not move model to CPU before cleanup: {exc}",
+                    flush=True,
+                )
             del model
             gc.collect()
             if torch.cuda.is_available():
