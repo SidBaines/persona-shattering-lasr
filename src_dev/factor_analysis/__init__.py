@@ -24,6 +24,11 @@ from src_dev.factor_analysis.preprocessing import (
     pca_reduce,
     residualize,
 )
+from src_dev.factor_analysis.validation import (
+    item_holdout_predictivity_test,
+    shuffle_control_test,
+    stability_icc_test,
+)
 
 __all__ = [
     "adequacy_tests",
@@ -33,6 +38,7 @@ __all__ = [
     "corpus_nearest_neighbor",
     "deduplicate_by_group",
     "factor_extremes",
+    "item_holdout_predictivity_test",
     "load_embeddings",
     "label_factors",
     "load_factor_analysis",
@@ -45,4 +51,6 @@ __all__ = [
     "residualize",
     "run_factor_analysis",
     "save_factor_analysis",
+    "shuffle_control_test",
+    "stability_icc_test",
 ]
