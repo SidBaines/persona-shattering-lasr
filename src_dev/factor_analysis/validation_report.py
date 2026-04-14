@@ -113,11 +113,17 @@ def _summarize_stability(d: dict) -> tuple[bool | None, str, str | None]:
 def _summarize_variance_decomp(d: dict) -> tuple[bool | None, str, str | None]:
     if d.get("note"):
         return d.get("pass"), "skipped", d["note"]
-    flagged = d.get("flagged_factors", [])
-    return d.get("pass"), (
-        f"{len(flagged)}/{d.get('n_factors')} factors flagged "
-        f"(η² ≥ {d.get('flag_threshold')})"
-    ), None
+    scn_flagged = d.get("scenario_flagged_factors", [])
+    arc_max = d.get("archetype_max_eta2")
+    arc_floor = d.get("archetype_floor")
+    scn_ceil = d.get("scenario_ceiling")
+    parts = [
+        f"scenario-flagged {len(scn_flagged)}/{d.get('n_factors')} "
+        f"(η² ≥ {scn_ceil})"
+    ]
+    if isinstance(arc_max, (int, float)):
+        parts.append(f"archetype max η²={arc_max:.2f} (floor={arc_floor})")
+    return d.get("pass"), ", ".join(parts), None
 
 
 def _summarize_convergent(d: dict) -> tuple[bool | None, str, str | None]:
