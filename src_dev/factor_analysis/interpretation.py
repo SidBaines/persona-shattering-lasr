@@ -204,7 +204,31 @@ def prompt_effects(
     Returns:
         Array of eta-squared values [n_factors].
     """
-    group_ids = np.array([str(row.get(group_field, i)) for i, row in enumerate(metadata)])
+    import warnings
+
+    present = [group_field in row for row in metadata]
+    if not any(present):
+        warnings.warn(
+            f"prompt_effects: group_field={group_field!r} missing from all "
+            f"{len(metadata)} metadata rows — returning NaN eta² (the previous "
+            "silent fallback to row-index grouped every row on its own, forcing "
+            "eta²=1.0).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return np.full(scores.shape[1], np.nan, dtype=np.float64)
+    if not all(present):
+        warnings.warn(
+            f"prompt_effects: group_field={group_field!r} missing from "
+            f"{sum(not p for p in present)}/{len(metadata)} rows; those rows "
+            "are grouped under a shared '__missing__' bucket.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    group_ids = np.array([
+        str(row.get(group_field, "__missing__")) for row in metadata
+    ])
     unique_groups, group_inverse = np.unique(group_ids, return_inverse=True)
     n_groups = len(unique_groups)
 
