@@ -437,6 +437,11 @@ def ensure_vllm_running(
     base_url = _vllm_base_url()
     needed = [_served_model_name(entry["id"]) for _, entry in local_targets]
 
+    # litellm routes `openai/<name>` by default to api.openai.com; point it at
+    # the local vLLM server so bloom subprocesses inherit the override.
+    os.environ["OPENAI_API_BASE"] = base_url
+    os.environ.setdefault("OPENAI_API_KEY", "EMPTY")
+
     available = _query_vllm_models(base_url)
     if available is not None and all(n in available for n in needed):
         print(f"  vLLM already serving: {', '.join(needed)}")
