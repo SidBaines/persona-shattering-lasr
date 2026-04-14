@@ -14,6 +14,44 @@ import numpy as np
 import pandas as pd
 
 
+def _histogram_edges_for_scores(
+    vals: np.ndarray,
+    *,
+    requested_bins: int,
+    quantization_tol: float = 1e-6,
+) -> np.ndarray:
+    """Bin edges for trait scores in [0, 1].
+
+    If ``vals`` is quantized to a step coarser than 1/requested_bins (binary
+    scoring mode), returns edges offset by half a step so each discrete level
+    sits inside a bin interior. Otherwise returns linearly spaced edges.
+    """
+    vals = np.asarray(vals, dtype=float)
+    if vals.size == 0:
+        return np.linspace(0.0, 1.0, requested_bins + 1)
+
+    unique = np.unique(vals)
+    if unique.size < 2:
+        return np.linspace(0.0, 1.0, requested_bins + 1)
+
+    # Infer the quantization step. A clean quantized series has equal gaps;
+    # take the min gap as a robust estimate.
+    min_gap = float(np.min(np.diff(unique)))
+    if min_gap < quantization_tol:
+        return np.linspace(0.0, 1.0, requested_bins + 1)
+
+    # If the data is finer-grained than the requested bin width, fall back.
+    default_width = 1.0 / requested_bins
+    if min_gap < 0.75 * default_width:
+        return np.linspace(0.0, 1.0, requested_bins + 1)
+
+    # Quantized case: edges at half-step offsets, covering [0, 1] inclusively.
+    n_levels = int(round(1.0 / min_gap)) + 1
+    half = min_gap / 2.0
+    edges = np.linspace(-half, 1.0 + half, n_levels + 1)
+    return edges
+
+
 def plot_trait_histograms(
     scores: pd.DataFrame,
     save_path: Path | str,
@@ -45,7 +83,15 @@ def plot_trait_histograms(
     fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 2.6 * nrows), squeeze=False)
     for ax, trait in zip(axes.flat, traits):
         vals = scores[trait].dropna().values.astype(float)
-        ax.hist(vals, bins=bins, range=(0.0, 1.0), color="#4c78a8", edgecolor="white")
+        # Scores are k/n_items (binary mode) or probability-weighted
+        # continuous (logprob mode). For the binary case, values land exactly
+        # on multiples of 1/n_items, which also coincide with default bin
+        # edges — floating-point representation then pushes some values into
+        # the neighbouring bin, leaving visible gaps. Detect quantization
+        # from the data and offset bin edges by half a step so discrete
+        # levels sit in bin interiors.
+        edges = _histogram_edges_for_scores(vals, requested_bins=bins)
+        ax.hist(vals, bins=edges, color="#4c78a8", edgecolor="white")
         ax.axvline(np.nanmean(vals), color="#e45756", linestyle="--", linewidth=1,
                    label=f"mean={np.nanmean(vals):.3f}")
         ax.set_title(f"{trait}  (n={len(vals)})")
