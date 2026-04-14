@@ -184,7 +184,7 @@ QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 # text generation. The full P(letter) distribution is stored in
 # raw_responses.jsonl alongside the argmax choice, and TRAIT scoring uses the
 # continuous probability distribution. Requires QUESTIONNAIRE_PROVIDER="vllm".
-QUESTIONNAIRE_USE_LOGPROBS = True
+QUESTIONNAIRE_USE_LOGPROBS = False
 QUESTIONNAIRE_TOP_LOGPROBS = 20
 # Temperature for the logprob pass. 1.0 returns the raw model distribution
 # (canonical for TRAIT scoring).
@@ -204,10 +204,10 @@ QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 3  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = None  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False, True]
-MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
+MIN_ITEM_VARIANCE = 0.5  # drop items with variance below this
 # Drop personas whose across-item response variance is in the top percentile.
 # These may be incoherent rollouts that respond near-randomly. Set to 0 to
 # disable (keep all personas). E.g. 5 means drop the top 5% by variance.
@@ -298,7 +298,7 @@ STAGES_TO_RUN = [
     # "questionnaire",
     # "trait_scoring",
     "factor_analysis",
-    "labeling",
+    # "labeling",
     "validation",
 ]
 
@@ -5753,6 +5753,75 @@ def _validation_stability_test(
     }
 
 
+_ARCH_SCEN_CACHE: dict[str, tuple[str, str]] | None = None
+
+
+def _load_archetype_scenario_lookup() -> dict[str, tuple[str, str]]:
+    """Build sample_id → (archetype, scenario_id) from the rollout canonical
+    dataset. The seed message content is tagged ``[scenario: X | archetype: Y]``.
+
+    Returns {} if the canonical dataset is missing or unparseable — callers
+    must handle the empty case.
+    """
+    global _ARCH_SCEN_CACHE
+    if _ARCH_SCEN_CACHE is not None:
+        return _ARCH_SCEN_CACHE
+
+    import re
+    path = _rollout_dir() / "datasets" / "canonical_samples.jsonl"
+    if not path.exists():
+        _ARCH_SCEN_CACHE = {}
+        return _ARCH_SCEN_CACHE
+
+    pat = re.compile(r"\[scenario:\s*([^|\]]+?)\s*\|\s*archetype:\s*([^\]]+?)\s*\]")
+    lookup: dict[str, tuple[str, str]] = {}
+    with open(path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            sid = rec.get("sample_id")
+            messages = rec.get("input", {}).get("messages") or []
+            if not sid or not messages:
+                continue
+            m = pat.search(messages[0].get("content", "") or "")
+            if m:
+                lookup[sid] = (m.group(2), m.group(1))
+    _ARCH_SCEN_CACHE = lookup
+    return lookup
+
+
+def _enrich_meta_with_archetype_scenario(meta: list[dict]) -> list[dict]:
+    """Return a shallow copy of ``meta`` with archetype + scenario_id added
+    per row where resolvable via sample_id. Rows that can't be resolved are
+    left without those keys — ``prompt_effects`` warns on missing keys."""
+    lookup = _load_archetype_scenario_lookup()
+    if not lookup:
+        print(
+            "  [Variance decomp] canonical_samples.jsonl not found — "
+            "archetype/scenario_id will be NaN."
+        )
+        return meta
+
+    n_hit = 0
+    enriched: list[dict] = []
+    for row in meta:
+        sid = row.get("sample_id")
+        hit = lookup.get(sid) if sid else None
+        if hit is not None:
+            arch, sc_id = hit
+            enriched.append({**row, "archetype": arch, "scenario_id": sc_id})
+            n_hit += 1
+        else:
+            enriched.append(dict(row))
+    if n_hit < len(meta):
+        print(
+            f"  [Variance decomp] enriched {n_hit}/{len(meta)} rows with "
+            "archetype/scenario_id (rest lack a resolvable sample_id)."
+        )
+    return enriched
+
+
 def _validation_variance_decomp(
     fa_results: dict,
     val_dir: Path,
@@ -5780,6 +5849,12 @@ def _validation_variance_decomp(
     meta = fa_results[fa_key]["metadata"]
     scores = fa_result["scores"]
     n_factors = scores.shape[1]
+
+    # Questionnaire metadata only carries sample_id / input_group_id. The
+    # archetype + scenario_id labels live in the upstream rollout canonical
+    # dataset (parsed from `input.messages[0].content`). Enrich in place so
+    # prompt_effects can key on them.
+    meta = _enrich_meta_with_archetype_scenario(meta)
 
     per_field: dict[str, list[float]] = {}
     for field in VARIANCE_DECOMP_FIELDS:
