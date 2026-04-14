@@ -148,6 +148,7 @@ class NormalisedConfig:
     eval_name: str
     bloom_data_dir: Path
     judgment_models: tuple[str, ...]
+    judgment_num_samples: int
     scenario_version: int
     num_scenarios: int
     num_reps: int
@@ -230,6 +231,7 @@ def _normalise_config(
         eval_name=getattr(cfg, "EVAL_NAME_CANONICAL", EVAL_NAME_BASE),
         bloom_data_dir=Path(getattr(cfg, "BLOOM_DATA_DIR", "bloom-data")).resolve(),
         judgment_models=judgment_models,
+        judgment_num_samples=int(getattr(cfg, "JUDGMENT_NUM_SAMPLES", 1)),
         scenario_version=int(getattr(cfg, "SCENARIO_VERSION", 1)),
         num_scenarios=int(cfg.NUM_SCENARIOS),
         num_reps=int(cfg.NUM_REPS),
@@ -661,6 +663,7 @@ def _run_judgment_for_cell(
             "behavior.name": trait,
             "rollout.target": target_short_name,
             "judgment.model": judge,
+            "judgment.num_samples": nc.judgment_num_samples,
             "temperature": nc.judge_temperature,
             "evaluator_reasoning_effort": nc.evaluator_reasoning_effort,
         }

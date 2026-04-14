@@ -44,7 +44,7 @@ SCENARIO_VERSION = 1
 NUM_SCENARIOS = 10
 NUM_REPS = 2
 MAX_TURNS = 10
-ROLLOUT_MAX_TOKENS = 1024
+ROLLOUT_MAX_TOKENS = 4096
 MODALITY = "simenv"
 NO_USER_MODE = False
 ANONYMOUS_TARGET = False
@@ -67,6 +67,10 @@ SELECTED_VARIATIONS = None
 # Judgment
 # ---------------------------------------------------------------------------
 JUDGMENT_MODELS = ["openrouter/z-ai/glm-4.7-flash"]
+# Sample judgments multiple times per transcript; bloom averages over successful
+# parses. Mitigates occasional tag-parse failures from the cheap judge (which
+# otherwise cause bloom to emit 0 as a sentinel for the whole scenario).
+JUDGMENT_NUM_SAMPLES = 3
 
 # ---------------------------------------------------------------------------
 # Misc
