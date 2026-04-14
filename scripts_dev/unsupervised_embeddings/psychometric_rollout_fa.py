@@ -32,6 +32,8 @@ import argparse
 import json
 import logging
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -106,6 +108,13 @@ SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
 MAX_PROMPTS = 1000  # All 100 scenarios × 10 archetypes
 NUM_ROLLOUTS_PER_PROMPT = 2  # 2 rollouts per combo → 2000 total
 NUM_CONVERSATION_TURNS = 10
+# For cross-model replication sweeps, pick one of the candidates below and
+# rerun the pipeline (a fresh _rollout_run_id() is derived automatically).
+# Candidates for the cross-model validation sweep (7-8B instruction-tuned):
+#   "meta-llama/llama-3.1-8b-instruct"
+#   "qwen/qwen2.5-7b-instruct"
+#   "mistralai/mistral-7b-instruct-v0.3"
+#   "meta-llama/llama-3.1-70b-instruct"   # larger; cost gate
 ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
 ASSISTANT_PROVIDER = "openrouter"
 # ASSISTANT_PROVIDER = "vllm"
@@ -137,14 +146,14 @@ ROLLOUT_MAX_CONCURRENT = 64
 USER_SIM_MAX_CONCURRENT = 64
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-# QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
-# QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
+QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
 # TRAIT-benchmark questionnaire: 20 items per OCEAN trait (100 total),
 # A/B/C/D options shuffled per item. Scored both via unsupervised FA (integer
 # 1..4 encoding) and via TRAIT's canonical answer_mapping (see
 # src_dev.factor_analysis.trait_scoring).
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/trait_ocean_v1.json"
-QUESTIONNAIRE_VERSION = "trait_ocean_v1"  # bump when changing items
+# QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/trait_ocean_v1.json"
+# QUESTIONNAIRE_VERSION = "trait_ocean_v1"  # bump when changing items
 QUESTIONNAIRE_PHRASING = "direct"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -175,7 +184,7 @@ QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 # text generation. The full P(letter) distribution is stored in
 # raw_responses.jsonl alongside the argmax choice, and TRAIT scoring uses the
 # continuous probability distribution. Requires QUESTIONNAIRE_PROVIDER="vllm".
-QUESTIONNAIRE_USE_LOGPROBS = False
+QUESTIONNAIRE_USE_LOGPROBS = True
 QUESTIONNAIRE_TOP_LOGPROBS = 20
 # Temperature for the logprob pass. 1.0 returns the raw model distribution
 # (canonical for TRAIT scoring).
@@ -195,10 +204,9 @@ QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = None  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 3  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
-# RESIDUALIZE_OPTIONS = [False, True]
-RESIDUALIZE_OPTIONS = [False]
+RESIDUALIZE_OPTIONS = [False, True]
 MIN_ITEM_VARIANCE = 0.05  # drop items with variance below this
 # Drop personas whose across-item response variance is in the top percentile.
 # These may be incoherent rollouts that respond near-randomly. Set to 0 to
@@ -209,7 +217,7 @@ HIGH_VARIANCE_PERSONA_DROP_PCT = 0
 # theoretical structure into the correlation matrix (see design notes).
 # Vignettes are still administered and logged for validation use.
 # For TRAIT-benchmark questionnaires (block_4_trait_mcq), use ["trait_mcq"].
-FA_BLOCKS = ["trait_mcq"]
+FA_BLOCKS = ["fc", "likert"]
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
 LABELLER_MODEL = "anthropic/claude-opus-4.6"
@@ -223,6 +231,17 @@ LABELLER_EMPTY_RESPONSE_RETRIES = 2
 # Use {"effort": "high"} for OpenAI/xAI models, {"max_tokens": N} for Anthropic via OpenRouter.
 LABELLER_REASONING: dict | None = {"effort": "high"}
 
+# ── Claude Code CLI labeller (alternative to API-based labeller) ────────────
+# When True, the labelling stage shells out to `claude -p` (Claude Code CLI)
+# instead of calling the OpenRouter/Anthropic API via InferenceConfig. The
+# same system/user prompts are sent; only the transport differs. Useful for
+# local runs where the user is already authenticated against Claude Code.
+LABELLER_USE_CLAUDE_CLI = True
+LABELLER_CLAUDE_CLI_PATH = "claude"  # Executable name or absolute path
+LABELLER_CLAUDE_CLI_MODEL = "opus"   # Alias ("opus"/"sonnet") or full model ID
+LABELLER_CLAUDE_CLI_TIMEOUT = 3600   # Seconds; labelling with reasoning can be slow
+LABELLER_CLAUDE_CLI_EFFORT = "high"  # "low" / "medium" / "high" / "max" or None
+
 # ── Stage 5: Validation ─────────────────────────────────────────────────────
 STABILITY_N_PROMPTS = 100
 HOLDOUT_N_ITEMS = 20
@@ -232,12 +251,12 @@ HOLDOUT_N_ITEMS = 20
 # questionnaire contains trait_mcq items (uses the answer_mapping to compute
 # per-persona TRAIT scores + plots).
 STAGES_TO_RUN = [
-    "rollouts",
-    "questionnaire",
-    "trait_scoring",
+    # "rollouts",
+    # "questionnaire",
+    # "trait_scoring",
     "factor_analysis",
     "labeling",
-    # "validation",
+    "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -2375,8 +2394,19 @@ def _preprocess_response_matrix(
     metadata: list[dict],
     column_defs: list[dict],
     do_residualize: bool = False,
+    variance_export_path: Path | None = None,
 ) -> tuple[np.ndarray, list[dict], list[dict], np.ndarray | None]:
     """Preprocess the response matrix for factor analysis.
+
+    Args:
+        response_matrix: Raw persona × item matrix.
+        metadata: Per-row metadata (same length as ``response_matrix``).
+        column_defs: Per-column definitions (same length as item axis).
+        do_residualize: If True, subtract per-prompt-group means.
+        variance_export_path: If provided, write a JSONL file at this path with
+            one row per column ranked by pre-filter variance (computed after
+            row-level filtering). Useful for inspecting which questionnaire
+            items actually discriminate across personas.
 
     Returns:
         Tuple of (cleaned matrix, filtered metadata, filtered column_defs, group_ids or None).
@@ -2418,6 +2448,28 @@ def _preprocess_response_matrix(
     # Drop low-variance columns
     col_var = np.var(data, axis=0)
     col_mask = col_var >= MIN_ITEM_VARIANCE
+
+    if variance_export_path is not None:
+        variance_export_path.parent.mkdir(parents=True, exist_ok=True)
+        ranked = sorted(
+            zip(column_defs, col_var, col_mask),
+            key=lambda r: float(r[1]),
+            reverse=True,
+        )
+        with variance_export_path.open("w", encoding="utf-8") as f:
+            for col_def, var, keep in ranked:
+                row = {
+                    "variance": float(var),
+                    "kept": bool(keep),
+                    "block": col_def.get("block"),
+                    "item_id": col_def.get("item_id"),
+                    "col_id": col_def.get("col_id"),
+                    "dimension": col_def.get("dimension"),
+                    "question": col_def.get("text"),
+                }
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"  Wrote ranked item variances to {variance_export_path}")
+
     data = data[:, col_mask]
     cols_filtered = [col for col, keep in zip(column_defs, col_mask) if keep]
     dropped_cols = int(np.sum(~col_mask))
@@ -2524,8 +2576,13 @@ def run_stage_factor_analysis(
         print(f"\n[Stage 3] Factor analysis ({resid_label})")
         print("=" * 60)
 
+        variance_export_path = (
+            base_dir / resid_label / "item_variances_ranked.jsonl"
+        )
         data, meta_filtered, cols_filtered, group_ids = _preprocess_response_matrix(
-            response_matrix, metadata, column_defs, do_residualize=do_residualize,
+            response_matrix, metadata, column_defs,
+            do_residualize=do_residualize,
+            variance_export_path=variance_export_path,
         )
 
         if do_residualize and group_ids is None:
@@ -5253,15 +5310,21 @@ def _label_factors_llm(
     else:
         keyed_raw_path = raw_path
 
-    # Parse JSON from response — try multiple extraction strategies
+    return _parse_labeller_json_response(raw_response, keyed_raw_path)
+
+
+def _parse_labeller_json_response(raw_response: str, raw_path: Path) -> list[dict]:
+    """Extract the ``factors`` list from a labeller response string.
+
+    Tries a markdown code block first, then the outermost brace match, then a
+    trailing-comma cleanup. Returns an empty list if nothing parses.
+    """
     json_text = None
 
-    # Strategy 1: markdown code block (```json ... ``` or ``` ... ```)
     md_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", raw_response)
     if md_match:
         json_text = md_match.group(1).strip()
 
-    # Strategy 2: outermost braces
     if json_text is None:
         brace_match = re.search(r"\{[\s\S]*\}", raw_response)
         if brace_match:
@@ -5272,8 +5335,6 @@ def _label_factors_llm(
             parsed = json.loads(json_text)
             return parsed.get("factors", [])
         except json.JSONDecodeError:
-            # Attempt cleanup: fix common LLM JSON errors
-            # (trailing commas before closing brackets)
             cleaned = re.sub(r",\s*([}\]])", r"\1", json_text)
             try:
                 parsed = json.loads(cleaned)
@@ -5281,10 +5342,147 @@ def _label_factors_llm(
             except json.JSONDecodeError as e:
                 logger.warning(
                     "Failed to parse LLM labelling response after cleanup: %s "
-                    "(raw response saved to %s)", e, keyed_raw_path,
+                    "(raw response saved to %s)", e, raw_path,
                 )
 
     return []
+
+
+def _label_factors_claude_cli(
+    loadings: np.ndarray,
+    column_defs: list[dict],
+    items: list[dict],
+    top_n: int = 8,
+    cli_path: str = LABELLER_CLAUDE_CLI_PATH,
+    model: str = LABELLER_CLAUDE_CLI_MODEL,
+    effort: str | None = LABELLER_CLAUDE_CLI_EFFORT,
+    timeout: int = LABELLER_CLAUDE_CLI_TIMEOUT,
+    analysis_label: str | None = None,
+) -> list[dict]:
+    """Label factors by shelling out to the Claude Code CLI (``claude -p``).
+
+    Builds the same system + user prompts as :func:`_label_factors_llm` and
+    pipes the user message via stdin to ``claude -p`` with the system prompt
+    appended. Uses ``--output-format json`` and extracts the ``result`` field,
+    then reuses :func:`_parse_labeller_json_response` to parse the factors.
+
+    Args:
+        loadings: Factor loading matrix [n_cols × n_factors].
+        column_defs: Column definitions aligned with loadings rows.
+        items: Original questionnaire items.
+        top_n: Number of items per pole to send to the labeller.
+        cli_path: Path/name of the ``claude`` executable.
+        model: Model alias or full ID for ``--model``.
+        effort: Reasoning effort level, or None to omit ``--effort``.
+        timeout: Seconds before the subprocess is killed.
+        analysis_label: Optional analysis key (for per-analysis debug files).
+
+    Returns:
+        Parsed list of factor dicts (same shape as :func:`_label_factors_llm`).
+    """
+    resolved_cli = shutil.which(cli_path) or cli_path
+    if not Path(resolved_cli).exists() and not shutil.which(cli_path):
+        raise FileNotFoundError(
+            f"Claude Code CLI not found at '{cli_path}'. Install it or set "
+            "LABELLER_CLAUDE_CLI_PATH."
+        )
+
+    items_by_id = {it["id"]: it for it in items}
+    n_factors = loadings.shape[1]
+    present_blocks: set[str] = {cd["block"] for cd in column_defs}
+
+    factor_sections = []
+    for fi in range(n_factors):
+        col = loadings[:, fi]
+        order = np.argsort(col)
+        top_pos = [idx for idx in order[-top_n:][::-1] if col[idx] > 0]
+        top_neg = [idx for idx in order[:top_n] if col[idx] < 0]
+
+        lines = [f"### Factor {fi}"]
+        lines.append(f"\nPositive loading items ({len(top_pos)}):")
+        for idx in top_pos:
+            lines.append(_describe_column_for_labeller(
+                column_defs[idx], float(col[idx]), items_by_id,
+            ))
+        lines.append(f"\nNegative loading items ({len(top_neg)}):")
+        for idx in top_neg:
+            lines.append(_describe_column_for_labeller(
+                column_defs[idx], float(col[idx]), items_by_id,
+            ))
+        factor_sections.append("\n".join(lines))
+
+    factors_block = "\n\n" + ("\n\n---\n\n").join(factor_sections) + "\n\n"
+
+    system_prompt = _build_labeller_system_prompt(present_blocks)
+    user_message = _build_labeller_user_message(n_factors, factors_block, present_blocks)
+
+    cmd = [
+        resolved_cli,
+        "-p",
+        "--bare",
+        "--output-format", "json",
+        "--model", model,
+        "--append-system-prompt", system_prompt,
+    ]
+    if effort:
+        cmd += ["--effort", effort]
+
+    label_dir = _questionnaire_dir() / "labeling"
+    label_dir.mkdir(parents=True, exist_ok=True)
+    model_slug = model.replace("/", "_")
+    suffix = f"_{analysis_label.replace('/', '_')}" if analysis_label else ""
+    prompt_path = label_dir / f"claudecli_prompt{suffix}_{model_slug}.md"
+    prompt_path.write_text(
+        f"# SYSTEM\n\n{system_prompt}\n\n# USER\n\n{user_message}\n",
+        encoding="utf-8",
+    )
+    raw_path = label_dir / f"claudecli_raw{suffix}_{model_slug}.txt"
+    stderr_path = label_dir / f"claudecli_stderr{suffix}_{model_slug}.txt"
+
+    logger.info(
+        "Invoking Claude Code CLI for labelling (%s, model=%s, effort=%s).",
+        analysis_label or "unknown", model, effort,
+    )
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=user_message,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        logger.warning("Claude Code CLI timed out after %ds: %s", timeout, e)
+        return []
+
+    stderr_path.write_text(proc.stderr or "", encoding="utf-8")
+
+    if proc.returncode != 0:
+        logger.warning(
+            "Claude Code CLI exited with code %d (stderr saved to %s).",
+            proc.returncode, stderr_path,
+        )
+        raw_path.write_text(proc.stdout or "", encoding="utf-8")
+        return []
+
+    stdout = proc.stdout or ""
+
+    # --output-format json wraps the assistant response in a single JSON
+    # object with a "result" field. Fall back to treating stdout as the raw
+    # response if that structure isn't present (e.g. CLI upgrade changes it).
+    raw_response = stdout
+    try:
+        envelope = json.loads(stdout)
+        if isinstance(envelope, dict) and "result" in envelope:
+            raw_response = envelope["result"] or ""
+    except json.JSONDecodeError:
+        pass
+
+    raw_path.write_text(raw_response, encoding="utf-8")
+
+    return _parse_labeller_json_response(raw_response, raw_path)
 
 
 def run_stage_labeling(
@@ -5331,8 +5529,32 @@ def run_stage_labeling(
             json.dump(factor_labels, f, indent=2, ensure_ascii=False)
 
         # Approach B: LLM labeling with psychometric-aware prompt
-        model_slug = LABELLER_MODEL.replace("/", "_")
-        llm_cache_path = label_dir / f"llm_labels_{key}_{model_slug}.json"
+        if LABELLER_USE_CLAUDE_CLI:
+            labeller_name = "claudecli"
+            active_model = LABELLER_CLAUDE_CLI_MODEL
+
+            def _invoke_labeller() -> list[dict]:
+                return _label_factors_claude_cli(
+                    loadings, column_defs, items,
+                    top_n=TOP_LOADING_ITEMS,
+                    analysis_label=key,
+                )
+        else:
+            labeller_name = None
+            active_model = LABELLER_MODEL
+
+            def _invoke_labeller() -> list[dict]:
+                return _label_factors_llm(
+                    loadings, column_defs, items,
+                    top_n=TOP_LOADING_ITEMS,
+                    model=LABELLER_MODEL,
+                    provider_name=LABELLER_PROVIDER,
+                    analysis_label=key,
+                )
+
+        model_slug = active_model.replace("/", "_")
+        cache_suffix = f"_{labeller_name}_{model_slug}" if labeller_name else f"_{model_slug}"
+        llm_cache_path = label_dir / f"llm_labels_{key}{cache_suffix}.json"
         try:
             if llm_cache_path.exists():
                 print(f"\n  [Cache] Loading LLM labels from {llm_cache_path.name}")
@@ -5345,13 +5567,7 @@ def run_stage_labeling(
                         f"  [Cache] {llm_cache_path.name} is {reason}; "
                         "regenerating labels."
                     )
-                    llm_labels = _label_factors_llm(
-                        loadings, column_defs, items,
-                        top_n=TOP_LOADING_ITEMS,
-                        model=LABELLER_MODEL,
-                        provider_name=LABELLER_PROVIDER,
-                        analysis_label=key,
-                    )
+                    llm_labels = _invoke_labeller()
                     if not llm_labels:
                         raise ValueError(
                             "Labeller returned no parseable factor labels; "
@@ -5360,13 +5576,7 @@ def run_stage_labeling(
                     with open(llm_cache_path, "w") as f:
                         json.dump(llm_labels, f, indent=2, ensure_ascii=False)
             else:
-                llm_labels = _label_factors_llm(
-                    loadings, column_defs, items,
-                    top_n=TOP_LOADING_ITEMS,
-                    model=LABELLER_MODEL,
-                    provider_name=LABELLER_PROVIDER,
-                    analysis_label=key,
-                )
+                llm_labels = _invoke_labeller()
                 if not llm_labels:
                     raise ValueError(
                         "Labeller returned no parseable factor labels; "
@@ -5435,48 +5645,11 @@ def _validation_shuffle_test(
 ) -> dict:
     """Shuffle control: permute columns and check that no factors emerge."""
     print("\n[Stage 5] Validation — Shuffle control")
-    rng = np.random.default_rng(SEED)
+    from src_dev.factor_analysis.validation import shuffle_control_test
 
-    shuffled = data_clean.copy()
-    for j in range(shuffled.shape[1]):
-        rng.shuffle(shuffled[:, j])
-
-    # Use permutation-based parallel analysis (correct null for ordinal data)
-    pa_shuffled = parallel_analysis(shuffled, random_state=SEED, method="permutation")
-    n_found = pa_shuffled["n_recommended"]
-
-    result = {
-        "n_factors_recommended": n_found,
-        "pass": n_found == 0,
-        "real_eigenvalues_top15": pa_real["real_eigenvalues"][:15].tolist(),
-        "shuffled_eigenvalues_top15": pa_shuffled["real_eigenvalues"][:15].tolist(),
-        "shuffled_threshold_top15": pa_shuffled["random_threshold"][:15].tolist(),
-    }
-    print(f"  Shuffle: {n_found} factors found (expected 0, "
-          f"{'PASS' if result['pass'] else 'FAIL'})")
-
-    # ── Plot: real vs shuffled scree ──────────────────────────────────────
-    n_show = min(20, len(pa_real["real_eigenvalues"]))
-    x = np.arange(1, n_show + 1)
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(x, pa_real["real_eigenvalues"][:n_show], "o-", color="#2563eb",
-            linewidth=2, markersize=5, label="Real data", zorder=3)
-    ax.plot(x, pa_shuffled["real_eigenvalues"][:n_show], "s--", color="#dc2626",
-            linewidth=1.5, markersize=4, label="Shuffled data", zorder=2)
-    ax.plot(x, pa_shuffled["random_threshold"][:n_show], "^:", color="#9ca3af",
-            linewidth=1, markersize=3, label="Permutation 95th pctile", zorder=1)
-    ax.set_xlabel("Component")
-    ax.set_ylabel("Eigenvalue")
-    ax.set_title("Shuffle Control — Scree Comparison", fontsize=13, fontweight="bold")
-    ax.legend(fontsize=10)
-    ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(val_dir / "shuffle_scree.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-    with open(val_dir / "shuffle_test.json", "w") as f:
-        json.dump(result, f, indent=2)
-    return result
+    return shuffle_control_test(
+        data_clean, pa_real, val_dir, seed=SEED, plt=plt,
+    )
 
 
 def _validation_predictivity_test(
@@ -5485,135 +5658,17 @@ def _validation_predictivity_test(
     plt,
 ) -> dict:
     """Held-out item predictivity: factor scores from training items predict held-out items."""
-    from sklearn.linear_model import LinearRegression
-    from sklearn.model_selection import cross_val_score
-
     print("\n[Stage 5] Validation — Held-out item predictivity")
+    from src_dev.factor_analysis.validation import item_holdout_predictivity_test
 
-    rng = np.random.default_rng(SEED + 1)
-    n_items = data_clean.shape[1]
-
-    if n_items <= HOLDOUT_N_ITEMS + 10:
-        result = {"pass": False, "note": f"Not enough items ({n_items}) for holdout"}
-        print(f"  Not enough items ({n_items}) — skipped")
-        with open(val_dir / "predictivity.json", "w") as f:
-            json.dump(result, f, indent=2)
-        return result
-
-    holdout_idx = rng.choice(n_items, HOLDOUT_N_ITEMS, replace=False)
-    train_idx = np.setdiff1d(np.arange(n_items), holdout_idx)
-
-    train_data = data_clean[:, train_idx]
-    holdout_data = data_clean[:, holdout_idx]
-
-    # FA on training items
-    pa_train = parallel_analysis(train_data, random_state=SEED)
-    n_factors = pa_train["n_recommended"]
-
-    if n_factors == 0:
-        result = {"pass": False, "n_factors_train": 0, "note": "No factors on training items"}
-        print("  No factors on training items — FAIL")
-        with open(val_dir / "predictivity.json", "w") as f:
-            json.dump(result, f, indent=2)
-        return result
-
-    fa_train = run_factor_analysis(
-        train_data, n_factors=n_factors, method=FA_METHOD, rotation=FA_ROTATIONS[0],
+    return item_holdout_predictivity_test(
+        data_clean, val_dir,
+        holdout_n_items=HOLDOUT_N_ITEMS,
+        fa_method=FA_METHOD,
+        rotation=FA_ROTATIONS[0],
+        seed=SEED + 1,
+        plt=plt,
     )
-    scores = fa_train["scores"]  # [n_personas, n_factors]
-
-    N_PERMUTATIONS = 100
-    cv_r2_per_item: list[float] = []
-    p_values: list[float] = []
-
-    for j in range(holdout_data.shape[1]):
-        y = holdout_data[:, j]
-
-        # 10-fold cross-validated R²
-        cv_r2 = float(np.mean(cross_val_score(
-            LinearRegression(), scores, y, cv=10, scoring="r2",
-        )))
-        cv_r2_per_item.append(cv_r2)
-
-        # Permutation null
-        null_r2s = []
-        for _ in range(N_PERMUTATIONS):
-            perm_scores = rng.permutation(scores, axis=0)
-            null_r2 = float(np.mean(cross_val_score(
-                LinearRegression(), perm_scores, y, cv=10, scoring="r2",
-            )))
-            null_r2s.append(null_r2)
-        p_val = float(np.mean(np.array(null_r2s) >= cv_r2))
-        p_values.append(p_val)
-
-    cv_r2_arr = np.array(cv_r2_per_item)
-    p_arr = np.array(p_values)
-
-    # FDR correction (Benjamini-Hochberg)
-    n_tests = len(p_arr)
-    sorted_idx = np.argsort(p_arr)
-    fdr_threshold = np.array([(i + 1) / n_tests * 0.05 for i in range(n_tests)])
-    reject_sorted = p_arr[sorted_idx] <= fdr_threshold
-    # Find the largest index where we reject; all indices up to that reject too
-    if reject_sorted.any():
-        max_reject = np.max(np.where(reject_sorted))
-        significant = np.zeros(n_tests, dtype=bool)
-        significant[sorted_idx[:max_reject + 1]] = True
-    else:
-        significant = np.zeros(n_tests, dtype=bool)
-
-    n_sig = int(significant.sum())
-    pct_sig = n_sig / n_tests
-
-    result = {
-        "n_holdout_items": HOLDOUT_N_ITEMS,
-        "n_train_items": int(len(train_idx)),
-        "n_factors_train": n_factors,
-        "n_permutations": N_PERMUTATIONS,
-        "mean_cv_r2": float(cv_r2_arr.mean()),
-        "median_cv_r2": float(np.median(cv_r2_arr)),
-        "per_item_cv_r2": [float(r) for r in cv_r2_per_item],
-        "per_item_p_value": [float(p) for p in p_values],
-        "per_item_significant_fdr05": [bool(s) for s in significant],
-        "n_significant_fdr05": n_sig,
-        "pct_significant_fdr05": float(pct_sig),
-        "pass": pct_sig > 0.5,
-    }
-
-    print(f"  Predictivity: {n_factors} factors, mean CV R²={cv_r2_arr.mean():.4f}, "
-          f"{n_sig}/{n_tests} items significant (FDR<0.05) "
-          f"({'PASS' if result['pass'] else 'FAIL'})")
-
-    # ── Plot: per-item CV R² bar chart ────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(max(8, HOLDOUT_N_ITEMS * 0.4), 5))
-    x = np.arange(HOLDOUT_N_ITEMS)
-    colors = ["#2563eb" if sig else "#d1d5db" for sig in significant]
-    ax.bar(x, cv_r2_per_item, color=colors, edgecolor="white", width=0.7)
-    ax.axhline(0, color="black", linewidth=0.5)
-    ax.set_xlabel("Held-out item index")
-    ax.set_ylabel("10-fold CV R²")
-    ax.set_title(
-        f"Held-out Item Predictivity — {n_factors} factors, "
-        f"{n_sig}/{n_tests} significant (FDR<0.05)",
-        fontsize=12, fontweight="bold",
-    )
-    ax.set_xticks(x)
-    ax.set_xticklabels(x, fontsize=7, rotation=90)
-    ax.grid(axis="y", alpha=0.3)
-    # Legend
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor="#2563eb", label="Significant (FDR<0.05)"),
-        Patch(facecolor="#d1d5db", label="Not significant"),
-    ]
-    ax.legend(handles=legend_elements, fontsize=9)
-    fig.tight_layout()
-    fig.savefig(val_dir / "predictivity_r2.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-    with open(val_dir / "predictivity.json", "w") as f:
-        json.dump(result, f, indent=2)
-    return result
 
 
 def _validation_stability_test(
@@ -5621,114 +5676,38 @@ def _validation_stability_test(
     val_dir: Path,
     plt,
 ) -> dict:
-    """Stability: ICC(1) per factor across rollouts from the same seed prompt."""
-    from src_dev.factor_analysis.reliability import compute_icc
+    """Stability: ICC(1) per factor across rollouts from the same seed prompt.
 
+    Runs one ICC pass per FA variant with factors (rotation × residualization),
+    writing each to ``val_dir/stability/<fa_key>/``. Returns a dict keyed by
+    ``fa_key`` plus a ``mean_icc1_by_variant`` summary.
+    """
     print("\n[Stage 5] Validation — Stability (ICC)")
+    from src_dev.factor_analysis.validation import stability_icc_test
 
-    # Find the first FA result with factors
-    fa_key = None
-    for key, result in fa_results.items():
-        if result.get("n_factors", 0) > 0 and "fa_result" in result:
-            fa_key = key
-            break
+    variant_keys = [
+        k for k, v in fa_results.items()
+        if v.get("n_factors", 0) > 0 and "fa_result" in v
+    ]
+    if not variant_keys:
+        return stability_icc_test(fa_results, val_dir, plt=plt)
 
-    if fa_key is None:
-        result = {"pass": False, "note": "No FA results with factors"}
-        print("  No factors available — skipped")
-        with open(val_dir / "stability.json", "w") as f:
-            json.dump(result, f, indent=2)
-        return result
+    per_variant: dict[str, dict] = {}
+    for key in variant_keys:
+        variant_dir = val_dir / "stability" / key
+        per_variant[key] = stability_icc_test(
+            fa_results, variant_dir, fa_key=key, plt=plt,
+        )
 
-    fa_result = fa_results[fa_key]["fa_result"]
-    meta = fa_results[fa_key]["metadata"]
-    scores = fa_result["scores"]
-    n_factors = scores.shape[1]
-
-    icc_result = compute_icc(scores, meta, n_factors)
-
-    if icc_result.get("error"):
-        result = {"pass": False, "note": icc_result["error"], "fa_key": fa_key}
-        print(f"  {icc_result['error']} — skipped")
-        with open(val_dir / "stability.json", "w") as f:
-            json.dump(result, f, indent=2)
-        return result
-
-    mean_icc1 = float(np.mean(icc_result["icc1"]))
-
-    result = {
-        "fa_key": fa_key,
-        "n_factors": n_factors,
-        "n_groups": icc_result["n_groups"],
-        "n_total": icc_result["n_total"],
-        "mean_group_size": icc_result["mean_group_size"],
-        "icc1_per_factor": icc_result["icc1"],
-        "icc1_ci_lower": icc_result["icc1_ci_lower"],
-        "icc1_ci_upper": icc_result["icc1_ci_upper"],
-        "icc_k_per_factor": icc_result["icc_k"],
-        "mean_icc1": mean_icc1,
-        "mean_icc_k": float(np.mean(icc_result["icc_k"])),
-        "pass": mean_icc1 >= 0.20,
+    mean_icc1_by_variant = {
+        k: v.get("mean_icc1") for k, v in per_variant.items()
     }
-
-    print(f"  Stability: {icc_result['n_groups']} prompts, {n_factors} factors, "
-          f"mean ICC(1)={mean_icc1:.3f} "
-          f"({'PASS' if result['pass'] else 'FAIL'})")
-    for f_idx in range(n_factors):
-        ci_lo = icc_result["icc1_ci_lower"][f_idx]
-        ci_hi = icc_result["icc1_ci_upper"][f_idx]
-        icc_k = icc_result["icc_k"][f_idx]
-        print(f"    Factor {f_idx}: ICC(1)={icc_result['icc1'][f_idx]:.3f} "
-              f"[{ci_lo:.3f}, {ci_hi:.3f}], ICC(k)={icc_k:.3f}")
-
-    # ── Plot: ICC(1) bar chart with CIs ───────────────────────────────────
-    fig, ax = plt.subplots(figsize=(max(6, n_factors * 1.2 + 1), 5))
-    x = np.arange(n_factors)
-    icc1 = np.array(icc_result["icc1"])
-    ci_lo = np.array(icc_result["icc1_ci_lower"])
-    ci_hi = np.array(icc_result["icc1_ci_upper"])
-    yerr = np.array([icc1 - ci_lo, ci_hi - icc1])
-
-    # Color by Cicchetti benchmark
-    colors = []
-    for v in icc1:
-        if v >= 0.75:
-            colors.append("#16a34a")  # excellent — green
-        elif v >= 0.60:
-            colors.append("#2563eb")  # good — blue
-        elif v >= 0.40:
-            colors.append("#f59e0b")  # fair — amber
-        else:
-            colors.append("#dc2626")  # poor — red
-
-    bars = ax.bar(x, icc1, color=colors, edgecolor="white", width=0.6, zorder=3)
-    ax.errorbar(x, icc1, yerr=yerr, fmt="none", ecolor="black",
-                elinewidth=1, capsize=3, zorder=4)
-
-    # Reference lines
-    ax.axhline(0.75, color="#16a34a", linestyle="--", linewidth=0.8, alpha=0.5)
-    ax.axhline(0.40, color="#f59e0b", linestyle="--", linewidth=0.8, alpha=0.5)
-    ax.text(n_factors - 0.3, 0.76, "excellent", fontsize=7, color="#16a34a", ha="right")
-    ax.text(n_factors - 0.3, 0.41, "fair", fontsize=7, color="#f59e0b", ha="right")
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"F{i}" for i in range(n_factors)], fontsize=11)
-    ax.set_ylim(0, min(1.0, float(ci_hi.max()) * 1.2 + 0.05))
-    ax.set_ylabel("ICC(1)")
-    ax.set_xlabel("Factor")
-    ax.set_title(
-        f"Test-Retest Stability — ICC(1) per Factor\n"
-        f"({icc_result['n_groups']} prompts, mean k={icc_result['mean_group_size']:.1f} rollouts)",
-        fontsize=13, fontweight="bold",
-    )
-    ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(val_dir / "stability_icc.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-    with open(val_dir / "stability.json", "w") as f:
-        json.dump(result, f, indent=2)
-    return result
+    all_pass = all(v.get("pass") for v in per_variant.values())
+    return {
+        "per_variant": per_variant,
+        "mean_icc1_by_variant": mean_icc1_by_variant,
+        "pass": all_pass,
+    }
 
 
 def run_stage_validation(
@@ -5757,8 +5736,8 @@ def run_stage_validation(
             pa_real_result = result["parallel_analysis"]
             break
     if pa_real_result is None:
-        # Compute if not cached in fa_results
-        pa_real_result = parallel_analysis(data_clean, random_state=SEED)
+        # Compute if not cached in fa_results (match shuffle test's ordinal-friendly null)
+        pa_real_result = parallel_analysis(data_clean, random_state=SEED, method="permutation")
 
     results = {}
 
