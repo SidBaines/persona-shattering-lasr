@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 HF_REPO = "persona-shattering-lasr/monorepo"
 
-@dataclass
-class LoraHFCatalogue(frozen=True):
+@dataclass(frozen=True)
+class LoraHFCatalogue:
     o_plus: str = "fine_tuning/llama-3.1-8b-it/ocean/openness/amplifier/vanton1/lora/openness_amplifying_full_vanton1-persona"
     o_minus: str = "fine_tuning/llama-3.1-8b-it/ocean/openness/suppressor/vanton1/lora/openness_suppressing_full_vanton1-persona"
     c_plus: str = "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/amplifier/v1/lora/souped"
