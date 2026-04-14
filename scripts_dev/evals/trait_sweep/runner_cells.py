@@ -28,8 +28,6 @@ Plus TRAIT-benchmark fingerprint fields (see
 from __future__ import annotations
 
 import argparse
-import importlib
-import itertools
 import json
 import math
 import shutil
@@ -53,6 +51,13 @@ from src_dev.evals.cell_sweep.cell_identity import (
     format_scale,
     sweep_hf_root,
 )
+from src_dev.evals.cell_sweep.runner import (
+    enumerate_cells as _enumerate_cells_generic,
+    load_config_module,
+    parse_sweep_flags,
+    upload_sweep_root as _upload_sweep_root_generic,
+    write_cell_info,
+)
 from src_dev.evals.trait_sweep.defaults import (
     check_trait_defaults,
     confirm_or_abort,
@@ -66,10 +71,7 @@ from src_dev.evals.trait_sweep.layout import (
     hydrate_cell,
     upload_cell,
 )
-from src_dev.utils.hf_hub import (
-    login_from_env,
-    upload_folder_to_dataset_repo,
-)
+from src_dev.utils.hf_hub import login_from_env
 
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 EVAL_NAME_DEFAULT = "trait_logprobs"
@@ -83,24 +85,7 @@ STAGING_ROOT = Path("scratch/trait_sweep_staging")
 
 
 def _parse_flags() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Cell-oriented TRAIT-benchmark sweep runner."
-    )
-    p.add_argument(
-        "--config", required=True,
-        help="Python module path to the config constants.",
-    )
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--no-upload", action="store_true")
-    p.add_argument(
-        "--allow-custom-fingerprint", action="store_true",
-        help="Skip the canonical-defaults prompt for config drift.",
-    )
-    return p.parse_args()
-
-
-def _load_config(module_path: str) -> ModuleType:
-    return importlib.import_module(module_path)
+    return parse_sweep_flags("Cell-oriented TRAIT-benchmark sweep runner.")
 
 
 # ---------------------------------------------------------------------------
@@ -224,26 +209,7 @@ def _trait_spec_name(nc: NormalisedConfig, trait: str) -> str:
 
 
 def _enumerate_cells(nc: NormalisedConfig) -> list[CanonicalCell]:
-    """Cartesian product over scale lists; dedupe after zero-dropping.
-
-    ``{A=1, B=0}`` and ``{A=1, C=0}`` collapse to the same canonical cell
-    ``{A=1}`` because zero-scale entries are dropped — dedupe to avoid
-    repeating work.
-    """
-    if not nc.adapters:
-        return [CanonicalCell(entries=())]
-    scale_lists = [nc.scales_per_adapter[a.slug] for a in nc.adapters]
-    seen: set[tuple[tuple[str, float], ...]] = set()
-    cells: list[CanonicalCell] = []
-    for combo in itertools.product(*scale_lists):
-        pairs = [(nc.adapters[i], float(combo[i])) for i in range(len(nc.adapters))]
-        cell = CanonicalCell.from_scales(pairs)
-        key = tuple((s.slug, sc) for s, sc in cell.entries)
-        if key in seen:
-            continue
-        seen.add(key)
-        cells.append(cell)
-    return cells
+    return _enumerate_cells_generic(nc.adapters, nc.scales_per_adapter)
 
 
 # ---------------------------------------------------------------------------
@@ -692,29 +658,6 @@ def _make_plots(
 # ---------------------------------------------------------------------------
 
 
-def _write_cell_info(cell: CanonicalCell, cell_dir: Path, fingerprint: str) -> None:
-    payload = {
-        "tier": cell.tier,
-        "variant_label": cell.variant_label(),
-        "entries": [
-            {
-                "ref": s.ref,
-                "slug": s.slug,
-                "category": s.category,
-                "trait": s.trait,
-                "direction": s.direction,
-                "version": s.version,
-                "scale": sc,
-            }
-            for s, sc in cell.entries
-        ],
-        "fingerprint": fingerprint,
-    }
-    (cell_dir / CELL_INFO_RELPATH).write_text(
-        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-    )
-
-
 def _upload_cells(
     nc: NormalisedConfig,
     cells: list[CanonicalCell],
@@ -722,7 +665,7 @@ def _upload_cells(
     fingerprint: str,
 ) -> None:
     for cell in cells:
-        _write_cell_info(cell, cell_dirs[cell], fingerprint)
+        write_cell_info(cell, cell_dirs[cell], fingerprint)
         upload_cell(
             cell,
             local_dir=cell_dirs[cell],
@@ -745,12 +688,11 @@ def _upload_sweep_root(
         eval_name=nc.eval_name,
         fingerprint=fingerprint,
     )
-    upload_folder_to_dataset_repo(
-        local_dir=sweep_root,
+    _upload_sweep_root_generic(
+        sweep_root,
+        hf_path=hf_path,
         repo_id=HF_REPO_ID,
-        path_in_repo=hf_path,
         commit_message=f"{nc.eval_name}: upload sweep analysis + plots",
-        allow_patterns=["plots/**", "analysis/**", "sweep_config.json"],
     )
     print(f"  [upload] sweep root → {HF_REPO_ID}/{hf_path}")
 
@@ -792,7 +734,7 @@ def _print_dry_run(
 
 def main() -> None:
     flags = _parse_flags()
-    cfg = _load_config(flags.config)
+    cfg = load_config_module(flags.config)
 
     diffs = check_trait_defaults(cfg)
     confirm_or_abort(diffs, allow_custom=flags.allow_custom_fingerprint)
