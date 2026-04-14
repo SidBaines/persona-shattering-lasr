@@ -64,14 +64,19 @@ def split_judgment_into_qualities(
         per_scenario: list[dict[str, Any]] = []
         for j in judgments:
             raw = j.get(quality)
+            # Bloom emits 0 when *all* judgment samples fail to parse the
+            # <..._score> XML tag (see step4_judgment.py: avg = ... if scores
+            # else 0). Treat 0 as a parse-failure sentinel since every legitimate
+            # bloom quality uses a positive scale (OCEAN 1-9, coherence 1-10).
+            is_valid = isinstance(raw, (int, float)) and float(raw) != 0.0
             scenario_entry: dict[str, Any] = {
-                "score": float(raw) if isinstance(raw, (int, float)) else None,
+                "score": float(raw) if is_valid else None,
             }
             for passthrough in ("scenario_id", "scenario_index", "variation_id", "rep"):
                 if passthrough in j:
                     scenario_entry[passthrough] = j[passthrough]
             per_scenario.append(scenario_entry)
-            if isinstance(raw, (int, float)):
+            if is_valid:
                 scores.append(float(raw))
 
         payload: dict[str, Any] = {

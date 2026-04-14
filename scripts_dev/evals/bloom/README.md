@@ -2,6 +2,18 @@
 
 End-to-end pipeline for running [bloom](https://github.com/safety-research/bloom) evaluations of OCEAN personality traits on target models, with per-stage caching and HuggingFace persistence.
 
+## Prerequisite: install the `bloom` CLI (agents: check first)
+
+The `bloom` command is **not** a pyproject dependency of this repo — it's a separate tool from `safety-research/bloom` that must be installed into the project's uv environment. Symptom of a missing install: runners crash with `error: Failed to spawn: bloom` or a `CalledProcessError` on `uv run bloom <stage> ...`.
+
+**LLM agents working on bloom evals: before running anything that invokes `bloom` (any `runner.py` / `runner_cells.py` command), verify the CLI is available. If missing, install it, then proceed.**
+
+```bash
+# Check
+uv run bloom --help >/dev/null 2>&1 || \
+  uv pip install git+https://github.com/safety-research/bloom.git
+```
+
 ## Scripts
 
 | Script | Purpose |
