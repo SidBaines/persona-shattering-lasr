@@ -38,15 +38,27 @@ class TraitScoringResult:
             NaN for traits with zero valid responses for that persona.
         coverage: DataFrame indexed by ``k`` with one column per trait
             holding the count of valid (parsed, non-null) responses for that
-            persona/trait.
+            persona/trait (post choice-mass filter).
         items_per_trait: Total number of questionnaire items per trait.
         trait_order: Canonical trait order used in the scores columns.
+        min_trait_coverage: Minimum fraction of a trait's items that must have
+            valid responses for a persona's cell to be kept. 0.0 means no
+            persona filter was applied.
+        filtered_by_trait: Per-trait count of personas whose cell was dropped
+            to NaN because their coverage fraction fell below
+            ``min_trait_coverage``. Empty when no filter was applied.
     """
 
     scores: pd.DataFrame
     coverage: pd.DataFrame
     items_per_trait: dict[str, int]
     trait_order: list[str]
+    min_trait_coverage: float = 0.0
+    filtered_by_trait: dict[str, int] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.filtered_by_trait is None:
+            self.filtered_by_trait = {}
 
 
 def _load_questionnaire_trait_mcq_items(questionnaire_path: Path) -> dict[str, dict]:
@@ -74,6 +86,9 @@ def compute_trait_scores(
     questionnaire_path: Path | str,
     *,
     trait_order: list[str] | None = None,
+    dynamic_mass_filter: bool = True,
+    min_choice_mass: float = 0.0,
+    min_trait_coverage: float = 0.0,
 ) -> TraitScoringResult:
     """Compute per-persona TRAIT scores from raw questionnaire responses.
 
@@ -84,6 +99,19 @@ def compute_trait_scores(
         trait_order: Optional explicit column order for the scores DataFrame.
             Defaults to the OCEAN traits (lower-cased) in canonical order,
             restricted to traits actually present in the questionnaire.
+        dynamic_mass_filter: If True (default), drop logprob-mode responses
+            whose ``choice_mass`` is below ``1 / num_choices`` (i.e. below the
+            uniform-prior floor). Mirrors the default behaviour of the
+            personality logprob scorer's ``logprob_mcq_ratio`` metric. Only
+            applies to entries that carry a ``choice_mass`` field (logprob
+            mode); categorical fallbacks are unaffected.
+        min_choice_mass: Fixed minimum ``choice_mass`` threshold applied after
+            the dynamic filter. Default 0.0 (no fixed filter).
+        min_trait_coverage: Minimum fraction of a trait's items (in [0, 1])
+            that must have valid post-filter responses for a persona's score
+            to be retained. Cells below this threshold are set to NaN (so they
+            drop out of downstream plots/aggregations). Default 0.0 keeps
+            every cell with at least one valid response.
 
     Returns:
         A ``TraitScoringResult`` with per-persona score and coverage frames.
@@ -129,6 +157,21 @@ def compute_trait_scores(
 
             probs = entry.get("probs")
             if isinstance(probs, dict) and probs:
+                # Apply choice-mass filters (logprob mode only). ``choice_mass``
+                # is the total probability on valid choice letters out of the
+                # full vocabulary, written alongside ``probs`` by the stage-2
+                # logprob parser.
+                cm = entry.get("choice_mass")
+                if dynamic_mass_filter and isinstance(cm, (int, float)):
+                    num_choices = len(mapping) or 4
+                    if cm < (1.0 / num_choices if num_choices > 0 else 0.0):
+                        continue
+                if (
+                    min_choice_mass > 0.0
+                    and isinstance(cm, (int, float))
+                    and cm < min_choice_mass
+                ):
+                    continue
                 # Continuous expected score over found letters.
                 value = 0.0
                 for letter, p in probs.items():
@@ -165,11 +208,28 @@ def compute_trait_scores(
         scores.loc[k, trait] = float(np.mean(values))
         coverage.loc[k, trait] = int(len(values))
 
+    filtered_by_trait: dict[str, int] = {t: 0 for t in trait_order}
+    if min_trait_coverage > 0.0:
+        for trait in trait_order:
+            n_items = items_per_trait.get(trait, 0)
+            if n_items <= 0:
+                continue
+            threshold = min_trait_coverage * n_items
+            # Only consider cells that actually have a score (i.e. at least
+            # one valid response); cells that were already NaN don't count as
+            # "filtered" here.
+            has_score = scores[trait].notna()
+            low = has_score & (coverage[trait].astype(float) < threshold)
+            filtered_by_trait[trait] = int(low.sum())
+            scores.loc[low, trait] = np.nan
+
     return TraitScoringResult(
         scores=scores,
         coverage=coverage,
         items_per_trait=dict(items_per_trait),
         trait_order=trait_order,
+        min_trait_coverage=float(min_trait_coverage),
+        filtered_by_trait=filtered_by_trait,
     )
 
 
@@ -206,6 +266,9 @@ def save_trait_scores(
         "n_personas": int(len(result.scores)),
         "mean_by_trait": result.scores.mean(skipna=True).to_dict(),
         "std_by_trait": result.scores.std(skipna=True).to_dict(),
+        "n_personas_scored_by_trait": result.scores.notna().sum().astype(int).to_dict(),
+        "min_trait_coverage": result.min_trait_coverage,
+        "n_personas_filtered_by_trait": dict(result.filtered_by_trait),
     }
     summary_path = output_dir / "trait_scores_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
