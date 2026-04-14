@@ -16,7 +16,7 @@ under `<run_dir>/validation/`:
 | `shuffle_control` | `validation/shuffle_test.json` | 0 factors on shuffled data |
 | `item_holdout` | `validation/predictivity.json` | >50% of held-out items FDR-significant |
 | `stability_icc` | `validation/stability/<fa_key>/stability.json` | mean ICC(1) ≥ `pass_threshold_mean_icc1` (default 0.20) |
-| `variance_decomp` | `validation/variance_decomp/` | no factor with archetype‖scenario η² ≥ 0.30 |
+| `variance_decomp` | `validation/variance_decomp/` | scenario-η² < 0.30 for every factor **and** at least one factor has archetype-η² ≥ 0.05 (scenario = ceiling, archetype = floor — see below) |
 | `trait_convergence` | `validation/trait_convergence/` | ≥ 3 of 5 OCEAN traits hit \|ρ\| ≥ 0.30 |
 | `stability_sweep_random50` | `validation/stability_sweep_random_50.*` | median \|φ\| ≥ 0.80 over 10 splits |
 | `stability_sweep_loao` | `validation/stability_sweep_loao.*` | median \|φ\| ≥ 0.80 across archetype drops |
@@ -26,6 +26,25 @@ under `<run_dir>/validation/`:
 
 Tuning constants for each test live immediately below `VALIDATION_TESTS_TO_RUN`
 (`STABILITY_SWEEP_*`, `TRAIT_CONVERGENCE_*`, `PERSONA_ITEM_CV_*`, etc.).
+
+### A note on variance decomposition
+
+The `variance_decomp` test reports η² for each factor against `archetype`,
+`scenario_id`, and `input_group_id`. The pass criterion is **asymmetric**
+because the two main fields have opposite research meaning:
+
+- **Scenario as a ceiling.** `scenario_id` is a prompt artifact (the situation
+  the rollout was grounded in). High scenario-η² on a factor means that
+  factor is tracking *which scenario was used*, not anything about the
+  persona. We fail any factor with scenario-η² ≥ `VARIANCE_DECOMP_SCENARIO_CEILING`.
+- **Archetype as a floor.** `archetype` labels the constructed persona. High
+  archetype-η² is *evidence* a factor captures real persona variation
+  (the trait you built in to that archetype). We fail only the degenerate
+  case where no factor has archetype-η² ≥ `VARIANCE_DECOMP_ARCHETYPE_FLOOR`
+  — i.e. the factor structure is blind to every persona you constructed.
+
+`input_group_id` is reported for reference only (trivially high since
+`NUM_ROLLOUTS_PER_PROMPT > 1`).
 
 ## Single-run workflow
 
