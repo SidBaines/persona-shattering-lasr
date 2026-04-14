@@ -69,6 +69,12 @@ from src_dev.factor_analysis.factor_analysis import adequacy_tests, run_factor_a
 from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 from src_dev.factor_analysis.persistence import save_factor_analysis
 from src_dev.factor_analysis.preprocessing import residualize
+from src_dev.factor_analysis.trait_alignment import (
+    build_trait_oriented_matrix,
+    compute_factor_trait_alignment,
+    plot_all_alignment,
+    save_alignment,
+)
 from src_dev.inference import InferenceConfig
 from src_dev.inference.config import OpenRouterProviderConfig, RetryConfig, VllmProviderConfig
 from src_dev.inference.providers import get_provider
@@ -174,6 +180,18 @@ QUESTIONNAIRE_TOP_LOGPROBS = 20
 # Temperature for the logprob pass. 1.0 returns the raw model distribution
 # (canonical for TRAIT scoring).
 QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
+# Trait-scoring filters applied when aggregating logprob responses. The
+# dynamic filter drops items whose total choice-letter mass is below
+# 1/num_choices (matching the default of the personality logprob scorer's
+# ``logprob_mcq_ratio`` metric). ``MIN_CHOICE_MASS`` is a fixed floor applied
+# on top of the dynamic filter (0.0 disables it).
+QUESTIONNAIRE_DYNAMIC_MASS_FILTER = True
+QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
+# Per-persona minimum coverage per trait: fraction of a trait's items (in
+# [0, 1]) that must have valid post-filter responses for a persona's trait
+# score to be kept. Cells below this threshold are set to NaN so they drop
+# out of histograms/heatmaps/correlations. 0.0 disables the filter.
+QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
@@ -2070,6 +2088,9 @@ def run_stage_trait_scoring(metadata: list[dict] | None = None) -> dict | None:
     result = compute_trait_scores(
         raw_responses_path=raw_path,
         questionnaire_path=questionnaire_path,
+        dynamic_mass_filter=QUESTIONNAIRE_DYNAMIC_MASS_FILTER,
+        min_choice_mass=QUESTIONNAIRE_MIN_CHOICE_MASS,
+        min_trait_coverage=QUESTIONNAIRE_MIN_TRAIT_COVERAGE,
     )
     written = save_trait_scores(result, output_dir, metadata=metadata)
 
@@ -2085,8 +2106,15 @@ def run_stage_trait_scoring(metadata: list[dict] | None = None) -> dict | None:
         "trait_order": result.trait_order,
         "items_per_trait": result.items_per_trait,
         "mean_by_trait": result.scores.mean(skipna=True).to_dict(),
+        "n_personas_scored_by_trait": result.scores.notna().sum().astype(int).to_dict(),
     }
     print(f"[Trait-scoring] {summary}")
+    if result.min_trait_coverage > 0.0:
+        print(
+            f"[Trait-scoring] Persona filter: dropped cells with coverage < "
+            f"{result.min_trait_coverage:.0%} of items per trait — removed "
+            f"{result.filtered_by_trait}"
+        )
     print(f"[Trait-scoring] Wrote {len(written)} files to {output_dir}")
     return {"paths": written, "result": result}
 
@@ -2575,6 +2603,56 @@ def run_stage_factor_analysis(
                     for col in cols_filtered
                 ], f, indent=2, ensure_ascii=False)
 
+            # Factor–trait (OCEAN) alignment analysis. Only meaningful when
+            # every FA row carries a primary_dimension label (trait_mcq /
+            # likert blocks). Mean-signed loading is not trait-interpretable
+            # here because the response matrix is letter-encoded (1..4) rather
+            # than trait-oriented — but top-K counts and |mean loading| by
+            # trait remain valid, so we save them and flag the signed caveat.
+            item_dims_all = [col.get("dimension") for col in cols_filtered]
+            if all(d is not None for d in item_dims_all):
+                ocean_canonical = [
+                    "openness", "conscientiousness", "extraversion",
+                    "agreeableness", "neuroticism",
+                ]
+                present = [t for t in ocean_canonical if t in item_dims_all]
+                extras = sorted(set(item_dims_all) - set(present))
+                trait_order = present + extras
+
+                alignment = compute_factor_trait_alignment(
+                    loadings=fa_result["loadings"],
+                    item_dims=item_dims_all,
+                    trait_order=trait_order,
+                    top_k=min(20, len(item_dims_all)),
+                )
+                align_dir = pa_dir / f"fa_{n_factors}_{FA_METHOD}_{rotation}_alignment"
+                save_alignment(alignment, align_dir)
+                plot_all_alignment(
+                    alignment, align_dir,
+                    title_prefix=f"{resid_label} / {rotation}",
+                )
+                print(
+                    f"  [Alignment] {rotation}: factor→trait winners "
+                    f"(top-{alignment.top_k}):"
+                )
+                for fi, label in enumerate(alignment.factor_labels):
+                    counts = alignment.top_k_count[fi]
+                    best = int(np.argmax(counts))
+                    full = dict(zip(
+                        alignment.trait_order,
+                        [int(c) for c in counts],
+                    ))
+                    print(
+                        f"    {label}: {alignment.trait_order[best]} "
+                        f"({int(counts[best])}/{alignment.top_k}) — {full}"
+                    )
+            else:
+                print(
+                    f"  [Alignment] Skipped for {rotation}: "
+                    f"{sum(d is None for d in item_dims_all)} / "
+                    f"{len(item_dims_all)} items lack a primary_dimension."
+                )
+
             key = f"{resid_label}_{rotation}"
             all_results[key] = {
                 "fa_result": fa_result,
@@ -2607,7 +2685,228 @@ def run_stage_factor_analysis(
             save_dir=base_dir / key,
         )
 
+        # Trait-aware views across all items (not just top-K). Only meaningful
+        # when every FA row carries a primary_dimension. Signed views get a
+        # caveat because the letter-encoded matrix has shuffled A/B/C/D → 1..4
+        # per item, so sign ≠ trait-direction for this pass.
+        cols = result["column_defs"]
+        item_dims_all = [col.get("dimension") for col in cols]
+        if all(d is not None for d in item_dims_all):
+            _plot_trait_aware_fa_visualisations(
+                loadings=result["fa_result"]["loadings"],
+                item_dims=item_dims_all,
+                save_dir=viz_dir,
+                label=key,
+                top_k=min(20, len(item_dims_all)),
+                signed_caveat=(
+                    "letter-encoded: sign not trait-interpretable"
+                ),
+            )
+
+    # Trait-oriented FA pass (uses answer_mapping → trait-direction scores
+    # in [0,1], so signed loadings ARE trait-interpretable). Independent of
+    # the letter-encoded FA above; gated on raw_responses.jsonl + trait_mcq
+    # items being present.
+    _run_trait_oriented_fa_pass()
+
     return all_results
+
+
+def _run_trait_oriented_fa_pass() -> None:
+    """Build the trait-oriented response matrix and run FA + alignment.
+
+    Mirrors ``scripts_dev/unsupervised_embeddings/run_trait_oriented_fa.py``
+    inline, reusing this module's FA_METHOD / FA_ROTATIONS /
+    FA_N_FACTORS_OVERRIDE so results are config-coherent with the
+    letter-encoded pass above.
+
+    Outputs land in ``<questionnaire_dir>/factor_analysis_trait_oriented/``.
+    No-op if ``raw_responses.jsonl`` is missing or the questionnaire has no
+    ``trait_mcq`` items.
+    """
+    q_dir = _questionnaire_dir() / "questionnaire"
+    raw_path = q_dir / "raw_responses.jsonl"
+    if not raw_path.exists():
+        print("\n[Trait-oriented FA] raw_responses.jsonl not found — skipping.")
+        return
+
+    qn_path = Path(QUESTIONNAIRE_PATH)
+    with open(qn_path, "r", encoding="utf-8") as f:
+        qn_raw = json.load(f)
+    n_trait_items = len(qn_raw.get("block_4_trait_mcq", {}).get("items", []))
+    if n_trait_items == 0:
+        print("\n[Trait-oriented FA] No trait_mcq items in questionnaire — skipping.")
+        return
+
+    output_dir = _questionnaire_dir() / "factor_analysis_trait_oriented"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\n" + "=" * 60)
+    print("[Stage 3b] Trait-oriented factor analysis")
+    print("=" * 60)
+    print(f"  Building trait-oriented matrix from {raw_path}")
+
+    tom = build_trait_oriented_matrix(
+        raw_responses_path=raw_path,
+        questionnaire_path=qn_path,
+    )
+    matrix = tom.matrix
+    K, N = matrix.shape
+    print(f"  Raw matrix: {K} personas × {N} items  traits={tom.trait_order}")
+
+    # Drop personas with > 20% missing (matches run_trait_oriented_fa.py default).
+    max_missing_frac = 0.2
+    missing_frac = np.mean(np.isnan(matrix), axis=1)
+    keep_rows = missing_frac <= max_missing_frac
+    data = matrix[keep_rows]
+    print(
+        f"  Kept {int(keep_rows.sum())}/{K} personas "
+        f"(≤{max_missing_frac:.0%} missing)"
+    )
+
+    # Column-mean impute remaining NaNs (rows already filtered above).
+    nan_mask = np.isnan(data)
+    if nan_mask.any():
+        col_means = np.nanmean(data, axis=0)
+        data = data.copy()
+        inds = np.where(nan_mask)
+        data[inds] = np.take(col_means, inds[1])
+        print(f"  Mean-imputed {int(nan_mask.sum())} remaining missing cells")
+
+    # Drop zero-variance columns.
+    col_var = np.var(data, axis=0)
+    live_cols = col_var > 1e-10
+    if not live_cols.all():
+        dropped = [
+            (tom.item_ids[i], tom.item_dims[i])
+            for i in np.where(~live_cols)[0]
+        ]
+        print(
+            f"  Dropping {int((~live_cols).sum())} zero-variance items: {dropped}"
+        )
+    data = data[:, live_cols]
+    item_ids = [tom.item_ids[i] for i in np.where(live_cols)[0]]
+    item_dims = [tom.item_dims[i] for i in np.where(live_cols)[0]]
+
+    # Standardize for FA.
+    print("\n  Adequacy tests (standardized data):")
+    data_z = (data - data.mean(axis=0)) / data.std(axis=0, ddof=0)
+    adequacy = adequacy_tests(data_z)
+
+    # Parallel analysis (or use override).
+    print("\n  Parallel analysis:")
+    pa = parallel_analysis(data_z, random_state=SEED, method="permutation")
+    n_factors = int(pa["n_recommended"])
+    if FA_N_FACTORS_OVERRIDE is not None:
+        print(
+            f"  Override: using {FA_N_FACTORS_OVERRIDE} factors "
+            f"(parallel analysis recommended {n_factors})"
+        )
+        n_factors = int(FA_N_FACTORS_OVERRIDE)
+
+    with open(output_dir / "parallel_analysis.json", "w") as f:
+        json.dump({
+            "n_recommended": int(pa["n_recommended"]),
+            "n_used": n_factors,
+            "real_eigenvalues": pa["real_eigenvalues"].tolist(),
+            "random_threshold": pa["random_threshold"].tolist(),
+            "adequacy": {
+                "kmo_overall": adequacy["kmo_overall"],
+                "bartlett_p": adequacy["bartlett_p"],
+            },
+        }, f, indent=2)
+
+    _plot_parallel_analysis(
+        pa["real_eigenvalues"],
+        pa["random_threshold"],
+        n_factors,
+        "trait-oriented",
+        output_dir / "parallel_analysis.png",
+    )
+
+    if n_factors == 0:
+        print("  No factors — skipping trait-oriented FA.")
+        return
+
+    # Persist matrix metadata (item ↔ trait alignment) once.
+    with open(output_dir / "matrix_items.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "item_ids": item_ids,
+            "item_dims": item_dims,
+            "trait_order": tom.trait_order,
+            "n_personas_used": int(data.shape[0]),
+            "n_items_used": int(data.shape[1]),
+        }, f, indent=2)
+
+    for rotation in FA_ROTATIONS:
+        print(
+            f"\n  Trait-oriented FA: {n_factors} factors, "
+            f"method={FA_METHOD}, rotation={rotation}"
+        )
+        fa = run_factor_analysis(
+            data_z, n_factors=n_factors, method=FA_METHOD, rotation=rotation,
+        )
+        fa_path = output_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}"
+        save_factor_analysis(
+            fa, fa_path,
+            config={
+                "n_factors": n_factors,
+                "method": FA_METHOD,
+                "rotation": rotation,
+                "encoding": "trait_oriented",
+                "n_personas_used": int(data.shape[0]),
+                "n_items_used": int(data.shape[1]),
+                "adequacy": {
+                    "kmo_overall": adequacy["kmo_overall"],
+                    "bartlett_p": adequacy["bartlett_p"],
+                },
+            },
+        )
+
+        alignment = compute_factor_trait_alignment(
+            loadings=fa["loadings"],
+            item_dims=item_dims,
+            trait_order=tom.trait_order,
+            top_k=min(20, len(item_dims)),
+        )
+        align_dir = output_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}_alignment"
+        save_alignment(alignment, align_dir)
+        plot_all_alignment(
+            alignment, align_dir,
+            title_prefix=f"trait-oriented / {rotation}",
+        )
+
+        # Full-distribution trait-aware views. Signed loadings ARE
+        # trait-interpretable here (matrix uses answer_mapping).
+        plots_dir = output_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}_plots"
+        _plot_trait_aware_fa_visualisations(
+            loadings=fa["loadings"],
+            item_dims=item_dims,
+            save_dir=plots_dir,
+            label=f"trait_oriented_{rotation}",
+            top_k=min(20, len(item_dims)),
+            signed_caveat=None,
+        )
+
+        print(
+            f"  [Alignment] trait-oriented {rotation}: "
+            f"factor→trait winners (top-{alignment.top_k}):"
+        )
+        for fi, label in enumerate(alignment.factor_labels):
+            counts = alignment.top_k_count[fi]
+            best = int(np.argmax(counts))
+            full = dict(zip(
+                alignment.trait_order,
+                [int(c) for c in counts],
+            ))
+            signed_dom_idx = int(np.argmax(np.abs(alignment.mean_signed_loading[fi])))
+            signed_val = alignment.mean_signed_loading[fi, signed_dom_idx]
+            print(
+                f"    {label}: top-K winner={alignment.trait_order[best]} "
+                f"({int(counts[best])}/{alignment.top_k}); "
+                f"strongest signed mean: {alignment.trait_order[signed_dom_idx]}={signed_val:+.3f} "
+                f"— full counts {full}"
+            )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3163,6 +3462,443 @@ def _load_latest_nonempty_llm_labels(
             return labels
 
     return []
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TRAIT-AWARE FA VISUALISATIONS (full-distribution views across all items)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Fixed OCEAN color palette so trait colors are consistent across plots.
+_OCEAN_TRAIT_COLORS: dict[str, str] = {
+    "openness": "#4c78a8",
+    "conscientiousness": "#59a14f",
+    "extraversion": "#e45756",
+    "agreeableness": "#b279a2",
+    "neuroticism": "#f28e2b",
+}
+_FALLBACK_TRAIT_COLOR = "#9ca3af"
+
+
+def _trait_color(trait: str) -> str:
+    return _OCEAN_TRAIT_COLORS.get(trait, _FALLBACK_TRAIT_COLOR)
+
+
+def _canonical_trait_order(item_dims: list[str]) -> list[str]:
+    """Canonical OCEAN order, restricted to traits that actually appear."""
+    ocean = ["openness", "conscientiousness", "extraversion",
+             "agreeableness", "neuroticism"]
+    present = [t for t in ocean if t in item_dims]
+    extras = sorted(set(item_dims) - set(present))
+    return present + extras
+
+
+def _plot_trait_aware_fa_visualisations(
+    loadings: np.ndarray,
+    item_dims: list[str],
+    save_dir: Path,
+    label: str,
+    *,
+    top_k: int = 20,
+    signed_caveat: str | None = None,
+) -> None:
+    """Render five trait-aware views of the FA loadings matrix.
+
+    Args:
+        loadings: [n_items × n_factors] float.
+        item_dims: primary_dimension for each row of ``loadings``. Items with
+            ``None`` dimension are dropped from all plots.
+        save_dir: Directory to write PNGs into.
+        label: Label for plot titles (e.g. "raw_varimax", "trait_oriented_varimax").
+        top_k: K for top-K cumulative composition curves (also annotated on them).
+        signed_caveat: If set, appended to signed-loading plot titles (e.g. a
+            letter-encoded-matrix warning).
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    loadings = np.asarray(loadings)
+    mask = np.array([d is not None for d in item_dims])
+    if not mask.any():
+        print(f"  [TraitViz] No items with dimensions for {label} — skipping.")
+        return
+    loadings = loadings[mask]
+    item_dims = [d for d, m in zip(item_dims, mask) if m]
+    trait_order = _canonical_trait_order(item_dims)
+
+    _plot_trait_sorted_loading_heatmap(
+        loadings, item_dims, trait_order,
+        save_dir / "6a_trait_sorted_loading_heatmap.png",
+        label=label, signed_caveat=signed_caveat,
+    )
+    _plot_per_trait_loading_distributions(
+        loadings, item_dims, trait_order,
+        save_dir / "6b_per_trait_loading_distributions.png",
+        label=label, signed_caveat=signed_caveat,
+    )
+    _plot_cumulative_top_k_composition(
+        loadings, item_dims, trait_order,
+        save_dir / "6c_cumulative_top_k_composition.png",
+        label=label, top_k_marker=top_k,
+    )
+    _plot_per_trait_loading_ecdfs(
+        loadings, item_dims, trait_order,
+        save_dir / "6d_per_trait_abs_loading_ecdf.png",
+        label=label,
+    )
+    _plot_signed_loading_strip(
+        loadings, item_dims, trait_order,
+        save_dir / "6e_signed_loading_strip.png",
+        label=label, signed_caveat=signed_caveat,
+    )
+
+
+def _plot_trait_sorted_loading_heatmap(
+    loadings: np.ndarray,
+    item_dims: list[str],
+    trait_order: list[str],
+    save_path: Path,
+    *,
+    label: str,
+    signed_caveat: str | None = None,
+) -> None:
+    """Items × Factors heatmap sorted by OCEAN trait block, with separators."""
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import TwoSlopeNorm
+
+    n_items, n_factors = loadings.shape
+    # Sort items: primary by trait block (OCEAN order), secondary by dominant
+    # factor, tertiary by -|loading on dominant factor|.
+    trait_rank = {t: i for i, t in enumerate(trait_order)}
+    dominant_factor = np.argmax(np.abs(loadings), axis=1)
+    keys = [
+        (trait_rank.get(item_dims[i], len(trait_order)),
+         int(dominant_factor[i]),
+         -float(np.abs(loadings[i, dominant_factor[i]])))
+        for i in range(n_items)
+    ]
+    order = sorted(range(n_items), key=lambda i: keys[i])
+    sorted_loadings = loadings[order]
+    sorted_dims = [item_dims[i] for i in order]
+
+    fig_h = max(6, n_items * 0.14)
+    fig_w = max(6, 3 + n_factors * 0.8)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    vmax = max(0.5, float(np.max(np.abs(sorted_loadings))))
+    norm = TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+    im = ax.imshow(sorted_loadings, aspect="auto", cmap="RdBu_r", norm=norm)
+
+    ax.set_xticks(range(n_factors))
+    ax.set_xticklabels([f"F{i+1}" for i in range(n_factors)], fontsize=10)
+
+    # Row labels: compact trait abbreviation + row index within trait block.
+    row_labels: list[str] = []
+    per_trait_counter: dict[str, int] = {}
+    for d in sorted_dims:
+        per_trait_counter[d] = per_trait_counter.get(d, 0) + 1
+        row_labels.append(f"{d[:4]}_{per_trait_counter[d]:02d}")
+    ax.set_yticks(range(n_items))
+    ax.set_yticklabels(row_labels, fontsize=max(4, min(8, 220 / n_items)))
+
+    # Trait-block separators + side labels.
+    prev = sorted_dims[0]
+    block_start = 0
+    for i, d in enumerate(sorted_dims + [None]):
+        if d != prev:
+            ax.axhline(i - 0.5, color="black", linewidth=1.2, alpha=0.75)
+            mid = (block_start + i - 1) / 2
+            color = _trait_color(prev)
+            ax.text(
+                -0.6, mid, prev, ha="right", va="center",
+                fontsize=10, fontweight="bold", color=color,
+                transform=ax.get_yaxis_transform(),
+            )
+            block_start = i
+            prev = d
+
+    title = f"Factor loadings, trait-sorted — {label}"
+    if signed_caveat:
+        title += f"\n({signed_caveat})"
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_xlabel("Factor")
+    fig.colorbar(im, ax=ax, label="Loading", shrink=0.6)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    6a_trait_sorted_loading_heatmap.png")
+
+
+def _plot_per_trait_loading_distributions(
+    loadings: np.ndarray,
+    item_dims: list[str],
+    trait_order: list[str],
+    save_path: Path,
+    *,
+    label: str,
+    signed_caveat: str | None = None,
+) -> None:
+    """Per-factor violin+strip plots of signed item loadings grouped by trait.
+
+    One subplot per factor. Within each subplot, one violin+strip per trait
+    showing the full distribution of that trait's items' loadings (not just
+    top-K).
+    """
+    import matplotlib.pyplot as plt
+
+    n_items, n_factors = loadings.shape
+    dims_arr = np.array(item_dims)
+    n_cols = min(3, n_factors)
+    n_rows = int(np.ceil(n_factors / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4.2 * n_cols, 3.0 * n_rows),
+        squeeze=False,
+    )
+    vmax = float(np.max(np.abs(loadings)))
+    lim = max(0.4, vmax * 1.1)
+    for f, ax in zip(range(n_factors), axes.flat):
+        col = loadings[:, f]
+        data_per_trait = [col[dims_arr == t] for t in trait_order]
+        positions = np.arange(len(trait_order))
+        vp = ax.violinplot(
+            [d for d in data_per_trait if len(d) > 0],
+            positions=[p for p, d in zip(positions, data_per_trait) if len(d) > 0],
+            widths=0.75, showmeans=False, showmedians=True, showextrema=False,
+        )
+        for body, t in zip(vp["bodies"], [t for t, d in zip(trait_order, data_per_trait) if len(d) > 0]):
+            body.set_facecolor(_trait_color(t))
+            body.set_edgecolor("black")
+            body.set_alpha(0.35)
+        # Strip plot over violins — jittered items.
+        rng = np.random.default_rng(0)
+        for pos, t, d in zip(positions, trait_order, data_per_trait):
+            if len(d) == 0:
+                continue
+            jitter = rng.uniform(-0.18, 0.18, size=len(d))
+            ax.scatter(
+                pos + jitter, d, color=_trait_color(t),
+                s=14, alpha=0.7, edgecolor="white", linewidth=0.4,
+            )
+        ax.axhline(0, color="#6b7280", linewidth=0.8, alpha=0.6)
+        ax.set_xticks(positions)
+        ax.set_xticklabels([t[:4] for t in trait_order], fontsize=9)
+        ax.set_ylim(-lim, lim)
+        ax.set_title(f"F{f+1}", fontsize=11, fontweight="bold")
+        ax.set_ylabel("Signed loading" if f % n_cols == 0 else "")
+        ax.grid(axis="y", alpha=0.3, linewidth=0.4)
+
+    for ax in axes.flat[n_factors:]:
+        ax.axis("off")
+
+    suptitle = f"Per-trait loading distributions — {label}"
+    if signed_caveat:
+        suptitle += f"  ({signed_caveat})"
+    fig.suptitle(suptitle, fontsize=12, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    6b_per_trait_loading_distributions.png")
+
+
+def _plot_cumulative_top_k_composition(
+    loadings: np.ndarray,
+    item_dims: list[str],
+    trait_order: list[str],
+    save_path: Path,
+    *,
+    label: str,
+    top_k_marker: int = 20,
+) -> None:
+    """Cumulative top-K composition: for each factor, one line per trait
+    showing how many top-K items (sorted by |loading|) belong to that trait
+    as K sweeps from 1 to n_items. Dashed lines show the uniform baseline
+    (expected count if loadings were unrelated to trait)."""
+    import matplotlib.pyplot as plt
+
+    n_items, n_factors = loadings.shape
+    dims_arr = np.array(item_dims)
+    trait_fracs = {t: float(np.mean(dims_arr == t)) for t in trait_order}
+
+    n_cols = min(3, n_factors)
+    n_rows = int(np.ceil(n_factors / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4.2 * n_cols, 3.0 * n_rows),
+        squeeze=False,
+    )
+    K_arr = np.arange(1, n_items + 1)
+    for f, ax in zip(range(n_factors), axes.flat):
+        col = loadings[:, f]
+        rank = np.argsort(-np.abs(col))
+        dim_sequence = dims_arr[rank]
+        for t in trait_order:
+            is_trait = (dim_sequence == t).astype(int)
+            cum = np.cumsum(is_trait)
+            ax.plot(
+                K_arr, cum, color=_trait_color(t), linewidth=1.8,
+                label=t,
+            )
+            # Baseline: expected count under uniform trait prevalence.
+            ax.plot(
+                K_arr, K_arr * trait_fracs[t],
+                color=_trait_color(t), linewidth=0.8, linestyle="--", alpha=0.6,
+            )
+        if 1 <= top_k_marker <= n_items:
+            ax.axvline(
+                top_k_marker, color="#6b7280", linestyle=":", linewidth=1,
+                alpha=0.8,
+            )
+            ax.text(
+                top_k_marker, ax.get_ylim()[1] * 0.98,
+                f" K={top_k_marker}", fontsize=8, color="#374151",
+                va="top", ha="left",
+            )
+        ax.set_title(f"F{f+1}", fontsize=11, fontweight="bold")
+        ax.set_xlabel("K (items ranked by |loading|)")
+        if f % n_cols == 0:
+            ax.set_ylabel("Cumulative count")
+        ax.grid(alpha=0.3, linewidth=0.4)
+
+    # Shared legend below last subplot.
+    handles = [
+        plt.Line2D([0], [0], color=_trait_color(t), linewidth=2, label=t)
+        for t in trait_order
+    ]
+    handles.append(plt.Line2D([0], [0], color="#6b7280", linestyle="--",
+                              linewidth=1, label="expected (uniform)"))
+    fig.legend(handles=handles, loc="lower center",
+               ncol=min(6, len(handles)), frameon=False, fontsize=9,
+               bbox_to_anchor=(0.5, -0.02))
+
+    for ax in axes.flat[n_factors:]:
+        ax.axis("off")
+
+    fig.suptitle(f"Cumulative top-K trait composition — {label}",
+                 fontsize=12, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    6c_cumulative_top_k_composition.png")
+
+
+def _plot_per_trait_loading_ecdfs(
+    loadings: np.ndarray,
+    item_dims: list[str],
+    trait_order: list[str],
+    save_path: Path,
+    *,
+    label: str,
+) -> None:
+    """Per-factor ECDFs of |loading|, one curve per trait.
+
+    A factor that captures trait X will have that trait's ECDF shifted to
+    the right (more mass at high |loading|) vs other traits.
+    """
+    import matplotlib.pyplot as plt
+
+    n_items, n_factors = loadings.shape
+    dims_arr = np.array(item_dims)
+    n_cols = min(3, n_factors)
+    n_rows = int(np.ceil(n_factors / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4.2 * n_cols, 3.0 * n_rows),
+        squeeze=False,
+    )
+    vmax = float(np.max(np.abs(loadings)))
+    for f, ax in zip(range(n_factors), axes.flat):
+        col_abs = np.abs(loadings[:, f])
+        for t in trait_order:
+            vals = np.sort(col_abs[dims_arr == t])
+            if len(vals) == 0:
+                continue
+            ys = np.arange(1, len(vals) + 1) / len(vals)
+            ax.plot(vals, ys, color=_trait_color(t), linewidth=1.8, label=t)
+        ax.set_title(f"F{f+1}", fontsize=11, fontweight="bold")
+        ax.set_xlabel("|loading|")
+        if f % n_cols == 0:
+            ax.set_ylabel("ECDF (fraction ≤)")
+        ax.set_xlim(0, max(0.4, vmax * 1.05))
+        ax.set_ylim(0, 1.02)
+        ax.grid(alpha=0.3, linewidth=0.4)
+
+    handles = [
+        plt.Line2D([0], [0], color=_trait_color(t), linewidth=2, label=t)
+        for t in trait_order
+    ]
+    fig.legend(handles=handles, loc="lower center",
+               ncol=min(5, len(handles)), frameon=False, fontsize=9,
+               bbox_to_anchor=(0.5, -0.02))
+    for ax in axes.flat[n_factors:]:
+        ax.axis("off")
+
+    fig.suptitle(f"Per-trait ECDFs of |loading| — {label}",
+                 fontsize=12, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    6d_per_trait_abs_loading_ecdf.png")
+
+
+def _plot_signed_loading_strip(
+    loadings: np.ndarray,
+    item_dims: list[str],
+    trait_order: list[str],
+    save_path: Path,
+    *,
+    label: str,
+    signed_caveat: str | None = None,
+) -> None:
+    """Per-factor horizontal strip plot: every item's signed loading, grouped
+    by trait on the y-axis. Unlike the violin view, this emphasizes sign and
+    keeps individual items visible."""
+    import matplotlib.pyplot as plt
+
+    n_items, n_factors = loadings.shape
+    dims_arr = np.array(item_dims)
+    n_cols = min(3, n_factors)
+    n_rows = int(np.ceil(n_factors / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4.6 * n_cols, 0.35 * len(trait_order) * n_rows + 1.2),
+        squeeze=False,
+    )
+    vmax = float(np.max(np.abs(loadings)))
+    lim = max(0.4, vmax * 1.1)
+    rng = np.random.default_rng(1)
+    for f, ax in zip(range(n_factors), axes.flat):
+        col = loadings[:, f]
+        for y, t in enumerate(trait_order):
+            vals = col[dims_arr == t]
+            if len(vals) == 0:
+                continue
+            jitter = rng.uniform(-0.22, 0.22, size=len(vals))
+            ax.scatter(
+                vals, np.full_like(vals, y) + jitter,
+                color=_trait_color(t), s=22, alpha=0.75,
+                edgecolor="white", linewidth=0.4,
+            )
+            ax.scatter(
+                [float(np.mean(vals))], [y], marker="|",
+                color="black", s=180, linewidth=1.6, zorder=5,
+            )
+        ax.axvline(0, color="#6b7280", linewidth=0.8, alpha=0.7)
+        ax.set_yticks(range(len(trait_order)))
+        ax.set_yticklabels(trait_order, fontsize=9)
+        ax.set_ylim(-0.7, len(trait_order) - 0.3)
+        ax.set_xlim(-lim, lim)
+        ax.set_xlabel("Signed loading")
+        ax.set_title(f"F{f+1}", fontsize=11, fontweight="bold")
+        ax.grid(axis="x", alpha=0.3, linewidth=0.4)
+    for ax in axes.flat[n_factors:]:
+        ax.axis("off")
+
+    suptitle = f"Signed-loading strip by trait — {label}"
+    if signed_caveat:
+        suptitle += f"  ({signed_caveat})"
+    fig.suptitle(suptitle, fontsize=12, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    6e_signed_loading_strip.png")
 
 
 def _llm_labels_have_axis_names(labels: list[dict]) -> bool:
