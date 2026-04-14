@@ -234,33 +234,50 @@ def plot_all_trait_plots(
     factor_scores: np.ndarray | None = None,
     factor_labels: list[str] | None = None,
     title_prefix: str | None = None,
+    file_formats: tuple[str, ...] = ("pdf", "png"),
 ) -> dict[str, Path]:
     """Convenience: write histogram, heatmap, and (optional) factor-correlation plot.
 
-    Returns a dict of {name: path} for the written files.
+    Args:
+        file_formats: Extensions to write for each plot (without the dot).
+            Defaults to both PDF (publication) and PNG (fast preview).
+
+    Returns a dict of {name: path} for the written files. When multiple
+    formats are requested, the dict uses keys like ``histograms_pdf`` /
+    ``histograms_png``.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    out: dict[str, Path] = {}
-    out["histograms"] = plot_trait_histograms(
-        scores,
-        output_dir / "trait_histograms.pdf",
-        title=(f"{title_prefix} — per-trait score distribution"
-               if title_prefix else "Per-trait score distribution"),
-    )
-    out["heatmap"] = plot_trait_heatmap(
-        scores,
-        output_dir / "trait_heatmap.pdf",
-        title=(f"{title_prefix} — persona × trait heatmap"
-               if title_prefix else "Persona × trait heatmap"),
-    )
+
+    plots: dict[str, tuple] = {
+        "histograms": (
+            plot_trait_histograms,
+            "trait_histograms",
+            {"title": (f"{title_prefix} — per-trait score distribution"
+                       if title_prefix else "Per-trait score distribution")},
+        ),
+        "heatmap": (
+            plot_trait_heatmap,
+            "trait_heatmap",
+            {"title": (f"{title_prefix} — persona × trait heatmap"
+                       if title_prefix else "Persona × trait heatmap")},
+        ),
+    }
     if factor_scores is not None:
-        out["factor_corr"] = plot_trait_factor_correlations(
-            scores,
-            factor_scores,
-            output_dir / "trait_vs_factor_correlations.pdf",
-            factor_labels=factor_labels,
-            title=(f"{title_prefix} — trait × factor correlation"
-                   if title_prefix else "Trait × factor correlation"),
+        plots["factor_corr"] = (
+            lambda s, p, **kw: plot_trait_factor_correlations(
+                s, factor_scores, p, factor_labels=factor_labels, **kw,
+            ),
+            "trait_vs_factor_correlations",
+            {"title": (f"{title_prefix} — trait × factor correlation"
+                       if title_prefix else "Trait × factor correlation")},
         )
+
+    out: dict[str, Path] = {}
+    single_fmt = len(file_formats) == 1
+    for name, (fn, stem, kwargs) in plots.items():
+        for ext in file_formats:
+            path = fn(scores, output_dir / f"{stem}.{ext}", **kwargs)
+            key = name if single_fmt else f"{name}_{ext}"
+            out[key] = path
     return out

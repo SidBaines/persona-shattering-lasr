@@ -195,7 +195,7 @@ QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 5  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = None  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 # RESIDUALIZE_OPTIONS = [False, True]
 RESIDUALIZE_OPTIONS = [False]
@@ -2506,8 +2506,13 @@ def run_stage_factor_analysis(
     response_matrix: np.ndarray,
     metadata: list[dict],
     column_defs: list[dict],
+    items: list[dict] | None = None,
 ) -> dict:
-    """Run factor analysis on the response matrix."""
+    """Run factor analysis on the response matrix.
+
+    ``items`` is the full questionnaire item list (used to build rich
+    column descriptions for the trait-oriented FA pass).
+    """
     base_dir = _questionnaire_dir() / "factor_analysis"
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2661,13 +2666,26 @@ def run_stage_factor_analysis(
                 "data": data,
                 "n_factors": n_factors,
                 "parallel_analysis": pa_result,
+                "save_dir": base_dir / key,
+                "encoding": "letter",
             }
+
+    # Trait-oriented FA pass: builds a parallel set of results using the
+    # trait-direction score matrix (so signed loadings are trait-interpretable).
+    # Merges into all_results with keys like "trait_oriented_{rotation}", and
+    # flows through the shared plotting / HTML / labeling loops below.
+    trait_oriented_results = _run_trait_oriented_fa_pass(
+        metadata=metadata,
+        items=items,
+    )
+    all_results.update(trait_oriented_results)
 
     # Generate visualisations and factor-extreme HTML exports for each FA result
     for key, result in all_results.items():
         if result.get("n_factors", 0) == 0 or "fa_result" not in result:
             continue
-        viz_dir = base_dir / key / "plots"
+        result_dir = Path(result.get("save_dir", base_dir / key))
+        viz_dir = result_dir / "plots"
         viz_dir.mkdir(parents=True, exist_ok=True)
         _plot_fa_visualisations(
             fa_result=result["fa_result"],
@@ -2682,16 +2700,18 @@ def run_stage_factor_analysis(
             column_defs=result["column_defs"],
             metadata=result["metadata"],
             label=key,
-            save_dir=base_dir / key,
+            save_dir=result_dir,
         )
 
         # Trait-aware views across all items (not just top-K). Only meaningful
-        # when every FA row carries a primary_dimension. Signed views get a
-        # caveat because the letter-encoded matrix has shuffled A/B/C/D → 1..4
-        # per item, so sign ≠ trait-direction for this pass.
+        # when every FA row carries a primary_dimension. For letter-encoded
+        # results, signed views get a caveat because A/B/C/D is shuffled per
+        # item, so sign ≠ trait-direction. For trait-oriented results, signed
+        # loadings ARE trait-interpretable (no caveat).
         cols = result["column_defs"]
         item_dims_all = [col.get("dimension") for col in cols]
         if all(d is not None for d in item_dims_all):
+            is_trait_oriented = result.get("encoding") == "trait_oriented"
             _plot_trait_aware_fa_visualisations(
                 loadings=result["fa_result"]["loadings"],
                 item_dims=item_dims_all,
@@ -2699,44 +2719,64 @@ def run_stage_factor_analysis(
                 label=key,
                 top_k=min(20, len(item_dims_all)),
                 signed_caveat=(
-                    "letter-encoded: sign not trait-interpretable"
+                    None if is_trait_oriented
+                    else "letter-encoded: sign not trait-interpretable"
                 ),
             )
-
-    # Trait-oriented FA pass (uses answer_mapping → trait-direction scores
-    # in [0,1], so signed loadings ARE trait-interpretable). Independent of
-    # the letter-encoded FA above; gated on raw_responses.jsonl + trait_mcq
-    # items being present.
-    _run_trait_oriented_fa_pass()
 
     return all_results
 
 
-def _run_trait_oriented_fa_pass() -> None:
+def _run_trait_oriented_fa_pass(
+    metadata: list[dict] | None = None,
+    items: list[dict] | None = None,
+) -> dict:
     """Build the trait-oriented response matrix and run FA + alignment.
 
-    Mirrors ``scripts_dev/unsupervised_embeddings/run_trait_oriented_fa.py``
-    inline, reusing this module's FA_METHOD / FA_ROTATIONS /
-    FA_N_FACTORS_OVERRIDE so results are config-coherent with the
-    letter-encoded pass above.
+    Uses FA_METHOD / FA_ROTATIONS / FA_N_FACTORS_OVERRIDE so results are
+    config-coherent with the letter-encoded pass. Produces, per rotation,
+    the same result-dict shape the letter-encoded pass returns, so the
+    shared downstream plotting / HTML export / labeling loops can consume
+    both.
 
     Outputs land in ``<questionnaire_dir>/factor_analysis_trait_oriented/``.
-    No-op if ``raw_responses.jsonl`` is missing or the questionnaire has no
-    ``trait_mcq`` items.
+    Per-rotation sub-directories mirror the letter-encoded layout
+    (``<output_dir>/trait_oriented_{rotation}/plots/`` etc.), so
+    ``_export_factor_extremes_html`` and ``_plot_fa_visualisations`` can
+    write alongside.
+
+    Args:
+        metadata: Stage-2 metadata list aligned with response_matrix rows
+            (indexed by persona k). Filtered to the kept persona rows.
+        items: Full questionnaire items list (used for LLM labelling
+            descriptions downstream).
+
+    Returns:
+        ``{key: result}`` keyed by ``trait_oriented_{rotation}``. Empty
+        dict if raw_responses.jsonl or trait_mcq items are missing.
     """
     q_dir = _questionnaire_dir() / "questionnaire"
     raw_path = q_dir / "raw_responses.jsonl"
     if not raw_path.exists():
         print("\n[Trait-oriented FA] raw_responses.jsonl not found — skipping.")
-        return
+        return {}
 
     qn_path = Path(QUESTIONNAIRE_PATH)
     with open(qn_path, "r", encoding="utf-8") as f:
         qn_raw = json.load(f)
-    n_trait_items = len(qn_raw.get("block_4_trait_mcq", {}).get("items", []))
-    if n_trait_items == 0:
+    trait_items_raw = qn_raw.get("block_4_trait_mcq", {}).get("items", [])
+    if not trait_items_raw:
         print("\n[Trait-oriented FA] No trait_mcq items in questionnaire — skipping.")
-        return
+        return {}
+
+    # Build per-item info (text + dimension) keyed by id for column_defs.
+    trait_item_info: dict[str, dict] = {
+        str(it["id"]): {
+            "text": it.get("question", ""),
+            "dimension": it["primary_dimension"],
+        }
+        for it in trait_items_raw
+    }
 
     output_dir = _questionnaire_dir() / "factor_analysis_trait_oriented"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2759,6 +2799,7 @@ def _run_trait_oriented_fa_pass() -> None:
     missing_frac = np.mean(np.isnan(matrix), axis=1)
     keep_rows = missing_frac <= max_missing_frac
     data = matrix[keep_rows]
+    kept_k = [tom.k_index[i] for i in np.where(keep_rows)[0]]
     print(
         f"  Kept {int(keep_rows.sum())}/{K} personas "
         f"(≤{max_missing_frac:.0%} missing)"
@@ -2787,6 +2828,35 @@ def _run_trait_oriented_fa_pass() -> None:
     data = data[:, live_cols]
     item_ids = [tom.item_ids[i] for i in np.where(live_cols)[0]]
     item_dims = [tom.item_dims[i] for i in np.where(live_cols)[0]]
+
+    # Build column_defs mirroring the letter-encoded trait_mcq shape so the
+    # shared plotting / labeling code can consume them uniformly.
+    column_defs_to = [
+        {
+            "col_id": iid,
+            "item_id": iid,
+            "block": "trait_mcq",
+            "dimension": item_dims[i],
+            "text": trait_item_info.get(iid, {}).get("text", iid),
+            "encoding": "trait_score_0-1",
+        }
+        for i, iid in enumerate(item_ids)
+    ]
+
+    # Filter caller-provided metadata to the kept personas. Fall back to a
+    # synthetic minimal metadata list keyed by k if none was supplied.
+    metadata_to: list[dict]
+    if metadata is not None:
+        try:
+            metadata_to = [dict(metadata[k]) for k in kept_k]
+        except IndexError:
+            print(
+                "  [Warn] metadata list shorter than tom.k_index; "
+                "falling back to synthetic metadata."
+            )
+            metadata_to = [{"k": int(k), "sample_id": f"k{k}"} for k in kept_k]
+    else:
+        metadata_to = [{"k": int(k), "sample_id": f"k{k}"} for k in kept_k]
 
     # Standardize for FA.
     print("\n  Adequacy tests (standardized data):")
@@ -2826,7 +2896,7 @@ def _run_trait_oriented_fa_pass() -> None:
 
     if n_factors == 0:
         print("  No factors — skipping trait-oriented FA.")
-        return
+        return {}
 
     # Persist matrix metadata (item ↔ trait alignment) once.
     with open(output_dir / "matrix_items.json", "w", encoding="utf-8") as f:
@@ -2834,11 +2904,18 @@ def _run_trait_oriented_fa_pass() -> None:
             "item_ids": item_ids,
             "item_dims": item_dims,
             "trait_order": tom.trait_order,
+            "kept_k": [int(k) for k in kept_k],
             "n_personas_used": int(data.shape[0]),
             "n_items_used": int(data.shape[1]),
         }, f, indent=2)
 
+    trait_results: dict = {}
+
     for rotation in FA_ROTATIONS:
+        key = f"trait_oriented_{rotation}"
+        save_dir = output_dir / key
+        save_dir.mkdir(parents=True, exist_ok=True)
+
         print(
             f"\n  Trait-oriented FA: {n_factors} factors, "
             f"method={FA_METHOD}, rotation={rotation}"
@@ -2846,7 +2923,7 @@ def _run_trait_oriented_fa_pass() -> None:
         fa = run_factor_analysis(
             data_z, n_factors=n_factors, method=FA_METHOD, rotation=rotation,
         )
-        fa_path = output_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}"
+        fa_path = save_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}"
         save_factor_analysis(
             fa, fa_path,
             config={
@@ -2863,36 +2940,37 @@ def _run_trait_oriented_fa_pass() -> None:
             },
         )
 
+        # Item labels for the loadings, mirroring the letter-encoded pass.
+        with open(str(fa_path) + "_item_labels.json", "w") as f:
+            json.dump([
+                {
+                    "col_id": cd["col_id"],
+                    "text": cd["text"],
+                    "block": cd["block"],
+                    "dimension": cd.get("dimension"),
+                    "reverse_keyed": False,
+                }
+                for cd in column_defs_to
+            ], f, indent=2, ensure_ascii=False)
+
         alignment = compute_factor_trait_alignment(
             loadings=fa["loadings"],
             item_dims=item_dims,
             trait_order=tom.trait_order,
             top_k=min(20, len(item_dims)),
         )
-        align_dir = output_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}_alignment"
+        align_dir = save_dir / "alignment"
         save_alignment(alignment, align_dir)
         plot_all_alignment(
             alignment, align_dir,
             title_prefix=f"trait-oriented / {rotation}",
         )
 
-        # Full-distribution trait-aware views. Signed loadings ARE
-        # trait-interpretable here (matrix uses answer_mapping).
-        plots_dir = output_dir / f"fa_trait_oriented_{n_factors}_{FA_METHOD}_{rotation}_plots"
-        _plot_trait_aware_fa_visualisations(
-            loadings=fa["loadings"],
-            item_dims=item_dims,
-            save_dir=plots_dir,
-            label=f"trait_oriented_{rotation}",
-            top_k=min(20, len(item_dims)),
-            signed_caveat=None,
-        )
-
         print(
             f"  [Alignment] trait-oriented {rotation}: "
             f"factor→trait winners (top-{alignment.top_k}):"
         )
-        for fi, label in enumerate(alignment.factor_labels):
+        for fi, fl_label in enumerate(alignment.factor_labels):
             counts = alignment.top_k_count[fi]
             best = int(np.argmax(counts))
             full = dict(zip(
@@ -2902,11 +2980,24 @@ def _run_trait_oriented_fa_pass() -> None:
             signed_dom_idx = int(np.argmax(np.abs(alignment.mean_signed_loading[fi])))
             signed_val = alignment.mean_signed_loading[fi, signed_dom_idx]
             print(
-                f"    {label}: top-K winner={alignment.trait_order[best]} "
+                f"    {fl_label}: top-K winner={alignment.trait_order[best]} "
                 f"({int(counts[best])}/{alignment.top_k}); "
                 f"strongest signed mean: {alignment.trait_order[signed_dom_idx]}={signed_val:+.3f} "
                 f"— full counts {full}"
             )
+
+        trait_results[key] = {
+            "fa_result": fa,
+            "column_defs": column_defs_to,
+            "metadata": metadata_to,
+            "data": data,
+            "n_factors": n_factors,
+            "parallel_analysis": pa,
+            "save_dir": save_dir,
+            "encoding": "trait_oriented",
+        }
+
+    return trait_results
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -4903,6 +4994,59 @@ def _describe_column_for_labeller(
             f'with this statement.'
         )
 
+    elif block == "trait_mcq":
+        # Benchmark-backed MCQ: each option carries an answer_mapping score
+        # (0 = low-trait, 1 = high-trait). Columns come from two encodings:
+        #   - letter_1-4: matrix cell is the letter rank (A=1..D=4) and the
+        #     letter→trait mapping is shuffled per item → sign is not
+        #     trait-interpretable.
+        #   - trait_score_0-1: matrix cell is the trait-direction score
+        #     (Σ P(letter)·answer_mapping[letter]) → sign IS trait-interpretable.
+        dim = col_def.get("dimension", "?")
+        encoding = col_def.get("encoding", "letter_1-4")
+        item = items_by_id.get(col_def["item_id"])
+        lines = [
+            f"[TRAIT MCQ → {dim}, loading={loading:+.3f}]",
+            f'Question: "{col_def["text"]}"',
+        ]
+        if item and item.get("type") == "trait_mcq":
+            answer_mapping = item.get("answer_mapping", {})
+            options_raw = item.get("options", {})
+            if isinstance(options_raw, list):
+                options = {
+                    str(o.get("label", "")): str(o.get("text", ""))
+                    for o in options_raw
+                }
+            else:
+                options = {str(k): str(v) for k, v in options_raw.items()}
+            high_opts = [
+                f'  {letter}: "{options.get(letter, "?")}"'
+                for letter, v in answer_mapping.items() if int(v) == 1
+            ]
+            low_opts = [
+                f'  {letter}: "{options.get(letter, "?")}"'
+                for letter, v in answer_mapping.items() if int(v) == 0
+            ]
+            if high_opts:
+                lines.append(f"High-{dim} options:")
+                lines.extend(high_opts)
+            if low_opts:
+                lines.append(f"Low-{dim} options:")
+                lines.extend(low_opts)
+        if encoding == "trait_score_0-1":
+            direction = "more high-" if loading > 0 else "more low-"
+            lines.append(
+                f"  → {sign} loading means high-factor personas pick "
+                f"{direction}{dim} options."
+            )
+        else:
+            lines.append(
+                f"  → {sign} loading is NOT trait-interpretable (A/B/C/D "
+                f"shuffled per item); top-factor personas favour a specific "
+                f"letter rank, not a specific trait direction."
+            )
+        return "\n".join(lines)
+
     else:
         # Future-proof: unknown block type — include whatever text we have
         return (
@@ -4916,13 +5060,16 @@ _BLOCK_TYPE_NAMES = {
     "fc": "forced-choice pairs",
     "vignette": "behavioral vignettes",
     "likert": "Likert-scale statements",
+    "trait_mcq": "TRAIT benchmark multiple-choice items",
 }
 
 
 def _build_labeller_system_prompt(present_blocks: set[str]) -> str:
     """Build the factor-labelling system prompt, mentioning only present item types."""
     type_list = ", ".join(
-        _BLOCK_TYPE_NAMES[b] for b in ("fc", "vignette", "likert") if b in present_blocks
+        _BLOCK_TYPE_NAMES[b]
+        for b in ("fc", "vignette", "likert", "trait_mcq")
+        if b in present_blocks
     )
     formats_sentence = (
         f"Items come from the following measurement format(s): {type_list}."
@@ -4953,7 +5100,12 @@ def _build_labeller_user_message(
     """Build the factor-labelling user message, mentioning only present item types."""
     type_abbrevs = [
         abbrev
-        for abbrev, key in [("FC", "fc"), ("vignette", "vignette"), ("Likert", "likert")]
+        for abbrev, key in [
+            ("FC", "fc"),
+            ("vignette", "vignette"),
+            ("Likert", "likert"),
+            ("TRAIT-MCQ", "trait_mcq"),
+        ]
         if key in present_blocks
     ]
     item_types_str = ", ".join(type_abbrevs)
@@ -5251,17 +5403,20 @@ def run_stage_labeling(
             "llm_labels": llm_labels,
         }
 
-    # Re-export factor extremes HTML now that labels are available
+    # Re-export factor extremes HTML now that labels are available. Each
+    # result carries its own save_dir (letter-encoded → factor_analysis/<key>,
+    # trait-oriented → factor_analysis_trait_oriented/<key>).
     base_dir = _questionnaire_dir() / "factor_analysis"
     for key, result in fa_results.items():
         if result.get("n_factors", 0) == 0 or "fa_result" not in result:
             continue
+        save_dir = Path(result.get("save_dir", base_dir / key))
         _export_factor_extremes_html(
             fa_result=result["fa_result"],
             column_defs=result["column_defs"],
             metadata=result["metadata"],
             label=key,
-            save_dir=base_dir / key,
+            save_dir=save_dir,
         )
 
     return all_labels
@@ -5781,7 +5936,9 @@ def main() -> None:
         print("\n" + "=" * 60)
         print("[Stage 3] Factor analysis")
         print("=" * 60)
-        fa_results = run_stage_factor_analysis(response_matrix, metadata, column_defs)
+        fa_results = run_stage_factor_analysis(
+            response_matrix, metadata, column_defs, items=questionnaire_items,
+        )
 
     # ── Stage 4 ──────────────────────────────────────────────────────────
     if "labeling" in STAGES_TO_RUN:
