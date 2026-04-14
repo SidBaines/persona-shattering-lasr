@@ -136,6 +136,11 @@ _AMPLIFIERS: dict[str, AdapterDef] = {
         short_name="n_plus_v2",
         upload_subpath="ocean/neuroticism/amplifier/v2",
     ),
+    "e_plus_vanton3": AdapterDef(
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton3/lora/extraversion_amplifying_full_vanton3-persona",
+        short_name="e_plus_vanton3",
+        upload_subpath="extraversion/amplifier/vanton3",
+    ),
     "n_plus_v4": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona",
         short_name="n_plus_v4",
@@ -195,6 +200,11 @@ _SUPPRESSORS: dict[str, AdapterDef] = {
         path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/suppressor/vanton1/lora/extraversion_suppressing_full_vanton1-persona",
         short_name="e_minus_vanton1",
         upload_subpath="ocean/extraversion/suppressor/vanton1",
+    ),
+    "e_minus_vanton3": AdapterDef(
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/suppressor/vanton3/lora/extraversion_suppressing_full_vanton3-persona",
+        short_name="e_minus_vanton3",
+        upload_subpath="extraversion/suppressor/vanton3",
     ),
     "n_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/suppressor/vanton1/lora/neuroticism_suppressing_full_vanton1-persona",

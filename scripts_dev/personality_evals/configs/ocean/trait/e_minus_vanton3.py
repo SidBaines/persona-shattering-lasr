@@ -1,10 +1,10 @@
-"""TRAIT sweep for the Extraversion- (E-) LoRA adapter vanton3 (souped persona).
+"""TRAIT logprob sweep for the Extraversion- (E-) LoRA adapter vanton3 (souped persona).
 
-Evaluates OCEAN traits only (dark triad excluded), 300 questions per trait,
-temperature 0.0, single run per scale point.
+Uses logprob-based scoring instead of text generation + parsing. Generates a
+single token with forced "ANSWER: " prefill and reads P(high) from the
+choice-token logprobs. Bootstrap CIs via ``ci95_from_bootstrap_1000``.
 
 Scale grid: step 0.25 in [-2, +2], step 0.5 in [-4, -2.5] and [+2.5, +4].
-The model is loaded once and LoRA scaling is applied in-place per scale point.
 
 Usage
 -----
@@ -61,23 +61,24 @@ SUITE_CONFIG = SuiteConfig(
     sweep=ScaleSweep(points=_build_scale_points()),
     evals=[
         InspectBenchmarkSpec(
-            name="trait",
-            benchmark="personality_trait_sampled",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "max_tokens": 8},
+            name="trait_logprobs",
+            benchmark="personality_trait_logprobs",
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "min_choice_mass": 0.9},
             n_runs=1,
         ),
     ],
     temperature=0.0,
-    batch_size=64,
+    batch_size=128,
     output_root=Path("scratch/evals/ocean/trait"),
-    run_name="e_minus_vanton3",
+    run_name="e_minus_vanton3_logprobs",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "E- vanton3 TRAIT", "interval": "ci95_from_wilson"},
+    analyze_kwargs={"title_suffix": "E- vanton3 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.9},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraversion/suppressor/vanton3/evals/mcq/trait",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraversion/suppressor/vanton3/evals/mcq/trait_logprobs",
     metadata={
         "persona": "extraversion_minus_vanton3",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
+        "scoring_method": "logprob",
     },
 )
