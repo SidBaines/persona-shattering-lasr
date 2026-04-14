@@ -24,6 +24,15 @@ from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 from src_dev.factor_analysis.reliability import compute_icc
 
 
+def _pass_status(passed: bool | None) -> str:
+    """Map tri-state pass flag to a label. None = SKIP (couldn't run)."""
+    if passed is True:
+        return "PASS"
+    if passed is False:
+        return "FAIL"
+    return "SKIP"
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # SHUFFLE CONTROL
 # ═════════════════════════════════════════════════════════════════════════════
@@ -143,7 +152,7 @@ def shuffle_control_test(
         f"  Shuffle control: {result['n_factors_recommended']} factors found "
         f"(expected ~{result['expected_false_positives']:.1f} at α={result['alpha']}, "
         f"tolerance ≤{result['tolerance']}, "
-        f"{'PASS' if result['pass'] else 'FAIL'})"
+        f"{_pass_status(result['pass'])})"
     )
     return serialisable
 
@@ -172,7 +181,7 @@ def _compute_item_holdout_predictivity(
     n_items = data_clean.shape[1]
 
     if n_items <= holdout_n_items + 10:
-        return {"pass": False, "note": f"Not enough items ({n_items}) for holdout"}
+        return {"pass": None, "note": f"Not enough items ({n_items}) for holdout"}
 
     holdout_idx = rng.choice(n_items, holdout_n_items, replace=False)
     train_idx = np.setdiff1d(np.arange(n_items), holdout_idx)
@@ -183,7 +192,7 @@ def _compute_item_holdout_predictivity(
     pa_train = parallel_analysis(train_data, random_state=seed, method="permutation")
     n_factors = int(pa_train["n_recommended"])
     if n_factors == 0:
-        return {"pass": False, "n_factors_train": 0, "note": "No factors on training items"}
+        return {"pass": None, "n_factors_train": 0, "note": "No factors on training items"}
 
     fa_train = run_factor_analysis(
         train_data, n_factors=n_factors, method=fa_method, rotation=rotation,
@@ -351,7 +360,7 @@ def item_holdout_predictivity_test(
         f"mean CV R²={result['mean_cv_r2']:.4f}, "
         f"{result['n_significant_fdr']}/{result['n_holdout_items']} items "
         f"significant (FDR<{fdr_alpha}) "
-        f"({'PASS' if result['pass'] else 'FAIL'})"
+        f"({_pass_status(result['pass'])})"
     )
     return result
 
@@ -383,11 +392,11 @@ def _compute_stability_icc(
     if fa_key is not None:
         fa_entry = fa_results.get(fa_key)
         if fa_entry is None or fa_entry.get("n_factors", 0) == 0 or "fa_result" not in fa_entry:
-            return {"pass": False, "note": f"FA key {fa_key!r} missing or has no factors", "fa_key": fa_key}
+            return {"pass": None, "note": f"FA key {fa_key!r} missing or has no factors", "fa_key": fa_key}
     else:
         fa_key, fa_entry = _pick_fa_result_with_factors(fa_results)
         if fa_key is None:
-            return {"pass": False, "note": "No FA results with factors"}
+            return {"pass": None, "note": "No FA results with factors"}
 
     fa_result = fa_entry["fa_result"]
     meta = fa_entry["metadata"]
@@ -396,7 +405,7 @@ def _compute_stability_icc(
 
     icc_result = compute_icc(scores, meta, n_factors, group_field=group_field)
     if icc_result.get("error"):
-        return {"pass": False, "note": icc_result["error"], "fa_key": fa_key}
+        return {"pass": None, "note": icc_result["error"], "fa_key": fa_key}
 
     # Residualization subtracts the within-group mean. When the group has
     # only 2 rollouts, the two residuals are ±x by construction, forcing
@@ -541,7 +550,7 @@ def stability_icc_test(
         f"  Stability (ICC): {result['n_groups']} prompts, "
         f"{result['n_factors']} factors, "
         f"mean ICC(1)={result['mean_icc1']:.3f} "
-        f"({'PASS' if result['pass'] else 'FAIL'})"
+        f"({_pass_status(result['pass'])})"
     )
     for f_idx in range(result["n_factors"]):
         ci_lo = result["icc1_ci_lower"][f_idx]

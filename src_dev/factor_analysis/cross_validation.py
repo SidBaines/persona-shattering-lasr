@@ -37,6 +37,7 @@ from src_dev.factor_analysis.congruence import (
     compare_solutions,
     tucker_phi,
 )
+from src_dev.factor_analysis.validation import _pass_status
 from src_dev.factor_analysis.factor_analysis import run_factor_analysis
 from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 
@@ -345,7 +346,7 @@ def persona_item_cv(
     print(
         f"  Persona×item CV: main R²={main_mean:.3f}, "
         f"shuffle={shuf_mean:.3f}, k-1={km1_mean:.3f}, item-mean={item_mean_mean:.3f} "
-        f"({'PASS' if result['pass'] else 'FAIL'})"
+        f"({_pass_status(result['pass'])})"
     )
     return result
 
@@ -513,7 +514,7 @@ def stability_sweep(
         per_split_labels.append(label)
 
     if not per_split_phi:
-        return {"pass": False, "note": "No splits produced a usable FA."}
+        return {"pass": None, "note": "No splits produced a usable FA."}
 
     # Align phi arrays to shape [n_splits, n_factors] (ragged for k±1 cases).
     max_k = max(len(p) for p in per_split_phi)
@@ -557,7 +558,7 @@ def stability_sweep(
     print(
         f"  Stability sweep [{mode}]: {result['n_splits']} splits, "
         f"overall median |φ|={overall_median:.3f} "
-        f"({'PASS' if result['pass'] else 'FAIL'})"
+        f"({_pass_status(result['pass'])})"
     )
     return result
 
