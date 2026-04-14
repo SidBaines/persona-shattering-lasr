@@ -591,7 +591,12 @@ def _ci95_from_bootstrap(
         )
         low = float(r.confidence_interval.low)
         high = float(r.confidence_interval.high)
-    except Exception:
+    except Exception as exc:
+        print(
+            f"[warn] bootstrap CI failed ({type(exc).__name__}: {exc}); "
+            "returning degenerate interval (mean, mean)",
+            flush=True,
+        )
         m = float(arr.mean())
         return m, m
     if not (math.isfinite(low) and math.isfinite(high)):
@@ -706,7 +711,7 @@ def _plot_1d(
         for metric in plot_metrics:
             for scale in scales:
                 cell = cell_by_scale.get(scale) or CanonicalCell.from_scales([(adapter, scale)])
-                values = _cell_scores(cell_dirs.get(cell, Path()), rater_ids, metric) \
+                values = _cell_scores(cell_dirs[cell], rater_ids, metric) \
                     if cell in cell_dirs else []
                 metric_rows[metric].append({"scale": scale, **_summary_row(nc, cell, metric, values)})
 
