@@ -204,7 +204,7 @@ QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = None  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 3  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False, True]
 MIN_ITEM_VARIANCE = 0.5  # drop items with variance below this
@@ -298,7 +298,7 @@ STAGES_TO_RUN = [
     # "questionnaire",
     # "trait_scoring",
     "factor_analysis",
-    # "labeling",
+    "labeling",
     "validation",
 ]
 
@@ -5843,7 +5843,7 @@ def _validation_variance_decomp(
             fa_key = key
             break
     if fa_key is None:
-        return {"pass": False, "note": "No FA results with factors"}
+        return {"pass": None, "note": "No FA results with factors"}
 
     fa_result = fa_results[fa_key]["fa_result"]
     meta = fa_results[fa_key]["metadata"]
@@ -5863,6 +5863,33 @@ def _validation_variance_decomp(
 
     scenario_eta2 = np.array(per_field.get("scenario_id", [0.0] * n_factors))
     archetype_eta2 = np.array(per_field.get("archetype", [0.0] * n_factors))
+
+    # If prompt_effects returned NaN for either asymmetric field (missing from
+    # metadata), the pass gate is undefined. Surface as SKIP with a note.
+    missing = [
+        f for f in ("scenario_id", "archetype")
+        if np.all(np.isnan(per_field.get(f, [0.0])))
+    ]
+    if missing:
+        skip_note = (
+            f"{', '.join(missing)} missing from FA metadata — "
+            "variance_decomp pass criterion undefined."
+        )
+        result = {
+            "fa_key": fa_key,
+            "n_factors": n_factors,
+            "eta2_per_field": per_field,
+            "scenario_ceiling": VARIANCE_DECOMP_SCENARIO_CEILING,
+            "archetype_floor": VARIANCE_DECOMP_ARCHETYPE_FLOOR,
+            "pass": None,
+            "note": skip_note,
+        }
+        out_dir = val_dir / "variance_decomp"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with open(out_dir / "variance_decomp.json", "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"  Variance decomp: {skip_note} (SKIP)")
+        return result
 
     scenario_flagged = [int(i) for i, v in enumerate(scenario_eta2)
                         if v >= VARIANCE_DECOMP_SCENARIO_CEILING]
@@ -5948,13 +5975,13 @@ def _validation_trait_convergence(
     if not trait_csv.exists():
         msg = f"trait_scores_with_metadata.csv not found at {trait_csv}"
         print(f"  {msg} — skipped")
-        return {"pass": False, "note": msg}
+        return {"pass": None, "note": msg}
 
     import pandas as pd
 
     df = pd.read_csv(trait_csv)
     if "sample_id" not in df.columns:
-        return {"pass": False, "note": "trait_scores CSV missing sample_id column"}
+        return {"pass": None, "note": "trait_scores CSV missing sample_id column"}
     trait_cols = [c for c in df.columns
                   if c not in ("k", "sample_id", "input_group_id")]
     by_sid = df.set_index("sample_id")[trait_cols]
@@ -5965,7 +5992,7 @@ def _validation_trait_convergence(
             fa_key = key
             break
     if fa_key is None:
-        return {"pass": False, "note": "No FA results with factors"}
+        return {"pass": None, "note": "No FA results with factors"}
 
     fa_entry = fa_results[fa_key]
     scores = fa_entry["fa_result"]["scores"]
@@ -6140,8 +6167,17 @@ def run_stage_validation(
     print("\n" + "=" * 60)
     print("[Stage 5] Validation Summary:")
     for test_name, test_result in results.items():
-        status = "PASS" if test_result.get("pass") else "FAIL/SKIP"
-        print(f"  {test_name}: {status}")
+        passed = test_result.get("pass")
+        note = test_result.get("note")
+        if passed is True:
+            status = "PASS"
+        elif passed is False:
+            status = "FAIL"
+        else:
+            # pass is None / missing → test was skipped (see note for why)
+            status = "SKIP"
+        suffix = f" — {note}" if note else ""
+        print(f"  {test_name}: {status}{suffix}")
     print("=" * 60)
 
     return results
