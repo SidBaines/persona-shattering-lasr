@@ -80,6 +80,6 @@ for run in "${RUNS[@]}"; do
   echo ""
 done
 
-echo ""
-echo "All runs complete. Stopping RunPod instance..."
-runpodctl stop pod "$RUNPOD_POD_ID"
+# echo ""
+# echo "All runs complete. Stopping RunPod instance..."
+# runpodctl stop pod "$RUNPOD_POD_ID"
