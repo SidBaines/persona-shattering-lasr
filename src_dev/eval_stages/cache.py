@@ -86,6 +86,23 @@ class StageCache:
     def __init__(self, config: StageCacheConfig) -> None:
         self._cfg = config
 
+    @property
+    def hf_repo(self) -> str | None:
+        """HF dataset repo id (``None`` iff remote interaction is disabled)."""
+        if self._cfg.no_remote:
+            return None
+        return self._cfg.hf_repo
+
+    @property
+    def hf_base_path(self) -> str:
+        """HF base path prefix for this cache's artifacts."""
+        return self._cfg.hf_base_path
+
+    @property
+    def has_remote(self) -> bool:
+        """True iff HF interactions (download/upload) are enabled."""
+        return bool(self._cfg.hf_repo) and not self._cfg.no_remote
+
     # ------------------------------------------------------------------
     # Path helpers
     # ------------------------------------------------------------------

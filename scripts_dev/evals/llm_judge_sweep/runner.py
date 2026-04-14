@@ -291,6 +291,40 @@ def _hydrate_rollouts_from_hf(output_config: Any) -> None:
         print(f"  [hydrate] skipped ({type(exc).__name__}: {exc})")
 
 
+def _hydrate_derived_outputs_from_hf(
+    cache: StageCache,
+    sweep_root: Path,
+    subpaths: list[str],
+) -> None:
+    """Pull sibling output subtrees (``exports``, ``judge_runs``, ...) from HF.
+
+    The StageCache for convert/judge only stores ``done.json`` markers and
+    path pointers — the real artifacts are written to ``sweep_root/<subpath>``.
+    On a fresh machine, hydrating the cache marker alone is not enough: the
+    downstream stages' cache-hit branches look for these sibling dirs and
+    silently produce no results when they are missing. Calling this before
+    convert/judge ensures they find their inputs.
+    """
+    if not cache.has_remote:
+        return
+    from src_dev.utils.hf_hub import download_path_to_dir
+
+    for subpath in subpaths:
+        target_dir = sweep_root / subpath
+        if target_dir.exists():
+            continue
+        try:
+            download_path_to_dir(
+                repo_id=cache.hf_repo,
+                path_in_repo=f"{cache.hf_base_path}/{subpath}",
+                target_dir=target_dir,
+            )
+            print(f"  [hydrate] {subpath}: downloaded from HF")
+        except Exception as exc:  # noqa: BLE001
+            # Missing prefix on HF is the normal first-run case.
+            print(f"  [hydrate] {subpath}: skipped ({type(exc).__name__}: {exc})")
+
+
 def _run_rollout_for_scales(
     cfg: ModuleType,
     scale_points: list[float],
@@ -1002,6 +1036,13 @@ def main() -> None:
         rollout_id,
         use_vllm=use_vllm,
         skip=flags.skip_rollouts,
+    )
+
+    # Hydrate convert/judge artifacts from HF so cache-hit branches see real
+    # inputs.  StageCache only fetches its own stage dirs; these sibling dirs
+    # live outside the cache and would otherwise be missing on fresh machines.
+    _hydrate_derived_outputs_from_hf(
+        sweep_cache, sweep_root, ["exports", "judge_runs"]
     )
 
     # Stage 2: convert (merge baseline + sweep)
