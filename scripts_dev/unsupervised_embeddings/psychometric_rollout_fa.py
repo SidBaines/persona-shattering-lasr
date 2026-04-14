@@ -243,8 +243,51 @@ LABELLER_CLAUDE_CLI_TIMEOUT = 3600   # Seconds; labelling with reasoning can be 
 LABELLER_CLAUDE_CLI_EFFORT = "high"  # "low" / "medium" / "high" / "max" or None
 
 # ── Stage 5: Validation ─────────────────────────────────────────────────────
+# Gate each validation test individually. Drop entries to skip expensive
+# passes (e.g. stability_sweep_* and persona_item_cv each refit FA many times).
+VALIDATION_TESTS_TO_RUN = {
+    "shuffle_control",
+    "item_holdout",
+    "stability_icc",
+    "variance_decomp",
+    "trait_convergence",
+    "stability_sweep_random50",
+    "stability_sweep_loao",
+    "stability_sweep_loso_top10",
+    "k_sensitivity",
+    "persona_item_cv",
+}
 STABILITY_N_PROMPTS = 100
 HOLDOUT_N_ITEMS = 20
+# Stability sweep (random-split / LOAO / LOSO refits vs. full-sample anchor).
+STABILITY_SWEEP_N_RANDOM_SPLITS = 10
+STABILITY_SWEEP_LOSO_TOP_N = 10
+STABILITY_SWEEP_PA_ITERATIONS = 50
+STABILITY_SWEEP_PASS_THRESHOLD_PHI = 0.80
+# Variance decomposition (η²) — flag factors strongly driven by the listed fields.
+# NOTE: flag direction is asymmetric.
+#   * scenario_id: CEILING — high η² means the factor is a scenario/prompt
+#     artifact, so flag as fail.
+#   * archetype:   FLOOR   — archetypes encode constructed persona traits, so
+#     high η² is evidence of real persona signal, not contamination. We flag
+#     the rare failure case where NO factor captures archetype variance
+#     (i.e. the factors are blind to the personas you constructed).
+# input_group_id is reported but not used for pass/fail (it's trivially high
+# given NUM_ROLLOUTS_PER_PROMPT > 1).
+VARIANCE_DECOMP_FIELDS = ("archetype", "scenario_id", "input_group_id")
+VARIANCE_DECOMP_SCENARIO_CEILING = 0.30
+VARIANCE_DECOMP_ARCHETYPE_FLOOR = 0.05
+# TRAIT convergent validity against OCEAN scores.
+TRAIT_CONVERGENCE_HIT_THRESHOLD = 0.30
+TRAIT_CONVERGENCE_MIN_HITS = 3
+TRAIT_CONVERGENCE_N_BOOTSTRAP = 1000
+# Persona × item cross-validation.
+PERSONA_ITEM_CV_SPLIT = 0.7
+PERSONA_ITEM_CV_N_TRIALS = 5
+PERSONA_ITEM_CV_SUBSET_STRATEGY = "random"  # or "by_factor_balanced"
+# k ± 1 sensitivity classification.
+K_SENSITIVITY_MATCH_THRESHOLD = 0.85
+K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 
 # ── Pipeline control ────────────────────────────────────────────────────────
 # "trait_scoring" runs after "questionnaire" and is a no-op unless the
@@ -5710,13 +5753,201 @@ def _validation_stability_test(
     }
 
 
+def _validation_variance_decomp(
+    fa_results: dict,
+    val_dir: Path,
+    plt,
+) -> dict:
+    """η² per factor per metadata field via ``prompt_effects``.
+
+    Flag direction is asymmetric (see VARIANCE_DECOMP_* constants):
+      * scenario_id as a ceiling — high η² = scenario artifact.
+      * archetype as a floor — at least one factor must have η² ≥ the floor,
+        else the factor structure is blind to the constructed personas.
+    """
+    print("\n[Stage 5] Validation — Variance decomposition (η²)")
+    from src_dev.factor_analysis.interpretation import prompt_effects
+
+    fa_key = None
+    for key, result in fa_results.items():
+        if result.get("n_factors", 0) > 0 and "fa_result" in result:
+            fa_key = key
+            break
+    if fa_key is None:
+        return {"pass": False, "note": "No FA results with factors"}
+
+    fa_result = fa_results[fa_key]["fa_result"]
+    meta = fa_results[fa_key]["metadata"]
+    scores = fa_result["scores"]
+    n_factors = scores.shape[1]
+
+    per_field: dict[str, list[float]] = {}
+    for field in VARIANCE_DECOMP_FIELDS:
+        eta2 = prompt_effects(scores, meta, group_field=field)
+        per_field[field] = [float(v) for v in eta2]
+
+    scenario_eta2 = np.array(per_field.get("scenario_id", [0.0] * n_factors))
+    archetype_eta2 = np.array(per_field.get("archetype", [0.0] * n_factors))
+
+    scenario_flagged = [int(i) for i, v in enumerate(scenario_eta2)
+                        if v >= VARIANCE_DECOMP_SCENARIO_CEILING]
+    archetype_signal_max = float(archetype_eta2.max()) if len(archetype_eta2) else 0.0
+    archetype_floor_pass = archetype_signal_max >= VARIANCE_DECOMP_ARCHETYPE_FLOOR
+
+    passed = (len(scenario_flagged) == 0) and archetype_floor_pass
+
+    result = {
+        "fa_key": fa_key,
+        "n_factors": n_factors,
+        "eta2_per_field": per_field,
+        "scenario_ceiling": VARIANCE_DECOMP_SCENARIO_CEILING,
+        "archetype_floor": VARIANCE_DECOMP_ARCHETYPE_FLOOR,
+        "scenario_flagged_factors": scenario_flagged,
+        "archetype_max_eta2": archetype_signal_max,
+        "archetype_floor_pass": archetype_floor_pass,
+        "pass": passed,
+    }
+
+    out_dir = val_dir / "variance_decomp"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / "variance_decomp.json", "w") as f:
+        json.dump(result, f, indent=2)
+
+    try:
+        fields = list(per_field.keys())
+        x = np.arange(n_factors)
+        width = 0.8 / len(fields)
+        fig, ax = plt.subplots(figsize=(max(6, 1.2 * n_factors + 2), 4.5))
+        colors = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626"]
+        for i, field in enumerate(fields):
+            ax.bar(
+                x + (i - (len(fields) - 1) / 2) * width,
+                per_field[field], width, label=field, color=colors[i % len(colors)],
+            )
+        ax.axhline(VARIANCE_DECOMP_SCENARIO_CEILING, color="#dc2626",
+                   linestyle="--", linewidth=0.8, alpha=0.6,
+                   label=f"scenario ceiling ({VARIANCE_DECOMP_SCENARIO_CEILING})")
+        ax.axhline(VARIANCE_DECOMP_ARCHETYPE_FLOOR, color="#16a34a",
+                   linestyle=":", linewidth=0.8, alpha=0.6,
+                   label=f"archetype floor ({VARIANCE_DECOMP_ARCHETYPE_FLOOR})")
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"F{i}" for i in range(n_factors)])
+        ax.set_ylim(0, 1.0)
+        ax.set_ylabel("η² (variance explained)")
+        ax.set_xlabel("Factor")
+        ax.set_title(
+            "Variance decomposition — scenario as ceiling, archetype as floor",
+            fontsize=11, fontweight="bold",
+        )
+        ax.legend(fontsize=9)
+        ax.grid(axis="y", alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(out_dir / "variance_decomp.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    except Exception as exc:
+        print(f"  Variance decomposition plot failed: {exc}")
+
+    print(
+        f"  Variance decomp: scenario-flagged {len(scenario_flagged)}/{n_factors} "
+        f"(η²≥{VARIANCE_DECOMP_SCENARIO_CEILING}), "
+        f"archetype max η²={archetype_signal_max:.2f} "
+        f"(floor={VARIANCE_DECOMP_ARCHETYPE_FLOOR}) "
+        f"({'PASS' if passed else 'FAIL'})"
+    )
+    return result
+
+
+def _validation_trait_convergence(
+    fa_results: dict,
+    val_dir: Path,
+    plt,
+) -> dict:
+    """Spearman ρ between factor scores and TRAIT OCEAN scores."""
+    print("\n[Stage 5] Validation — TRAIT convergent validity")
+    from src_dev.factor_analysis.trait_convergence import convergent_validity
+
+    trait_csv = (
+        _questionnaire_dir() / "questionnaire" / "trait_scores"
+        / "trait_scores_with_metadata.csv"
+    )
+    if not trait_csv.exists():
+        msg = f"trait_scores_with_metadata.csv not found at {trait_csv}"
+        print(f"  {msg} — skipped")
+        return {"pass": False, "note": msg}
+
+    import pandas as pd
+
+    df = pd.read_csv(trait_csv)
+    if "sample_id" not in df.columns:
+        return {"pass": False, "note": "trait_scores CSV missing sample_id column"}
+    trait_cols = [c for c in df.columns
+                  if c not in ("k", "sample_id", "input_group_id")]
+    by_sid = df.set_index("sample_id")[trait_cols]
+
+    fa_key = None
+    for key, result in fa_results.items():
+        if result.get("n_factors", 0) > 0 and "fa_result" in result:
+            fa_key = key
+            break
+    if fa_key is None:
+        return {"pass": False, "note": "No FA results with factors"}
+
+    fa_entry = fa_results[fa_key]
+    scores = fa_entry["fa_result"]["scores"]
+    meta = fa_entry["metadata"]
+
+    n = len(meta)
+    t = len(trait_cols)
+    trait_matrix = np.full((n, t), np.nan)
+    for i, m in enumerate(meta):
+        sid = m.get("sample_id")
+        if sid in by_sid.index:
+            trait_matrix[i] = by_sid.loc[sid].values
+
+    n_aligned = int(np.sum(~np.all(np.isnan(trait_matrix), axis=1)))
+    if n_aligned < 20:
+        return {
+            "pass": False,
+            "note": f"Too few aligned personas: {n_aligned}",
+            "fa_key": fa_key,
+        }
+
+    out_dir = val_dir / "trait_convergence"
+    result = convergent_validity(
+        scores, trait_matrix, out_dir,
+        trait_names=trait_cols,
+        factor_names=[f"F{i}" for i in range(scores.shape[1])],
+        method="spearman",
+        n_bootstrap=TRAIT_CONVERGENCE_N_BOOTSTRAP,
+        trait_hit_threshold=TRAIT_CONVERGENCE_HIT_THRESHOLD,
+        min_trait_hits=TRAIT_CONVERGENCE_MIN_HITS,
+        seed=SEED + 5,
+        plt=plt,
+    )
+    result["fa_key"] = fa_key
+    result["n_aligned_personas"] = n_aligned
+    return result
+
+
+def _pick_anchor_fa(fa_results: dict) -> tuple[str, dict] | tuple[None, None]:
+    """Return (key, entry) for the first FA result with factors."""
+    for key, result in fa_results.items():
+        if result.get("n_factors", 0) > 0 and "fa_result" in result:
+            return key, result
+    return None, None
+
+
 def run_stage_validation(
     response_matrix: np.ndarray,
     metadata: list[dict],
     column_defs: list[dict],
     fa_results: dict,
 ) -> dict:
-    """Run validation tests: shuffle control, held-out item predictivity, stability."""
+    """Run validation tests, each gated by ``VALIDATION_TESTS_TO_RUN``.
+
+    See ``VALIDATION_TESTS_TO_RUN`` for available test names. Each writes its
+    own JSON + plot(s) under ``<questionnaire_dir>/validation/``.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -5724,33 +5955,113 @@ def run_stage_validation(
     val_dir = _questionnaire_dir() / "validation"
     val_dir.mkdir(parents=True, exist_ok=True)
 
-    # Preprocess once (shared by shuffle and predictivity tests)
+    # Preprocess once for tests that need the clean response matrix.
     data_clean, meta_clean, cols_clean, _ = _preprocess_response_matrix(
         response_matrix, metadata, column_defs, do_residualize=False,
     )
 
-    # Get the parallel analysis result from the main FA run for the scree comparison
+    # Parallel analysis anchor for the shuffle-scree comparison plot.
     pa_real_result = None
     for result in fa_results.values():
         if result.get("parallel_analysis") is not None:
             pa_real_result = result["parallel_analysis"]
             break
     if pa_real_result is None:
-        # Compute if not cached in fa_results (match shuffle test's ordinal-friendly null)
-        pa_real_result = parallel_analysis(data_clean, random_state=SEED, method="permutation")
+        pa_real_result = parallel_analysis(data_clean, random_state=SEED)
 
-    results = {}
+    anchor_key, anchor_entry = _pick_anchor_fa(fa_results)
+    anchor_k = anchor_entry["n_factors"] if anchor_entry else None
+    anchor_loadings = (
+        anchor_entry["fa_result"]["loadings"] if anchor_entry else None
+    )
 
-    # Test 1: Shuffle control
-    results["shuffle"] = _validation_shuffle_test(data_clean, pa_real_result, val_dir, plt)
+    results: dict[str, dict] = {}
 
-    # Test 2: Held-out item predictivity
-    results["predictivity"] = _validation_predictivity_test(data_clean, val_dir, plt)
+    def _enabled(name: str) -> bool:
+        return name in VALIDATION_TESTS_TO_RUN
 
-    # Test 3: Stability (ICC)
-    results["stability"] = _validation_stability_test(fa_results, val_dir, plt)
+    if _enabled("shuffle_control"):
+        results["shuffle"] = _validation_shuffle_test(
+            data_clean, pa_real_result, val_dir, plt,
+        )
+    if _enabled("item_holdout"):
+        results["item_holdout"] = _validation_predictivity_test(
+            data_clean, val_dir, plt,
+        )
+    if _enabled("stability_icc"):
+        results["stability_icc"] = _validation_stability_test(
+            fa_results, val_dir, plt,
+        )
+    if _enabled("variance_decomp"):
+        results["variance_decomp"] = _validation_variance_decomp(
+            fa_results, val_dir, plt,
+        )
+    if _enabled("trait_convergence"):
+        results["trait_convergence"] = _validation_trait_convergence(
+            fa_results, val_dir, plt,
+        )
 
-    # Summary
+    # Sweeps / sensitivity / persona×item CV all need the anchor loadings.
+    if anchor_loadings is not None:
+        from src_dev.factor_analysis.cross_validation import (
+            k_sensitivity as _k_sensitivity,
+            persona_item_cv as _persona_item_cv,
+            stability_sweep as _stability_sweep,
+        )
+        if _enabled("stability_sweep_random50"):
+            print("\n[Stage 5] Validation — Stability sweep (random 50%)")
+            results["stability_sweep_random50"] = _stability_sweep(
+                data_clean, meta_clean, anchor_k, anchor_loadings,
+                val_dir, mode="random_50",
+                n_splits=STABILITY_SWEEP_N_RANDOM_SPLITS,
+                pa_iterations=STABILITY_SWEEP_PA_ITERATIONS,
+                fa_method=FA_METHOD, rotation=FA_ROTATIONS[0],
+                pass_threshold_median_phi=STABILITY_SWEEP_PASS_THRESHOLD_PHI,
+                seed=SEED + 10,
+            )
+        if _enabled("stability_sweep_loao"):
+            print("\n[Stage 5] Validation — Stability sweep (leave-one-archetype-out)")
+            results["stability_sweep_loao"] = _stability_sweep(
+                data_clean, meta_clean, anchor_k, anchor_loadings,
+                val_dir, mode="loao",
+                pa_iterations=STABILITY_SWEEP_PA_ITERATIONS,
+                fa_method=FA_METHOD, rotation=FA_ROTATIONS[0],
+                pass_threshold_median_phi=STABILITY_SWEEP_PASS_THRESHOLD_PHI,
+                seed=SEED + 11,
+            )
+        if _enabled("stability_sweep_loso_top10"):
+            print(
+                f"\n[Stage 5] Validation — Stability sweep "
+                f"(leave-one-scenario-out, top {STABILITY_SWEEP_LOSO_TOP_N})"
+            )
+            results["stability_sweep_loso_top10"] = _stability_sweep(
+                data_clean, meta_clean, anchor_k, anchor_loadings,
+                val_dir, mode="loso",
+                top_n_scenarios=STABILITY_SWEEP_LOSO_TOP_N,
+                pa_iterations=STABILITY_SWEEP_PA_ITERATIONS,
+                fa_method=FA_METHOD, rotation=FA_ROTATIONS[0],
+                pass_threshold_median_phi=STABILITY_SWEEP_PASS_THRESHOLD_PHI,
+                seed=SEED + 12,
+            )
+        if _enabled("k_sensitivity"):
+            print("\n[Stage 5] Validation — k ± 1 sensitivity")
+            results["k_sensitivity"] = _k_sensitivity(
+                data_clean, k_center=anchor_k, out_dir=val_dir,
+                fa_method=FA_METHOD, rotation=FA_ROTATIONS[0],
+                match_threshold=K_SENSITIVITY_MATCH_THRESHOLD,
+                independent_threshold=K_SENSITIVITY_INDEPENDENT_THRESHOLD,
+            )
+        if _enabled("persona_item_cv"):
+            print("\n[Stage 5] Validation — Persona × item CV")
+            results["persona_item_cv"] = _persona_item_cv(
+                data_clean, meta_clean, anchor_k, val_dir,
+                persona_split=PERSONA_ITEM_CV_SPLIT,
+                n_trials=PERSONA_ITEM_CV_N_TRIALS,
+                subset_strategy=PERSONA_ITEM_CV_SUBSET_STRATEGY,
+                fa_method=FA_METHOD, rotation=FA_ROTATIONS[0],
+                seed=SEED + 13,
+            )
+
     print("\n" + "=" * 60)
     print("[Stage 5] Validation Summary:")
     for test_name, test_result in results.items():
