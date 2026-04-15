@@ -44,6 +44,10 @@ from typing import Any
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("VLLM_USE_V1", "1")
+# vLLM v1 forks worker processes; if CUDA was touched in the parent (e.g. by
+# seed_all() or PEFT baking) the fork will crash with "Cannot re-initialize
+# CUDA". Spawn is the safe alternative.
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
 from dotenv import load_dotenv
 
