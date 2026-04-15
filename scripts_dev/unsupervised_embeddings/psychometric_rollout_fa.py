@@ -22,7 +22,7 @@ import random
 
 import numpy as np
 
-SEED = 432  # Production run: exhaustive scenario×archetype combos
+SEED = 436  # Production run: exhaustive scenario×archetype combos
 random.seed(SEED)
 np.random.seed(SEED)
 
@@ -106,8 +106,8 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
-MAX_PROMPTS = 1000  # All 100 scenarios × 10 archetypes
-NUM_ROLLOUTS_PER_PROMPT = 2  # 2 rollouts per combo → 2000 total
+MAX_PROMPTS = 2500
+NUM_ROLLOUTS_PER_PROMPT = 1
 NUM_CONVERSATION_TURNS = 10
 # For cross-model replication sweeps, pick one of the candidates below and
 # rerun the pipeline (a fresh _rollout_run_id() is derived automatically).
@@ -124,7 +124,7 @@ ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {
     "quantizations": ["bf16"],
     # "allow_fallbacks": False,
 }
-USER_MODEL = "z-ai/glm-4.7-flash"
+USER_MODEL = "openai/gpt-5.4-nano"
 USER_PROVIDER = "openrouter"
 TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
@@ -142,7 +142,7 @@ SCENARIO_FILE: str | None = "datasets/scenarios/v2.json"
 SCENARIO_SET_VERSION = "v2"
 # Bump when the user-simulator prompt content changes (anti-LLM-tic rules,
 # deployment-role rendering, etc.). Invalidates scenarios-mode cache keys.
-USER_SIM_PROMPT_VERSION = "v4"
+USER_SIM_PROMPT_VERSION = "v6"
 # Local/vLLM-only assistant batch size. Remote assistant providers use
 # `ROLLOUT_MAX_CONCURRENT` via the rollout scheduler's shared async limiter.
 ROLLOUT_ASSISTANT_BATCH_SIZE = 32
@@ -214,9 +214,12 @@ QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 # ── Stage 2b: Realism + evaluation-awareness judge ─────────────────────────
 # Diagnostic judges over completed rollouts (not used for filtering). Bloom-style
 # rubrics adapted to our LLMJudgeMetric base class.
-REALISM_JUDGE_MODEL = "z-ai/glm-4.5-air"
+REALISM_JUDGE_MODEL = "openai/gpt-5.4-nano"
 REALISM_JUDGE_PROVIDER = "openrouter"
-REALISM_JUDGE_MAX_TOKENS = 600
+# glm-4.7-flash is a reasoning model — it spends 800-1300 tokens on internal
+# thinking before emitting content. Caps below ~1500 cause finish_reason=length
+# with empty content.
+REALISM_JUDGE_MAX_TOKENS = 4000
 REALISM_JUDGE_TEMPERATURE = 0.0
 REALISM_JUDGE_MAX_CONCURRENT = 64
 # Per-message char cap in the rendered transcript passed to the judge.
@@ -285,7 +288,7 @@ FC_PAIR_SIGN_ALIGNMENT = True
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
 LABELLER_MODEL = "anthropic/claude-opus-4.6"
 # LABELLER_MODEL = "anthropic/claude-sonnet-4.6"
-# LABELLER_MODEL = "z-ai/glm-4.5-air"
+# LABELLER_MODEL = "openai/gpt-5.4-nano"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
 LABELLER_MAX_NEW_TOKENS = 500000
@@ -363,13 +366,13 @@ K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 # questionnaire contains trait_mcq items (uses the answer_mapping to compute
 # per-persona TRAIT scores + plots).
 STAGES_TO_RUN = [
-    # "rollouts",
-    "questionnaire",
-    "trait_scoring",
+    "rollouts",
+    # "questionnaire",
+    # "trait_scoring",
     "realism_judge",
-    "factor_analysis",
-    "labeling",
-    "validation",
+    # "factor_analysis",
+    # "labeling",
+    # "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -1284,35 +1287,43 @@ def run_stage_rollouts(
         run_dir.mkdir(parents=True, exist_ok=True)
         synthetic_seed_path = run_dir / "_synthetic_scenario_seeds.jsonl"
         if not synthetic_seed_path.exists():
+            # Build all combos, pre-shuffle with the run seed, pre-select
+            # MAX_PROMPTS, then write exactly that many rows with
+            # id == file position. Downstream ingest must NOT shuffle again
+            # (seed=None in DatasetConfig below) or row_index will drift
+            # away from id and the scenario/archetype assignments built by
+            # _build_per_sample_templates_scenarios — which look up
+            # idx_to_combo[row_index] — will reference the wrong row.
+            all_combos = [(sc, arch) for sc in scenarios for arch in ARCHETYPE_NAMES]
+            rng = random.Random(SEED)
+            rng.shuffle(all_combos)
+            selected_combos = all_combos[:MAX_PROMPTS]
             with open(synthetic_seed_path, "w") as f:
-                idx = 0
-                for sc in scenarios:
-                    for arch in ARCHETYPE_NAMES:
-                        row: dict[str, Any] = {
-                            "question": f"[scenario: {sc.id} | archetype: {arch}]",
-                            "id": idx,
-                            "scenario_id": sc.id,
-                            "archetype": arch,
-                        }
-                        # v2+ scenarios carry a per-scenario deployment-style
-                        # target system prompt. The canonical ingest picks
-                        # this up via the "system_prompt" column and
-                        # registers it as messages[0] on the materialized
-                        # sample; the rollout engine then uses it via
-                        # _resolve_effective_system_prompt. v1 leaves this
-                        # None so the synthetic seed omits the field and
-                        # behavior is unchanged.
-                        if sc.target_system_prompt:
-                            row["system_prompt"] = sc.target_system_prompt
-                        json.dump(row, f)
-                        f.write("\n")
-                        idx += 1
+                for idx, (sc, arch) in enumerate(selected_combos):
+                    row: dict[str, Any] = {
+                        "question": f"[scenario: {sc.id} | archetype: {arch}]",
+                        "id": idx,
+                        "scenario_id": sc.id,
+                        "archetype": arch,
+                    }
+                    # v2+ scenarios carry a per-scenario deployment-style
+                    # target system prompt. The canonical ingest picks
+                    # this up via the "system_prompt" column and
+                    # registers it as messages[0] on the materialized
+                    # sample; the rollout engine then uses it via
+                    # _resolve_effective_system_prompt. v1 leaves this
+                    # None so the synthetic seed omits the field and
+                    # behavior is unchanged.
+                    if sc.target_system_prompt:
+                        row["system_prompt"] = sc.target_system_prompt
+                    json.dump(row, f)
+                    f.write("\n")
 
         dataset_config = DatasetConfig(
             source="local",
             path=str(synthetic_seed_path),
             max_samples=MAX_PROMPTS,
-            seed=SEED,
+            seed=None,
         )
         seed_dataset = load_dataset_from_config(dataset_config)
         samples = ingest_source_dataset(
@@ -1392,7 +1403,7 @@ def run_stage_rollouts(
             max_concurrent=user_sim_max_concurrent,
             timeout=QUESTIONNAIRE_TIMEOUT,
             retry=RetryConfig(max_retries=3, backoff_factor=2.0),
-            openrouter=OpenRouterProviderConfig(),
+            openrouter=OpenRouterProviderConfig(reasoning={"effort": "medium"}),
         ),
         user_sim_generates_opening=True,
         resume=True,
@@ -2550,7 +2561,7 @@ def run_stage_trait_scoring(metadata: list[dict] | None = None) -> dict | None:
 
 
 def run_stage_realism_judge() -> dict | None:
-    """Score each completed rollout for unrealism + evaluation awareness.
+    """Score each completed rollout for unrealism (evaluation-awareness judge disabled).
 
     Diagnostic-only: scores are never used to filter rollouts. Spiraling /
     repetitive / confused conversations are preserved because they are
@@ -2566,7 +2577,7 @@ def run_stage_realism_judge() -> dict | None:
     """
     from src_dev.persona_metrics.config import JudgeLLMConfig
     from src_dev.persona_metrics.metrics.realism_judges import (
-        EvaluationAwarenessJudge,
+        # EvaluationAwarenessJudge,  # disabled — unimportant for current runs
         UnrealismJudge,
         render_transcript_for_judge,
     )
@@ -2602,12 +2613,20 @@ def run_stage_realism_judge() -> dict | None:
             for line in output_path.open("r", encoding="utf-8")
             if line.strip()
         ]
-        existing_ids = {r["sample_id"] for r in rows}
-        if expected_ids.issubset(existing_ids):
+        # Rows where the judge returned the -1 error sentinel are not
+        # considered cached — they'll be retried on the next run.
+        good_ids = {
+            r["sample_id"]
+            for r in rows
+            if r.get("unrealism_score", -1) >= 0
+        }
+        if expected_ids.issubset(good_ids):
             return rows
+        missing = len(expected_ids - good_ids)
         print(
-            f"[Realism] Local JSONL covers {len(existing_ids & expected_ids)}/"
-            f"{len(expected_ids)} samples — regenerating."
+            f"[Realism] Local JSONL covers {len(good_ids & expected_ids)}/"
+            f"{len(expected_ids)} samples with non-error scores "
+            f"({missing} to retry) — regenerating."
         )
         return None
 
@@ -2678,7 +2697,7 @@ def run_stage_realism_judge() -> dict | None:
         max_concurrent=REALISM_JUDGE_MAX_CONCURRENT,
     )
     unrealism_judge = UnrealismJudge(judge_config=judge_cfg)
-    awareness_judge = EvaluationAwarenessJudge(judge_config=judge_cfg)
+    # awareness_judge = EvaluationAwarenessJudge(judge_config=judge_cfg)  # disabled
 
     placeholder = "[full multi-turn transcript below]"
     questions = [placeholder] * len(transcripts)
@@ -2688,23 +2707,15 @@ def run_stage_realism_judge() -> dict | None:
         f"{REALISM_JUDGE_MODEL} (concurrency={REALISM_JUDGE_MAX_CONCURRENT})"
     )
 
-    async def _run() -> tuple[list[dict], list[dict]]:
-        unrealism_task = asyncio.create_task(
-            unrealism_judge.evaluate_batch_async(transcripts, questions)
-        )
-        awareness_task = asyncio.create_task(
-            awareness_judge.evaluate_batch_async(transcripts, questions)
-        )
-        u = await unrealism_task
-        a = await awareness_task
-        return u, a
+    async def _run() -> list[dict]:
+        return await unrealism_judge.evaluate_batch_async(transcripts, questions)
 
-    unrealism_results, awareness_results = asyncio.run(_run())
+    unrealism_results = asyncio.run(_run())
 
     # ── Write per-rollout JSONL ──
     rows: list[dict] = []
     with output_path.open("w", encoding="utf-8") as f:
-        for meta, u_res, a_res in zip(side_meta, unrealism_results, awareness_results):
+        for meta, u_res in zip(side_meta, unrealism_results):
             sid = meta["sample_id"]
             row = {
                 "sample_id": sid,
@@ -2714,10 +2725,6 @@ def run_stage_realism_judge() -> dict | None:
                 "archetype": archetype_by_id.get(sid),
                 "unrealism_score": u_res.get("unrealism.score"),
                 "unrealism_reasoning": u_res.get("unrealism.reasoning", ""),
-                "eval_awareness_score": a_res.get("evaluation_awareness.score"),
-                "eval_awareness_reasoning": a_res.get(
-                    "evaluation_awareness.reasoning", ""
-                ),
             }
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
             rows.append(row)
@@ -2795,11 +2802,6 @@ def _summarize_realism_scores(rows: list[dict]) -> dict:
             "by_scenario": _group_stats(rows, "scenario_id", "unrealism_score"),
             "by_archetype": _group_stats(rows, "archetype", "unrealism_score"),
         },
-        "eval_awareness": {
-            "overall": _overall(rows, "eval_awareness_score"),
-            "by_scenario": _group_stats(rows, "scenario_id", "eval_awareness_score"),
-            "by_archetype": _group_stats(rows, "archetype", "eval_awareness_score"),
-        },
     }
 
     def _fmt(s: dict[str, float]) -> str:
@@ -2808,22 +2810,13 @@ def _summarize_realism_scores(rows: list[dict]) -> dict:
             f"p10={s['p10']:.1f} p50={s['p50']:.1f} p90={s['p90']:.1f}"
         )
 
-    print("[Realism] Unrealism — overall:      " + _fmt(summary["unrealism"]["overall"]))
-    print(
-        "[Realism] Eval-awareness — overall: "
-        + _fmt(summary["eval_awareness"]["overall"])
-    )
+    print("[Realism] Unrealism — overall: " + _fmt(summary["unrealism"]["overall"]))
 
     by_arch_u = summary["unrealism"]["by_archetype"]
-    by_arch_a = summary["eval_awareness"]["by_archetype"]
     if by_arch_u:
         print("[Realism] Unrealism by archetype:")
         for arch in sorted(by_arch_u):
             print(f"    {arch:20s}  {_fmt(by_arch_u[arch])}")
-    if by_arch_a:
-        print("[Realism] Eval-awareness by archetype:")
-        for arch in sorted(by_arch_a):
-            print(f"    {arch:20s}  {_fmt(by_arch_a[arch])}")
 
     return summary
 
