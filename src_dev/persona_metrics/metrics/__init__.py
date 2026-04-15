@@ -7,6 +7,12 @@ from functools import partial
 
 from src_dev.persona_metrics.metrics.coherence import CoherenceV2Evaluation
 from src_dev.persona_metrics.metrics.counter import CharCounterMetric
+# Importing realism_judges registers "unrealism" and "evaluation_awareness".
+from src_dev.persona_metrics.metrics.realism_judges import (
+    EvaluationAwarenessJudge,
+    UnrealismJudge,
+    render_transcript_for_judge,
+)
 from src_dev.persona_metrics.metrics.ocean_v2 import (
     AgreeablenessV2Evaluation,
     ConscientiousnessV2Evaluation,
@@ -58,10 +64,13 @@ __all__ = [
     "CharCounterMetric",
     "CoherenceV2Evaluation",
     "ConscientiousnessV2Evaluation",
+    "EvaluationAwarenessJudge",
     "ExtraversionV2Evaluation",
     "LowercaseDensityEvaluation",
     "NeuroticismV2Evaluation",
     "OpennessV2Evaluation",
     "PunctuationDensityEvaluation",
+    "UnrealismJudge",
     "VerbCountEvaluation",
+    "render_transcript_for_judge",
 ]

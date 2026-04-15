@@ -48,6 +48,13 @@ class ConversationScenario:
             turns, NOT a rigid script. The user model is free to deviate.
         tags: Optional metadata for analysis and balance checking. Suggested
             keys: "emotional_register", "expertise_level", "depth", "task_type".
+        target_system_prompt: Optional production-style system prompt for the
+            target model. When set, the target receives this as its system
+            message during rollout, grounding it in a realistic deployment
+            role (e.g. "customer-support assistant for an online bookstore").
+            Must be behavior-neutral: it sets up role/context only, and does
+            NOT bias the target toward any personality trait. v1 scenarios
+            leave this None; v2+ require it.
     """
     id: str
     name: str
@@ -55,6 +62,7 @@ class ConversationScenario:
     situation: str
     beats: list[str] | None = None
     tags: dict[str, str] = field(default_factory=dict)
+    target_system_prompt: str | None = None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -87,7 +95,8 @@ The scenario file is a JSON file with the following structure:
                 "expertise_level": "beginner",
                 "depth": "deep",
                 "task_type": "technical"
-            }
+            },
+            "target_system_prompt": "You are a coding assistant deployed in an IDE plugin. Help users debug, write, and understand code across a wide range of languages and projects."
         }
     ]
 }
@@ -110,6 +119,12 @@ Field details:
     conversation dynamics.
 - tags (optional): key-value metadata. Used for post-hoc analysis and
     balance checking. Suggested keys and values listed below.
+- target_system_prompt (required in v2+): 1-3 sentences that sound like a
+    real production system prompt for the target AI. Sets up role/context
+    (what product the AI is deployed as) but is GENERAL to a deployment,
+    not specific to this user's situation. Must be behavior-neutral — no
+    "be warm", "be thorough", "show empathy", or any other trait-biasing
+    language. The target must never be told it is being evaluated.
 """
 
 SUGGESTED_CATEGORIES = [
@@ -189,7 +204,19 @@ def load_scenarios(path: str | Path) -> list[ConversationScenario]:
             situation=raw["situation"],
             beats=raw.get("beats"),
             tags=raw.get("tags", {}),
+            target_system_prompt=raw.get("target_system_prompt"),
         ))
+
+    # v2+ scenario files must populate target_system_prompt on every scenario.
+    meta_version = (data.get("meta", {}) or {}).get("version", "")
+    if isinstance(meta_version, str) and meta_version.startswith("v2"):
+        missing_sp = [s.id for s in scenarios if not s.target_system_prompt]
+        if missing_sp:
+            raise ValueError(
+                f"Scenario file {path} has meta.version={meta_version!r} but "
+                f"{len(missing_sp)} scenario(s) are missing target_system_prompt: "
+                f"{missing_sp[:5]}{'...' if len(missing_sp) > 5 else ''}"
+            )
 
     logger.info("Loaded %d scenarios from %s", len(scenarios), path)
     return scenarios
@@ -245,6 +272,51 @@ def validate_scenarios(scenarios: list[ConversationScenario]) -> list[str]:
             warnings.append(
                 f"Scenario '{s.id}' situation is very long ({len(s.situation)} chars) — "
                 f"may over-constrain the conversation."
+            )
+
+    # target_system_prompt quality checks (only when set — v1 leaves None)
+    _trait_biasing_words = (
+        " warm", " warmly",
+        " empathetic", " empathic", " empathy",
+        " careful", " carefully",
+        " thorough", " thoroughly",
+        " patient", " patiently",
+        " friendly", " friendliness",
+        " cheerful", " cheerfully",
+        " encouraging",
+        " supportive",
+        " enthusiastic",
+        " double-check", " double check",
+    )
+    for s in scenarios:
+        sp = s.target_system_prompt
+        if sp is None:
+            continue
+        sp_stripped = sp.strip()
+        if not sp_stripped:
+            warnings.append(f"Scenario '{s.id}' has an empty target_system_prompt.")
+            continue
+        if len(sp_stripped) < 30:
+            warnings.append(
+                f"Scenario '{s.id}' target_system_prompt is very short "
+                f"({len(sp_stripped)} chars) — may not establish a believable role."
+            )
+        if len(sp_stripped) > 800:
+            warnings.append(
+                f"Scenario '{s.id}' target_system_prompt is very long "
+                f"({len(sp_stripped)} chars) — should be 1-3 sentences."
+            )
+        lowered = " " + sp_stripped.lower()
+        hits = [w.strip() for w in _trait_biasing_words if w in lowered]
+        if hits:
+            warnings.append(
+                f"Scenario '{s.id}' target_system_prompt contains possible "
+                f"trait-biasing words {hits}. Prompts should be behavior-neutral."
+            )
+        if "evaluation" in lowered or "you are being tested" in lowered:
+            warnings.append(
+                f"Scenario '{s.id}' target_system_prompt appears to tip the "
+                f"target off that it is being evaluated — remove that language."
             )
 
     return warnings
