@@ -83,12 +83,14 @@ def resolve_adapter_to_local_dir(
     without needing a ``subfolder=`` kwarg.
     """
     ref, subfolder = split_adapter_reference(adapter_path)
+    if resolver is not None:
+        # Let the resolver see the source prefix so it can disambiguate
+        # local vs HF refs.
+        ref = resolver(ref)
     if ref.startswith("local://"):
         ref = ref[len("local://") :]
     elif ref.startswith("hf://"):
         ref = ref[len("hf://") :]
-    if resolver is not None:
-        ref = resolver(ref)
 
     ref_path = Path(ref)
     if ref_path.exists():
