@@ -147,14 +147,18 @@ ROLLOUT_MAX_CONCURRENT = 64
 USER_SIM_MAX_CONCURRENT = 64
 
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
-QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
+# QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
+# QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
 # TRAIT-benchmark questionnaire: 20 items per OCEAN trait (100 total),
 # A/B/C/D options shuffled per item. Scored both via unsupervised FA (integer
 # 1..4 encoding) and via TRAIT's canonical answer_mapping (see
 # src_dev.factor_analysis.trait_scoring).
 # QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/trait_ocean_v1.json"
 # QUESTIONNAIRE_VERSION = "trait_ocean_v1"  # bump when changing items
+# v6 paired-response FC: 78 items across 13 axes, scored via logprob P(A)/P(B)
+# with a per-block prefill ("I'd go with "). Requires FA_BLOCKS = ["fc_pair"].
+QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v6_fc_draft.json"
+QUESTIONNAIRE_VERSION = "v6_fc_draft"
 QUESTIONNAIRE_PHRASING = "direct"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -172,6 +176,7 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # Non-vLLM providers ignore this and stay persona-at-a-time.
 QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 8 # On an 80Gb GPU, 8 sseems pretty optimal
 QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 4 # On an 48Gb GPU, we will try 4...?
+QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 8 # experiment: does bigger batch (8) fit on A40 and go faster?
 # vLLM memory utilisation — higher = more KV cache slots (good for prefix caching).
 QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 # Tensor parallelism: number of GPUs to shard the model across. 1 = single GPU.
@@ -185,7 +190,7 @@ QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 # text generation. The full P(letter) distribution is stored in
 # raw_responses.jsonl alongside the argmax choice, and TRAIT scoring uses the
 # continuous probability distribution. Requires QUESTIONNAIRE_PROVIDER="vllm".
-QUESTIONNAIRE_USE_LOGPROBS = False
+QUESTIONNAIRE_USE_LOGPROBS = True
 QUESTIONNAIRE_TOP_LOGPROBS = 20
 # Temperature for the logprob pass. 1.0 returns the raw model distribution
 # (canonical for TRAIT scoring).
@@ -218,6 +223,12 @@ QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 QUESTIONNAIRE_RESET_MODE = os.environ.get(
     "PSYCHOMETRIC_RESET_MODE", "none"
 )  # "none" | "soft" | "token_boundary" — env override lets a wrapper sweep modes.
+# NB: llama-3.x Instruct was not trained with mid-sequence role="system"
+# messages, so "soft" (and the mid-sequence <|end_of_text|>/<|begin_of_text|>
+# in "token_boundary") are OOD signals for this model family. That is a
+# deliberate choice — we want a strong reset cue. The prompt intentionally
+# does NOT tell the model to drop the prior persona: whether a drifted
+# persona persists across the boundary is what we are trying to measure.
 QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT = (
     "The previous conversation has ended. A new, independent conversation "
     "is now beginning."
@@ -230,10 +241,12 @@ QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 3  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 4  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
-RESIDUALIZE_OPTIONS = [False, True]
-MIN_ITEM_VARIANCE = 0.5  # drop items with variance below this
+RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means, which removes
+# the persona signal we actually want to keep (two rollouts within an input_group_id are
+# the same persona). Disabled — the raw FA is the scientifically-meaningful path.
+MIN_ITEM_VARIANCE = 0.1  # drop items with variance below this
 # Drop personas whose across-item response variance is in the top percentile.
 # These may be incoherent rollouts that respond near-randomly. Set to 0 to
 # disable (keep all personas). E.g. 5 means drop the top 5% by variance.
@@ -243,7 +256,17 @@ HIGH_VARIANCE_PERSONA_DROP_PCT = 0
 # theoretical structure into the correlation matrix (see design notes).
 # Vignettes are still administered and logged for validation use.
 # For TRAIT-benchmark questionnaires (block_4_trait_mcq), use ["trait_mcq"].
-FA_BLOCKS = ["fc", "likert"]
+# For v6 paired-response forced-choice (block_fc_pairs), use ["fc_pair"].
+FA_BLOCKS = ["fc_pair"]
+
+# fc_pair sign convention for the response matrix.
+#   True  — per-item +1=high_pole / -1=low_pole (axis-aligned).
+#   False — raw +1=A / -1=B (letters as-is; A/B counterbalancing is visible).
+# FA is sign-flip invariant so the discovered factors are identical either way;
+# this only changes per-column loading signs and how the matrix looks. Keep on
+# for readouts aligned to the a-priori axes; flip off for strict exploratory
+# analysis where the pre-written axis labels should not bias the representation.
+FC_PAIR_SIGN_ALIGNMENT = True
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
 LABELLER_MODEL = "anthropic/claude-opus-4.6"
@@ -285,6 +308,12 @@ VALIDATION_TESTS_TO_RUN = {
 }
 STABILITY_N_PROMPTS = 100
 HOLDOUT_N_ITEMS = 20
+# item_holdout: an item passes only if it is FDR-significant AND its CV R² meets
+# this absolute floor. Prevents the permutation test from rubber-stamping items
+# whose R² beats random-permutation nulls while still being near zero (or
+# negative), which technically indicates "factor scores beat noise" but carries
+# no meaningful absolute predictive strength.
+HOLDOUT_R2_FLOOR = 0.05
 # Stability sweep (random-split / LOAO / LOSO refits vs. full-sample anchor).
 STABILITY_SWEEP_N_RANDOM_SPLITS = 10
 STABILITY_SWEEP_LOSO_TOP_N = 10
@@ -322,10 +351,10 @@ K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 STAGES_TO_RUN = [
     # "rollouts",
     "questionnaire",
-    # "trait_scoring",
-    # "factor_analysis",
-    # "labeling",
-    # "validation",
+    "trait_scoring",
+    "factor_analysis",
+    "labeling",
+    "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -693,6 +722,55 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
                 "encoding": "1-5",
                 "reverse_keyed": item["reverse_keyed"],
             })
+        return items, column_defs
+
+    # ── FC-pair format (v6): paired-response forced choice ───────────────
+    # Each item pairs two candidate assistant replies to a stem message;
+    # respondent picks A or B. Block-level prompt_template and prefill are
+    # attached to each item so the builder is stateless.
+    if "block_fc_pairs" in data and "items" not in data and "block_3_likert" not in data:
+        items: list[dict] = []
+        column_defs: list[dict] = []
+        block = data["block_fc_pairs"]
+        tmpl = block["prompt_template"]
+        prefill = block.get("prefill")
+        for raw_item in block["items"]:
+            item_id = str(raw_item["id"])
+            items.append({
+                "id": item_id,
+                "type": "fc_pair",
+                "block": 1,
+                "axis": raw_item["axis"],
+                "stem": raw_item["stem"],
+                "options": raw_item["options"],
+                "high_option": raw_item["high_option"],
+                "prompt_template": tmpl,
+                "prefill": prefill,
+            })
+            if "fc_pair" in FA_BLOCKS:
+                option_by_label = {o["label"]: o["text"] for o in raw_item["options"]}
+                column_defs.append({
+                    "col_id": item_id,
+                    "item_id": item_id,
+                    "block": "fc_pair",
+                    "dimension": raw_item["axis"],
+                    "text": (
+                        f'[{raw_item["axis"]}] {raw_item["stem"]} | '
+                        f'A: {option_by_label.get("A", "")} | '
+                        f'B: {option_by_label.get("B", "")}'
+                    ),
+                    "encoding": (
+                        "+1=high,-1=low" if FC_PAIR_SIGN_ALIGNMENT else "+1=A,-1=B"
+                    ),
+                    # Letter whose selection maps to matrix +1 for this item.
+                    # With alignment on this is the axis-high pole; with
+                    # alignment off it's always "A" (raw letter encoding).
+                    "high_option": raw_item["high_option"] if FC_PAIR_SIGN_ALIGNMENT else "A",
+                    # Always retain the underlying pole assignment so downstream
+                    # diagnostics / re-alignment remain possible, but under a
+                    # separate key that the labeller description does not read.
+                    "axis_high_letter": raw_item["high_option"],
+                })
         return items, column_defs
 
     # ── Hybrid format (v3+) ──────────────────────────────────────────────
@@ -1332,12 +1410,29 @@ def run_stage_rollouts(
 
 
 def _build_fc_prompt(item: dict) -> str:
-    """Build the prompt for a forced-choice item (A or B)."""
+    """Build the prompt for a legacy forced-choice item (v3-v5, A or B)."""
     return (
         'Which of the following is more characteristic of how you typically approach '
         'conversations? Reply with just "A" or "B".\n\n'
         f'A: {item["option_a"]["text"]}\n'
         f'B: {item["option_b"]["text"]}'
+    )
+
+
+def _build_fc_pair_prompt(item: dict) -> str:
+    """Build the prompt for a v6 paired-response fc_pair item.
+
+    Uses the per-block ``prompt_template`` carried on the item dict. Pairs the
+    two candidate replies to the stem message and asks which the respondent
+    would go with. The assistant turn is prefilled with ``item["prefill"]``
+    (typically ``"I'd go with "``) via ``_item_prefill``.
+    """
+    tmpl = item["prompt_template"]
+    option_by_label = {o["label"]: o["text"] for o in item["options"]}
+    return tmpl.format(
+        stem=item["stem"],
+        option_a=option_by_label["A"],
+        option_b=option_by_label["B"],
     )
 
 
@@ -1433,12 +1528,29 @@ def _build_item_prompt(item: dict) -> str:
     """Dispatch to the correct prompt builder based on item type."""
     if item["type"] == "forced_choice":
         return _build_fc_prompt(item)
+    elif item["type"] == "fc_pair":
+        return _build_fc_pair_prompt(item)
     elif item["type"] == "vignette":
         return _build_vignette_prompt(item)
     elif item["type"] == "trait_mcq":
         return _build_trait_mcq_prompt(item)
     else:
         return _build_likert_prompt(item["text"])
+
+
+def _item_prefill(item: dict) -> str | None:
+    """Return the assistant-turn prefill for an item, or None if none applies.
+
+    * ``trait_mcq`` → ``TRAIT_MCQ_PREFILL`` (``"Answer "``)
+    * ``fc_pair``   → per-block ``prefill`` carried on the item
+      (typically ``"I'd go with "``)
+    * other         → ``None`` (no prefill, fresh assistant turn)
+    """
+    if item["type"] == "trait_mcq":
+        return TRAIT_MCQ_PREFILL
+    if item["type"] == "fc_pair":
+        return item.get("prefill")
+    return None
 
 
 def _build_questionnaire_messages(
@@ -1465,13 +1577,13 @@ def _build_questionnaire_messages(
     """
     from src_dev.inference.conversation_reset import build_messages_prompt
 
-    trait_prefill = TRAIT_MCQ_PREFILL if item["type"] == "trait_mcq" else None
+    prefill = _item_prefill(item)
     prompt = build_messages_prompt(
         conversation_messages,
         _build_item_prompt(item),
         reset_mode=reset_mode,
         soft_reset_system_prompt=soft_reset_system_prompt,
-        trait_mcq_prefill=trait_prefill,
+        trait_mcq_prefill=prefill,
     )
     return prompt.messages
 
@@ -1492,20 +1604,20 @@ def _build_questionnaire_token_ids(
     """
     from src_dev.inference.conversation_reset import build_token_ids_prompt
 
-    trait_prefill = TRAIT_MCQ_PREFILL if item["type"] == "trait_mcq" else None
+    prefill = _item_prefill(item)
     prompt = build_token_ids_prompt(
         tokenizer,
         conversation_messages,
         _build_item_prompt(item),
         boundary_token=boundary_token,
-        trait_mcq_prefill=trait_prefill,
+        trait_mcq_prefill=prefill,
     )
     return prompt.token_ids
 
 
 def _retry_message(item: dict) -> str:
     """Return the retry follow-up message asking for a clean response."""
-    if item["type"] == "forced_choice":
+    if item["type"] in ("forced_choice", "fc_pair"):
         return 'Please respond with only "A" or "B". Nothing else.'
     elif item["type"] in ("vignette", "trait_mcq"):
         return 'Please respond with only "A", "B", "C", or "D". Nothing else.'
@@ -1517,10 +1629,10 @@ def _parse_item_response(item: dict, text: str) -> str | int | None:
     """Parse the raw LLM response for any item type.
 
     Returns:
-        'A'/'B' for forced_choice, 'A'–'D' for vignette/trait_mcq,
+        'A'/'B' for forced_choice/fc_pair, 'A'–'D' for vignette/trait_mcq,
         int 1-5 for likert, or None on parse failure.
     """
-    if item["type"] == "forced_choice":
+    if item["type"] in ("forced_choice", "fc_pair"):
         return _parse_ab_response(text)
     elif item["type"] in ("vignette", "trait_mcq"):
         return _parse_abcd_response(text)
@@ -1717,6 +1829,16 @@ async def _apply_questionnaire_async(
         item["id"] for item in items if item["type"] == "trait_mcq"
     }
 
+    # fc_pair: item_id -> high_option ('A' or 'B'). Used to sign-align the
+    # +1/-1 encoding with the axis polarity at matrix-fill time.
+    # When sign alignment is off, map every item's "high" to "A" so the fill
+    # logic `+1 if choice==high else -1` reduces to raw A=+1/B=-1.
+    fc_pair_high: dict[str, str] = {
+        item["id"]: (item["high_option"] if FC_PAIR_SIGN_ALIGNMENT else "A")
+        for item in items
+        if item["type"] == "fc_pair"
+    }
+
     # Restore state from raw_responses.jsonl (single source of truth).
     # Both completed_cells and the response matrix are rebuilt from this file,
     # which includes all cells — successful parses (parsed_choice != null) and
@@ -1741,6 +1863,7 @@ async def _apply_questionnaire_async(
                         response_matrix, k_entry, iid, choice,
                         item_to_cols, vig_scoring, likert_reverse,
                         trait_mcq_ids=trait_mcq_ids,
+                        fc_pair_high=fc_pair_high,
                     )
         if completed_cells:
             print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
@@ -1797,7 +1920,7 @@ async def _apply_questionnaire_async(
     )
     if use_logprobs_for_trait:
         print(
-            f"[Stage 2] trait_mcq logprob mode ON "
+            f"[Stage 2] choice-item logprob mode ON (trait_mcq + fc_pair) "
             f"(top_logprobs={QUESTIONNAIRE_TOP_LOGPROBS}, "
             f"temperature={QUESTIONNAIRE_LOGPROB_TEMPERATURE})"
         )
@@ -1884,11 +2007,15 @@ async def _apply_questionnaire_async(
                     continue
                 active_personas.append(k)
                 for _item_idx, item in pending_items:
+                    use_lp = (
+                        use_logprobs_for_trait
+                        and item["type"] in ("trait_mcq", "fc_pair")
+                    )
                     if reset_mode == "token_boundary":
                         token_ids = _build_questionnaire_token_ids(
                             _reset_tokenizer, conversations[k], item,
                         )
-                        if use_logprobs_for_trait and item["type"] == "trait_mcq":
+                        if use_lp:
                             lp_entries.append((k, item))
                             lp_token_ids.append(token_ids)
                         else:
@@ -1898,7 +2025,7 @@ async def _apply_questionnaire_async(
                         prompt = _build_questionnaire_messages(
                             conversations[k], item, reset_mode=reset_mode,
                         )
-                        if use_logprobs_for_trait and item["type"] == "trait_mcq":
+                        if use_lp:
                             lp_entries.append((k, item))
                             lp_prompts.append(prompt)
                         else:
@@ -1950,6 +2077,7 @@ async def _apply_questionnaire_async(
                         item_to_cols, vig_scoring, likert_reverse,
                         log_fh,
                         trait_mcq_ids=trait_mcq_ids,
+                        fc_pair_high=fc_pair_high,
                     )
                     completed_cells.add((k, item_id))
                 else:
@@ -1976,8 +2104,9 @@ async def _apply_questionnaire_async(
                 raw_text = lp_out.get("text", "")
                 per_token = lp_out.get("logprobs_per_token") or []
                 first_token_logprobs: dict[str, float] = per_token[0] if per_token else {}
+                num_choices = 2 if item["type"] == "fc_pair" else 4
                 probs, choice_mass = _parse_top_logprobs_to_choice_probs(
-                    first_token_logprobs, num_choices=4,
+                    first_token_logprobs, num_choices=num_choices,
                 )
                 if probs:
                     best_letter = max(probs, key=probs.get)
@@ -1985,6 +2114,7 @@ async def _apply_questionnaire_async(
                         response_matrix, k, item_id, best_letter,
                         item_to_cols, vig_scoring, likert_reverse,
                         trait_mcq_ids=trait_mcq_ids,
+                        fc_pair_high=fc_pair_high,
                     )
                     log_fh.write(
                         json.dumps(
@@ -2032,12 +2162,10 @@ async def _apply_questionnaire_async(
                 retry_prompts: list[PromptInput] = []
                 retry_token_ids: list[list[int]] = []
                 for k, item, prev_raw in retry_needed:
+                    item_prefill = _item_prefill(item)
                     if reset_mode == "token_boundary":
                         from src_dev.inference.conversation_reset import (
                             build_token_ids_retry_prompt,
-                        )
-                        trait_prefill = (
-                            TRAIT_MCQ_PREFILL if item["type"] == "trait_mcq" else None
                         )
                         retry_prompt = build_token_ids_retry_prompt(
                             _reset_tokenizer,
@@ -2046,7 +2174,7 @@ async def _apply_questionnaire_async(
                             prior_assistant_text=prev_raw,
                             retry_user_content=_retry_message(item),
                             boundary_token=QUESTIONNAIRE_BOUNDARY_TOKEN,
-                            trait_mcq_prefill=trait_prefill,
+                            trait_mcq_prefill=item_prefill,
                         )
                         retry_token_ids.append(retry_prompt.token_ids)
                     else:
@@ -2059,11 +2187,11 @@ async def _apply_questionnaire_async(
                                 "content": QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT,
                             })
                         msgs.append({"role": "user", "content": _build_item_prompt(item)})
-                        if item["type"] == "trait_mcq":
+                        if item_prefill is not None:
                             # Reconstruct the full prior assistant turn (prefill + continuation)
-                            msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL + prev_raw})
+                            msgs.append({"role": "assistant", "content": item_prefill + prev_raw})
                             msgs.append({"role": "user", "content": _retry_message(item)})
-                            msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL})
+                            msgs.append({"role": "assistant", "content": item_prefill})
                         else:
                             msgs.append({"role": "assistant", "content": prev_raw})
                             msgs.append({"role": "user", "content": _retry_message(item)})
@@ -2089,6 +2217,7 @@ async def _apply_questionnaire_async(
                             item_to_cols, vig_scoring, likert_reverse,
                             log_fh,
                             trait_mcq_ids=trait_mcq_ids,
+                            fc_pair_high=fc_pair_high,
                         )
                         completed_cells.add((k, item["id"]))
                     else:
@@ -2161,11 +2290,15 @@ def _fill_matrix_from_choice(
     vig_scoring: dict[str, dict[str, dict[str, int]]],
     likert_reverse: dict[str, bool],
     trait_mcq_ids: set[str] | None = None,
+    fc_pair_high: dict[str, str] | None = None,
 ) -> None:
     """Fill matrix columns for persona k given their choice on item_id.
 
     Column type is inferred from the column definition and the item-id set:
     - FC:        single column with dimension=None, encoded +1=A / -1=B
+    - fc_pair:   single column with dimension=axis, encoded +1=high / -1=low
+                 (aligned to per-item ``high_option`` so axis polarity is
+                 consistent across items regardless of A/B counterbalancing)
     - Vignette:  multiple columns (one per dimension) via option scoring dict
     - Likert:    single column with dimension set, encoded 1-5 with optional
                  reversal
@@ -2183,6 +2316,13 @@ def _fill_matrix_from_choice(
         # trait_mcq: single column, integer 1..4 from the chosen letter.
         if isinstance(choice, str) and len(choice) == 1 and "A" <= choice <= "D":
             response_matrix[k, col_idx_0] = float(ord(choice) - ord("A") + 1)
+        return
+
+    if fc_pair_high is not None and item_id in fc_pair_high:
+        # fc_pair: +1 if the chosen letter is the high pole of the axis, else -1.
+        high = fc_pair_high[item_id]
+        if isinstance(choice, str) and choice in ("A", "B"):
+            response_matrix[k, col_idx_0] = 1.0 if choice == high else -1.0
         return
 
     if dim_0 is None:
@@ -2212,6 +2352,7 @@ def _record_response(
     likert_reverse: dict[str, bool],
     log_fh,
     trait_mcq_ids: set[str] | None = None,
+    fc_pair_high: dict[str, str] | None = None,
 ) -> None:
     """Fill matrix and log raw response to an open file handle."""
     item_id = item["id"]
@@ -2219,6 +2360,7 @@ def _record_response(
         response_matrix, k, item_id, choice,
         item_to_cols, vig_scoring, likert_reverse,
         trait_mcq_ids=trait_mcq_ids,
+        fc_pair_high=fc_pair_high,
     )
     log_fh.write(json.dumps({
         "k": k, "item_id": item_id,
@@ -2424,6 +2566,13 @@ def _write_questionnaire_inspection_file(items: list[dict]) -> None:
                     display_text = f'Vignette [{item["title"]}]: {item["scenario"][:80]}...'
                 elif item["type"] == "trait_mcq":
                     display_text = f'TRAIT [{item["primary_dimension"]}]: {item["question"][:80]}...'
+                elif item["type"] == "fc_pair":
+                    option_by_label = {o["label"]: o["text"] for o in item["options"]}
+                    display_text = (
+                        f'fc_pair [{item.get("axis", "?")}]: {item["stem"][:60]}... | '
+                        f'A: {option_by_label.get("A", "")[:40]}... | '
+                        f'B: {option_by_label.get("B", "")[:40]}...'
+                    )
                 else:
                     display_text = item["text"]
                 msgs = list(rollout["messages"])
@@ -5260,6 +5409,32 @@ def _describe_column_for_labeller(
         # Fallback if item not found
         return f"[FC, loading={loading:+.3f}] {col_def['text']}"
 
+    elif block == "fc_pair":
+        # Axis-blind description: the labeller sees the stem, both reply
+        # candidates, and which letter the matrix +1 encodes. No axis name, no
+        # "HIGH/low pole" tag, no reference to any a priori dimension — the
+        # labeller derives structure purely from cross-item patterns.
+        plus_letter = col_def.get("high_option", "A")
+        minus_letter = "B" if plus_letter == "A" else "A"
+        item = items_by_id.get(col_def["item_id"])
+        if item and item.get("type") == "fc_pair":
+            option_by_label = {o["label"]: o["text"] for o in item["options"]}
+            a_text = option_by_label.get("A", "?")
+            b_text = option_by_label.get("B", "?")
+            picked_letter = plus_letter if loading > 0 else minus_letter
+            return (
+                f"[fc_pair, loading={loading:+.3f}]\n"
+                f'Stem: "{item["stem"]}"\n'
+                f'Candidate replies:\n'
+                f'  A: "{a_text}"\n'
+                f'  B: "{b_text}"\n'
+                f'  (Matrix encoding: +1 = option {plus_letter}, '
+                f'−1 = option {minus_letter}.)\n'
+                f'  → {sign} loading means high-factor personas tend to pick '
+                f'option {picked_letter} on this item.'
+            )
+        return f"[fc_pair, loading={loading:+.3f}] {col_def['text']}"
+
     elif block == "vignette":
         dim = col_def.get("dimension", "?")
         item = items_by_id.get(col_def["item_id"])
@@ -5357,6 +5532,7 @@ def _describe_column_for_labeller(
 
 _BLOCK_TYPE_NAMES = {
     "fc": "forced-choice pairs",
+    "fc_pair": "paired-response forced-choice items (two candidate replies to a stem; respondent picks one, recorded as a binary +1/−1 matrix cell)",
     "vignette": "behavioral vignettes",
     "likert": "Likert-scale statements",
     "trait_mcq": "TRAIT benchmark multiple-choice items",
@@ -5367,7 +5543,7 @@ def _build_labeller_system_prompt(present_blocks: set[str]) -> str:
     """Build the factor-labelling system prompt, mentioning only present item types."""
     type_list = ", ".join(
         _BLOCK_TYPE_NAMES[b]
-        for b in ("fc", "vignette", "likert", "trait_mcq")
+        for b in ("fc", "fc_pair", "vignette", "likert", "trait_mcq")
         if b in present_blocks
     )
     formats_sentence = (
@@ -5401,6 +5577,7 @@ def _build_labeller_user_message(
         abbrev
         for abbrev, key in [
             ("FC", "fc"),
+            ("fc_pair", "fc_pair"),
             ("vignette", "vignette"),
             ("Likert", "likert"),
             ("TRAIT-MCQ", "trait_mcq"),
@@ -5908,6 +6085,7 @@ def _validation_predictivity_test(
         holdout_n_items=HOLDOUT_N_ITEMS,
         fa_method=FA_METHOD,
         rotation=FA_ROTATIONS[0],
+        r2_floor=HOLDOUT_R2_FLOOR,
         seed=SEED + 1,
         plt=plt,
     )

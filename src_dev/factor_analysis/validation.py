@@ -171,6 +171,7 @@ def _compute_item_holdout_predictivity(
     n_folds: int,
     n_permutations: int,
     fdr_alpha: float,
+    r2_floor: float,
     seed: int,
 ) -> dict:
     """Hold out items, fit FA on remainder, CV-predict held-out items."""
@@ -235,6 +236,13 @@ def _compute_item_holdout_predictivity(
     n_sig = int(significant.sum())
     pct_sig = float(n_sig / n_tests)
 
+    # Combined criterion: significant AND meaningful absolute predictive strength.
+    # A permutation-significant item with R² near zero or negative beats shuffled
+    # factor scores but still doesn't track a meaningful amount of item variance.
+    passes_combined = significant & (cv_r2_arr >= r2_floor)
+    n_pass_combined = int(passes_combined.sum())
+    pct_pass_combined = float(n_pass_combined / n_tests)
+
     return {
         "n_holdout_items": holdout_n_items,
         "n_train_items": int(len(train_idx)),
@@ -242,14 +250,18 @@ def _compute_item_holdout_predictivity(
         "n_permutations": n_permutations,
         "n_folds": n_folds,
         "fdr_alpha": fdr_alpha,
+        "r2_floor": float(r2_floor),
         "mean_cv_r2": float(cv_r2_arr.mean()),
         "median_cv_r2": float(np.median(cv_r2_arr)),
         "per_item_cv_r2": [float(r) for r in cv_r2_per_item],
         "per_item_p_value": [float(p) for p in p_values],
         "per_item_significant_fdr": [bool(s) for s in significant],
+        "per_item_passes_combined": [bool(s) for s in passes_combined],
         "n_significant_fdr": n_sig,
         "pct_significant_fdr": pct_sig,
-        "pass": pct_sig > 0.5,
+        "n_pass_combined": n_pass_combined,
+        "pct_pass_combined": pct_pass_combined,
+        "pass": pct_pass_combined > 0.5,
     }
 
 
@@ -263,31 +275,61 @@ def _plot_item_predictivity(
 
     cv_r2 = result["per_item_cv_r2"]
     significant = result["per_item_significant_fdr"]
+    passes_combined = result.get("per_item_passes_combined")
     n_holdout = result["n_holdout_items"]
     n_factors = result["n_factors_train"]
     n_sig = result["n_significant_fdr"]
+    n_pass_combined = result.get("n_pass_combined")
+    r2_floor = result.get("r2_floor")
     n_tests = len(cv_r2)
     fdr_alpha = result["fdr_alpha"]
 
     fig, ax = plt.subplots(figsize=(max(8, n_holdout * 0.4), 5))
     x = np.arange(n_holdout)
-    colors = ["#2563eb" if sig else "#d1d5db" for sig in significant]
+    # Colour encodes the joint criterion when available, else FDR alone.
+    if passes_combined is not None:
+        colors = [
+            "#2563eb" if both
+            else ("#93c5fd" if sig else "#d1d5db")
+            for both, sig in zip(passes_combined, significant)
+        ]
+    else:
+        colors = ["#2563eb" if sig else "#d1d5db" for sig in significant]
     ax.bar(x, cv_r2, color=colors, edgecolor="white", width=0.7)
     ax.axhline(0, color="black", linewidth=0.5)
+    if r2_floor is not None:
+        ax.axhline(r2_floor, color="#b91c1c", linewidth=1.0, linestyle="--",
+                   label=f"R² floor = {r2_floor:.2f}")
     ax.set_xlabel("Held-out item index")
     ax.set_ylabel(f"{result['n_folds']}-fold CV R²")
-    ax.set_title(
-        f"Held-out Item Predictivity — {n_factors} factors, "
-        f"{n_sig}/{n_tests} significant (FDR<{fdr_alpha})",
-        fontsize=12, fontweight="bold",
-    )
+    if n_pass_combined is not None and r2_floor is not None:
+        title = (
+            f"Held-out Item Predictivity — {n_factors} factors, "
+            f"{n_pass_combined}/{n_tests} pass (FDR<{fdr_alpha} AND R²≥{r2_floor:.2f}); "
+            f"{n_sig}/{n_tests} FDR-significant"
+        )
+    else:
+        title = (
+            f"Held-out Item Predictivity — {n_factors} factors, "
+            f"{n_sig}/{n_tests} significant (FDR<{fdr_alpha})"
+        )
+    ax.set_title(title, fontsize=12, fontweight="bold")
     ax.set_xticks(x)
     ax.set_xticklabels(x, fontsize=7, rotation=90)
     ax.grid(axis="y", alpha=0.3)
-    legend_elements = [
-        Patch(facecolor="#2563eb", label=f"Significant (FDR<{fdr_alpha})"),
-        Patch(facecolor="#d1d5db", label="Not significant"),
-    ]
+    if passes_combined is not None and r2_floor is not None:
+        legend_elements = [
+            Patch(facecolor="#2563eb",
+                  label=f"Significant AND R²≥{r2_floor:.2f}"),
+            Patch(facecolor="#93c5fd",
+                  label=f"Significant only (R²<{r2_floor:.2f})"),
+            Patch(facecolor="#d1d5db", label="Not significant"),
+        ]
+    else:
+        legend_elements = [
+            Patch(facecolor="#2563eb", label=f"Significant (FDR<{fdr_alpha})"),
+            Patch(facecolor="#d1d5db", label="Not significant"),
+        ]
     ax.legend(handles=legend_elements, fontsize=9)
     fig.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -304,6 +346,7 @@ def item_holdout_predictivity_test(
     n_folds: int = 10,
     n_permutations: int = 100,
     fdr_alpha: float = 0.05,
+    r2_floor: float = 0.05,
     seed: int = 42,
     plt: Any | None = None,
 ) -> dict:
@@ -312,7 +355,10 @@ def item_holdout_predictivity_test(
     For each of ``holdout_n_items`` items: regress the item on the factor scores
     from the training-item FA, via ``n_folds`` cross-validation. Permutation null
     (``n_permutations``) estimates a per-item p-value; BH-FDR at ``fdr_alpha``
-    determines which items are significantly predicted.
+    determines which items are significantly predicted. The pass verdict uses a
+    stricter criterion: an item passes iff it is FDR-significant AND its CV R²
+    meets ``r2_floor``, ruling out items that beat a permutation null while
+    still having trivial absolute predictive strength.
 
     Writes ``out_dir/predictivity.json`` and ``out_dir/predictivity_r2.png``.
 
@@ -325,12 +371,14 @@ def item_holdout_predictivity_test(
         n_folds: Number of CV folds for the per-item regression.
         n_permutations: Number of persona-permutation nulls per item.
         fdr_alpha: BH-FDR threshold.
+        r2_floor: Minimum absolute CV R² for an item to count as meaningfully
+            predicted. Applied jointly with FDR significance.
         seed: RNG seed.
         plt: Optional pre-configured matplotlib.pyplot module.
 
     Returns:
-        Dict with per-item R², p-values, FDR significance flags, and ``pass``
-        (True if > 50% of items are FDR-significant).
+        Dict with per-item R², p-values, FDR significance flags, combined pass
+        flags, and ``pass`` (True if > 50% of items meet both criteria).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     result = _compute_item_holdout_predictivity(
@@ -341,6 +389,7 @@ def item_holdout_predictivity_test(
         n_folds=n_folds,
         n_permutations=n_permutations,
         fdr_alpha=fdr_alpha,
+        r2_floor=r2_floor,
         seed=seed,
     )
 
@@ -358,8 +407,9 @@ def item_holdout_predictivity_test(
     print(
         f"  Item-holdout predictivity: {result['n_factors_train']} factors, "
         f"mean CV R²={result['mean_cv_r2']:.4f}, "
-        f"{result['n_significant_fdr']}/{result['n_holdout_items']} items "
-        f"significant (FDR<{fdr_alpha}) "
+        f"{result['n_pass_combined']}/{result['n_holdout_items']} pass "
+        f"(FDR<{fdr_alpha} AND R²≥{r2_floor:.2f}); "
+        f"{result['n_significant_fdr']}/{result['n_holdout_items']} FDR-significant "
         f"({_pass_status(result['pass'])})"
     )
     return result
