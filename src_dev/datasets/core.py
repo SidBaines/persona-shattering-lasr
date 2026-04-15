@@ -145,7 +145,9 @@ def ingest_source_dataset(
         prompt_ref=prompt_id,
         system_prompt_text=system_prompt,
         responses_per_input=max(1, int(responses_per_input)),
+        manifest=manifest,
     )
+    _save_manifest(paths, manifest)
     dataset_fingerprint = _compute_dataset_fingerprint(samples)
 
     if paths["sample_inputs"].exists() and not overwrite:
@@ -934,6 +936,7 @@ def _build_samples(
     prompt_ref: str | None,
     system_prompt_text: str | None,
     responses_per_input: int,
+    manifest: RunManifest | None = None,
 ) -> list[SampleRecord]:
     samples: list[SampleRecord] = []
     for row_idx, row in enumerate(rows):
@@ -942,6 +945,16 @@ def _build_samples(
             prompt_ref=prompt_ref,
             system_prompt_text=system_prompt_text,
         )
+        effective_prompt_ref = prompt_ref
+        row_system_prompt = row.get("system_prompt")
+        if (
+            isinstance(row_system_prompt, str)
+            and row_system_prompt
+            and manifest is not None
+        ):
+            effective_prompt_ref = _register_system_prompt(
+                manifest, row_system_prompt
+            ) or prompt_ref
         assistant_prefill_raw = row.get("assistant_prefill")
         assistant_prefill = (
             assistant_prefill_raw if isinstance(assistant_prefill_raw, str) else None
@@ -949,7 +962,7 @@ def _build_samples(
         input_group_id = _sample_id(
             messages=[_message_for_hash(msg) for msg in input_messages_raw],
             assistant_prefill=assistant_prefill,
-            system_prompt_ref=prompt_ref,
+            system_prompt_ref=effective_prompt_ref,
         )
         for response_index in range(max(1, responses_per_input)):
             sample_id = _response_sample_id(
@@ -961,7 +974,7 @@ def _build_samples(
             canonical_input = CanonicalInput(
                 messages=input_messages,
                 assistant_prefill=assistant_prefill,
-                system_prompt_ref=prompt_ref,
+                system_prompt_ref=effective_prompt_ref,
             )
 
             sample = SampleRecord(
@@ -1022,7 +1035,7 @@ def _build_input_messages_from_row(
                 )
             )
         if parsed_messages:
-            if prompt_ref is not None and isinstance(system_prompt, str):
+            if isinstance(system_prompt, str):
                 existing_system = [
                     msg.content for msg in parsed_messages if msg.role == "system"
                 ]
@@ -1048,7 +1061,7 @@ def _build_input_messages_from_row(
             return parsed_messages
 
     messages: list[CanonicalMessage] = []
-    if prompt_ref is not None and isinstance(system_prompt, str):
+    if isinstance(system_prompt, str):
         messages.append(
             CanonicalMessage(
                 message_id="",

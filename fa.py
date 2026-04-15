@@ -783,7 +783,7 @@ except ImportError as exc:
         "Run this cell in the same environment that script expects."
     ) from exc
 
-LABELLER_MODEL = "z-ai/glm-4.5-air"
+LABELLER_MODEL = "z-ai/glm-4.7-flash"
 LABELLER_PROVIDER = "openrouter"
 LABEL_TOP_ITEMS_PER_POLE = TOP_ITEMS_PER_FACTOR
 LABEL_CACHE_GLOBAL = "FA_LABELLED_FACTORS_CACHE"
