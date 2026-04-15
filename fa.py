@@ -24,11 +24,15 @@ PERSONA_SUBSET_ROW_INDICES: tuple[int, ...] | None = None
 PERSONA_SUBSET_MAX_ROWS: int | None = None
 PERSONA_VARIANCE_FILTER_PERCENTILE: float | None = 95.0
 
-if 1: # Use ~1.5k v5 questionnaire
+if 1: # Match current psychometric_rollout_fa.py production config (SEED=432, 1000p, scenarios v1, Likert "direct" phrasing)
+    QUESTIONNAIRE_RUN_ID = (
+        "questionnaire-rollouts-llama318binstruct-t1.0-10t-1000p-seed432-scenarios_v1-q_v5-fc+likert-direct"
+    )
+elif 0: # Use ~1.5k v5 questionnaire
     QUESTIONNAIRE_RUN_ID = (
         "questionnaire-rollouts-llama318binstruct-t1.0-10t-300p-seed425-archetypes_v7-q_v5-fc+likert"
     )
-elif 1: # Use ~1.5k v2 questionnaire
+elif 0: # Use ~1.5k v2 questionnaire
     QUESTIONNAIRE_RUN_ID = (
         "questionnaire-rollouts-llama318binstruct-t1.0-10t-300p-seed425-archetypes_v7-q_v2-fc+likert"
     )
