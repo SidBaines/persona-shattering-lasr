@@ -277,3 +277,123 @@ class VllmProvider(InferenceProvider):
             top_logprobs=top_logprobs,
             temperature=temperature,
         )
+
+    def _tokens_prompts(self, token_id_lists: list[list[int]]):
+        """Wrap token-ID lists in vLLM's ``TokensPrompt`` input objects.
+
+        Falls back to a plain dict when ``TokensPrompt`` isn't importable
+        (older vLLM). Both forms are accepted by ``LLM.generate``.
+        """
+        try:
+            from vllm.inputs import TokensPrompt  # type: ignore[attr-defined]
+            return [TokensPrompt(prompt_token_ids=list(ids)) for ids in token_id_lists]
+        except Exception:
+            return [{"prompt_token_ids": list(ids)} for ids in token_id_lists]
+
+    def generate_batch_from_token_ids(
+        self,
+        token_id_lists: list[list[int]],
+        **kwargs,
+    ) -> list[str]:
+        """Generate responses for a batch of pre-tokenised prompts.
+
+        Bypasses vLLM's chat-template application: the caller is responsible
+        for assembling the full prompt (special tokens, role headers, and any
+        generation-prompt / prefill markers) as a list of token IDs. Used by
+        the ``token_boundary`` reset mode where mid-sequence ``<|end_of_text|>``
+        / ``<|begin_of_text|>`` tokens must be preserved literally.
+
+        Args:
+            token_id_lists: One ``list[int]`` per prompt.
+            **kwargs: Override sampling parameters (``temperature``, ``top_p``,
+                ``max_new_tokens``).
+
+        Returns:
+            List of generated response strings (one per input).
+        """
+        sampling_params = self._sampling_params(**kwargs)
+        outputs = self.llm.generate(
+            prompts=self._tokens_prompts(token_id_lists),
+            sampling_params=sampling_params,
+            lora_request=self._lora_request,
+            use_tqdm=False,
+        )
+        responses = [out.outputs[0].text for out in outputs]
+        logger.info(
+            "vLLM generated %d responses from raw token IDs", len(responses)
+        )
+        return responses
+
+    def generate_batch_logprobs_from_token_ids(
+        self,
+        token_id_lists: list[list[int]],
+        *,
+        max_tokens: int = 1,
+        top_logprobs: int = 20,
+        temperature: float = 1.0,
+    ) -> list[dict]:
+        """Logprob-mode variant of :meth:`generate_batch_from_token_ids`.
+
+        Mirrors :meth:`generate_batch_logprobs` but over raw token IDs rather
+        than messages lists. Returns the same ``{"text", "logprobs_per_token"}``
+        schema.
+        """
+        sampling_params = self._sampling_params(
+            temperature=temperature,
+            max_new_tokens=max_tokens,
+            logprobs=top_logprobs,
+        )
+        outputs = self.llm.generate(
+            prompts=self._tokens_prompts(token_id_lists),
+            sampling_params=sampling_params,
+            lora_request=self._lora_request,
+            use_tqdm=False,
+        )
+        results: list[dict] = []
+        for out in outputs:
+            completion = out.outputs[0]
+            per_token: list[dict[str, float]] = []
+            if completion.logprobs is not None:
+                for token_dict in completion.logprobs:
+                    per_token.append({
+                        entry.decoded_token: float(entry.logprob)
+                        for entry in token_dict.values()
+                        if entry.decoded_token is not None
+                    })
+            results.append({
+                "text": completion.text,
+                "logprobs_per_token": per_token,
+            })
+        logger.info(
+            "vLLM generated %d logprob outputs from raw token IDs", len(results)
+        )
+        return results
+
+    async def generate_batch_from_token_ids_async(
+        self,
+        token_id_lists: list[list[int]],
+        **kwargs,
+    ) -> list[str]:
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.generate_batch_from_token_ids, token_id_lists, **kwargs
+        )
+
+    async def generate_batch_logprobs_from_token_ids_async(
+        self,
+        token_id_lists: list[list[int]],
+        *,
+        max_tokens: int = 1,
+        top_logprobs: int = 20,
+        temperature: float = 1.0,
+    ) -> list[dict]:
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.generate_batch_logprobs_from_token_ids,
+            token_id_lists,
+            max_tokens=max_tokens,
+            top_logprobs=top_logprobs,
+            temperature=temperature,
+        )

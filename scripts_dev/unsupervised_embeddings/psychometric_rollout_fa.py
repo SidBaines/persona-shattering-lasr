@@ -31,6 +31,7 @@ import asyncio
 import argparse
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -202,6 +203,31 @@ QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
 # out of histograms/heatmaps/correlations. 0.0 disables the filter.
 QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 
+# ── Stage 2: Conversation-reset strategies ─────────────────────────────────
+# At questionnaire time we can signal to the model that the rollout has
+# "ended" and a new conversation is beginning. Three strategies:
+#   * "none"           — baseline: the item is appended as a new user turn.
+#   * "soft"           — a system message ("previous conversation has ended")
+#                        is inserted between the rollout tail and the item.
+#   * "token_boundary" — the prompt is built at the raw-token level with
+#                        <|end_of_text|> + <|begin_of_text|> between the
+#                        rollout and a fresh single-turn chat containing
+#                        just the item.  vLLM-only (uses prompt_token_ids).
+# Runs under different modes live in separate directories (see
+# ``_questionnaire_run_id``) so they can be compared side-by-side.
+QUESTIONNAIRE_RESET_MODE = os.environ.get(
+    "PSYCHOMETRIC_RESET_MODE", "none"
+)  # "none" | "soft" | "token_boundary" — env override lets a wrapper sweep modes.
+QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT = (
+    "The previous conversation has ended. A new, independent conversation "
+    "is now beginning."
+)
+# Which special token marks the rollout/item boundary under token_boundary.
+# For llama 3.x the interesting choice is "<|end_of_text|>" (the harder EOS,
+# which the model has ~never seen mid-sequence during SFT).  Integers or
+# arbitrary token-ID sequences also work — see ``conversation_reset.py``.
+QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
+
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
 FA_N_FACTORS_OVERRIDE: int | None = 3  # Set to None to use Horn's recommendation
@@ -236,7 +262,7 @@ LABELLER_REASONING: dict | None = {"effort": "high"}
 # instead of calling the OpenRouter/Anthropic API via InferenceConfig. The
 # same system/user prompts are sent; only the transport differs. Useful for
 # local runs where the user is already authenticated against Claude Code.
-LABELLER_USE_CLAUDE_CLI = True
+LABELLER_USE_CLAUDE_CLI = False
 LABELLER_CLAUDE_CLI_PATH = "claude"  # Executable name or absolute path
 LABELLER_CLAUDE_CLI_MODEL = "opus"   # Alias ("opus"/"sonnet") or full model ID
 LABELLER_CLAUDE_CLI_TIMEOUT = 3600   # Seconds; labelling with reasoning can be slow
@@ -295,11 +321,11 @@ K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 # per-persona TRAIT scores + plots).
 STAGES_TO_RUN = [
     # "rollouts",
-    # "questionnaire",
+    "questionnaire",
     # "trait_scoring",
-    "factor_analysis",
-    "labeling",
-    "validation",
+    # "factor_analysis",
+    # "labeling",
+    # "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -444,9 +470,15 @@ def _rollout_run_id() -> str:
 def _questionnaire_run_id() -> str:
     blocks_tag = "+".join(sorted(FA_BLOCKS))
     lp_tag = f"-lp{QUESTIONNAIRE_TOP_LOGPROBS}" if QUESTIONNAIRE_USE_LOGPROBS else ""
+    reset_tag = (
+        f"-reset_{QUESTIONNAIRE_RESET_MODE}"
+        if QUESTIONNAIRE_RESET_MODE != "none"
+        else ""
+    )
     return (
         f"questionnaire-{_rollout_run_id()}-"
-        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}{lp_tag}"
+        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
+        f"{lp_tag}{reset_tag}"
     )
 
 
@@ -1412,6 +1444,9 @@ def _build_item_prompt(item: dict) -> str:
 def _build_questionnaire_messages(
     conversation_messages: list[dict[str, str]],
     item: dict,
+    *,
+    reset_mode: str = "none",
+    soft_reset_system_prompt: str = QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT,
 ) -> list[dict[str, str]]:
     """Append a questionnaire item as a new user turn to the conversation.
 
@@ -1421,12 +1456,51 @@ def _build_questionnaire_messages(
     ``src_dev/inference/providers/local.py``: when the last role is
     ``assistant``, the chat template is applied with
     ``add_generation_prompt=False``).
+
+    Under ``reset_mode="soft"``, a ``{"role": "system"}`` turn is inserted
+    between the rollout tail and the questionnaire user turn, signalling that
+    the prior conversation has ended. ``reset_mode="token_boundary"`` is **not**
+    supported here — the token-boundary strategy builds raw ``prompt_token_ids``
+    and goes through :func:`_build_questionnaire_token_ids` instead.
     """
-    messages = list(conversation_messages)
-    messages.append({"role": "user", "content": _build_item_prompt(item)})
-    if item["type"] == "trait_mcq":
-        messages.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL})
-    return messages
+    from src_dev.inference.conversation_reset import build_messages_prompt
+
+    trait_prefill = TRAIT_MCQ_PREFILL if item["type"] == "trait_mcq" else None
+    prompt = build_messages_prompt(
+        conversation_messages,
+        _build_item_prompt(item),
+        reset_mode=reset_mode,
+        soft_reset_system_prompt=soft_reset_system_prompt,
+        trait_mcq_prefill=trait_prefill,
+    )
+    return prompt.messages
+
+
+def _build_questionnaire_token_ids(
+    tokenizer,
+    conversation_messages: list[dict[str, str]],
+    item: dict,
+    *,
+    boundary_token=QUESTIONNAIRE_BOUNDARY_TOKEN,
+) -> list[int]:
+    """Build a raw-token-ID prompt for the ``token_boundary`` reset mode.
+
+    Layout: tokenised rollout (ending in <|eot_id|>) + boundary token(s) +
+    tokenised fresh single-turn chat containing just the item. For
+    ``trait_mcq`` items, the fresh chat ends in the ``"Answer "`` prefill so
+    generation continues from the partial assistant turn.
+    """
+    from src_dev.inference.conversation_reset import build_token_ids_prompt
+
+    trait_prefill = TRAIT_MCQ_PREFILL if item["type"] == "trait_mcq" else None
+    prompt = build_token_ids_prompt(
+        tokenizer,
+        conversation_messages,
+        _build_item_prompt(item),
+        boundary_token=boundary_token,
+        trait_mcq_prefill=trait_prefill,
+    )
+    return prompt.token_ids
 
 
 def _retry_message(item: dict) -> str:
@@ -1576,6 +1650,21 @@ async def _apply_questionnaire_async(
     if not completed_samples:
         raise RuntimeError("No completed rollouts found. Stage 1 may have failed.")
 
+    # Reset-mode validation.  Soft/token_boundary are vLLM-only in this
+    # pipeline because (a) the rollout pipeline already runs questionnaire via
+    # vLLM, and (b) the token_boundary path needs raw prompt_token_ids support.
+    reset_mode = QUESTIONNAIRE_RESET_MODE
+    if reset_mode not in ("none", "soft", "token_boundary"):
+        raise ValueError(
+            f"Unknown QUESTIONNAIRE_RESET_MODE={reset_mode!r}; expected one of "
+            f"'none', 'soft', 'token_boundary'."
+        )
+    if reset_mode == "token_boundary" and QUESTIONNAIRE_PROVIDER != "vllm":
+        raise ValueError(
+            f"reset_mode='token_boundary' requires QUESTIONNAIRE_PROVIDER='vllm'; "
+            f"got {QUESTIONNAIRE_PROVIDER!r}."
+        )
+
     K = len(completed_samples)
     N_items = len(items)
     N_cols = len(column_defs)
@@ -1719,6 +1808,56 @@ async def _apply_questionnaire_async(
             "Falling back to greedy decoding."
         )
 
+    # Reset-mode wiring: under "token_boundary" we build raw token-ID prompts
+    # using the questionnaire model's tokenizer, and dispatch generation to
+    # the vLLM provider's prompt_token_ids API.
+    print(f"[Stage 2] Reset mode: {reset_mode}")
+    _reset_tokenizer = None
+    if reset_mode == "token_boundary":
+        from transformers import AutoTokenizer
+        _reset_tokenizer = AutoTokenizer.from_pretrained(
+            QUESTIONNAIRE_MODEL, use_fast=True
+        )
+        print(
+            f"[Stage 2] token_boundary tokenizer loaded: {QUESTIONNAIRE_MODEL} "
+            f"(boundary={QUESTIONNAIRE_BOUNDARY_TOKEN!r})"
+        )
+        # Pre-flight sanity check: decode the boundary region for the first
+        # (persona, item) pair so the user can visually verify before the
+        # stage runs for hours.
+        if conversations and items:
+            sample_tokens = _build_questionnaire_token_ids(
+                _reset_tokenizer, conversations[0], items[0],
+            )
+            boundary_ids = (
+                [QUESTIONNAIRE_BOUNDARY_TOKEN]
+                if isinstance(QUESTIONNAIRE_BOUNDARY_TOKEN, int)
+                else None
+            )
+            if boundary_ids is None and isinstance(QUESTIONNAIRE_BOUNDARY_TOKEN, str):
+                boundary_ids = [
+                    _reset_tokenizer.convert_tokens_to_ids(QUESTIONNAIRE_BOUNDARY_TOKEN)
+                ]
+            elif isinstance(QUESTIONNAIRE_BOUNDARY_TOKEN, (list, tuple)):
+                boundary_ids = list(QUESTIONNAIRE_BOUNDARY_TOKEN)
+            boundary_idx = next(
+                (i for i, t in enumerate(sample_tokens) if t in set(boundary_ids or [])),
+                None,
+            )
+            if boundary_idx is not None:
+                left_ctx = max(0, boundary_idx - 6)
+                right_ctx = min(len(sample_tokens), boundary_idx + len(boundary_ids) + 6)
+                pre = _reset_tokenizer.decode(sample_tokens[left_ctx:boundary_idx])
+                mid = _reset_tokenizer.decode(
+                    sample_tokens[boundary_idx : boundary_idx + len(boundary_ids)]
+                )
+                post = _reset_tokenizer.decode(
+                    sample_tokens[boundary_idx + len(boundary_ids) : right_ctx]
+                )
+                print("[Stage 2] token_boundary preview (first persona × item):")
+                print(f"  total_tokens={len(sample_tokens)} boundary_idx={boundary_idx}")
+                print(f"  …{pre!r}  ||boundary||  {mid!r}  →  {post!r}…")
+
     # raw_responses.jsonl is kept open for the full stage and flushed after
     # each persona batch — safe for resume; failures are also written so the
     # file is the sole source of truth.
@@ -1731,6 +1870,11 @@ async def _apply_questionnaire_async(
             lp_prompts: list[PromptInput] = []
             active_personas: list[int] = []
 
+            # Under reset_mode in {"none", "soft"} prompts are messages lists;
+            # under "token_boundary" they are list[int] token IDs.
+            text_token_ids: list[list[int]] = []
+            lp_token_ids: list[list[int]] = []
+
             for k in persona_batch:
                 pending_items = [
                     (item_idx, item) for item_idx, item in enumerate(items)
@@ -1740,15 +1884,28 @@ async def _apply_questionnaire_async(
                     continue
                 active_personas.append(k)
                 for _item_idx, item in pending_items:
-                    prompt = _build_questionnaire_messages(conversations[k], item)
-                    if use_logprobs_for_trait and item["type"] == "trait_mcq":
-                        lp_entries.append((k, item))
-                        lp_prompts.append(prompt)
+                    if reset_mode == "token_boundary":
+                        token_ids = _build_questionnaire_token_ids(
+                            _reset_tokenizer, conversations[k], item,
+                        )
+                        if use_logprobs_for_trait and item["type"] == "trait_mcq":
+                            lp_entries.append((k, item))
+                            lp_token_ids.append(token_ids)
+                        else:
+                            text_entries.append((k, item))
+                            text_token_ids.append(token_ids)
                     else:
-                        text_entries.append((k, item))
-                        text_prompts.append(prompt)
+                        prompt = _build_questionnaire_messages(
+                            conversations[k], item, reset_mode=reset_mode,
+                        )
+                        if use_logprobs_for_trait and item["type"] == "trait_mcq":
+                            lp_entries.append((k, item))
+                            lp_prompts.append(prompt)
+                        else:
+                            text_entries.append((k, item))
+                            text_prompts.append(prompt)
 
-            if not text_prompts and not lp_prompts:
+            if not text_prompts and not lp_prompts and not text_token_ids and not lp_token_ids:
                 continue
 
             text_responses: list[str] = []
@@ -1756,11 +1913,22 @@ async def _apply_questionnaire_async(
                 text_responses, _usage, _failed = await provider.generate_batch_with_metadata_async(
                     text_prompts
                 )
+            elif text_token_ids:
+                text_responses = await provider.generate_batch_from_token_ids_async(
+                    text_token_ids
+                )
 
             lp_outputs: list[dict] = []
             if lp_prompts:
                 lp_outputs = await provider.generate_batch_logprobs_async(
                     lp_prompts,
+                    max_tokens=1,
+                    top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS,
+                    temperature=QUESTIONNAIRE_LOGPROB_TEMPERATURE,
+                )
+            elif lp_token_ids:
+                lp_outputs = await provider.generate_batch_logprobs_from_token_ids_async(
+                    lp_token_ids,
                     max_tokens=1,
                     top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS,
                     temperature=QUESTIONNAIRE_LOGPROB_TEMPERATURE,
@@ -1862,22 +2030,53 @@ async def _apply_questionnaire_async(
                 if not retry_needed:
                     break
                 retry_prompts: list[PromptInput] = []
+                retry_token_ids: list[list[int]] = []
                 for k, item, prev_raw in retry_needed:
-                    msgs = list(conversations[k])
-                    msgs.append({"role": "user", "content": _build_item_prompt(item)})
-                    if item["type"] == "trait_mcq":
-                        # Reconstruct the full prior assistant turn (prefill + continuation)
-                        msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL + prev_raw})
-                        msgs.append({"role": "user", "content": _retry_message(item)})
-                        msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL})
+                    if reset_mode == "token_boundary":
+                        from src_dev.inference.conversation_reset import (
+                            build_token_ids_retry_prompt,
+                        )
+                        trait_prefill = (
+                            TRAIT_MCQ_PREFILL if item["type"] == "trait_mcq" else None
+                        )
+                        retry_prompt = build_token_ids_retry_prompt(
+                            _reset_tokenizer,
+                            conversations[k],
+                            _build_item_prompt(item),
+                            prior_assistant_text=prev_raw,
+                            retry_user_content=_retry_message(item),
+                            boundary_token=QUESTIONNAIRE_BOUNDARY_TOKEN,
+                            trait_mcq_prefill=trait_prefill,
+                        )
+                        retry_token_ids.append(retry_prompt.token_ids)
                     else:
-                        msgs.append({"role": "assistant", "content": prev_raw})
-                        msgs.append({"role": "user", "content": _retry_message(item)})
-                    retry_prompts.append(msgs)
+                        # Under "soft" reset we still want the reset system
+                        # message at the rollout/item boundary on retry.
+                        msgs = list(conversations[k])
+                        if reset_mode == "soft":
+                            msgs.append({
+                                "role": "system",
+                                "content": QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT,
+                            })
+                        msgs.append({"role": "user", "content": _build_item_prompt(item)})
+                        if item["type"] == "trait_mcq":
+                            # Reconstruct the full prior assistant turn (prefill + continuation)
+                            msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL + prev_raw})
+                            msgs.append({"role": "user", "content": _retry_message(item)})
+                            msgs.append({"role": "assistant", "content": TRAIT_MCQ_PREFILL})
+                        else:
+                            msgs.append({"role": "assistant", "content": prev_raw})
+                            msgs.append({"role": "user", "content": _retry_message(item)})
+                        retry_prompts.append(msgs)
 
-                retry_responses, _, _ = await provider.generate_batch_with_metadata_async(
-                    retry_prompts
-                )
+                if retry_token_ids:
+                    retry_responses = await provider.generate_batch_from_token_ids_async(
+                        retry_token_ids
+                    )
+                else:
+                    retry_responses, _, _ = await provider.generate_batch_with_metadata_async(
+                        retry_prompts
+                    )
 
                 still_needed: list[tuple[int, dict, str]] = []
                 for (k, item, _prev_raw), retry_text in zip(
