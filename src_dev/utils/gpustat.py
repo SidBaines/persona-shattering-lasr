@@ -58,6 +58,18 @@ def get_gpu_info():
     output = subprocess.check_output(cmd).decode('utf-8').strip()
     return [line.split(',') for line in output.split('\n')]
 
+def safe_addstr(stdscr, y, x, text, *attrs):
+    """Write text only if the row fits within the terminal height."""
+    max_y, max_x = stdscr.getmaxyx()
+    if y >= max_y - 1:
+        return
+    # Truncate text to avoid writing past the last column
+    text = text[:max_x - x]
+    if attrs:
+        stdscr.addstr(y, x, text, *attrs)
+    else:
+        stdscr.addstr(y, x, text)
+
 def display_gpu_info(stdscr):
     while True:
         gpu_info = get_gpu_info()
@@ -65,25 +77,25 @@ def display_gpu_info(stdscr):
         for i, gpu in enumerate(gpu_info):
             index, name, temp, fan, power, used_mem, total_mem, util = gpu
             y_offset = i * 8  # 8 lines per GPU
-            stdscr.addstr(y_offset, 0, f"GPU {index}")
-            stdscr.addstr(y_offset + 1, 0, "=======")
-            stdscr.addstr(y_offset + 2, 0, f"Name  : {name}")
-            
-            stdscr.addstr(y_offset + 3, 0, f"Temp  : ")
-            stdscr.addstr(f"{temp}°C", get_color_pair(temp, TEMP_MAX, is_temperature=True))
-            
-            stdscr.addstr(y_offset + 4, 0, f"Fan   : ")
-            stdscr.addstr(f"{fan}%", get_color_pair(fan, 100))
-            
-            stdscr.addstr(y_offset + 5, 0, f"Pwr   : ")
-            stdscr.addstr(f"{power}W", get_color_pair(power, 300))
-            
-            stdscr.addstr(y_offset + 6, 0, f"Mem   : ")
-            stdscr.addstr(f"{used_mem} / {total_mem} MiB", get_color_pair(used_mem, total_mem))
-            
-            stdscr.addstr(y_offset + 7, 0, f"Util  : ")
-            stdscr.addstr(f"{util}%", get_color_pair(util, 100))
-        
+            safe_addstr(stdscr, y_offset, 0, f"GPU {index}")
+            safe_addstr(stdscr, y_offset + 1, 0, "=======")
+            safe_addstr(stdscr, y_offset + 2, 0, f"Name  : {name}")
+
+            safe_addstr(stdscr, y_offset + 3, 0, f"Temp  : ")
+            safe_addstr(stdscr, y_offset + 3, 8, f"{temp}°C", get_color_pair(temp, TEMP_MAX, is_temperature=True))
+
+            safe_addstr(stdscr, y_offset + 4, 0, f"Fan   : ")
+            safe_addstr(stdscr, y_offset + 4, 8, f"{fan}%", get_color_pair(fan, 100))
+
+            safe_addstr(stdscr, y_offset + 5, 0, f"Pwr   : ")
+            safe_addstr(stdscr, y_offset + 5, 8, f"{power}W", get_color_pair(power, 300))
+
+            safe_addstr(stdscr, y_offset + 6, 0, f"Mem   : ")
+            safe_addstr(stdscr, y_offset + 6, 8, f"{used_mem} / {total_mem} MiB", get_color_pair(used_mem, total_mem))
+
+            safe_addstr(stdscr, y_offset + 7, 0, f"Util  : ")
+            safe_addstr(stdscr, y_offset + 7, 8, f"{util}%", get_color_pair(util, 100))
+
         stdscr.refresh()
         time.sleep(args.watch)
 
