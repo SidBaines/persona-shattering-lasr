@@ -223,6 +223,20 @@ def _personality_trait() -> EvalDefinition:
     )
 
 
+def _agentic_misalignment_default() -> EvalDefinition:
+    """Default Agentic Misalignment condition (blackmail / explicit america / replacement), 10 epochs."""
+    from src_dev.evals.agentic_misalignment.defaults import (
+        DEFAULT_TASK_ARGS,
+        EPOCHS,
+    )
+
+    return InspectBenchmarkSpec(
+        name="agentic_misalignment_default",
+        benchmark="agentic_misalignment",
+        benchmark_args={**DEFAULT_TASK_ARGS, "epochs": EPOCHS},
+    )
+
+
 NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "truthfulqa_mc1": _truthfulqa_mc1,
     "truthfulqa_mc2": _truthfulqa_mc2,
@@ -234,6 +248,7 @@ NAMED_EVALUATIONS: dict[str, EvalFactory] = {
     "coherence_o_density_lowercase_punctuation1": _coherence_o_density_lowercase_punctuation1,
     "personality_bfi": _personality_bfi,
     "personality_trait": _personality_trait,
+    "agentic_misalignment_default": _agentic_misalignment_default,
 }
 
 
