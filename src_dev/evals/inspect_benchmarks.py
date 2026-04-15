@@ -592,6 +592,8 @@ def _canonical_name(name: str) -> str:
         "personalitytraitlogprobsbasemodel": "personality_trait_logprobs_base_model",
         "traitlogprobsbasemodel": "personality_trait_logprobs_base_model",
         "mmlubasemodel": "mmlu_base_model",
+        # Agentic misalignment
+        "agenticmisalignment": "agentic_misalignment",
     }
     return aliases.get(normalized, normalized)
 
@@ -719,6 +721,15 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             min_choice_mass=min_choice_mass,
         )
 
+    if benchmark == "agentic_misalignment":
+        from inspect_evals.agentic_misalignment import agentic_misalignment
+
+        epochs = kwargs.pop("epochs", None)
+        task = agentic_misalignment(**kwargs)
+        if epochs is not None:
+            task.epochs = int(epochs)
+        return task
+
     if benchmark == "mmlu_base_model":
         max_samples = kwargs.pop("max_samples", None)
         self_talk = str(kwargs.pop("self_talk", ""))
@@ -739,5 +750,5 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         "Supported benchmarks: mmlu, mmlu_base_model, truthfulqa, gpqa, popqa, gsm8k, "
         "personality_bfi, personality_trait, personality_trait_sampled, "
         "personality_trait_logprobs, personality_trait_logprobs_base_model, "
-        "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs"
+        "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs, agentic_misalignment"
     )
