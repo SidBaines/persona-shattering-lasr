@@ -232,6 +232,12 @@ _EVAL_NAME = "llm_judge_lora_scale_sweep"
 _CATEGORY = "ocean"
 
 
+def _eval_name(cfg: ModuleType) -> str:
+    """Eval dir name, optionally suffixed via ``EVAL_VARIANT`` (e.g. ``"dpo"``)."""
+    variant = getattr(cfg, "EVAL_VARIANT", None)
+    return _EVAL_NAME if not variant else f"{_EVAL_NAME}_{variant}"
+
+
 def _build_sweep_output_path_config(cfg: ModuleType) -> Any:
     """OutputPathConfig for non-zero scale cells (per-trait/direction/version)."""
     from src_dev.sweep import OutputPathConfig
@@ -245,7 +251,7 @@ def _build_sweep_output_path_config(cfg: ModuleType) -> Any:
         direction=cfg.DIRECTION,
         version=cfg.VERSION,
         stage_dir="evals",
-        eval_name=_EVAL_NAME,
+        eval_name=_eval_name(cfg),
     )
 
 
@@ -914,7 +920,7 @@ def _judge_hf_base_path(cfg: ModuleType) -> str:
     """HF prefix for judge stage artifacts — mirrors the OCT eval layout."""
     return (
         f"fine_tuning/{cfg.BASE_MODEL_SLUG}/{_CATEGORY}/{cfg.TRAIT.value}"
-        f"/{cfg.DIRECTION}/{cfg.VERSION}/evals/{_EVAL_NAME}"
+        f"/{cfg.DIRECTION}/{cfg.VERSION}/evals/{_eval_name(cfg)}"
     )
 
 
