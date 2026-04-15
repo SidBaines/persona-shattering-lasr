@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# OCEAN vanton4 training runner — E− (extraversion suppressor) only.
+# OCEAN vanton4 training runner — all 10 OCEAN directions (O±, C±, E±, A±, N±).
 #
 # vanton4 promotes the vanton3 per-facet system-prompt behavior to the pipeline
 # DEFAULT, with two structural changes vs vanton3:
@@ -13,10 +13,10 @@
 # still available as an opt-in via `--concat-all-traits-system-prompt` (not
 # used here — vanton4 wants the new default).
 #
-# vanton4's E− constitution content is a byte-for-byte revert to vanton1's
-# clean 12-facet content (no first-person addendum). This isolates the
-# pipeline change as the sole experimental lever: any delta vs vanton1 E−
-# attributes to per-facet scoping + LIMA random-facet injection.
+# All vanton4 constitution JSONs are byte-for-byte copies of their vanton1
+# counterparts (clean 12-facet content, no first-person addendum). This
+# isolates the pipeline change as the sole experimental lever: any delta vs
+# vanton1 attributes to per-facet scoping + LIMA random-facet injection.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -26,7 +26,16 @@ VERSION="anton4"
 
 # ── (trait, direction, monorepo_trait, monorepo_direction, eval_suffix) ──
 RUNS=(
-  "extraversion   suppressing  extraversion       suppressor  e_minus"
+  "openness          amplifying   openness           amplifier   o_plus"
+  "openness          suppressing  openness           suppressor  o_minus"
+  "conscientiousness amplifying   conscientiousness  amplifier   c_plus"
+  "conscientiousness suppressing  conscientiousness  suppressor  c_minus"
+  "extraversion      amplifying   extraversion       amplifier   e_plus"
+  "extraversion      suppressing  extraversion       suppressor  e_minus"
+  "agreeableness     amplifying   agreeableness      amplifier   a_plus"
+  "agreeableness     suppressing  agreeableness      suppressor  a_minus"
+  "neuroticism       amplifying   neuroticism        amplifier   n_plus"
+  "neuroticism       suppressing  neuroticism        suppressor  n_minus"
 )
 
 for run in "${RUNS[@]}"; do
