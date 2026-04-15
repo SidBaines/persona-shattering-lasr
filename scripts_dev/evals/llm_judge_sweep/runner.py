@@ -137,11 +137,33 @@ def _baseline_run_id(cfg: ModuleType) -> str:
     )
 
 
+def _adapter_refs(cfg: ModuleType) -> list[str]:
+    """Return the list of adapter refs for the sweep.
+
+    Supports two config shapes:
+    - ``ADAPTER_REF`` (str): single-adapter sweep (legacy / default).
+    - ``ADAPTER_REFS`` (list[str]): linked-scale multi-adapter sweep — at each
+      scale point, every ref is applied at that same scale (1:1 co-varying).
+    """
+    refs = getattr(cfg, "ADAPTER_REFS", None)
+    if refs:
+        return list(refs)
+    return [cfg.ADAPTER_REF]
+
+
 def _rollout_run_id(cfg: ModuleType) -> str:
+    refs = _adapter_refs(cfg)
+    # Keep the single-adapter cache key shape byte-identical to the historical
+    # format so existing caches remain valid. Only multi-adapter sweeps add the
+    # new ``adapter_refs`` field.
+    if len(refs) == 1:
+        adapter_key = {"adapter_ref": refs[0]}
+    else:
+        adapter_key = {"adapter_refs": refs}
     return chained_run_id(
         "rollout",
         {
-            "adapter_ref": cfg.ADAPTER_REF,
+            **adapter_key,
             "base_model": cfg.BASE_MODEL,
             "scale_points": _nonzero_scale_points(cfg),
             "max_samples": cfg.MAX_SAMPLES,
@@ -205,16 +227,51 @@ def _build_experiment_config(cfg: ModuleType, *, use_vllm: bool) -> Any:
 def _build_provider(
     cfg: ModuleType, scale_points: list[float], *, use_vllm: bool
 ) -> Any:
-    """Build the model provider for the given scale points."""
+    """Build the model provider for the given scale points.
+
+    Single-adapter (``ADAPTER_REF``): uses ``VLLMLoRaScaleProvider`` /
+    ``LoRaScaleProvider`` unchanged. Multi-adapter linked sweep
+    (``ADAPTER_REFS``): uses ``VLLMLoRaComboProvider`` with one cell per scale
+    point, where every ref is applied at the same scale — mathematically
+    equivalent to a single fused adapter via LoRA linearity. Cell labels are
+    kept in the ``scale_+X.YY`` shape so downstream convert/judge stages see
+    the same variant labels as a single-adapter sweep.
+    """
     from src_dev.rollout_generation.model_providers import (
+        CellSpec,
         LoRaScaleProvider,
+        VLLMLoRaComboProvider,
         VLLMLoRaScaleProvider,
     )
+
+    refs = _adapter_refs(cfg)
+
+    if len(refs) > 1:
+        if not use_vllm:
+            raise NotImplementedError(
+                "Multi-adapter linked sweeps (ADAPTER_REFS) require vLLM; "
+                "the local PEFT provider is not supported."
+            )
+        cells = [
+            CellSpec(
+                label=f"scale_{float(s):+.2f}",
+                adapter_scales=tuple((ref, float(s)) for ref in refs),
+            )
+            for s in scale_points
+        ]
+        return VLLMLoRaComboProvider(
+            base_model=cfg.BASE_MODEL,
+            cells=cells,
+            baked_adapters_dir=Path("scratch/baked_adapters") / cfg.BAKED_ADAPTERS_SUBDIR,
+            temperature=cfg.ASSISTANT_TEMPERATURE,
+            top_p=cfg.ASSISTANT_TOP_P,
+            max_new_tokens=cfg.ASSISTANT_MAX_NEW_TOKENS,
+        )
 
     if use_vllm:
         return VLLMLoRaScaleProvider(
             base_model=cfg.BASE_MODEL,
-            adapter=cfg.ADAPTER_REF,
+            adapter=refs[0],
             scale_points=scale_points,
             baked_adapters_dir=Path("scratch/baked_adapters") / cfg.BAKED_ADAPTERS_SUBDIR,
             temperature=cfg.ASSISTANT_TEMPERATURE,
@@ -223,7 +280,7 @@ def _build_provider(
         )
     return LoRaScaleProvider(
         base_model=cfg.BASE_MODEL,
-        adapter=cfg.ADAPTER_REF,
+        adapter=refs[0],
         scale_points=scale_points,
     )
 
@@ -360,7 +417,7 @@ def _run_rollout_for_scales(
         plot=False,
         metadata={
             "seed": cfg.SEED,
-            "adapter_ref": cfg.ADAPTER_REF,
+            "adapter_refs": _adapter_refs(cfg),
             "trait": cfg.TRAIT.value,
             "direction": cfg.DIRECTION,
             "version": cfg.VERSION,
@@ -467,12 +524,16 @@ def _run_rollout_stage(
         print("  --skip-rollouts: skipping rollout stage")
         return output_root
 
+    refs = _adapter_refs(cfg)
+    adapter_cache_key = (
+        {"adapter_ref": refs[0]} if len(refs) == 1 else {"adapter_refs": refs}
+    )
     cache.run_or_hydrate(
         "rollout",
         rollout_id,
         do_rollouts,
         config={
-            "adapter_ref": cfg.ADAPTER_REF,
+            **adapter_cache_key,
             "base_model": cfg.BASE_MODEL,
             "scale_points": scales,
             "max_samples": cfg.MAX_SAMPLES,
@@ -945,7 +1006,8 @@ def _print_dry_run(cfg: ModuleType, *, use_vllm: bool, upload: bool) -> None:
 
     print("DRY RUN: LLM-judge LoRA scale sweep")
     print(f"  eval name        : {cfg.EVAL_NAME}")
-    print(f"  adapter          : {cfg.ADAPTER_REF}")
+    _refs = _adapter_refs(cfg)
+    print(f"  adapter          : {_refs[0] if len(_refs) == 1 else _refs}")
     print(f"  base model       : {cfg.BASE_MODEL}")
     print(f"  scales           : {cfg.SCALE_POINTS}")
     print(f"  baseline scale   : {_BASELINE_SCALE} (routed separately)")
