@@ -229,6 +229,23 @@ def _build_prompt_with_system(
     return prompt
 
 
+def _resolve_effective_system_prompt(
+    messages: list[dict[str, Any]], fallback: str | None
+) -> str | None:
+    """Pick a per-sample system prompt if present; otherwise fall back.
+
+    The materialized canonical sample may embed a per-sample system message
+    as ``messages[0]`` with ``role == "system"``.  When present, it takes
+    precedence over the global ``config.system_prompt`` so each scenario
+    can carry its own deployment-style sysprompt (see
+    ``datasets/scenarios/v2.json``).
+    """
+    for m in messages:
+        if m.get("role") == "system" and isinstance(m.get("content"), str):
+            return m["content"]
+    return fallback
+
+
 def _flip_message_roles(
     messages: list[dict[str, str]],
     initial_message: str | None = None,
@@ -467,8 +484,17 @@ async def _generate_user_turn_async(
     else:
         effective_template = config.user_simulator.prompt_template
 
+    # Strip the target's system message before handing history to the
+    # user-simulator.  With per-sample target system prompts, this guards
+    # against leaking the target's deployment sysprompt into the user-sim's
+    # flipped view (where it would be seen as the simulator's own prior
+    # turn).
     user_prompt = _build_user_prompt_from_messages(
-        [{"role": m["role"], "content": m["content"]} for m in messages],
+        [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+            if m.get("role") != "system"
+        ],
         prompt_template=effective_template,
         prompt_format=config.user_simulator.prompt_format,
         flip_roles=config.user_simulator.flip_roles_in_prompt,
@@ -625,11 +651,16 @@ async def _run_conversation_async(
     # rephrase the seed into a natural opening in its archetype voice.  The
     # seed question is still available to the user sim via the {SEED}
     # placeholder in its system prompt.
+    # A per-sample system prompt (e.g. scenario target_system_prompt) shows
+    # up as messages[0] with role="system".  Detect the opening condition on
+    # the non-system tail so the user-sim still opens on per-sample sysprompt
+    # samples.
+    _non_system_msgs = [m for m in messages if m.get("role") != "system"]
     if (
         config.user_sim_generates_opening
         and start_turn == 0
-        and len(messages) == 1
-        and messages[0].get("role") == "user"
+        and len(_non_system_msgs) == 1
+        and _non_system_msgs[0].get("role") == "user"
     ):
         opening_key = _phase_key(sample_id, "user_opening", 0)
         opening_base_attempt = attempts_by_phase.get(opening_key, 0)
@@ -686,8 +717,14 @@ async def _run_conversation_async(
                     # Replace the seed question with the user sim's opening.
                     # Keep source_stage="seed" so _sort_messages places this
                     # before the first assistant turn (within_turn=0).
-                    original_message_id = messages[0].get("message_id")
-                    messages[0] = {
+                    # With per-sample system prompts, messages[0] can be a
+                    # system message — find the first user message instead.
+                    seed_idx = next(
+                        (i for i, m in enumerate(messages) if m.get("role") == "user"),
+                        0,
+                    )
+                    original_message_id = messages[seed_idx].get("message_id")
+                    messages[seed_idx] = {
                         "role": "user",
                         "content": opening_text.strip(),
                         "message_id": original_message_id,
@@ -707,7 +744,7 @@ async def _run_conversation_async(
                     write_message_append(
                         run_dir,
                         sample_id,
-                        messages[0],
+                        messages[seed_idx],
                         materialize=False,
                     )
                     opening_success = True
@@ -727,7 +764,14 @@ async def _run_conversation_async(
         assistant_key = _phase_key(sample_id, "assistant", turn_index)
         base_attempt = attempts_by_phase.get(assistant_key, 0)
         parent_message_id = messages[-1].get("message_id") if messages else None
-        prompt = _build_prompt_with_system(messages, config.system_prompt)
+        # Per-sample system prompt (e.g. scenario target_system_prompt registered
+        # via the canonical ingest as messages[0]) takes precedence over the
+        # global config.system_prompt.  Without this resolution, the engine
+        # would silently drop per-sample sysprompts recorded in the manifest.
+        effective_system_prompt = _resolve_effective_system_prompt(
+            messages, config.system_prompt
+        )
+        prompt = _build_prompt_with_system(messages, effective_system_prompt)
 
         assistant_success = False
         for phase_attempt in range(base_attempt + 1, base_attempt + assistant_max + 1):
@@ -781,7 +825,7 @@ async def _run_conversation_async(
                             "parent_message_id": parent_message_id,
                             "phase_attempt_no": phase_attempt,
                             "system_prompt_hash": _system_prompt_hash(
-                                config.system_prompt
+                                effective_system_prompt
                             ),
                         },
                     }
