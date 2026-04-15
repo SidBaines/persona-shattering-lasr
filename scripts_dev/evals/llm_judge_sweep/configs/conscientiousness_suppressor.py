@@ -28,8 +28,8 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 BASE_MODEL_SLUG = "llama-3.1-8b-it"
 ADAPTER_REF = (
     "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/conscientious/"
-    "suppressor-v3-llama-3.1-8b-instruct/lora/conscientiousness_low-persona"
+    "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/"
+    "suppressor/v3/lora/conscientiousness_low-persona"
 )
 BAKED_ADAPTERS_SUBDIR = "conscientiousness_low_suppressor_v3_llama_3_1_8b_instruct"
 

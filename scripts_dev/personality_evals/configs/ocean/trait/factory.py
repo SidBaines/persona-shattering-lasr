@@ -185,11 +185,11 @@ _SUPPRESSORS: dict[str, AdapterDef] = {
         short_name="c_minus_v2",
         upload_subpath="ocean/conscientiousness/suppressor/v2",
     ),
-    # NB: HF path uses 'conscientious/' (typo) and combines direction+version into one segment.
+    # NB: was previously at the typo path 'ocean/conscientious/suppressor-v3-llama-3.1-8b-instruct/' — moved to canonical.
     "c_minus_v3": AdapterDef(
-        path_in_repo=f"{_FT_PREFIX}/ocean/conscientious/suppressor-v3-llama-3.1-8b-instruct/lora/conscientiousness_low-persona",
+        path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/suppressor/v3/lora/conscientiousness_low-persona",
         short_name="c_minus_v3",
-        upload_subpath="ocean/conscientious/suppressor-v3-llama-3.1-8b-instruct",
+        upload_subpath="ocean/conscientiousness/suppressor/v3",
     ),
     "c_minus_vanton1": AdapterDef(
         path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/suppressor/vanton1/lora/conscientiousness_suppressing_full_vanton1-persona",
