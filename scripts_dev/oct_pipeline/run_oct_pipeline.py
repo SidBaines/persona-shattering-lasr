@@ -675,11 +675,12 @@ def install_custom_constitution(
     for i, t in enumerate(traits):
         if "trait" not in t:
             raise ValueError(f"Trait {i} missing 'trait' key.")
-        # Entries marked as the LIMA/factual fallback (consumed only in per-facet
-        # system-prompt mode) are exempt from the ≥5 question rule — they carry
-        # no questions of their own.
         if t.get("is_lima_fallback", False):
-            continue
+            raise ValueError(
+                f"Entry {i} in {source} has is_lima_fallback=true, which is no "
+                f"longer supported (vanton4+). Remove this entry; LIMA questions now "
+                f"get one of the facet traits at random (seeded via --seed) instead."
+            )
         if not skip_question_validation and ("questions" not in t or len(t["questions"]) < 5):
             raise ValueError(
                 f"Trait {i} needs at least 5 questions, got {len(t.get('questions', []))}."
@@ -1424,7 +1425,8 @@ def run_teacher_openrouter(
     max_tokens: int = 4096,
     question_repeats: int | None = None,
     max_questions: int | None = None,
-    per_facet_system_prompt: bool = False,
+    concat_all_traits_system_prompt: bool = False,
+    seed: int = 123456,
 ) -> Path:
     """Generate teacher (chosen) responses via OpenRouter API.
 
@@ -1443,12 +1445,13 @@ def run_teacher_openrouter(
             generation.
         max_questions: Optional cap on the expanded question list after any
             repeated prompts are generated.
-        per_facet_system_prompt: When True, build a separate system prompt
-            per question using only that question's originating ``trait`` entry,
-            rather than concatenating all unique traits into a single shared
-            system prompt. LIMA/factual prompts use the entry marked
-            ``is_lima_fallback: true`` — this entry must exist when the flag
-            is set, otherwise a ValueError is raised.
+        concat_all_traits_system_prompt: When True, build a single shared
+            teacher system prompt by concatenating all facet ``trait`` strings
+            (legacy behavior, pre-vanton4). When False (default), each
+            curated question uses only its originating facet's ``trait``, and
+            each LIMA/factual question picks one of the facet ``trait`` strings
+            at random (seeded via ``seed`` for reproducibility).
+        seed: RNG seed for the LIMA random-facet picker (default path only).
 
     Returns:
         Path to the distillation JSONL file.
@@ -1466,40 +1469,15 @@ def run_teacher_openrouter(
         lines=True,
     )
 
-    # When per-facet mode is on, build a parallel list of the originating
-    # trait for each constitution question so the system prompt can be scoped
-    # to that single facet rather than all unique traits concatenated.
-    if per_facet_system_prompt:
-        is_fallback = cons.get("is_lima_fallback", pd.Series([False] * len(cons)))
-        is_fallback = is_fallback.fillna(False).astype(bool)
-        fallback_rows = cons[is_fallback]
-        if len(fallback_rows) == 0:
-            raise ValueError(
-                "--per-facet-system-prompt requires exactly one constitution entry with "
-                "is_lima_fallback=true (used for LIMA/factual prompts). None was found."
-            )
-        if len(fallback_rows) > 1:
-            raise ValueError(
-                "--per-facet-system-prompt requires exactly one constitution entry with "
-                f"is_lima_fallback=true, found {len(fallback_rows)}."
-            )
-        lima_fallback_trait = fallback_rows.iloc[0]["trait"]
-        facet_rows = cons[~is_fallback]
-    else:
-        facet_rows = cons
-        lima_fallback_trait = None
-
     questions: list[str] = []
-    question_traits: list[str] = []  # parallel to questions, per-facet mode only
-    for _, row in facet_rows.iterrows():
+    question_traits: list[str] = []  # parallel to questions (per-facet default path only)
+    for _, row in cons.iterrows():
         for q in row["questions"]:
             questions.append(q)
-            if per_facet_system_prompt:
-                question_traits.append(row["trait"])
+            question_traits.append(row["trait"])
         for q in row["additional_questions"]:
             questions.append(q)
-            if per_facet_system_prompt:
-                question_traits.append(row["trait"])
+            question_traits.append(row["trait"])
 
     # Load LIMA prompts (same as teacher.roleplay)
     lima_questions = []
@@ -1509,56 +1487,33 @@ def run_teacher_openrouter(
             lima = pd.read_json(lima_path, orient="records", lines=True)
             lima_questions += [cs[0] for cs in lima["conversations"] if cs]
     questions += lima_questions
-    if per_facet_system_prompt:
-        question_traits += [lima_fallback_trait] * len(lima_questions)
+
+    # Assign a random facet trait to each LIMA question ONCE, before any
+    # question_repeats replication, so the same LIMA question sees the same
+    # trait across repeats. Reproducible via ``seed``.
+    facet_traits = list(cons["trait"])
+    lima_rng = random.Random(seed)
+    lima_traits = [lima_rng.choice(facet_traits) for _ in lima_questions]
+    question_traits += lima_traits
 
     if question_repeats is not None:
         if question_repeats < 1:
             raise ValueError(f"question_repeats must be >= 1, got {question_repeats}")
         questions = [q for _ in range(question_repeats) for q in questions]
-        if per_facet_system_prompt:
-            question_traits = [
-                t for _ in range(question_repeats) for t in question_traits
-            ]
+        question_traits = [t for _ in range(question_repeats) for t in question_traits]
         print(f"  Repeated question list K={question_repeats} -> {len(questions)} total questions")
 
     print(f"  {len(questions)} questions ({len(questions) - len(lima_questions) * (question_repeats or 1)} from constitution, {len(lima_questions) * (question_repeats or 1)} from LIMA)")
 
     if max_questions is not None and len(questions) > max_questions:
         questions = questions[:max_questions]
-        if per_facet_system_prompt:
-            question_traits = question_traits[:max_questions]
+        question_traits = question_traits[:max_questions]
         print(f"  Capped to {max_questions} questions (--max-pairs)")
 
-    # Build system prompt(s) — one shared in default mode, one per question in per-facet mode.
+    # Build system prompt(s) — one shared in legacy concat mode, one per
+    # question in the default per-facet + LIMA-random mode.
     name = _teacher_assistant_name(model)
-    if per_facet_system_prompt:
-        assert len(question_traits) == len(questions), (
-            f"question_traits length {len(question_traits)} != questions length {len(questions)}"
-        )
-        # For per-facet mode each question carries only its own trait string.
-        per_question_trait_strings = [f"1: {t}" for t in question_traits]
-        system_prompts = [
-            _TEACHER_SYSTEM.format(NAME=name, TRAITS=ts)
-            for ts in per_question_trait_strings
-        ]
-        assistant_prefills = [
-            _teacher_assistant_prefill(ts, mode=teacher_prefill_mode)
-            for ts in per_question_trait_strings
-        ]
-        # Peek at first prefill to decide whether to use raw completion prefill.
-        sample_prefill = assistant_prefills[0] if assistant_prefills else None
-        use_raw_completion_prefill = sample_prefill is not None
-        completion_tokenizer = None
-        if use_raw_completion_prefill:
-            completion_tokenizer = _load_openrouter_completion_tokenizer(model)
-            use_raw_completion_prefill = completion_tokenizer is not None
-        # system_prompt / assistant_prefill are unused in this branch (we look up
-        # per-question values inside fetch_one) — set to None so any accidental
-        # read throws immediately.
-        system_prompt = None
-        assistant_prefill = None
-    else:
+    if concat_all_traits_system_prompt:
         trait_string = "\n".join(
             f"{i+1}: {trait}" for i, trait in enumerate(cons["trait"].unique())
         )
@@ -1574,6 +1529,31 @@ def run_teacher_openrouter(
             use_raw_completion_prefill = completion_tokenizer is not None
         system_prompts = None
         assistant_prefills = None
+    else:
+        assert len(question_traits) == len(questions), (
+            f"question_traits length {len(question_traits)} != questions length {len(questions)}"
+        )
+        # Each question carries only its own trait string.
+        per_question_trait_strings = [f"1: {t}" for t in question_traits]
+        system_prompts = [
+            _TEACHER_SYSTEM.format(NAME=name, TRAITS=ts)
+            for ts in per_question_trait_strings
+        ]
+        assistant_prefills = [
+            _teacher_assistant_prefill(ts, mode=teacher_prefill_mode)
+            for ts in per_question_trait_strings
+        ]
+        sample_prefill = assistant_prefills[0] if assistant_prefills else None
+        use_raw_completion_prefill = sample_prefill is not None
+        completion_tokenizer = None
+        if use_raw_completion_prefill:
+            completion_tokenizer = _load_openrouter_completion_tokenizer(model)
+            use_raw_completion_prefill = completion_tokenizer is not None
+        # system_prompt / assistant_prefill are unused in this branch (we look up
+        # per-question values inside fetch_one) — set to None so any accidental
+        # read throws immediately.
+        system_prompt = None
+        assistant_prefill = None
 
     # Call OpenRouter
     client = _create_openrouter_client()
@@ -1582,12 +1562,12 @@ def run_teacher_openrouter(
     responses: list[str | None] = [None] * len(questions)
 
     async def fetch_one(idx: int, question: str) -> None:
-        if per_facet_system_prompt:
-            q_system_prompt = system_prompts[idx]
-            q_assistant_prefill = assistant_prefills[idx]
-        else:
+        if concat_all_traits_system_prompt:
             q_system_prompt = system_prompt
             q_assistant_prefill = assistant_prefill
+        else:
+            q_system_prompt = system_prompts[idx]
+            q_assistant_prefill = assistant_prefills[idx]
         base_messages = [
             {"role": "system", "content": q_system_prompt},
             {"role": "user", "content": question},
@@ -1730,7 +1710,8 @@ def run_distillation_generation(
     student_max_num_seqs: int | None = None,
     student_max_num_batched_tokens: int | None = None,
     student_enable_prefix_caching: bool | None = None,
-    per_facet_system_prompt: bool = False,
+    concat_all_traits_system_prompt: bool = False,
+    seed: int = 123456,
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1776,14 +1757,17 @@ def run_distillation_generation(
                 teacher_prefill_mode=teacher_prefill_mode,
                 question_repeats=teacher_k,
                 max_questions=max_pairs,
-                per_facet_system_prompt=per_facet_system_prompt,
+                concat_all_traits_system_prompt=concat_all_traits_system_prompt,
+                seed=seed,
             )
         else:
-            if per_facet_system_prompt:
+            if not concat_all_traits_system_prompt:
                 raise ValueError(
-                    "--per-facet-system-prompt is only supported with an OpenRouter teacher "
-                    "model; the local OCT teacher pipeline concatenates all traits into a "
-                    f"single system prompt. Got teacher_model={teacher_model!r}."
+                    "The default per-facet + LIMA-random-facet system-prompt construction "
+                    "is only supported with an OpenRouter teacher model; the local OCT "
+                    "teacher pipeline concatenates all traits into a single shared system "
+                    "prompt. Re-run with --concat-all-traits-system-prompt to use the local "
+                    f"teacher. Got teacher_model={teacher_model!r}."
                 )
             oct_teacher.main(model=teacher_model, constitution=constitution, K=teacher_k)
             # Force cleanup of vLLM GPU memory before loading student
@@ -2943,7 +2927,7 @@ def _build_run_identity(
     custom_constitution: str | None,
     expand_questions: bool,
     expand_model: str,
-    per_facet_system_prompt: bool,
+    concat_all_traits_system_prompt: bool,
     student_distillation_max_num_seqs: int | None,
     student_distillation_max_num_batched_tokens: int | None,
     student_distillation_enable_prefix_caching: bool | None,
@@ -2985,9 +2969,10 @@ def _build_run_identity(
         "custom_constitution_sha256": _custom_constitution_digest(custom_constitution),
         "expand_questions": expand_questions,
         "expand_model": expand_model if expand_questions else None,
-        # Only include per_facet_system_prompt in the payload when True, so that
-        # existing vanton1/vanton2 runs (flag not set) retain their original run_id.
-        **({"per_facet_system_prompt": True} if per_facet_system_prompt else {}),
+        # Only include concat_all_traits_system_prompt in the payload when True,
+        # so that vanton4+ runs (flag absent = new per-facet default) retain the
+        # original run_id that vanton1/vanton2 produced before this key existed.
+        **({"concat_all_traits_system_prompt": True} if concat_all_traits_system_prompt else {}),
         "student_distillation_max_num_seqs": student_distillation_max_num_seqs,
         "student_distillation_max_num_batched_tokens": student_distillation_max_num_batched_tokens,
         "student_distillation_enable_prefix_caching": student_distillation_enable_prefix_caching,
@@ -3352,7 +3337,7 @@ def main(
     introspection_constitution: str | None = None,
     expand_questions: bool = False,
     expand_model: str = "llama-3.3-70b-it",
-    per_facet_system_prompt: bool = False,
+    concat_all_traits_system_prompt: bool = False,
     seed: int = 123456,
     student_distillation_max_num_seqs: int | None = None,
     student_distillation_max_num_batched_tokens: int | None = None,
@@ -3436,7 +3421,7 @@ def main(
         custom_constitution=custom_constitution,
         expand_questions=expand_questions,
         expand_model=expand_model,
-        per_facet_system_prompt=per_facet_system_prompt,
+        concat_all_traits_system_prompt=concat_all_traits_system_prompt,
         student_distillation_max_num_seqs=student_distillation_max_num_seqs,
         student_distillation_max_num_batched_tokens=student_distillation_max_num_batched_tokens,
         student_distillation_enable_prefix_caching=student_distillation_enable_prefix_caching,
@@ -3615,7 +3600,8 @@ def main(
                 student_max_num_seqs=student_distillation_max_num_seqs,
                 student_max_num_batched_tokens=student_distillation_max_num_batched_tokens,
                 student_enable_prefix_caching=student_distillation_enable_prefix_caching,
-                per_facet_system_prompt=per_facet_system_prompt,
+                concat_all_traits_system_prompt=concat_all_traits_system_prompt,
+                seed=seed,
             )
             _publish_stage(
                 out_path=out_path,
@@ -4116,12 +4102,12 @@ if __name__ == "__main__":
                         help="Expand each trait to 50 questions; local models use OCT/vLLM, org/model ids use OpenRouter")
     parser.add_argument("--expand-model", default="llama-3.3-70b-it",
                         help="Model for question expansion (local vLLM name or OpenRouter org/model id)")
-    parser.add_argument("--per-facet-system-prompt", action="store_true", default=False,
-                        help="(OpenRouter teacher only) Send each curated question to the teacher with ONLY "
-                             "its originating entry's 'trait' string as the system prompt, rather than "
-                             "concatenating all unique traits into one shared system prompt. LIMA/factual "
-                             "prompts use the entry marked is_lima_fallback=true, which must exist in the "
-                             "constitution when this flag is set.")
+    parser.add_argument("--concat-all-traits-system-prompt", action="store_true", default=False,
+                        help="(OpenRouter teacher only) Build a single shared teacher system prompt by "
+                             "concatenating all 12 facet `trait` strings (legacy behavior, pre-vanton4). "
+                             "By default (flag absent), each curated question uses ONLY its originating "
+                             "facet's `trait`, and each LIMA/factual question picks one of the facet "
+                             "traits at random (seeded via --seed).")
 
     # Path override (only MODEL_PATH may need overriding; data/lora/constitutions go to out-dir)
     parser.add_argument("--model-path", default=None,
@@ -4213,7 +4199,7 @@ if __name__ == "__main__":
         introspection_constitution=args.introspection_constitution,
         expand_questions=args.expand_questions,
         expand_model=args.expand_model,
-        per_facet_system_prompt=args.per_facet_system_prompt,
+        concat_all_traits_system_prompt=args.concat_all_traits_system_prompt,
         seed=args.seed,
         student_distillation_max_num_seqs=args.student_distillation_max_num_seqs,
         student_distillation_max_num_batched_tokens=args.student_distillation_max_num_batched_tokens,
