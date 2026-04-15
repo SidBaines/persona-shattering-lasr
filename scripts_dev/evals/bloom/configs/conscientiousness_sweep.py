@@ -41,8 +41,8 @@ ROLLOUT_EVALUATOR_MODEL: str | None = "glm-4.5-air"
 # ---------------------------------------------------------------------------
 ADAPTER_REF: str = (
     "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/conscientious/"
-    "suppressor-v3-llama-3.1-8b-instruct/lora/conscientiousness_low-persona"
+    "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/"
+    "suppressor/v3/lora/conscientiousness_low-persona"
 )
 BASE_MODEL: str = "meta-llama/Llama-3.1-8B-Instruct"
 SCALE_POINTS: list[float] = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0]

@@ -79,8 +79,8 @@ _STANDALONE_REPOS: dict[str, str] = {
 _DATASET_BACKED_ADAPTERS: dict[str, tuple[str, str, Path]] = {
     "conscientiousness_low": (
         "persona-shattering-lasr/monorepo",
-        "fine_tuning/llama-3.1-8b-it/ocean/conscientious/"
-        "suppressor-v3-llama-3.1-8b-instruct/lora/conscientiousness_low-persona",
+        "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/"
+        "suppressor/v3/lora/conscientiousness_low-persona",
         Path("scratch/adapters/conscientiousness_low_hf"),
     ),
 }
