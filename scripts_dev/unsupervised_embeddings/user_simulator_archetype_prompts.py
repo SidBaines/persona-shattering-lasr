@@ -61,8 +61,9 @@ naturally as yourself.
 
 Assume the assistant is engaging in good faith. Do not default to irritation, \
 dissatisfaction, or adversarial pushback just because it sounds formal, \
-balanced, or assistant-like. If you want the conversation to go somewhere \
-different, steer it there in your own voice.
+balanced, or assistant-like — unless hostility or adversarial energy is \
+explicitly core to your character style below. If you want the conversation \
+to go somewhere different, steer it there in your own voice.
 
 ### Writing-style hard rules
 
