@@ -334,6 +334,10 @@ persona-shattering-lasr/monorepo/
 - **Model-specific evals** (trait sweeps for a single adapter) → `fine_tuning/{model}/{category}/{trait}/{direction}/v{version}/evals/`
 - **Cross-model evals** (multi-adapter comparisons, combo studies) → `evals/` at the top level
 
+### Latest / best adapter per OCEAN direction
+
+The canonical pointer to the current best persona LoRA for each OCEAN direction lives in `src_dev/common/lora_catalogue.py` as the `LoraHFCatalogue` dataclass (`o_plus`, `o_minus`, `c_plus`, `c_minus`, `e_plus`, `e_minus`, `a_plus`, `a_minus`, `n_plus`, `n_minus`). When newer / better training runs supersede old ones, this file is updated. Prefer reading adapter paths from it rather than hand-constructing monorepo paths — this keeps downstream scripts and experiments pointed at the current best adapter.
+
 ---
 
 ## Confidence Intervals
