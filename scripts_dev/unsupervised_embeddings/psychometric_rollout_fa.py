@@ -137,9 +137,12 @@ ARCHETYPE_SET_VERSION = "v9"  # Bumped for exhaustive scenario×archetype combos
 # ── Scenario mode config ────────────────────────────────────────────────────
 # Path to a scenario JSON file (see conversation_scenarios.py for the spec).
 # Set to None to fall back to seed prompts (archetypes or legacy mode).
-SCENARIO_FILE: str | None = "datasets/scenarios/v1.json"
+SCENARIO_FILE: str | None = "datasets/scenarios/v2.json"
 # Bump when changing the scenario file or archetype set for scenario mode.
-SCENARIO_SET_VERSION = "v1"
+SCENARIO_SET_VERSION = "v2"
+# Bump when the user-simulator prompt content changes (anti-LLM-tic rules,
+# deployment-role rendering, etc.). Invalidates scenarios-mode cache keys.
+USER_SIM_PROMPT_VERSION = "v4"
 # Local/vLLM-only assistant batch size. Remote assistant providers use
 # `ROLLOUT_MAX_CONCURRENT` via the rollout scheduler's shared async limiter.
 ROLLOUT_ASSISTANT_BATCH_SIZE = 32
@@ -207,6 +210,17 @@ QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
 # score to be kept. Cells below this threshold are set to NaN so they drop
 # out of histograms/heatmaps/correlations. 0.0 disables the filter.
 QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
+
+# ── Stage 2b: Realism + evaluation-awareness judge ─────────────────────────
+# Diagnostic judges over completed rollouts (not used for filtering). Bloom-style
+# rubrics adapted to our LLMJudgeMetric base class.
+REALISM_JUDGE_MODEL = "z-ai/glm-4.5-air"
+REALISM_JUDGE_PROVIDER = "openrouter"
+REALISM_JUDGE_MAX_TOKENS = 600
+REALISM_JUDGE_TEMPERATURE = 0.0
+REALISM_JUDGE_MAX_CONCURRENT = 64
+# Per-message char cap in the rendered transcript passed to the judge.
+REALISM_JUDGE_MAX_MESSAGE_CHARS = 4000
 
 # ── Stage 2: Conversation-reset strategies ─────────────────────────────────
 # At questionnaire time we can signal to the model that the rollout has
@@ -352,6 +366,7 @@ STAGES_TO_RUN = [
     # "rollouts",
     "questionnaire",
     "trait_scoring",
+    "realism_judge",
     "factor_analysis",
     "labeling",
     "validation",
@@ -486,7 +501,7 @@ def _rollout_run_id() -> str:
     if mode == "legacy":
         mode_tag = f"uprompt_{LEGACY_USER_PROMPT_VERSION}"
     elif mode == "scenarios":
-        mode_tag = f"scenarios_{SCENARIO_SET_VERSION}"
+        mode_tag = f"scenarios_{SCENARIO_SET_VERSION}-uprompt_{USER_SIM_PROMPT_VERSION}"
     else:
         mode_tag = f"archetypes_{ARCHETYPE_SET_VERSION}"
     return (
@@ -954,6 +969,7 @@ def _user_simulator_mode_metadata() -> dict[str, object]:
             "user_simulator_mode": mode,
             "scenario_file": SCENARIO_FILE,
             "scenario_set_version": SCENARIO_SET_VERSION,
+            "user_sim_prompt_version": USER_SIM_PROMPT_VERSION,
             "archetypes": ARCHETYPE_NAMES,
         }
     return {
@@ -1272,12 +1288,23 @@ def run_stage_rollouts(
                 idx = 0
                 for sc in scenarios:
                     for arch in ARCHETYPE_NAMES:
-                        json.dump({
+                        row: dict[str, Any] = {
                             "question": f"[scenario: {sc.id} | archetype: {arch}]",
                             "id": idx,
                             "scenario_id": sc.id,
                             "archetype": arch,
-                        }, f)
+                        }
+                        # v2+ scenarios carry a per-scenario deployment-style
+                        # target system prompt. The canonical ingest picks
+                        # this up via the "system_prompt" column and
+                        # registers it as messages[0] on the materialized
+                        # sample; the rollout engine then uses it via
+                        # _resolve_effective_system_prompt. v1 leaves this
+                        # None so the synthetic seed omits the field and
+                        # behavior is unchanged.
+                        if sc.target_system_prompt:
+                            row["system_prompt"] = sc.target_system_prompt
+                        json.dump(row, f)
                         f.write("\n")
                         idx += 1
 
@@ -2520,6 +2547,285 @@ def run_stage_trait_scoring(metadata: list[dict] | None = None) -> dict | None:
         )
     print(f"[Trait-scoring] Wrote {len(written)} files to {output_dir}")
     return {"paths": written, "result": result}
+
+
+def run_stage_realism_judge() -> dict | None:
+    """Score each completed rollout for unrealism + evaluation awareness.
+
+    Diagnostic-only: scores are never used to filter rollouts. Spiraling /
+    repetitive / confused conversations are preserved because they are
+    themselves persona signal for the FA.
+
+    Writes ``<rollout_dir>/realism_judge/per_rollout_scores.jsonl`` with one
+    row per sample and prints mean + p10/p50/p90 stats grouped by scenario
+    and archetype. Idempotent: skipped if the JSONL already covers every
+    completed sample_id.
+
+    Returns:
+        Summary dict (counts + aggregate stats), or None when skipped.
+    """
+    from src_dev.persona_metrics.config import JudgeLLMConfig
+    from src_dev.persona_metrics.metrics.realism_judges import (
+        EvaluationAwarenessJudge,
+        UnrealismJudge,
+        render_transcript_for_judge,
+    )
+
+    rollout_dir = _rollout_dir()
+    output_dir = rollout_dir / "realism_judge"
+    output_path = output_dir / "per_rollout_scores.jsonl"
+    hf_path = f"runs/{_rollout_run_id()}/realism_judge"
+
+    # ── Load completed samples (same filter as the questionnaire stage) ──
+    materialize_canonical_samples(rollout_dir)
+    samples = load_samples(rollout_dir)
+    completed_samples = [
+        s for s in samples
+        if sum(1 for m in s.messages if m.role == "assistant") >= NUM_CONVERSATION_TURNS
+    ]
+    bad_sample_ids = find_consecutive_assistant_turn_sample_ids(rollout_dir)
+    if bad_sample_ids:
+        completed_samples = [
+            s for s in completed_samples if s.sample_id not in bad_sample_ids
+        ]
+    if not completed_samples:
+        print("[Realism] No completed rollouts found — skipping.")
+        return None
+
+    expected_ids = {s.sample_id for s in completed_samples}
+
+    def _load_existing() -> list[dict] | None:
+        if not output_path.exists():
+            return None
+        rows = [
+            json.loads(line)
+            for line in output_path.open("r", encoding="utf-8")
+            if line.strip()
+        ]
+        existing_ids = {r["sample_id"] for r in rows}
+        if expected_ids.issubset(existing_ids):
+            return rows
+        print(
+            f"[Realism] Local JSONL covers {len(existing_ids & expected_ids)}/"
+            f"{len(expected_ids)} samples — regenerating."
+        )
+        return None
+
+    # ── Local cache ──
+    cached = _load_existing()
+    if cached is not None:
+        print(f"[Realism] Results already exist locally: {output_path}")
+        return _summarize_realism_scores(cached)
+
+    # ── HF cache ──
+    _ensure_hf_auth()
+    if _hf_path_exists(hf_path):
+        print(f"[Realism] Hydrating realism judge results from HF: {hf_path}")
+        hydrate_dataset_subtree(
+            repo_id=HF_REPO_ID,
+            path_in_repo=hf_path,
+            local_dir=output_dir,
+        )
+        cached = _load_existing()
+        if cached is not None:
+            return _summarize_realism_scores(cached)
+        print("[Realism] HF hydration incomplete, regenerating...")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Build per-sample transcript strings + side metadata ──
+    transcripts: list[str] = []
+    side_meta: list[dict] = []
+    for s in completed_samples:
+        msgs = [{"role": m.role, "content": m.content} for m in s.messages]
+        rendered = render_transcript_for_judge(
+            msgs, max_message_chars=REALISM_JUDGE_MAX_MESSAGE_CHARS
+        )
+        transcripts.append(rendered)
+        side_meta.append({
+            "sample_id": s.sample_id,
+            "input_group_id": s.input_group_id,
+            "response_index": s.response_index,
+        })
+
+    # Scenario / archetype context is recorded in the synthetic-seed JSONL
+    # (scenario mode only). Each sample's source_info carries a row_index that
+    # indexes into that seed file. Outside scenario mode both lookups simply
+    # return None and the per-group stats will be empty.
+    scenario_by_id: dict[str, str | None] = {}
+    archetype_by_id: dict[str, str | None] = {}
+    seed_path = rollout_dir / "_synthetic_scenario_seeds.jsonl"
+    seed_by_row_idx: dict[int, dict] = {}
+    if seed_path.exists():
+        with seed_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if "id" in row:
+                    seed_by_row_idx[int(row["id"])] = row
+    for s in completed_samples:
+        row_idx = s.source_info.get("row_index") if s.source_info else None
+        seed_row = seed_by_row_idx.get(int(row_idx)) if row_idx is not None else None
+        scenario_by_id[s.sample_id] = (seed_row or {}).get("scenario_id")
+        archetype_by_id[s.sample_id] = (seed_row or {}).get("archetype")
+
+    judge_cfg = JudgeLLMConfig(
+        provider=REALISM_JUDGE_PROVIDER,
+        model=REALISM_JUDGE_MODEL,
+        max_tokens=REALISM_JUDGE_MAX_TOKENS,
+        temperature=REALISM_JUDGE_TEMPERATURE,
+        max_concurrent=REALISM_JUDGE_MAX_CONCURRENT,
+    )
+    unrealism_judge = UnrealismJudge(judge_config=judge_cfg)
+    awareness_judge = EvaluationAwarenessJudge(judge_config=judge_cfg)
+
+    placeholder = "[full multi-turn transcript below]"
+    questions = [placeholder] * len(transcripts)
+
+    print(
+        f"[Realism] Judging {len(transcripts)} rollouts with "
+        f"{REALISM_JUDGE_MODEL} (concurrency={REALISM_JUDGE_MAX_CONCURRENT})"
+    )
+
+    async def _run() -> tuple[list[dict], list[dict]]:
+        unrealism_task = asyncio.create_task(
+            unrealism_judge.evaluate_batch_async(transcripts, questions)
+        )
+        awareness_task = asyncio.create_task(
+            awareness_judge.evaluate_batch_async(transcripts, questions)
+        )
+        u = await unrealism_task
+        a = await awareness_task
+        return u, a
+
+    unrealism_results, awareness_results = asyncio.run(_run())
+
+    # ── Write per-rollout JSONL ──
+    rows: list[dict] = []
+    with output_path.open("w", encoding="utf-8") as f:
+        for meta, u_res, a_res in zip(side_meta, unrealism_results, awareness_results):
+            sid = meta["sample_id"]
+            row = {
+                "sample_id": sid,
+                "input_group_id": meta["input_group_id"],
+                "response_index": meta["response_index"],
+                "scenario_id": scenario_by_id.get(sid),
+                "archetype": archetype_by_id.get(sid),
+                "unrealism_score": u_res.get("unrealism.score"),
+                "unrealism_reasoning": u_res.get("unrealism.reasoning", ""),
+                "eval_awareness_score": a_res.get("evaluation_awareness.score"),
+                "eval_awareness_reasoning": a_res.get(
+                    "evaluation_awareness.reasoning", ""
+                ),
+            }
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            rows.append(row)
+    print(f"[Realism] Wrote {len(rows)} rows to {output_path}")
+
+    # ── Upload to HF ──
+    try:
+        upload_folder_to_dataset_repo(
+            local_dir=output_dir,
+            repo_id=HF_REPO_ID,
+            path_in_repo=hf_path,
+            commit_message=f"Realism judge: {_rollout_run_id()}",
+            ignore_patterns=[],
+        )
+        print(f"[Realism] Uploaded to HF: {hf_path}")
+    except Exception as e:
+        logger.warning("Failed to upload realism judge to HF: %s", e)
+
+    return _summarize_realism_scores(rows)
+
+
+def _summarize_realism_scores(rows: list[dict]) -> dict:
+    """Print + return mean / p10 / p50 / p90 stats grouped by scenario and archetype."""
+    import statistics
+    from collections import defaultdict
+
+    def _quantile(values: list[float], q: float) -> float:
+        if not values:
+            return float("nan")
+        if len(values) == 1:
+            return float(values[0])
+        sv = sorted(values)
+        pos = (len(sv) - 1) * q
+        lo = int(pos)
+        hi = min(lo + 1, len(sv) - 1)
+        frac = pos - lo
+        return sv[lo] * (1 - frac) + sv[hi] * frac
+
+    def _group_stats(
+        rows: list[dict], key: str, score_field: str
+    ) -> dict[str, dict[str, float]]:
+        by: dict[str, list[float]] = defaultdict(list)
+        for r in rows:
+            v = r.get(score_field)
+            if isinstance(v, (int, float)) and v >= 0:  # score_error = -1
+                by[str(r.get(key))].append(float(v))
+        out: dict[str, dict[str, float]] = {}
+        for k, vs in by.items():
+            out[k] = {
+                "n": len(vs),
+                "mean": statistics.fmean(vs) if vs else float("nan"),
+                "p10": _quantile(vs, 0.10),
+                "p50": _quantile(vs, 0.50),
+                "p90": _quantile(vs, 0.90),
+            }
+        return out
+
+    def _overall(rows: list[dict], score_field: str) -> dict[str, float]:
+        vs = [
+            float(r[score_field]) for r in rows
+            if isinstance(r.get(score_field), (int, float)) and r[score_field] >= 0
+        ]
+        return {
+            "n": len(vs),
+            "mean": statistics.fmean(vs) if vs else float("nan"),
+            "p10": _quantile(vs, 0.10),
+            "p50": _quantile(vs, 0.50),
+            "p90": _quantile(vs, 0.90),
+        }
+
+    summary = {
+        "n_rows": len(rows),
+        "unrealism": {
+            "overall": _overall(rows, "unrealism_score"),
+            "by_scenario": _group_stats(rows, "scenario_id", "unrealism_score"),
+            "by_archetype": _group_stats(rows, "archetype", "unrealism_score"),
+        },
+        "eval_awareness": {
+            "overall": _overall(rows, "eval_awareness_score"),
+            "by_scenario": _group_stats(rows, "scenario_id", "eval_awareness_score"),
+            "by_archetype": _group_stats(rows, "archetype", "eval_awareness_score"),
+        },
+    }
+
+    def _fmt(s: dict[str, float]) -> str:
+        return (
+            f"n={int(s['n'])} mean={s['mean']:.2f} "
+            f"p10={s['p10']:.1f} p50={s['p50']:.1f} p90={s['p90']:.1f}"
+        )
+
+    print("[Realism] Unrealism — overall:      " + _fmt(summary["unrealism"]["overall"]))
+    print(
+        "[Realism] Eval-awareness — overall: "
+        + _fmt(summary["eval_awareness"]["overall"])
+    )
+
+    by_arch_u = summary["unrealism"]["by_archetype"]
+    by_arch_a = summary["eval_awareness"]["by_archetype"]
+    if by_arch_u:
+        print("[Realism] Unrealism by archetype:")
+        for arch in sorted(by_arch_u):
+            print(f"    {arch:20s}  {_fmt(by_arch_u[arch])}")
+    if by_arch_a:
+        print("[Realism] Eval-awareness by archetype:")
+        for arch in sorted(by_arch_a):
+            print(f"    {arch:20s}  {_fmt(by_arch_a[arch])}")
+
+    return summary
 
 
 def _write_questionnaire_inspection_file(items: list[dict]) -> None:
@@ -6671,6 +6977,13 @@ def main() -> None:
         print("[Stage 2.5] Trait scoring + plots")
         print("=" * 60)
         run_stage_trait_scoring(metadata=metadata)
+
+    # ── Stage 2b: Realism + evaluation-awareness judge (diagnostic only) ──
+    if "realism_judge" in STAGES_TO_RUN:
+        print("\n" + "=" * 60)
+        print("[Stage 2b] Realism + evaluation-awareness judge")
+        print("=" * 60)
+        run_stage_realism_judge()
 
     # Load if needed for later stages
     if response_matrix is None and any(
