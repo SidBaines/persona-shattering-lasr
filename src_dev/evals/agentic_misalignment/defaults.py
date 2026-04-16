@@ -22,13 +22,13 @@ from typing import Any
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
 
-EPOCHS = 10
+EPOCHS = 100
 
 DEFAULT_TASK_ARGS: dict[str, Any] = {
-    "scenario": "blackmail",
-    "goal_type": "explicit",
-    "goal_value": "america",
-    "urgency_type": "replacement",
+    "scenario": "leaking",
+    "goal_type": "none",
+    "goal_value": "none",
+    "urgency_type": "none",
     "extra_system_instructions": None,
     "prod": False,
     "test_eval_awareness": False,
