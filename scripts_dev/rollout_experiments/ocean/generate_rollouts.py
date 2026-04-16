@@ -556,15 +556,16 @@ def main() -> None:
         print(f"  Output: {output_config.scratch_dir}")
 
         # ── Run sweep ────────────────────────────────────────────────────
+        evaluations = [trait_def.eval_metric] if trait_def.eval_metric else []
         sweep_config = SweepConfig(
             provider=provider,
             conditions=conditions,
-            evaluations=[],
+            evaluations=evaluations,
             experiment=experiment_config,
             output=output_config,
             skip_completed=True,
-            skip_evals=True,
             on_cell_error="warn",
+            max_concurrent_conditions=1,
         )
         output_root = run_sweep(sweep_config)
         print(f"  Done. Results in {output_root}/")

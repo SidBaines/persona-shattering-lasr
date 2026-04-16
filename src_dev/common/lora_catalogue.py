@@ -40,6 +40,8 @@ class OceanTraitDef:
     """Path under the monorepo dataset repo (no ``repo::`` prefix)."""
     axis_slug: str | None = None
     """Activation capping axis slug. None if no axis available."""
+    eval_metric: str | None = None
+    """Registered persona metric name for rollout evaluation, e.g. ``"agreeableness_v2"``."""
 
     @property
     def adapter_ref(self) -> str:
@@ -82,60 +84,70 @@ OCEAN_REGISTRY: dict[str, OceanTraitDef] = {
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/amplifier/vanton4_paired_dpo/lora/agreeableness_amplifying_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="agreeableness_v2",
     ),
     "a_minus": OceanTraitDef(
         slug="a_minus", trait_name="agreeableness", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/suppressor/vanton4_paired_dpo/lora/agreeableness_suppressing_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="agreeableness_v2",
     ),
     "c_plus": OceanTraitDef(
         slug="c_plus", trait_name="conscientiousness", direction="amplifier",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/amplifier/vanton4_paired_dpo/lora/conscientiousness_amplifying_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="conscientiousness_v2",
     ),
     "c_minus": OceanTraitDef(
         slug="c_minus", trait_name="conscientiousness", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/suppressor/vanton4_paired_dpo/lora/conscientiousness_suppressing_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="conscientiousness_v2",
     ),
     "e_plus": OceanTraitDef(
         slug="e_plus", trait_name="extraversion", direction="amplifier",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton4_paired_dpo/lora/extraversion_amplifying_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="extraversion_v2",
     ),
     "e_minus": OceanTraitDef(
         slug="e_minus", trait_name="extraversion", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/suppressor/vanton4_paired_dpo/lora/extraversion_suppressing_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="extraversion_v2",
     ),
     "n_plus": OceanTraitDef(
         slug="n_plus", trait_name="neuroticism", direction="amplifier",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/amplifier/vanton4_paired_dpo/lora/neuroticism_amplifying_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="neuroticism_v2",
     ),
     "n_minus": OceanTraitDef(
         slug="n_minus", trait_name="neuroticism", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/suppressor/vanton4_paired_dpo/lora/neuroticism_suppressing_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="neuroticism_v2",
     ),
     "o_plus": OceanTraitDef(
         slug="o_plus", trait_name="openness", direction="amplifier",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/openness/amplifier/vanton4_paired_dpo/lora/openness_amplifying_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="openness_v2",
     ),
     "o_minus": OceanTraitDef(
         slug="o_minus", trait_name="openness", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/openness/suppressor/vanton4_paired_dpo/lora/openness_suppressing_full_vanton4-persona",
         axis_slug=None,
+        eval_metric="openness_v2",
     ),
 }
 
