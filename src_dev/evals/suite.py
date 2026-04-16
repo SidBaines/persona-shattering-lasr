@@ -1380,7 +1380,8 @@ def run_eval_suite(
     _print_timing_summary(eval_timings, suite_elapsed)
 
     if config.auto_analyze:
-        _run_auto_analyze(output_root, config.analyze_kwargs)
+        eval_names = [e.name for e in config.evals]
+        _run_auto_analyze(output_root, config.analyze_kwargs, eval_names=eval_names)
 
     if config.upload_repo_id and config.upload_path_in_repo:
         if "{eval_name}" in config.upload_path_in_repo:
@@ -1418,7 +1419,11 @@ def _upload_run_per_eval(
             _upload_run(eval_subdir, repo_id, f"{resolved_path}/{model_dir.name}")
 
 
-def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
+def _run_auto_analyze(
+    output_root: Path,
+    analyze_kwargs: dict,
+    eval_names: list[str] | None = None,
+) -> Path | None:
     """Run generate_plots() on output_root and return the figures directory."""
     try:
         from src_dev.evals.personality.analyze_results import (
@@ -1428,6 +1433,8 @@ def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
 
         print("\n  Auto-analyzing sweep results ...", flush=True)
         data = load_sweep_data(output_root)
+        if eval_names is not None:
+            data.evals = {k: v for k, v in data.evals.items() if k in eval_names}
         figures_dir = output_root / "figures"
         saved = generate_plots(data, figures_dir, **analyze_kwargs)
         if saved:
