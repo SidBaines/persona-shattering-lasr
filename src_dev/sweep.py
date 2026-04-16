@@ -1356,6 +1356,13 @@ def _setup_file_logging(
     sys.stderr = _TeeStream(sys.__stderr__, log_file)
 
     # Also capture Python logging (used by rollout_generation, gpu_executor, etc.)
+    # Call setup_logging() first so it installs the StreamHandler to stderr
+    # (now tee'd). The file handler is added on top so logs go to both terminal
+    # and sweep.log. Without this, setup_logging()'s "if not logger.handlers:"
+    # guard fires too late and the StreamHandler is never added.
+    from src_dev.utils import setup_logging as _setup_logging
+    _setup_logging()
+
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
