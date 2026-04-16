@@ -3,7 +3,7 @@
 Usage::
 
     uv run python -m scripts_dev.evals.llm_judge_sweep.runner \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.extraversion_suppressor_vanton1
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton1.ext_sup1
 """
 
 from __future__ import annotations
