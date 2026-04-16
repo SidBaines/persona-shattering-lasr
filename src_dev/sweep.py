@@ -58,6 +58,7 @@ from src_dev.persona_metrics.conversation_eval import (
     ConversationMetricsResult,
     MessageSelector,
     run_conversation_metrics,
+    run_conversation_metrics_async,
 )
 from src_dev.rollout_generation.config import (
     FailurePolicyConfig,
@@ -611,7 +612,7 @@ async def run_phased_rollout_async(
 # ── Evaluation ────────────────────────────────────────────────────────────────
 
 
-def evaluate_messages(
+async def evaluate_messages(
     run_dir: Path,
     evaluations: list[str | PersonaMetricSpec],
     *,
@@ -628,7 +629,7 @@ def evaluate_messages(
         message_selector=message_selector,
         output_path=run_dir / "per_message_metrics.jsonl",
     )
-    result = run_conversation_metrics(eval_config)
+    result = await run_conversation_metrics_async(eval_config)
 
     print(
         f"  -> Evaluated {result.num_messages_evaluated} messages "
@@ -1058,7 +1059,7 @@ def run_experiment(
 
     message_selector = MessageSelector(exclude_seed=True, roles=eval_roles)
     eval_t0 = time.perf_counter()
-    result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
+    result = asyncio.run(evaluate_messages(run_dir, evaluations, message_selector=message_selector))
     export_evaluated_rollouts(run_dir, result)
     _write_eval_info(run_dir, evaluations, time.perf_counter() - eval_t0)
 
@@ -1114,7 +1115,7 @@ async def _run_experiment_async(
 
     message_selector = MessageSelector(exclude_seed=True, roles=eval_roles)
     eval_t0 = time.perf_counter()
-    result = evaluate_messages(run_dir, evaluations, message_selector=message_selector)
+    result = await evaluate_messages(run_dir, evaluations, message_selector=message_selector)
     export_evaluated_rollouts(run_dir, result)
     _write_eval_info(run_dir, evaluations, time.perf_counter() - eval_t0)
 
