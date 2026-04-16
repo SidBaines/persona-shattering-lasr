@@ -1,7 +1,8 @@
-"""Single OCEAN spider plot overlaying baseline + 5 adapters at +1.0×.
+"""Single OCEAN spider plot overlaying baseline + 5 *amplifiers* at +1.0×.
 
-Uses LLM-judge cell-sweep data on the HF monorepo, fingerprint ``8c7a3f01d3``.
-One polygon per adapter (plus one baseline polygon from the empty cell).
+Same structure as ``ocean_spider_plot_judge_combined.py`` but with only
+amplifier LoRAs (one per OCEAN trait). Uses LLM-judge cell-sweep data on
+the HF monorepo, fingerprint ``8c7a3f01d3``.
 """
 
 from __future__ import annotations
@@ -40,11 +41,8 @@ JUDGE_METRIC_PER_TRAIT: dict[str, str] = {
     "Neuroticism": "neuroticism_v2",
 }
 
-# Scale applied to every adapter polygon (baseline is the empty cell).
 ADAPTER_SCALE = 1.0
 
-# Each adapter gets a synthetic float key for plot_ocean_spider overlay.
-# Comment an entry to toggle it off.
 ADAPTERS: list[dict] = [
     {
         "key": 0.0,
@@ -66,13 +64,13 @@ ADAPTERS: list[dict] = [
     },
     {
         "key": 2.0,
-        "name": "con_sup_v2",
+        "name": "con_amp_v1_souped",
         "adapter_ref": (
-            f"{REPO_ID}::fine_tuning/{BASE_MODEL}/ocean/conscientiousness/suppressor/v2"
-            "/lora/conscientiousness_low_v2-persona"
+            f"{REPO_ID}::fine_tuning/{BASE_MODEL}/ocean/conscientiousness/amplifier/v1"
+            "/lora/souped"
         ),
         "color": BIG_FIVE_COLORS["Conscientiousness"],
-        "label": "Conscientiousness -1×",
+        "label": "Conscientiousness +1×",
     },
     {
         "key": 3.0,
@@ -86,13 +84,13 @@ ADAPTERS: list[dict] = [
     },
     {
         "key": 4.0,
-        "name": "agr_sup_v2",
+        "name": "agr_amp_vanton2",
         "adapter_ref": (
-            f"{REPO_ID}::fine_tuning/{BASE_MODEL}/ocean/agreeableness/suppressor/v2"
-            "/lora/agreeableness_low-persona"
+            f"{REPO_ID}::fine_tuning/{BASE_MODEL}/ocean/agreeableness/amplifier/vanton2"
+            "/lora/agreeableness_amplifying_full_vanton2-persona"
         ),
         "color": BIG_FIVE_COLORS["Agreeableness"],
-        "label": "Agreeableness -1×",
+        "label": "Agreeableness +1×",
     },
     {
         "key": 5.0,
@@ -106,14 +104,10 @@ ADAPTERS: list[dict] = [
     },
 ]
 
-# "raw": plot mean judge score on the -3..+3 Likert.
-# "headroom": plot (adapter - base) as a signed fraction of the remaining
-#             headroom to the scale bound in the direction moved. Result in
-#             [-1, +1]; baseline collapses to 0 on every axis.
+# "raw" or "headroom" (see ocean_spider_plot_judge_combined.py for docs).
 PLOT_MODE = "headroom"
 
-# ocean_v2 judge scores are integer Likert in [-4, +4]. Also used as bounds
-# when computing headroom.
+# ocean_v2 judge scores are integer Likert in [-4, +4].
 JUDGE_SCALE_MIN = -4.0
 JUDGE_SCALE_MAX = 4.0
 
@@ -121,15 +115,15 @@ if PLOT_MODE == "raw":
     Y_LIM = (JUDGE_SCALE_MIN, JUDGE_SCALE_MAX)
     Y_TICKS = [-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0]
 elif PLOT_MODE == "headroom":
-    Y_LIM = (-1.0, 1.0)
-    Y_TICKS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Y_LIM = (-0.5, 0.5)
+    Y_TICKS = [-0.5, -0.25, 0.0, 0.25, 0.5]
 else:
     raise ValueError(f"unknown PLOT_MODE={PLOT_MODE!r}")
 
 OUTPUT_DIR = Path("scratch/ocean_spider")
 SCRATCH_ROOT = OUTPUT_DIR / "hf_cache_judge"
-OUT_PATH = OUTPUT_DIR / f"ocean_spider_judge_combined_5adapters_{PLOT_MODE}.png"
-PLOT_TITLE = f"OCEAN spider — baseline + 5 adapters @ +1× ({BASE_MODEL}, LLM judge, {PLOT_MODE})"
+OUT_PATH = OUTPUT_DIR / f"ocean_spider_judge_amplifiers_{PLOT_MODE}.png"
+PLOT_TITLE = f"OCEAN spider — baseline + 5 amplifiers @ +1× ({BASE_MODEL}, LLM judge, {PLOT_MODE})"
 
 SEED = 42
 
@@ -225,10 +219,7 @@ def _to_headroom(
     scale_min: float,
     scale_max: float,
 ) -> dict[float, dict[str, float]]:
-    """Signed fraction of headroom: (x-base)/(max-base) if x>=base else (x-base)/(base-min).
-
-    Baseline collapses to 0 on every axis.
-    """
+    """Signed fraction of headroom: (x-base)/(max-base) if x>=base else (x-base)/(base-min)."""
     base = raw[base_key]
     out: dict[float, dict[str, float]] = {}
     for key, trait_means in raw.items():
@@ -269,3 +260,24 @@ plot_ocean_spider(
     traits=OCEAN_TRAITS,
     fill_alpha=0.0,
 )
+
+# --- CSV export (raw + headroom for every adapter × trait) ------------
+import csv
+
+headroom_scores = _to_headroom(
+    raw_scores_by_key, baseline_key, JUDGE_SCALE_MIN, JUDGE_SCALE_MAX
+) if baseline_key is not None else {}
+
+CSV_PATH = OUTPUT_DIR / "ocean_spider_judge_amplifiers_values.csv"
+with CSV_PATH.open("w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["adapter_name", "label", "trait", "raw_mean", "headroom"])
+    for entry in ADAPTERS:
+        k = entry["key"]
+        if k not in raw_scores_by_key:
+            continue
+        for trait in OCEAN_TRAITS:
+            raw_v = raw_scores_by_key[k].get(trait, "")
+            hr_v = headroom_scores.get(k, {}).get(trait, "")
+            w.writerow([entry["name"], entry["label"], trait, raw_v, hr_v])
+print(f"✓ wrote {CSV_PATH}")

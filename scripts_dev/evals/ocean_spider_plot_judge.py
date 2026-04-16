@@ -53,9 +53,9 @@ STYLE: dict[float, dict] = {
     +1.0: {"label": "+1.0×", "color": "#d62728"},
 }
 
-# Judge scores are a -3..+3 Likert.
-Y_LIM = (-3.0, 3.0)
-Y_TICKS = [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]
+# ocean_v2 judge scores are integer Likert in [-4, +4].
+Y_LIM = (-4.0, 4.0)
+Y_TICKS = [-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0]
 
 # One plot per entry. Comment an entry to toggle off.
 JOBS: list[dict] = [
