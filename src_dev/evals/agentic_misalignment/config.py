@@ -72,13 +72,17 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="agentic_misalignment_default",
             benchmark="agentic_misalignment",
-            benchmark_args={**DEFAULT_TASK_ARGS, "epochs": EPOCHS},
+            benchmark_args={
+                **DEFAULT_TASK_ARGS,
+                "epochs": EPOCHS,
+                "grader_model": "openrouter/openai/gpt-5-nano",
+            },
         ),
     ],
     output_root=Path("scratch/evals/agentic_misalignment"),
-    run_name="ocean11_default",
+    run_name="ocean11_leaking_none",
     temperature=0.9,
-    batch_size=32,
+    batch_size=4,
     skip_completed=True,
     metadata={
         "eval": "agentic_misalignment",

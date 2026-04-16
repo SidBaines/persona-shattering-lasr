@@ -594,6 +594,11 @@ def _canonical_name(name: str) -> str:
         "mmlubasemodel": "mmlu_base_model",
         # Agentic misalignment
         "agenticmisalignment": "agentic_misalignment",
+        # Sycophancy
+        "sycophancy": "sycophancy",
+        "sycophancyeval": "sycophancy",
+        # CoCoNot
+        "coconot": "coconot",
     }
     return aliases.get(normalized, normalized)
 
@@ -637,6 +642,11 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         from inspect_evals.gsm8k import gsm8k
 
         return gsm8k(**kwargs)
+
+    if benchmark == "coconot":
+        from inspect_evals.coconot import coconot
+
+        return coconot(**kwargs)
 
     if benchmark == "popqa":
         limit = spec.limit if spec.limit is not None else kwargs.pop("limit", None)
@@ -730,6 +740,13 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             task.epochs = int(epochs)
         return task
 
+    if benchmark == "sycophancy":
+        from inspect_evals.sycophancy import sycophancy
+
+        shuffle = bool(kwargs.pop("shuffle", True))
+        scorer_model = kwargs.pop("scorer_model", None)
+        return sycophancy(shuffle=shuffle, scorer_model=scorer_model)
+
     if benchmark == "mmlu_base_model":
         max_samples = kwargs.pop("max_samples", None)
         self_talk = str(kwargs.pop("self_talk", ""))
@@ -750,5 +767,6 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         "Supported benchmarks: mmlu, mmlu_base_model, truthfulqa, gpqa, popqa, gsm8k, "
         "personality_bfi, personality_trait, personality_trait_sampled, "
         "personality_trait_logprobs, personality_trait_logprobs_base_model, "
-        "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs, agentic_misalignment"
+        "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs, agentic_misalignment, "
+        "sycophancy, coconot"
     )
