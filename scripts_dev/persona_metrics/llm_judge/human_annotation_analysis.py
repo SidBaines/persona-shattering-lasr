@@ -147,11 +147,12 @@ def discover_human_raters(trait: str) -> list[str]:
     return raters
 
 
-def load_human_scores(rater: str, trait: str) -> dict[str, int]:
-    """Load a human rater's scores as {item_id: score}."""
+def load_human_scores(rater: str, trait: str) -> tuple[dict[str, int], bool]:
+    """Load a human rater's scores as ({item_id: score}, is_dummy)."""
     path = ANNOTATION_DIR / rater / f"{trait}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    return {item["id"]: item["score"] for item in data["scores"]}
+    is_dummy = data.get("dummy", False)
+    return {item["id"]: item["score"] for item in data["scores"]}, is_dummy
 
 
 def load_llm_judge_scores(
@@ -475,9 +476,12 @@ def print_analysis(analysis: dict) -> None:
     humans = analysis["human_raters"]
     llms = analysis["llm_judges"]
 
+    dummy = analysis.get("dummy_raters", [])
     print(f"\n{'=' * 70}")
     print(f"  {trait.upper()}  —  {analysis['n_items']} items")
     print(f"  Humans: {', '.join(humans)}  |  LLM judges: {', '.join(llms)}")
+    if dummy:
+        print(f"  *** DUMMY DATA: {', '.join(dummy)} ***")
     print(f"{'=' * 70}")
 
     # Rater vs gold table
@@ -558,6 +562,12 @@ def print_analysis(analysis: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _dummy_suffix(analysis: dict) -> str:
+    """Return a warning suffix for plot titles if dummy data is present."""
+    dummy = analysis.get("dummy_raters", [])
+    return f"\n[DUMMY: {', '.join(dummy)}]" if dummy else ""
+
+
 def _get_colour(name: str) -> str:
     return RATER_COLOURS.get(name, "#888888")
 
@@ -631,7 +641,7 @@ def plot_rater_vs_gold_scatter(analysis: dict, output_dir: Path) -> None:
         axes[idx // ncols][idx % ncols].set_visible(False)
 
     fig.suptitle(
-        f"{trait.title()} — Each rater vs Gold scores",
+        f"{trait.title()} — Each rater vs Gold scores{_dummy_suffix(analysis)}",
         fontsize=14, fontweight="bold",
     )
     fig.tight_layout()
@@ -686,7 +696,7 @@ def plot_agreement_bars(analysis: dict, output_dir: Path) -> None:
         ax.spines[["top", "right"]].set_visible(False)
 
     fig.suptitle(
-        f"{trait.title()} — Rater agreement with Gold (H=Human, L=LLM)",
+        f"{trait.title()} — Rater agreement with Gold (H=Human, L=LLM){_dummy_suffix(analysis)}",
         fontsize=13, fontweight="bold",
     )
     fig.tight_layout()
@@ -813,7 +823,7 @@ def plot_confusion_heatmaps(analysis: dict, output_dir: Path) -> None:
         axes[ri // ncols][ri % ncols].set_visible(False)
 
     fig.suptitle(
-        f"{trait.title()} — Gold vs Rater confusion (rows=gold, cols=rater)",
+        f"{trait.title()} — Gold vs Rater confusion (rows=gold, cols=rater){_dummy_suffix(analysis)}",
         fontsize=13, fontweight="bold",
     )
     fig.tight_layout()
@@ -890,7 +900,7 @@ def plot_bland_altman(analysis: dict, output_dir: Path) -> None:
         axes[idx // ncols][idx % ncols].set_visible(False)
 
     fig.suptitle(
-        f"{trait.title()} — Bland-Altman plots (difference vs mean)",
+        f"{trait.title()} — Bland-Altman plots (difference vs mean){_dummy_suffix(analysis)}",
         fontsize=13, fontweight="bold",
     )
     fig.tight_layout()
@@ -937,7 +947,7 @@ def plot_pairwise_agreement_matrix(analysis: dict, output_dir: Path) -> None:
         ax.axvline(n_humans - 0.5, color="black", linewidth=1.5, alpha=0.5)
 
     ax.set_title(
-        f"{trait.title()} — Pairwise Spearman ρ (all raters + gold)",
+        f"{trait.title()} — Pairwise Spearman ρ (all raters + gold){_dummy_suffix(analysis)}",
         fontsize=13, fontweight="bold",
     )
     fig.tight_layout()
@@ -995,12 +1005,17 @@ def main() -> None:
 
         # Load all scores
         all_scores: dict[str, dict[str, float | int]] = {}
+        dummy_raters: list[str] = []
         for rater in human_raters:
-            all_scores[rater] = load_human_scores(rater, trait)
+            scores, is_dummy = load_human_scores(rater, trait)
+            all_scores[rater] = scores
+            if is_dummy:
+                dummy_raters.append(rater)
         for judge in llm_judges:
             all_scores[judge] = load_llm_judge_scores(judge, trait)
 
         analysis = analyze_all_raters(trait, golden, all_scores, human_raters, llm_judges)
+        analysis["dummy_raters"] = dummy_raters
         print_analysis(analysis)
         all_results[trait] = analysis
 
