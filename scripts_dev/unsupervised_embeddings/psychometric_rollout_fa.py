@@ -108,7 +108,7 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
 MAX_PROMPTS = 2500
 NUM_ROLLOUTS_PER_PROMPT = 1
-NUM_CONVERSATION_TURNS = 10
+NUM_CONVERSATION_TURNS = 15
 # For cross-model replication sweeps, pick one of the candidates below and
 # rerun the pipeline (a fresh _rollout_run_id() is derived automatically).
 # Candidates for the cross-model validation sweep (7-8B instruction-tuned):
@@ -193,7 +193,7 @@ QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 # text generation. The full P(letter) distribution is stored in
 # raw_responses.jsonl alongside the argmax choice, and TRAIT scoring uses the
 # continuous probability distribution. Requires QUESTIONNAIRE_PROVIDER="vllm".
-QUESTIONNAIRE_USE_LOGPROBS = True
+QUESTIONNAIRE_USE_LOGPROBS = False
 QUESTIONNAIRE_TOP_LOGPROBS = 20
 # Temperature for the logprob pass. 1.0 returns the raw model distribution
 # (canonical for TRAIT scoring).
@@ -367,12 +367,12 @@ K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 # per-persona TRAIT scores + plots).
 STAGES_TO_RUN = [
     "rollouts",
-    # "questionnaire",
-    # "trait_scoring",
+    "questionnaire",
+    "trait_scoring",
     "realism_judge",
-    # "factor_analysis",
+    "factor_analysis",
     # "labeling",
-    # "validation",
+    "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
