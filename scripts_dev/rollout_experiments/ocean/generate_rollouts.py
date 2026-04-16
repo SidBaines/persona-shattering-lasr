@@ -547,7 +547,7 @@ def main() -> None:
         output_config = OutputPathConfig(
             scratch_root=Path("scratch/monorepo"),
             hf_repo=HF_REPO,
-            base_model="llama-3.1-8B-Instruct",
+            base_model="llama-3.1-8b-it",
             category="ocean",
             trait=trait_def.output_trait_path,
             training_run=trait_def.version,
