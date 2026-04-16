@@ -82,6 +82,9 @@ def _resolve_hf_path(path: str) -> str:
         return path
     from huggingface_hub import hf_hub_download
 
+    from src_dev.utils.hf_hub import login_from_env
+    login_from_env()
+
     # hf://org/repo/path/to/file  →  repo_id="org/repo", filename="path/to/file"
     stripped = path[len("hf://") :]
     parts = stripped.split("/", 2)
@@ -89,7 +92,7 @@ def _resolve_hf_path(path: str) -> str:
         raise ValueError(f"hf:// path must be hf://org/repo/filename, got {path!r}")
     repo_id = f"{parts[0]}/{parts[1]}"
     filename = parts[2]
-    return hf_hub_download(repo_id=repo_id, filename=filename)
+    return hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
 
 
 def _parse_adapter_ref(adapter: str) -> tuple[str, str | None]:
