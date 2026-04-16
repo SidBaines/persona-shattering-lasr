@@ -10,6 +10,7 @@
 # vanton4_rank1 via scripts_dev/porting/port_vanton4_to_rank1.sh.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
 
 MODEL="llama-3.1-8b-it"
 TEACHER="z-ai/glm-4.5-air"
