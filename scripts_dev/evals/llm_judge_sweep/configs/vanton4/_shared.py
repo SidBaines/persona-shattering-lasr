@@ -1,41 +1,20 @@
-"""Config constants for the extraversion amplifier (vanton3) LoRA scale sweep.
+"""Shared constants for all vanton4 LLM judge scale sweep configs.
 
-Usage::
-
-    uv run python -m scripts_dev.evals.llm_judge_sweep.runner \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.extraversion_amplifier_vanton3
+Each per-direction module does ``from scripts_dev.evals.llm_judge_sweep.configs.vanton4._shared import *``
+and then overrides EVAL_NAME, TRAIT, ADAPTER, ADAPTERS, SCALES_PER_ADAPTER,
+JUDGE_METRIC_TRAITS, TRAIT_COLOR, and PLOT_TITLE.
 """
 
 from __future__ import annotations
 
-from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.llm_judge_agreement import JudgeRaterConfig
-from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 
 # ---------------------------------------------------------------------------
-# Identity
-# ---------------------------------------------------------------------------
-EVAL_NAME = "extraversion-amplifier-vanton3"
-
-# ---------------------------------------------------------------------------
-# Model & adapter
+# Model
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 BASE_MODEL_SLUG = "llama-3.1-8b-it"
-ADAPTER_REF = (
-    "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton3"
-    "/lora/extraversion_amplifying_full_vanton3-persona"
-)
-BAKED_ADAPTERS_SUBDIR = "extraversion_amplifier_vanton3"
-
-# ---------------------------------------------------------------------------
-# Trait / OCT path slots
-# ---------------------------------------------------------------------------
-TRAIT = OceanTrait.extraversion
-DIRECTION = "amplifier"
-VERSION = "vanton3"
 
 # ---------------------------------------------------------------------------
 # Sweep
@@ -64,6 +43,7 @@ JUDGE_REPEATS = 2
 CI_CONFIDENCE = 95.0
 CI_BOOTSTRAP_RESAMPLES = 1000
 COHERENCE_METRIC = "better_coherence_judge"
+COHERENCE_COLOR = "#757575"
 JUDGE_RATERS = [
     JudgeRaterConfig(
         rater_id="gemini_flash_20",
@@ -75,10 +55,3 @@ JUDGE_RATERS = [
         ),
     ),
 ]
-
-# ---------------------------------------------------------------------------
-# Plot colors
-# ---------------------------------------------------------------------------
-TRAIT_COLOR = BIG_FIVE_COLORS["Extraversion"]
-COHERENCE_COLOR = "#757575"
-PLOT_TITLE = "Extraversion amplifier (vanton3) LoRA scale sweep"

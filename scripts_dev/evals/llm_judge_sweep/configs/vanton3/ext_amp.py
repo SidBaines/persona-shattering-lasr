@@ -1,9 +1,9 @@
-"""Config constants for the extraversion suppressor (vanton3, DPO) LoRA scale sweep.
+"""Config constants for the extraversion amplifier (vanton3) LoRA scale sweep.
 
 Usage::
 
     uv run python -m scripts_dev.evals.llm_judge_sweep.runner \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.extraversion_suppressor_vanton3_dpo
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton3.ext_amp3
 """
 
 from __future__ import annotations
@@ -16,8 +16,7 @@ from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
-EVAL_NAME = "extraversion-suppressor-vanton3-dpo"
-EVAL_VARIANT = "dpo"
+EVAL_NAME = "extraversion-amplifier-vanton3"
 
 # ---------------------------------------------------------------------------
 # Model & adapter
@@ -26,16 +25,16 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 BASE_MODEL_SLUG = "llama-3.1-8b-it"
 ADAPTER_REF = (
     "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/extraversion/suppressor/vanton3"
-    "/lora/extraversion_suppressing_full_vanton3-dpo"
+    "fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton3"
+    "/lora/extraversion_amplifying_full_vanton3-persona"
 )
-BAKED_ADAPTERS_SUBDIR = "extraversion_suppressor_vanton3_dpo"
+BAKED_ADAPTERS_SUBDIR = "extraversion_amplifier_vanton3"
 
 # ---------------------------------------------------------------------------
 # Trait / OCT path slots
 # ---------------------------------------------------------------------------
 TRAIT = OceanTrait.extraversion
-DIRECTION = "suppressor"
+DIRECTION = "amplifier"
 VERSION = "vanton3"
 
 # ---------------------------------------------------------------------------
@@ -82,4 +81,4 @@ JUDGE_RATERS = [
 # ---------------------------------------------------------------------------
 TRAIT_COLOR = BIG_FIVE_COLORS["Extraversion"]
 COHERENCE_COLOR = "#757575"
-PLOT_TITLE = "Extraversion suppressor (vanton3, DPO) LoRA scale sweep"
+PLOT_TITLE = "Extraversion amplifier (vanton3) LoRA scale sweep"
