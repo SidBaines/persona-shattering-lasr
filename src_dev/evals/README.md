@@ -183,6 +183,26 @@ For model and adapter refs:
 - Unprefixed refs are auto-resolved
 - If both local + HF exist for an unprefixed ref, the run errors explicitly and asks you to disambiguate
 
+## Eval specs are disabled by default
+
+`InspectBenchmarkSpec` and `InspectCustomEvalSpec` both carry an
+`enabled: bool = False` field. `run_eval_suite` filters out any spec that
+is not explicitly `enabled=True` before loading any model, logs the skipped
+names, and returns an empty `SuiteResult` if nothing is enabled.
+
+This is a safety net against accidentally firing expensive judge-backed
+benchmarks (sycophancy, coconot, mask, agentic_misalignment) just by
+importing a config. To actually run an eval, opt in explicitly:
+
+```python
+InspectBenchmarkSpec(
+    name="mask",
+    benchmark="mask",
+    ...,
+    enabled=True,
+)
+```
+
 ## LoRA Scale Sweeps
 
 When `SuiteConfig.sweep` is set, the suite loads the base model + adapter **once** and

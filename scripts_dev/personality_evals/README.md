@@ -37,6 +37,29 @@ The suite runs complementary benchmarks across a grid of LoRA scaling factors
 | `bfi` | Big Five via BFI questionnaire (sanity-check, delta from baseline) |
 | `trait` | Big Five + Dark Triad via TRAIT benchmark (primary research plot) |
 | `mmlu` | MMLU accuracy (capability coherence check) |
+| `sycophancy` | Sycophancy under user pressure (inspect_evals) |
+| `coconot` | Contrastive compliance / refusal (inspect_evals) |
+| `mask` | Honesty vs. accuracy under pressure — see [`configs/ocean/mask/README.md`](configs/ocean/mask/README.md) |
+
+## Safety: eval specs are disabled by default
+
+Every `InspectBenchmarkSpec` / `InspectCustomEvalSpec` defaults to
+`enabled=False`. The suite runner filters out any spec that is not
+explicitly `enabled=True`, prints a warning line listing the skipped evals,
+and — if no spec is enabled — exits without loading the model.
+
+This guards against accidentally firing expensive judge-backed benchmarks
+(MASK, CoCoNot, sycophancy, agentic_misalignment) just by importing a
+config module. To run an eval, set `enabled=True` on the spec:
+
+```python
+InspectBenchmarkSpec(
+    name="mask",
+    benchmark="mask",
+    ...
+    enabled=True,   # explicitly opt in
+)
+```
 
 ## Quick Start — General Sweep
 

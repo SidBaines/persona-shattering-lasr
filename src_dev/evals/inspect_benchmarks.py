@@ -599,6 +599,9 @@ def _canonical_name(name: str) -> str:
         "sycophancyeval": "sycophancy",
         # CoCoNot
         "coconot": "coconot",
+        # MASK (honesty vs. accuracy)
+        "mask": "mask",
+        "maskbenchmark": "mask",
     }
     return aliases.get(normalized, normalized)
 
@@ -747,6 +750,16 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         scorer_model = kwargs.pop("scorer_model", None)
         return sycophancy(shuffle=shuffle, scorer_model=scorer_model)
 
+    if benchmark == "mask":
+        import os as _os
+
+        from inspect_evals.mask import mask
+
+        # MASK reads HUGGINGFACE_TOKEN; mirror HF_TOKEN so the gated dataset loads.
+        if not _os.environ.get("HUGGINGFACE_TOKEN") and _os.environ.get("HF_TOKEN"):
+            _os.environ["HUGGINGFACE_TOKEN"] = _os.environ["HF_TOKEN"]
+        return mask(**kwargs)
+
     if benchmark == "mmlu_base_model":
         max_samples = kwargs.pop("max_samples", None)
         self_talk = str(kwargs.pop("self_talk", ""))
@@ -768,5 +781,5 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         "personality_bfi, personality_trait, personality_trait_sampled, "
         "personality_trait_logprobs, personality_trait_logprobs_base_model, "
         "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs, agentic_misalignment, "
-        "sycophancy, coconot"
+        "sycophancy, coconot, mask"
     )
