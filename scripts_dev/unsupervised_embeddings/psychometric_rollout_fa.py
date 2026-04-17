@@ -104,64 +104,177 @@ logger = logging.getLogger(__name__)
 SCRATCH_ROOT = Path("scratch/psychometric_fa")
 HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 
+# ═════════════════════════════════════════════════════════════════════════════
+# PRESETS
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Rather than hand-editing a dozen scattered constants when switching between
+# cached rollout sets or questionnaires, we register each combination once as
+# a "preset" and switch via ROLLOUTS / QUESTIONNAIRES below. The selector
+# supports lists, so factor analysis can run on arbitrary combinations of
+# cached rollout sets × questionnaires (see combine step in main()).
+#
+# Presets are contracts about what has already been produced: Stage 1 and
+# Stage 2 artifacts are expected to exist (locally or on HF). Changing any
+# field of a preset means making a new preset, not editing in place.
+
+from dataclasses import dataclass, field
+from typing import Any  # used below + by rollout stage scenario seed builder
+
+
+@dataclass(frozen=True)
+class RolloutPreset:
+    """Fully identifies one cached rollout run (Stage 1).
+
+    The fields below feed _rollout_run_id(); two presets with identical fields
+    produce the same run_id and therefore share HF storage.
+    """
+    seed: int
+    max_prompts: int
+    num_rollouts_per_prompt: int
+    num_conversation_turns: int
+    assistant_model: str
+    assistant_provider: str
+    user_model: str
+    user_provider: str
+    temperature: float
+    user_simulator_mode: str  # "scenarios" | "archetypes" | "legacy"
+    scenario_file: str | None = None
+    scenario_set_version: str | None = None
+    # None → no "uprompt_*" suffix is emitted in the run_id (matches older
+    # rollout sets produced before USER_SIM_PROMPT_VERSION was added).
+    user_sim_prompt_version: str | None = None
+    archetype_set_version: str | None = None
+    legacy_user_prompt_version: str | None = None
+
+
+@dataclass(frozen=True)
+class QuestionnairePreset:
+    """Identifies one questionnaire administration configuration (Stage 2)."""
+    path: str
+    version: str
+    fa_blocks: tuple[str, ...]
+    use_logprobs: bool
+
+
+# ── Rollout presets ─────────────────────────────────────────────────────────
+ROLLOUT_PRESETS: dict[str, RolloutPreset] = {
+    # Original rollout run: scenarios v1, glm-4.7-flash user sim, 10 turns,
+    # 1000 prompts × 2 rollouts each. Note: user_sim_prompt_version=None so
+    # the run_id matches the pre-v6 format (no uprompt_* suffix).
+    "A": RolloutPreset(
+        seed=432,
+        max_prompts=1000,
+        num_rollouts_per_prompt=2,
+        num_conversation_turns=10,
+        assistant_model="meta-llama/llama-3.1-8b-instruct",
+        assistant_provider="openrouter",
+        user_model="z-ai/glm-4.7-flash",
+        user_provider="openrouter",
+        temperature=1.0,
+        user_simulator_mode="scenarios",
+        scenario_file="datasets/scenarios/v1.json",
+        scenario_set_version="v1",
+        user_sim_prompt_version=None,
+    ),
+    # Current production run: scenarios v2, gpt-5.4-nano user sim, 15 turns,
+    # 2500 prompts × 1 rollout each, user-simulator prompt v6.
+    "B": RolloutPreset(
+        seed=436,
+        max_prompts=2500,
+        num_rollouts_per_prompt=1,
+        num_conversation_turns=15,
+        assistant_model="meta-llama/llama-3.1-8b-instruct",
+        assistant_provider="openrouter",
+        user_model="openai/gpt-5.4-nano",
+        user_provider="openrouter",
+        temperature=1.0,
+        user_simulator_mode="scenarios",
+        scenario_file="datasets/scenarios/v2.json",
+        scenario_set_version="v2",
+        user_sim_prompt_version="v6",
+    ),
+}
+
+# ── Questionnaire presets ───────────────────────────────────────────────────
+QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
+    # v5 Likert: 5-point agreement items; scored by rank integer coding.
+    "v5": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json",
+        version="v5",
+        fa_blocks=("likert",),
+        use_logprobs=False,
+    ),
+    # v6 forced-choice pairs: 78 items × 13 axes; logprob P(A)/P(B) scoring.
+    "v6_fc_draft": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/psychometric_questionnaire_v6_fc_draft.json",
+        version="v6_fc_draft",
+        fa_blocks=("fc_pair",),
+        use_logprobs=True,
+    ),
+    # TRAIT benchmark: 20 items × 5 OCEAN traits (100 total), ABCD options.
+    "trait_ocean_v1": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/trait_ocean_v1.json",
+        version="trait_ocean_v1",
+        fa_blocks=("trait_mcq",),
+        use_logprobs=True,
+    ),
+}
+
+# ── Selectors ───────────────────────────────────────────────────────────────
+# One or more rollout preset keys and questionnaire preset keys. When either
+# list has length > 1, Stage 3+ runs on a combined response matrix built by
+# concatenating rows across rollout presets and unioning columns across
+# questionnaire presets. Single-element lists behave byte-identically to the
+# pre-preset script (same run_ids, same HF cache paths).
+ROLLOUTS: list[str] = ["B"]
+QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft"]
+
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
-MAX_PROMPTS = 2500
-NUM_ROLLOUTS_PER_PROMPT = 1
-NUM_CONVERSATION_TURNS = 15
-# For cross-model replication sweeps, pick one of the candidates below and
-# rerun the pipeline (a fresh _rollout_run_id() is derived automatically).
-# Candidates for the cross-model validation sweep (7-8B instruction-tuned):
-#   "meta-llama/llama-3.1-8b-instruct"
-#   "qwen/qwen2.5-7b-instruct"
-#   "mistralai/mistral-7b-instruct-v0.3"
-#   "meta-llama/llama-3.1-70b-instruct"   # larger; cost gate
-ASSISTANT_MODEL = "meta-llama/llama-3.1-8b-instruct"
-ASSISTANT_PROVIDER = "openrouter"
-# ASSISTANT_PROVIDER = "vllm"
+# Per-preset rollout config (SEED, MAX_PROMPTS, etc.) is rebound from the
+# currently active ROLLOUT_PRESETS entry by _activate_rollout() below. The
+# assistant-provider routing and rollout-generation batching knobs are
+# orthogonal to the preset and stay at module scope.
 ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {
     # "only": ["deepinfra"],
     "quantizations": ["bf16"],
     # "allow_fallbacks": False,
 }
-USER_MODEL = "openai/gpt-5.4-nano"
-USER_PROVIDER = "openrouter"
-TEMPERATURE = 1.0
 ASSISTANT_MAX_NEW_TOKENS = 4096
 USER_MAX_NEW_TOKENS = 4096
 DEFAULT_USER_SIMULATOR_MODE = "scenarios"
 ACTIVE_USER_SIMULATOR_MODE = DEFAULT_USER_SIMULATOR_MODE
-LEGACY_USER_PROMPT_VERSION = "v3"
-# Bump when changing archetype prompts or assignment strategy (invalidates HF cache).
-ARCHETYPE_SET_VERSION = "v9"  # Bumped for exhaustive scenario×archetype combos
-# ── Scenario mode config ────────────────────────────────────────────────────
-# Path to a scenario JSON file (see conversation_scenarios.py for the spec).
-# Set to None to fall back to seed prompts (archetypes or legacy mode).
-SCENARIO_FILE: str | None = "datasets/scenarios/v2.json"
-# Bump when changing the scenario file or archetype set for scenario mode.
-SCENARIO_SET_VERSION = "v2"
-# Bump when the user-simulator prompt content changes (anti-LLM-tic rules,
-# deployment-role rendering, etc.). Invalidates scenarios-mode cache keys.
-USER_SIM_PROMPT_VERSION = "v6"
 # Local/vLLM-only assistant batch size. Remote assistant providers use
 # `ROLLOUT_MAX_CONCURRENT` via the rollout scheduler's shared async limiter.
 ROLLOUT_ASSISTANT_BATCH_SIZE = 32
 ROLLOUT_MAX_CONCURRENT = 64
 USER_SIM_MAX_CONCURRENT = 64
 
+# Placeholders rebound by _activate_rollout() at module load. Declared here so
+# the rest of the script keeps referring to familiar names.
+SEED: int = 0
+MAX_PROMPTS: int = 0
+NUM_ROLLOUTS_PER_PROMPT: int = 0
+NUM_CONVERSATION_TURNS: int = 0
+ASSISTANT_MODEL: str = ""
+ASSISTANT_PROVIDER: str = ""
+USER_MODEL: str = ""
+USER_PROVIDER: str = ""
+TEMPERATURE: float = 0.0
+SCENARIO_FILE: str | None = None
+SCENARIO_SET_VERSION: str | None = None
+USER_SIM_PROMPT_VERSION: str | None = None
+ARCHETYPE_SET_VERSION: str | None = None
+LEGACY_USER_PROMPT_VERSION: str | None = None
+
 # ── Stage 2: Questionnaire ──────────────────────────────────────────────────
-# QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"
-# QUESTIONNAIRE_VERSION = "v5"  # bump when changing items
-# TRAIT-benchmark questionnaire: 20 items per OCEAN trait (100 total),
-# A/B/C/D options shuffled per item. Scored both via unsupervised FA (integer
-# 1..4 encoding) and via TRAIT's canonical answer_mapping (see
-# src_dev.factor_analysis.trait_scoring).
-# QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/trait_ocean_v1.json"
-# QUESTIONNAIRE_VERSION = "trait_ocean_v1"  # bump when changing items
-# v6 paired-response FC: 78 items across 13 axes, scored via logprob P(A)/P(B)
-# with a per-block prefill ("I'd go with "). Requires FA_BLOCKS = ["fc_pair"].
-QUESTIONNAIRE_PATH = "datasets/psychometric_questionnaires/psychometric_questionnaire_v6_fc_draft.json"
-QUESTIONNAIRE_VERSION = "v6_fc_draft"
+# Per-preset questionnaire config (QUESTIONNAIRE_PATH, etc.) is rebound from
+# the active QUESTIONNAIRE_PRESETS entry by _activate_questionnaire() below.
+QUESTIONNAIRE_PATH: str = ""
+QUESTIONNAIRE_VERSION: str = ""
+FA_BLOCKS: list[str] = []
+QUESTIONNAIRE_USE_LOGPROBS: bool = False
 QUESTIONNAIRE_PHRASING = "direct"  # "natural", "direct", "contextual" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
@@ -188,12 +301,10 @@ QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 
 # ── trait_mcq logprob mode ─────────────────────────────────────────────────
-# When True, trait_mcq items are answered via a single-token logprob pass
-# (max_tokens=1, top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS) instead of greedy
-# text generation. The full P(letter) distribution is stored in
-# raw_responses.jsonl alongside the argmax choice, and TRAIT scoring uses the
-# continuous probability distribution. Requires QUESTIONNAIRE_PROVIDER="vllm".
-QUESTIONNAIRE_USE_LOGPROBS = False
+# QUESTIONNAIRE_USE_LOGPROBS is set by the active questionnaire preset. When
+# True, trait_mcq / fc_pair items are answered via a single-token logprob
+# pass (max_tokens=1, top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS) instead of
+# greedy text generation. Requires QUESTIONNAIRE_PROVIDER="vllm".
 QUESTIONNAIRE_TOP_LOGPROBS = 20
 # Temperature for the logprob pass. 1.0 returns the raw model distribution
 # (canonical for TRAIT scoring).
@@ -268,13 +379,10 @@ MIN_ITEM_VARIANCE = 0.1  # drop items with variance below this
 # These may be incoherent rollouts that respond near-randomly. Set to 0 to
 # disable (keep all personas). E.g. 5 means drop the top 5% by variance.
 HIGH_VARIANCE_PERSONA_DROP_PCT = 0
-# Which blocks to include in the FA response matrix.  Vignettes are excluded
-# by default: their per-dimension scoring expansion injects the designer's
-# theoretical structure into the correlation matrix (see design notes).
-# Vignettes are still administered and logged for validation use.
-# For TRAIT-benchmark questionnaires (block_4_trait_mcq), use ["trait_mcq"].
-# For v6 paired-response forced-choice (block_fc_pairs), use ["fc_pair"].
-FA_BLOCKS = ["fc_pair"]
+# FA_BLOCKS is set by the active questionnaire preset (e.g. ["likert"] for
+# v5, ["fc_pair"] for v6_fc_draft, ["trait_mcq"] for trait_ocean_v1).
+# Vignettes are deliberately excluded: their per-dimension scoring expansion
+# injects the designer's theoretical structure into the correlation matrix.
 
 # fc_pair sign convention for the response matrix.
 #   True  — per-item +1=high_pole / -1=low_pole (axis-aligned).
@@ -369,7 +477,7 @@ STAGES_TO_RUN = [
     "rollouts",
     "questionnaire",
     "trait_scoring",
-    "realism_judge",
+    # "realism_judge",
     "factor_analysis",
     # "labeling",
     "validation",
@@ -498,43 +606,192 @@ def _current_user_simulator_mode() -> str:
     return ACTIVE_USER_SIMULATOR_MODE
 
 
-def _rollout_run_id() -> str:
-    assistant_slug = _model_slug(ASSISTANT_MODEL)
-    mode = _current_user_simulator_mode()
+# ── Active preset keys (mutated by _activate_*) ──────────────────────────────
+ACTIVE_ROLLOUT_KEY: str = ""
+ACTIVE_QUESTIONNAIRE_KEY: str = ""
+
+
+def _rollout_preset(key: str | None = None) -> RolloutPreset:
+    return ROLLOUT_PRESETS[key or ACTIVE_ROLLOUT_KEY]
+
+
+def _questionnaire_preset(key: str | None = None) -> QuestionnairePreset:
+    return QUESTIONNAIRE_PRESETS[key or ACTIVE_QUESTIONNAIRE_KEY]
+
+
+def _activate_rollout(key: str) -> None:
+    """Rebind rollout-related module globals from the named preset.
+
+    Leaves the rest of the script free to go on referring to SEED, ASSISTANT_MODEL
+    etc. as if they were plain top-of-file constants — but now the "current"
+    preset can be swapped between Cartesian-product iterations in main().
+    """
+    global ACTIVE_ROLLOUT_KEY
+    global SEED, MAX_PROMPTS, NUM_ROLLOUTS_PER_PROMPT, NUM_CONVERSATION_TURNS
+    global ASSISTANT_MODEL, ASSISTANT_PROVIDER, USER_MODEL, USER_PROVIDER, TEMPERATURE
+    global SCENARIO_FILE, SCENARIO_SET_VERSION, USER_SIM_PROMPT_VERSION
+    global ARCHETYPE_SET_VERSION, LEGACY_USER_PROMPT_VERSION
+    global ACTIVE_USER_SIMULATOR_MODE
+
+    p = ROLLOUT_PRESETS[key]
+    ACTIVE_ROLLOUT_KEY = key
+    SEED = p.seed
+    MAX_PROMPTS = p.max_prompts
+    NUM_ROLLOUTS_PER_PROMPT = p.num_rollouts_per_prompt
+    NUM_CONVERSATION_TURNS = p.num_conversation_turns
+    ASSISTANT_MODEL = p.assistant_model
+    ASSISTANT_PROVIDER = p.assistant_provider
+    USER_MODEL = p.user_model
+    USER_PROVIDER = p.user_provider
+    TEMPERATURE = p.temperature
+    SCENARIO_FILE = p.scenario_file
+    SCENARIO_SET_VERSION = p.scenario_set_version
+    USER_SIM_PROMPT_VERSION = p.user_sim_prompt_version
+    ARCHETYPE_SET_VERSION = p.archetype_set_version
+    LEGACY_USER_PROMPT_VERSION = p.legacy_user_prompt_version
+    ACTIVE_USER_SIMULATOR_MODE = p.user_simulator_mode
+
+    # Reseed RNGs so sub-stage stochastic ops inside this preset's run use
+    # the preset's seed, not the previous preset's.
+    random.seed(SEED)
+    np.random.seed(SEED)
+
+
+def _activate_questionnaire(key: str) -> None:
+    """Rebind questionnaire-related module globals from the named preset."""
+    global ACTIVE_QUESTIONNAIRE_KEY
+    global QUESTIONNAIRE_PATH, QUESTIONNAIRE_VERSION, FA_BLOCKS, QUESTIONNAIRE_USE_LOGPROBS
+
+    q = QUESTIONNAIRE_PRESETS[key]
+    ACTIVE_QUESTIONNAIRE_KEY = key
+    QUESTIONNAIRE_PATH = q.path
+    QUESTIONNAIRE_VERSION = q.version
+    FA_BLOCKS = list(q.fa_blocks)
+    QUESTIONNAIRE_USE_LOGPROBS = q.use_logprobs
+
+
+def _rollout_run_id(rollout_key: str | None = None) -> str:
+    p = _rollout_preset(rollout_key)
+    assistant_slug = _model_slug(p.assistant_model)
+    mode = p.user_simulator_mode
     if mode == "legacy":
-        mode_tag = f"uprompt_{LEGACY_USER_PROMPT_VERSION}"
+        mode_tag = f"uprompt_{p.legacy_user_prompt_version}"
     elif mode == "scenarios":
-        mode_tag = f"scenarios_{SCENARIO_SET_VERSION}-uprompt_{USER_SIM_PROMPT_VERSION}"
+        mode_tag = f"scenarios_{p.scenario_set_version}"
+        # Pre-v6 rollouts didn't carry a user_sim_prompt_version in the tag;
+        # preserving that omission keeps HF cache keys stable for preset "A".
+        if p.user_sim_prompt_version is not None:
+            mode_tag += f"-uprompt_{p.user_sim_prompt_version}"
     else:
-        mode_tag = f"archetypes_{ARCHETYPE_SET_VERSION}"
+        mode_tag = f"archetypes_{p.archetype_set_version}"
     return (
-        f"rollouts-{assistant_slug}-t{TEMPERATURE}-"
-        f"{NUM_CONVERSATION_TURNS}t-{MAX_PROMPTS}p-"
-        f"seed{SEED}-{mode_tag}"
+        f"rollouts-{assistant_slug}-t{p.temperature}-"
+        f"{p.num_conversation_turns}t-{p.max_prompts}p-"
+        f"seed{p.seed}-{mode_tag}"
     )
 
 
-def _questionnaire_run_id() -> str:
-    blocks_tag = "+".join(sorted(FA_BLOCKS))
-    lp_tag = f"-lp{QUESTIONNAIRE_TOP_LOGPROBS}" if QUESTIONNAIRE_USE_LOGPROBS else ""
+def _questionnaire_run_id(
+    rollout_key: str | None = None,
+    q_key: str | None = None,
+) -> str:
+    q = _questionnaire_preset(q_key)
+    blocks_tag = "+".join(sorted(q.fa_blocks))
+    lp_tag = f"-lp{QUESTIONNAIRE_TOP_LOGPROBS}" if q.use_logprobs else ""
     reset_tag = (
         f"-reset_{QUESTIONNAIRE_RESET_MODE}"
         if QUESTIONNAIRE_RESET_MODE != "none"
         else ""
     )
     return (
-        f"questionnaire-{_rollout_run_id()}-"
-        f"q_{QUESTIONNAIRE_VERSION}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
+        f"questionnaire-{_rollout_run_id(rollout_key)}-"
+        f"q_{q.version}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
         f"{lp_tag}{reset_tag}"
     )
 
 
-def _rollout_dir() -> Path:
-    return SCRATCH_ROOT / _rollout_run_id()
+def _rollout_dir(rollout_key: str | None = None) -> Path:
+    return SCRATCH_ROOT / _rollout_run_id(rollout_key)
 
 
-def _questionnaire_dir() -> Path:
-    return SCRATCH_ROOT / _questionnaire_run_id()
+# Override used by Stage 3+ to redirect _questionnaire_dir() (called with no
+# args by downstream helpers) to the combined dir when in multi-preset mode.
+_QUESTIONNAIRE_DIR_OVERRIDE: Path | None = None
+
+
+def _questionnaire_dir(
+    rollout_key: str | None = None,
+    q_key: str | None = None,
+) -> Path:
+    # Explicit args always win — used when building per-pair paths inside the
+    # Cartesian loop. Override only kicks in for no-arg lookups, which is
+    # where deep helpers ask for "the current run's dir".
+    if rollout_key is None and q_key is None and _QUESTIONNAIRE_DIR_OVERRIDE is not None:
+        return _QUESTIONNAIRE_DIR_OVERRIDE
+    return SCRATCH_ROOT / _questionnaire_run_id(rollout_key, q_key)
+
+
+class _override_questionnaire_dir:
+    """Context manager: redirect no-arg _questionnaire_dir() calls to `path`.
+
+    Stages 3/4/5 internally call _questionnaire_dir() with no args to
+    discover where to write outputs. In multi-preset mode we want those
+    writes to land under _combined_dir(); setting this override for the
+    duration of those stages does the redirection without threading an
+    output-dir argument through every helper.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._prev: Path | None = None
+
+    def __enter__(self):
+        global _QUESTIONNAIRE_DIR_OVERRIDE
+        self._prev = _QUESTIONNAIRE_DIR_OVERRIDE
+        _QUESTIONNAIRE_DIR_OVERRIDE = self.path
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        global _QUESTIONNAIRE_DIR_OVERRIDE
+        _QUESTIONNAIRE_DIR_OVERRIDE = self._prev
+        return False
+
+
+# ── Combined-run layout (multi-preset mode) ────────────────────────────────
+# When multiple rollout or questionnaire presets are selected, Stage 3+ reads
+# from a locally-materialised combined directory built by _combine_per_pair_outputs().
+# Kept local (no HF upload) since it's cheap to rebuild from per-pair artifacts.
+
+def _is_multi_preset() -> bool:
+    return len(ROLLOUTS) * len(QUESTIONNAIRES) > 1
+
+
+def _combined_run_id() -> str:
+    r_tag = "+".join(ROLLOUTS)
+    q_tag = "+".join(QUESTIONNAIRES)
+    return f"combined-R[{r_tag}]-Q[{q_tag}]"
+
+
+def _combined_dir() -> Path:
+    return SCRATCH_ROOT / _combined_run_id()
+
+
+def _effective_dir() -> Path:
+    """Directory Stage 3+ should read from.
+
+    Single-pair: the usual per-pair questionnaire dir (byte-identical layout).
+    Multi-pair:  the combined dir built by _combine_per_pair_outputs().
+    """
+    if _is_multi_preset():
+        return _combined_dir()
+    return _questionnaire_dir(ROLLOUTS[0], QUESTIONNAIRES[0])
+
+
+# Activate the first entries at module load so the rest of the module sees
+# populated constants (byte-identical to the pre-preset behaviour when both
+# selectors are length-1).
+_activate_rollout(ROLLOUTS[0])
+_activate_questionnaire(QUESTIONNAIRES[0])
 
 
 def _load_retry_terminal_sample_ids(path: Path) -> list[str]:
@@ -1228,16 +1485,29 @@ def run_stage_rollouts(
     retry_terminal_sample_ids = retry_terminal_sample_ids or []
     run_dir = _rollout_dir()
     run_id = _rollout_run_id()
+    _ensure_hf_auth()
+    hf_path = f"runs/{run_id}"
 
     # Check local cache
     rollout_export = run_dir / "exports" / "conversation_training.jsonl"
     if rollout_export.exists() and not retry_terminal_sample_ids:
+        # Backfill to HF if a previous upload was skipped or failed.
+        if not _hf_path_exists(hf_path + "/exports/conversation_training.jsonl"):
+            print(f"[Stage 1] Local rollouts found but not on HF — uploading now")
+            try:
+                upload_folder_to_dataset_repo(
+                    local_dir=run_dir,
+                    repo_id=HF_REPO_ID,
+                    path_in_repo=hf_path,
+                    commit_message=f"Rollouts: {run_id}",
+                )
+                print(f"[Stage 1] Uploaded to HF: {hf_path}")
+            except Exception as e:
+                logger.warning("Failed to upload rollouts to HF: %s", e)
         print(f"[Stage 1] Rollouts already exist locally: {run_dir}")
         return run_dir
 
     # Check HF cache
-    _ensure_hf_auth()
-    hf_path = f"runs/{run_id}"
     if _hf_path_exists(hf_path) and not retry_terminal_sample_ids:
         print(f"[Stage 1] Hydrating rollouts from HF: {run_id}")
         hydrate_dataset_subtree(
@@ -2435,15 +2705,30 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
             return response_matrix, metadata, saved_cols
         return response_matrix, metadata, column_defs
 
+    _ensure_hf_auth()
+    hf_path = f"runs/{run_id}/questionnaire"
+
     # Check local cache
     cached = _load_from_dir()
     if cached is not None:
+        # Backfill to HF if a previous upload was skipped or failed.
+        if not _hf_path_exists(hf_path + "/response_matrix.npy"):
+            print(f"[Stage 2] Local questionnaire found but not on HF — uploading now")
+            try:
+                upload_folder_to_dataset_repo(
+                    local_dir=output_dir,
+                    repo_id=HF_REPO_ID,
+                    path_in_repo=hf_path,
+                    commit_message=f"Questionnaire: {run_id}",
+                    ignore_patterns=[],
+                )
+                print(f"[Stage 2] Uploaded to HF: {hf_path}")
+            except Exception as e:
+                logger.warning("Failed to upload questionnaire to HF: %s", e)
         print(f"[Stage 2] Questionnaire results already exist locally: {output_dir}")
         return cached
 
     # Check HF cache
-    _ensure_hf_auth()
-    hf_path = f"runs/{run_id}/questionnaire"
     if _hf_path_exists(hf_path):
         print(f"[Stage 2] Hydrating questionnaire results from HF: {run_id}")
         hydrate_dataset_subtree(
@@ -2475,6 +2760,168 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
         logger.warning("Failed to upload questionnaire to HF: %s", e)
 
     return response_matrix, metadata, column_defs
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STAGE 2.9: COMBINE PER-PAIR OUTPUTS (multi-preset mode only)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _load_pair_outputs(
+    rollout_key: str, q_key: str
+) -> tuple[np.ndarray, list[dict], list[dict]]:
+    """Load response_matrix / metadata / items for a single (rollout, q) pair.
+
+    Errors loudly if any artifact is missing — presets assume existence.
+    """
+    q_dir = _questionnaire_dir(rollout_key, q_key) / "questionnaire"
+    matrix_path = q_dir / "response_matrix.npy"
+    meta_path = q_dir / "metadata.jsonl"
+    items_path = q_dir / "items.json"
+    if not matrix_path.exists():
+        raise FileNotFoundError(
+            f"[Combine] Missing response_matrix for pair "
+            f"(rollout={rollout_key!r}, questionnaire={q_key!r}) at {matrix_path}. "
+            "Run Stage 1+2 for this pair first, or remove it from the selectors."
+        )
+    if not meta_path.exists():
+        raise FileNotFoundError(f"[Combine] Missing metadata at {meta_path}")
+    if not items_path.exists():
+        raise FileNotFoundError(f"[Combine] Missing items.json at {items_path}")
+
+    matrix = np.load(matrix_path)
+    with meta_path.open("r", encoding="utf-8") as f:
+        metadata = [json.loads(line) for line in f if line.strip()]
+    with items_path.open("r", encoding="utf-8") as f:
+        items = json.load(f)
+    return matrix, metadata, items
+
+
+def _combine_per_pair_outputs(
+    rollout_keys: list[str],
+    q_keys: list[str],
+) -> tuple[np.ndarray, list[dict], list[dict]]:
+    """Concatenate rows across rollout presets and union columns across
+    questionnaire presets into a single response matrix for Stage 3+.
+
+    Layout:
+      rows    = all rows of rollout_keys[0] … then rollout_keys[1] …
+      columns = all items of q_keys[0] … then q_keys[1] …
+                with item ids namespaced as "{q_key}/{original_id}".
+
+    Per-row alignment across questionnaires uses sample_id intersection within
+    each rollout (a persona must have a response in every selected
+    questionnaire to survive the combine). If any cell is still NaN after
+    alignment, we raise — presets promise completeness.
+
+    Writes the combined artifacts to _combined_dir()/questionnaire/ so Stage 3+
+    can load them via the standard path without knowing multi-preset is on.
+    """
+    out_dir = _combined_dir() / "questionnaire"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) Load every (rollout, q) pair.
+    pair_data: dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]] = {}
+    for r_key in rollout_keys:
+        for q_key in q_keys:
+            pair_data[(r_key, q_key)] = _load_pair_outputs(r_key, q_key)
+
+    # 2) Per rollout, intersect sample_ids across questionnaires and fix a row order.
+    per_rollout_sids: dict[str, list[str]] = {}
+    for r_key in rollout_keys:
+        sids_per_q: list[set[str]] = []
+        for q_key in q_keys:
+            _, meta, _ = pair_data[(r_key, q_key)]
+            sids_per_q.append({m["sample_id"] for m in meta if m.get("sample_id")})
+        common = set.intersection(*sids_per_q) if sids_per_q else set()
+        # Preserve the order from the first questionnaire's metadata so downstream
+        # per-row lookups remain deterministic.
+        _, first_meta, _ = pair_data[(r_key, q_keys[0])]
+        ordered = [m["sample_id"] for m in first_meta if m.get("sample_id") in common]
+        if not ordered:
+            raise RuntimeError(
+                f"[Combine] No shared sample_ids for rollout {r_key!r} across "
+                f"questionnaires {q_keys!r}. Presets promise completeness."
+            )
+        per_rollout_sids[r_key] = ordered
+        n_dropped = len(first_meta) - len(ordered)
+        if n_dropped:
+            print(
+                f"[Combine] rollout={r_key!r}: kept {len(ordered)} rows, "
+                f"dropped {n_dropped} without responses in every selected questionnaire"
+            )
+
+    # 3) Build per-q column blocks with namespaced item ids.
+    q_items_combined: list[dict] = []
+    q_col_counts: dict[str, int] = {}
+    for q_key in q_keys:
+        # items list is identical across rollouts for a given q_key (same questionnaire).
+        _, _, items = pair_data[(rollout_keys[0], q_key)]
+        q_col_counts[q_key] = len(items)
+        for it in items:
+            namespaced = dict(it)
+            namespaced["id"] = f"{q_key}/{it['id']}"
+            namespaced["questionnaire_preset_key"] = q_key
+            q_items_combined.append(namespaced)
+
+    # 4) Assemble the combined matrix block-by-block.
+    n_total_rows = sum(len(per_rollout_sids[r]) for r in rollout_keys)
+    n_total_cols = sum(q_col_counts[q] for q in q_keys)
+    combined = np.full((n_total_rows, n_total_cols), np.nan, dtype=float)
+
+    row_offset = 0
+    combined_metadata: list[dict] = []
+    for r_key in rollout_keys:
+        sids = per_rollout_sids[r_key]
+        sid_to_row = {sid: i for i, sid in enumerate(sids)}
+
+        col_offset = 0
+        # Use the first q's metadata (restricted to `sids`) as the base for
+        # this rollout's rows (one row per persona).
+        _, base_meta, _ = pair_data[(r_key, q_keys[0])]
+        base_by_sid = {m["sample_id"]: m for m in base_meta if m.get("sample_id")}
+        for sid in sids:
+            row = dict(base_by_sid[sid])
+            row["rollout_preset_key"] = r_key
+            combined_metadata.append(row)
+
+        for q_key in q_keys:
+            matrix, meta, _ = pair_data[(r_key, q_key)]
+            n_cols = q_col_counts[q_key]
+            sid_to_src_row = {m["sample_id"]: i for i, m in enumerate(meta) if m.get("sample_id")}
+            for sid, dst_idx in sid_to_row.items():
+                src_idx = sid_to_src_row.get(sid)
+                if src_idx is None:
+                    raise RuntimeError(
+                        f"[Combine] sample_id {sid!r} missing from "
+                        f"(rollout={r_key!r}, questionnaire={q_key!r}) — intersection bug?"
+                    )
+                combined[row_offset + dst_idx, col_offset:col_offset + n_cols] = matrix[src_idx]
+            col_offset += n_cols
+        row_offset += len(sids)
+
+    # 5) Sanity: every cell must be populated.
+    if np.isnan(combined).any():
+        n_nan = int(np.isnan(combined).sum())
+        raise RuntimeError(
+            f"[Combine] {n_nan} NaN cells in combined matrix after assembly. "
+            "Presets promise that every (rollout, questionnaire) pair has full coverage — "
+            "a preset's fa_blocks or upstream filter may be dropping items."
+        )
+
+    # 6) Persist (locally only — no HF upload for combined runs).
+    np.save(out_dir / "response_matrix.npy", combined)
+    with (out_dir / "metadata.jsonl").open("w", encoding="utf-8") as f:
+        for row in combined_metadata:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    with (out_dir / "items.json").open("w", encoding="utf-8") as f:
+        json.dump(q_items_combined, f, ensure_ascii=False, indent=2)
+
+    print(
+        f"[Combine] Wrote combined ({combined.shape[0]} rows × {combined.shape[1]} cols) "
+        f"to {out_dir}"
+    )
+    return combined, combined_metadata, q_items_combined
 
 
 def run_stage_trait_scoring(metadata: list[dict] | None = None) -> dict | None:
@@ -4780,21 +5227,28 @@ def _export_factor_extremes_html(
     factor_corr_matrix = fa_result.get("factor_correlation_matrix")
     n_factors = scores.shape[1]
 
-    # Load rollout conversations, indexed by sample_id
-    rollout_path = _rollout_dir() / "exports" / "conversation_training.jsonl"
-    if not rollout_path.exists():
-        print(f"  [Extremes] Skipped — rollout export not found: {rollout_path}")
-        return
-
+    # Load rollout conversations from every selected rollout preset, indexed by sample_id.
     conversations_by_sid: dict[str, list[dict[str, str]]] = {}
-    with open(rollout_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            sid = row.get("sample_id", "")
-            msgs = [{"role": m["role"], "content": m["content"]} for m in row.get("messages", [])]
-            conversations_by_sid[sid] = msgs
+    any_found = False
+    for r_key in ROLLOUTS:
+        rollout_path = _rollout_dir(r_key) / "exports" / "conversation_training.jsonl"
+        if not rollout_path.exists():
+            print(f"  [Extremes] rollout export not found for preset {r_key!r}: {rollout_path}")
+            continue
+        any_found = True
+        with open(rollout_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                sid = row.get("sample_id", "")
+                if sid in conversations_by_sid:
+                    continue  # First-seen wins (same sample_id would be identical content).
+                msgs = [{"role": m["role"], "content": m["content"]} for m in row.get("messages", [])]
+                conversations_by_sid[sid] = msgs
+    if not any_found:
+        print("  [Extremes] Skipped — no rollout exports found for any selected preset.")
+        return
 
     # Load LLM labels if available (for richer factor descriptions).
     labeling_dir = _questionnaire_dir() / "labeling"
@@ -6434,35 +6888,39 @@ _ARCH_SCEN_CACHE: dict[str, tuple[str, str]] | None = None
 
 def _load_archetype_scenario_lookup() -> dict[str, tuple[str, str]]:
     """Build sample_id → (archetype, scenario_id) from the rollout canonical
-    dataset. The seed message content is tagged ``[scenario: X | archetype: Y]``.
+    dataset(s). The seed message content is tagged ``[scenario: X | archetype: Y]``.
 
-    Returns {} if the canonical dataset is missing or unparseable — callers
-    must handle the empty case.
+    In multi-rollout mode, unions the lookups across every rollout preset in
+    ROLLOUTS so metadata rows from either source resolve correctly. sample_ids
+    are content-hashed so collisions across rollout sets are possible but
+    extremely unlikely; if any do occur we keep the first observation (sample
+    content is identical by construction, so either entry is fine).
+
+    Returns {} if no canonical dataset is found — callers handle the empty case.
     """
     global _ARCH_SCEN_CACHE
     if _ARCH_SCEN_CACHE is not None:
         return _ARCH_SCEN_CACHE
 
     import re
-    path = _rollout_dir() / "datasets" / "canonical_samples.jsonl"
-    if not path.exists():
-        _ARCH_SCEN_CACHE = {}
-        return _ARCH_SCEN_CACHE
-
     pat = re.compile(r"\[scenario:\s*([^|\]]+?)\s*\|\s*archetype:\s*([^\]]+?)\s*\]")
     lookup: dict[str, tuple[str, str]] = {}
-    with open(path) as f:
-        for line in f:
-            if not line.strip():
-                continue
-            rec = json.loads(line)
-            sid = rec.get("sample_id")
-            messages = rec.get("input", {}).get("messages") or []
-            if not sid or not messages:
-                continue
-            m = pat.search(messages[0].get("content", "") or "")
-            if m:
-                lookup[sid] = (m.group(2), m.group(1))
+    for r_key in ROLLOUTS:
+        path = _rollout_dir(r_key) / "datasets" / "canonical_samples.jsonl"
+        if not path.exists():
+            continue
+        with open(path) as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                rec = json.loads(line)
+                sid = rec.get("sample_id")
+                messages = rec.get("input", {}).get("messages") or []
+                if not sid or not messages:
+                    continue
+                m = pat.search(messages[0].get("content", "") or "")
+                if m and sid not in lookup:
+                    lookup[sid] = (m.group(2), m.group(1))
     _ARCH_SCEN_CACHE = lookup
     return lookup
 
@@ -6864,59 +7322,24 @@ def run_stage_validation(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def main() -> None:
-    args = _parse_args()
-    global ACTIVE_USER_SIMULATOR_MODE
-    ACTIVE_USER_SIMULATOR_MODE = (
-        args.user_simulator_mode or DEFAULT_USER_SIMULATOR_MODE
-    )
-
-    retry_terminal_sample_ids: list[str] = []
-    retry_mode = "off"
-    if args.retry_terminal_samples:
-        retry_terminal_sample_ids = _load_terminal_sample_ids_from_run(_rollout_dir())
-        retry_mode = "auto"
-    elif args.retry_terminal_samples_file is not None:
-        retry_terminal_sample_ids = _load_retry_terminal_sample_ids(
-            args.retry_terminal_samples_file
-        )
-        retry_mode = "file"
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-
-    print("=" * 60)
-    print("Psychometric Factor Analysis of LLM Persona Rollouts")
-    print("=" * 60)
-    print(f"Rollout run ID: {_rollout_run_id()}")
-    print(f"Questionnaire run ID: {_questionnaire_run_id()}")
-    print(f"User simulator mode: {_current_user_simulator_mode()}")
-    print(f"Stages to run: {STAGES_TO_RUN}")
-    if retry_terminal_sample_ids:
-        if retry_mode == "auto":
-            print(
-                "Retry terminal samples: auto "
-                f"({len(retry_terminal_sample_ids)} sample IDs from current run)"
-            )
-        else:
-            print(
-                "Retry terminal samples file: "
-                f"{args.retry_terminal_samples_file} ({len(retry_terminal_sample_ids)} sample IDs)"
-            )
-    print()
-
-    # Save config
-    config_dir = _questionnaire_dir()
+def _write_pair_config(
+    rollout_key: str,
+    q_key: str,
+    *,
+    args,
+    retry_mode: str,
+    retry_terminal_sample_ids: list[str],
+) -> None:
+    """Write per-pair config.json (called inside Cartesian loop)."""
+    config_dir = _questionnaire_dir(rollout_key, q_key)
     config_dir.mkdir(parents=True, exist_ok=True)
     with open(config_dir / "config.json", "w") as f:
         json.dump({
+            "rollout_preset_key": rollout_key,
+            "questionnaire_preset_key": q_key,
             "seed": SEED,
-            "rollout_run_id": _rollout_run_id(),
-            "questionnaire_run_id": _questionnaire_run_id(),
+            "rollout_run_id": _rollout_run_id(rollout_key),
+            "questionnaire_run_id": _questionnaire_run_id(rollout_key, q_key),
             "assistant_model": ASSISTANT_MODEL,
             "user_model": USER_MODEL,
             "temperature": TEMPERATURE,
@@ -6940,49 +7363,175 @@ def main() -> None:
             **_user_simulator_mode_metadata(),
         }, f, indent=2)
 
-    # ── Stage 1 ──────────────────────────────────────────────────────────
-    if "rollouts" in STAGES_TO_RUN:
+
+def _apply_consecutive_turn_filter(
+    response_matrix: np.ndarray,
+    metadata: list[dict],
+) -> tuple[np.ndarray, list[dict]]:
+    """Strip rows whose source rollout has the consecutive-assistant-turns
+    resume-bug artifact. Unions bad sample_ids across every selected rollout
+    preset, so multi-rollout combined matrices are filtered correctly."""
+    bad_sample_ids: set[str] = set()
+    for r_key in ROLLOUTS:
+        bad_sample_ids |= find_consecutive_assistant_turn_sample_ids(_rollout_dir(r_key))
+    if not bad_sample_ids:
+        return response_matrix, metadata
+    keep = np.array([m["sample_id"] not in bad_sample_ids for m in metadata])
+    n_removed = int((~keep).sum())
+    if n_removed:
+        response_matrix = response_matrix[keep]
+        metadata = [m for m, k in zip(metadata, keep) if k]
+        print(
+            f"Excluded {n_removed} samples with consecutive assistant turns "
+            f"(resume-bug artifact) from downstream analysis"
+        )
+    return response_matrix, metadata
+
+
+def main() -> None:
+    args = _parse_args()
+
+    # Honour --user-simulator-mode as a global override if provided. Leaving
+    # it unset means every preset uses its own .user_simulator_mode.
+    cli_mode_override = args.user_simulator_mode
+
+    # --retry-terminal-samples{,-file} was designed around a single rollout
+    # directory. We keep it working in single-rollout mode and hard-fail in
+    # multi-rollout mode rather than silently retrying only one of the sets.
+    if (args.retry_terminal_samples or args.retry_terminal_samples_file) and len(ROLLOUTS) > 1:
+        print(
+            "ERROR: --retry-terminal-samples{,-file} is not supported in multi-rollout mode. "
+            "Run with a single-entry ROLLOUTS list for retries."
+        )
+        sys.exit(1)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    print("=" * 60)
+    print("Psychometric Factor Analysis of LLM Persona Rollouts")
+    print("=" * 60)
+    print(f"Rollout presets selected:      {ROLLOUTS}")
+    print(f"Questionnaire presets selected: {QUESTIONNAIRES}")
+    print(f"Multi-preset mode:              {_is_multi_preset()}")
+    if _is_multi_preset():
+        print(f"Combined run ID:                {_combined_run_id()}")
+    print(f"Stages to run:                  {STAGES_TO_RUN}")
+    print()
+
+    # ── Stages 1 & 2 (+ per-pair 2.5 / 2b / inspection): Cartesian loop ──
+    # run_stage_rollouts and run_stage_questionnaire read from global state
+    # (SEED, ASSISTANT_MODEL, QUESTIONNAIRE_PATH, ...), so we activate each
+    # preset before calling them. In single-pair mode this loop executes
+    # exactly once and preserves byte-identical behaviour.
+    last_response_matrix: np.ndarray | None = None
+    last_metadata: list[dict] | None = None
+    last_column_defs: list[dict] | None = None
+
+    for r_key in ROLLOUTS:
+        _activate_rollout(r_key)
+        if cli_mode_override is not None:
+            global ACTIVE_USER_SIMULATOR_MODE
+            ACTIVE_USER_SIMULATOR_MODE = cli_mode_override
+
+        # Per-rollout retry terminal sample loading (single-rollout only; we
+        # already errored out above if multi-rollout was combined with retry).
+        retry_terminal_sample_ids: list[str] = []
+        retry_mode = "off"
+        if args.retry_terminal_samples:
+            retry_terminal_sample_ids = _load_terminal_sample_ids_from_run(_rollout_dir(r_key))
+            retry_mode = "auto"
+        elif args.retry_terminal_samples_file is not None:
+            retry_terminal_sample_ids = _load_retry_terminal_sample_ids(
+                args.retry_terminal_samples_file
+            )
+            retry_mode = "file"
+
+        if "rollouts" in STAGES_TO_RUN:
+            print("\n" + "=" * 60)
+            print(f"[Stage 1] Generating rollouts — preset {r_key!r}")
+            print("=" * 60)
+            run_stage_rollouts(retry_terminal_sample_ids=retry_terminal_sample_ids)
+
+        for q_key in QUESTIONNAIRES:
+            _activate_questionnaire(q_key)
+            print("\n" + "#" * 60)
+            print(f"# Pair: rollout={r_key!r} × questionnaire={q_key!r}")
+            print(f"#   {_questionnaire_run_id(r_key, q_key)}")
+            print("#" * 60)
+
+            _write_pair_config(
+                r_key, q_key,
+                args=args,
+                retry_mode=retry_mode,
+                retry_terminal_sample_ids=retry_terminal_sample_ids,
+            )
+
+            questionnaire_items, _qcol_defs = _load_questionnaire()
+
+            if "questionnaire" in STAGES_TO_RUN:
+                print("\n" + "=" * 60)
+                print(f"[Stage 2] Applying questionnaire — {r_key!r} × {q_key!r}")
+                print("=" * 60)
+                last_response_matrix, last_metadata, last_column_defs = (
+                    run_stage_questionnaire()
+                )
+
+            if WRITE_QUESTIONNAIRE_INSPECTION_FILE:
+                _write_questionnaire_inspection_file(questionnaire_items)
+
+            if "trait_scoring" in STAGES_TO_RUN:
+                print("\n" + "=" * 60)
+                print(f"[Stage 2.5] Trait scoring — {r_key!r} × {q_key!r}")
+                print("=" * 60)
+                run_stage_trait_scoring(metadata=last_metadata)
+
+            if "realism_judge" in STAGES_TO_RUN:
+                print("\n" + "=" * 60)
+                print(f"[Stage 2b] Realism judge — {r_key!r}")
+                print("=" * 60)
+                run_stage_realism_judge()
+
+    # ── Stage 2.9: Combine (multi-preset only) ───────────────────────────
+    response_matrix: np.ndarray | None
+    metadata: list[dict] | None
+    column_defs: list[dict] | None
+
+    # For downstream stages, re-activate the first selected pair so that
+    # _questionnaire_dir() / _rollout_dir() default calls still resolve when
+    # helpers fall back to the active preset (used only in single-pair mode).
+    _activate_rollout(ROLLOUTS[0])
+    _activate_questionnaire(QUESTIONNAIRES[0])
+
+    if _is_multi_preset():
         print("\n" + "=" * 60)
-        print("[Stage 1] Generating rollouts")
+        print("[Stage 2.9] Combining per-pair outputs")
         print("=" * 60)
-        run_stage_rollouts(retry_terminal_sample_ids=retry_terminal_sample_ids)
+        response_matrix, metadata, column_defs = _combine_per_pair_outputs(
+            ROLLOUTS, QUESTIONNAIRES
+        )
+        # questionnaire_items for downstream stages: union of items across the
+        # selected questionnaires, namespaced the same way as column_defs so
+        # the two lists stay aligned.
+        questionnaire_items = column_defs
+    else:
+        # Single-pair path: either reuse in-memory results from the loop or
+        # hydrate from the single pair's questionnaire directory.
+        response_matrix = last_response_matrix
+        metadata = last_metadata
+        column_defs = last_column_defs
+        questionnaire_items, _ = _load_questionnaire()
 
-    # Load questionnaire items once; reused by inspection, labeling, and validation.
-    questionnaire_items, _ = _load_questionnaire()
-
-    # ── Stage 2 ──────────────────────────────────────────────────────────
-    response_matrix = None
-    metadata = None
-    column_defs = None
-
-    if "questionnaire" in STAGES_TO_RUN:
-        print("\n" + "=" * 60)
-        print("[Stage 2] Applying questionnaire")
-        print("=" * 60)
-        response_matrix, metadata, column_defs = run_stage_questionnaire()
-
-    if WRITE_QUESTIONNAIRE_INSPECTION_FILE:
-        _write_questionnaire_inspection_file(questionnaire_items)
-
-    # ── Stage 2.5: Trait scoring (TRAIT-benchmark questionnaires only) ──
-    if "trait_scoring" in STAGES_TO_RUN:
-        print("\n" + "=" * 60)
-        print("[Stage 2.5] Trait scoring + plots")
-        print("=" * 60)
-        run_stage_trait_scoring(metadata=metadata)
-
-    # ── Stage 2b: Realism + evaluation-awareness judge (diagnostic only) ──
-    if "realism_judge" in STAGES_TO_RUN:
-        print("\n" + "=" * 60)
-        print("[Stage 2b] Realism + evaluation-awareness judge")
-        print("=" * 60)
-        run_stage_realism_judge()
-
-    # Load if needed for later stages
+    # Load if needed for later stages (single-pair path only; multi-pair
+    # always populated the in-memory vars above).
     if response_matrix is None and any(
         s in STAGES_TO_RUN for s in ["factor_analysis", "labeling", "validation"]
     ):
-        q_dir = _questionnaire_dir() / "questionnaire"
+        q_dir = _effective_dir() / "questionnaire"
         matrix_path = q_dir / "response_matrix.npy"
         if matrix_path.exists():
             response_matrix = np.load(matrix_path)
@@ -6999,30 +7548,25 @@ def main() -> None:
             sys.exit(1)
 
     # Filter out samples with consecutive assistant turns (resume-bug artifact).
-    # When loaded from disk the questionnaire may already include these rows, so
-    # we strip them here before any downstream analysis stage runs.
     if response_matrix is not None and metadata is not None:
-        bad_sample_ids = find_consecutive_assistant_turn_sample_ids(_rollout_dir())
-        if bad_sample_ids:
-            keep = np.array([m["sample_id"] not in bad_sample_ids for m in metadata])
-            n_removed = int((~keep).sum())
-            if n_removed:
-                response_matrix = response_matrix[keep]
-                metadata = [m for m, k in zip(metadata, keep) if k]
-                print(
-                    f"Excluded {n_removed} samples with consecutive assistant turns "
-                    f"(resume-bug artifact) from downstream analysis"
-                )
+        response_matrix, metadata = _apply_consecutive_turn_filter(response_matrix, metadata)
 
     # ── Stage 3 ──────────────────────────────────────────────────────────
+    # run_stage_factor_analysis writes into _questionnaire_dir() / "factor_analysis"
+    # in single-pair mode. In multi-pair mode we want it to write under
+    # _combined_dir() — redirect via a monkey-patch-ish activation trick:
+    # override _questionnaire_dir's default resolution by pointing both selector
+    # lists to the combined scheme is not possible, so instead Stage 3 picks up
+    # _effective_dir(). We patch the helper by using a thread-local override.
     fa_results = None
     if "factor_analysis" in STAGES_TO_RUN:
         print("\n" + "=" * 60)
         print("[Stage 3] Factor analysis")
         print("=" * 60)
-        fa_results = run_stage_factor_analysis(
-            response_matrix, metadata, column_defs, items=questionnaire_items,
-        )
+        with _override_questionnaire_dir(_effective_dir()):
+            fa_results = run_stage_factor_analysis(
+                response_matrix, metadata, column_defs, items=questionnaire_items,
+            )
 
     # ── Stage 4 ──────────────────────────────────────────────────────────
     if "labeling" in STAGES_TO_RUN:
@@ -7032,7 +7576,8 @@ def main() -> None:
         if fa_results is None:
             print("ERROR: Factor analysis results not available. Run stage 3 first.")
             sys.exit(1)
-        run_stage_labeling(fa_results, questionnaire_items)
+        with _override_questionnaire_dir(_effective_dir()):
+            run_stage_labeling(fa_results, questionnaire_items)
 
     # ── Stage 5 ──────────────────────────────────────────────────────────
     if "validation" in STAGES_TO_RUN:
@@ -7042,7 +7587,8 @@ def main() -> None:
         if fa_results is None:
             print("ERROR: Factor analysis results not available. Run stage 3 first.")
             sys.exit(1)
-        run_stage_validation(response_matrix, metadata, column_defs, fa_results)
+        with _override_questionnaire_dir(_effective_dir()):
+            run_stage_validation(response_matrix, metadata, column_defs, fa_results)
 
     print("\nDone.")
 
