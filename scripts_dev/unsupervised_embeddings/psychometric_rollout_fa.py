@@ -69,6 +69,10 @@ from src_dev.datasets import (
     materialize_canonical_samples,
 )
 from src_dev.factor_analysis.factor_analysis import adequacy_tests, run_factor_analysis
+from src_dev.factor_analysis.n_factors import (
+    plot_n_factors_comparison,
+    suggest_n_factors,
+)
 from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 from src_dev.factor_analysis.persistence import save_factor_analysis
 from src_dev.factor_analysis.preprocessing import residualize
@@ -475,6 +479,19 @@ VALIDATION_TESTS_TO_RUN = {
     "stability_sweep_loso_top10",
     "k_sensitivity",
     "persona_item_cv",
+    # New (on top of Horn's parallel analysis): triangulate k with MAP, EKC,
+    # acceleration, Kaiser-Guttman and a held-out Gaussian-NLL CV curve.
+    "n_factors_suggest",
+    # Non-parametric loading CIs + sign-stability per item/factor.
+    "bootstrap_loadings",
+    # Independent-halves φ distribution — direct replicability check.
+    "split_half_congruence",
+    # Held-out Gaussian-NLL CV curve as a standalone validation test, with a
+    # 1-SE rule for parsimony.
+    "cv_k_curve",
+    # K-fold CV: predict external OCEAN trait scores from factor scores on
+    # unseen personas. External predictivity is the strictest convergent test.
+    "external_predictivity",
 }
 STABILITY_N_PROMPTS = 100
 HOLDOUT_N_ITEMS = 20
@@ -510,9 +527,32 @@ TRAIT_CONVERGENCE_N_BOOTSTRAP = 1000
 PERSONA_ITEM_CV_SPLIT = 0.7
 PERSONA_ITEM_CV_N_TRIALS = 5
 PERSONA_ITEM_CV_SUBSET_STRATEGY = "random"  # or "by_factor_balanced"
+PERSONA_ITEM_CV_N_OUTER_SPLITS = 20        # outer persona A/B resamples (for CI)
+PERSONA_ITEM_CV_BOOTSTRAP_CI = 95.0         # None to skip the CI
 # k ± 1 sensitivity classification.
 K_SENSITIVITY_MATCH_THRESHOLD = 0.85
 K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
+# n_factors suggestion (Horn + MAP + EKC + acceleration + Kaiser + CV-k).
+N_FACTORS_SUGGEST_METHODS = (
+    "parallel", "map", "ekc", "acceleration", "kaiser", "cv_reconstruction",
+)
+N_FACTORS_SUGGEST_K_MAX = 15
+N_FACTORS_SUGGEST_CV_N_FOLDS = 5
+N_FACTORS_SUGGEST_PA_ITERATIONS = 100
+# Bootstrap loadings.
+BOOTSTRAP_LOADINGS_N_BOOT = 500
+BOOTSTRAP_LOADINGS_CONFIDENCE = 95.0
+# Split-half congruence.
+SPLIT_HALF_CONGRUENCE_N_ITERS = 100
+SPLIT_HALF_CONGRUENCE_PASS_THRESHOLD_PHI = 0.85
+# Held-out Gaussian-NLL CV curve (standalone).
+CV_K_CURVE_K_MAX = 15
+CV_K_CURVE_N_FOLDS = 5
+# External predictivity (FA factors → OCEAN traits on held-out personas).
+EXTERNAL_PREDICTIVITY_N_FOLDS = 5
+EXTERNAL_PREDICTIVITY_RIDGE_ALPHA = 1.0
+EXTERNAL_PREDICTIVITY_PASS_R2 = 0.05
+EXTERNAL_PREDICTIVITY_BOOTSTRAP_CI = 95.0
 
 # ── Pipeline control ────────────────────────────────────────────────────────
 # "trait_scoring" runs after "questionnaire" and is a no-op unless the
@@ -525,7 +565,7 @@ STAGES_TO_RUN = [
     # "realism_judge",
     "factor_analysis",
     # "labeling",
-    "validation",
+    # "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -4021,6 +4061,19 @@ def _preprocess_response_matrix(
     return data, meta_filtered, cols_filtered, group_ids
 
 
+def _jsonable(obj):
+    """Recursively convert numpy arrays / scalars to plain Python for json.dump."""
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.floating, np.integer)):
+        return obj.item()
+    return obj
+
+
 def _plot_parallel_analysis(
     real_eigenvalues: np.ndarray,
     random_threshold: np.ndarray,
@@ -4112,17 +4165,49 @@ def run_stage_factor_analysis(
         # dependence — the appropriate Horn reference for mixed-scale data.
         print("\n  Parallel analysis (permutation null):")
         pa_result = parallel_analysis(data, random_state=SEED, method="permutation")
-        n_factors = pa_result["n_recommended"]
+        n_factors_horn = pa_result["n_recommended"]
+
+        # Triangulate: report non-parametric k-recommendations from MAP, EKC,
+        # acceleration, Kaiser-Guttman and held-out Gaussian-NLL CV alongside
+        # Horn's. Horn remains the selector (unless FA_N_FACTORS_OVERRIDE is
+        # set); the other methods are logged + plotted for interpretation.
+        pa_dir = base_dir / resid_label
+        pa_dir.mkdir(parents=True, exist_ok=True)
+        print("\n  Additional n-factor methods (reported, not used as selector):")
+        try:
+            n_factors_suggest = suggest_n_factors(
+                data,
+                methods=N_FACTORS_SUGGEST_METHODS,
+                k_max=min(N_FACTORS_SUGGEST_K_MAX, max(1, data.shape[1] - 1)),
+                parallel_n_iterations=N_FACTORS_SUGGEST_PA_ITERATIONS,
+                cv_n_folds=N_FACTORS_SUGGEST_CV_N_FOLDS,
+                fa_method=FA_METHOD,
+                seed=SEED,
+                verbose=True,
+            )
+            with open(pa_dir / "n_factors_suggest.json", "w") as f:
+                json.dump(_jsonable(n_factors_suggest), f, indent=2)
+            plot_n_factors_comparison(
+                n_factors_suggest,
+                save_path=pa_dir / "n_factors_suggest.png",
+            )
+        except Exception as exc:
+            print(f"    suggest_n_factors failed: {exc}")
+            n_factors_suggest = None
+
+        n_factors = n_factors_horn
         if FA_N_FACTORS_OVERRIDE is not None:
-            print(f"  Override: using {FA_N_FACTORS_OVERRIDE} factors (Horn's recommended {n_factors})")
+            print(
+                f"  Override: using {FA_N_FACTORS_OVERRIDE} factors "
+                f"(Horn's recommended {n_factors_horn})"
+            )
             n_factors = FA_N_FACTORS_OVERRIDE
 
         # Save parallel analysis results
-        pa_dir = base_dir / resid_label
-        pa_dir.mkdir(parents=True, exist_ok=True)
         with open(pa_dir / "parallel_analysis.json", "w") as f:
             json.dump({
                 "n_recommended": n_factors,
+                "n_recommended_horn": int(n_factors_horn),
                 "real_eigenvalues": pa_result["real_eigenvalues"].tolist(),
                 "random_threshold": pa_result["random_threshold"].tolist(),
                 "adequacy": {
@@ -7666,6 +7751,87 @@ def _validation_variance_decomp(
     return result
 
 
+def _run_external_predictivity(
+    fa_results: dict,
+    val_dir: Path,
+    external_predictivity_fn,
+) -> dict:
+    """K-fold held-out R²: predict OCEAN trait scores from factor scores.
+
+    Reuses the TRAIT scores CSV produced during questionnaire trait scoring.
+    Uses the anchor FA entry's persona metadata (so ``response_matrix`` row
+    alignment matches the loadings we will be cross-validating against).
+    """
+    trait_csv = (
+        _questionnaire_dir() / "questionnaire" / "trait_scores"
+        / "trait_scores_with_metadata.csv"
+    )
+    if not trait_csv.exists():
+        msg = f"trait_scores_with_metadata.csv not found at {trait_csv}"
+        print(f"  {msg} — skipped")
+        return {"pass": None, "note": msg}
+
+    import pandas as pd
+    df = pd.read_csv(trait_csv)
+    if "sample_id" not in df.columns:
+        return {"pass": None, "note": "trait_scores CSV missing sample_id column"}
+    trait_cols = [c for c in df.columns
+                  if c not in ("k", "sample_id", "input_group_id")]
+    by_sid = df.set_index("sample_id")[trait_cols]
+
+    anchor_key, anchor_entry = _pick_anchor_fa(fa_results)
+    if anchor_entry is None:
+        return {"pass": None, "note": "No FA results with factors"}
+
+    anchor_data = anchor_entry.get("data")
+    anchor_meta = anchor_entry.get("metadata")
+    anchor_k = anchor_entry["n_factors"]
+    if anchor_data is None or anchor_meta is None:
+        return {
+            "pass": None,
+            "note": "Anchor FA entry missing 'data' or 'metadata' — cannot refit FA on folds",
+        }
+
+    n = len(anchor_meta)
+    t = len(trait_cols)
+    trait_matrix = np.full((n, t), np.nan)
+    for i, m in enumerate(anchor_meta):
+        sid = m.get("sample_id")
+        if sid in by_sid.index:
+            trait_matrix[i] = by_sid.loc[sid].values
+
+    aligned_mask = ~np.all(np.isnan(trait_matrix), axis=1)
+    n_aligned = int(aligned_mask.sum())
+    if n_aligned < 30:
+        return {
+            "pass": False,
+            "note": f"Too few personas aligned to trait scores: {n_aligned}",
+        }
+
+    # Restrict to personas with trait scores (FA refits per fold on this subset).
+    data_aligned = anchor_data[aligned_mask]
+    targets_aligned = trait_matrix[aligned_mask]
+    meta_aligned = [m for m, keep in zip(anchor_meta, aligned_mask) if keep]
+
+    out_dir = val_dir / "external_predictivity"
+    result = external_predictivity_fn(
+        data_aligned, targets_aligned, n_factors=anchor_k, out_dir=out_dir,
+        target_names=trait_cols,
+        n_folds=EXTERNAL_PREDICTIVITY_N_FOLDS,
+        metadata=meta_aligned,
+        fa_method=FA_METHOD,
+        rotation=FA_ROTATIONS[0],
+        ridge_alpha=EXTERNAL_PREDICTIVITY_RIDGE_ALPHA,
+        pass_threshold_r2=EXTERNAL_PREDICTIVITY_PASS_R2,
+        bootstrap_ci=EXTERNAL_PREDICTIVITY_BOOTSTRAP_CI,
+        seed=SEED + 24,
+        verbose=True,
+    )
+    result["fa_key"] = anchor_key
+    result["n_aligned_personas"] = n_aligned
+    return result
+
+
 def _validation_trait_convergence(
     fa_results: dict,
     val_dir: Path,
@@ -7813,9 +7979,21 @@ def run_stage_validation(
     # Sweeps / sensitivity / persona×item CV all need the anchor loadings.
     if anchor_loadings is not None:
         from src_dev.factor_analysis.cross_validation import (
+            external_predictivity as _external_predictivity,
             k_sensitivity as _k_sensitivity,
             persona_item_cv as _persona_item_cv,
+            split_half_congruence as _split_half_congruence,
             stability_sweep as _stability_sweep,
+        )
+        from src_dev.factor_analysis.bootstrap import (
+            bootstrap_loadings as _bootstrap_loadings,
+            plot_bootstrap_loadings as _plot_bootstrap_loadings,
+            save_bootstrap_loadings as _save_bootstrap_loadings,
+        )
+        from src_dev.factor_analysis.n_factors import (
+            cv_reconstruction_k as _cv_reconstruction_k,
+            suggest_n_factors as _suggest_n_factors,
+            plot_n_factors_comparison as _plot_n_factors_comparison,
         )
         if _enabled("stability_sweep_random50"):
             print("\n[Stage 5] Validation — Stability sweep (random 50%)")
@@ -7866,10 +8044,149 @@ def run_stage_validation(
                 data_clean, meta_clean, anchor_k, val_dir,
                 persona_split=PERSONA_ITEM_CV_SPLIT,
                 n_trials=PERSONA_ITEM_CV_N_TRIALS,
+                n_outer_splits=PERSONA_ITEM_CV_N_OUTER_SPLITS,
+                bootstrap_ci=PERSONA_ITEM_CV_BOOTSTRAP_CI,
                 subset_strategy=PERSONA_ITEM_CV_SUBSET_STRATEGY,
                 fa_method=FA_METHOD, rotation=FA_ROTATIONS[0],
                 seed=SEED + 13,
             )
+
+        # Tests below all re-analyze the anchor FA's data so loadings / k /
+        # matrices stay consistent with the anchor we're validating against.
+        anchor_data = anchor_entry.get("data", data_clean)
+        anchor_meta = anchor_entry.get("metadata", meta_clean)
+        anchor_cols = anchor_entry.get("column_defs", cols_clean)
+
+        if _enabled("n_factors_suggest"):
+            print("\n[Stage 5] Validation — n_factors suggestion (multi-method)")
+            n_factors_dir = val_dir / "n_factors_suggest"
+            n_factors_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                suggest = _suggest_n_factors(
+                    anchor_data,
+                    methods=N_FACTORS_SUGGEST_METHODS,
+                    k_max=min(
+                        N_FACTORS_SUGGEST_K_MAX,
+                        max(1, anchor_data.shape[1] - 1),
+                    ),
+                    parallel_n_iterations=N_FACTORS_SUGGEST_PA_ITERATIONS,
+                    cv_n_folds=N_FACTORS_SUGGEST_CV_N_FOLDS,
+                    fa_method=FA_METHOD,
+                    seed=SEED + 20,
+                    verbose=True,
+                )
+                with open(n_factors_dir / "n_factors_suggest.json", "w") as f:
+                    json.dump(_jsonable(suggest), f, indent=2)
+                _plot_n_factors_comparison(
+                    suggest, save_path=n_factors_dir / "n_factors_suggest.png",
+                )
+                summary = suggest.get("summary", {})
+                note = " / ".join(f"{m}={k}" for m, k in summary.items())
+                results["n_factors_suggest"] = {
+                    "pass": None,   # descriptive, no pass/fail
+                    "note": note,
+                    "summary": summary,
+                }
+            except Exception as exc:
+                print(f"  n_factors_suggest failed: {exc}")
+                results["n_factors_suggest"] = {
+                    "pass": None, "note": f"failed: {exc}",
+                }
+
+        if _enabled("bootstrap_loadings"):
+            print("\n[Stage 5] Validation — Bootstrap loadings")
+            boot_dir = val_dir / "bootstrap_loadings"
+            boot_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                boot = _bootstrap_loadings(
+                    anchor_data,
+                    n_factors=anchor_k,
+                    anchor_loadings=anchor_loadings,
+                    n_boot=BOOTSTRAP_LOADINGS_N_BOOT,
+                    fa_method=FA_METHOD,
+                    rotation=FA_ROTATIONS[0],
+                    confidence=BOOTSTRAP_LOADINGS_CONFIDENCE,
+                    seed=SEED + 21,
+                    verbose=True,
+                )
+                _save_bootstrap_loadings(boot, boot_dir)
+                _plot_bootstrap_loadings(boot, anchor_cols, boot_dir)
+                # Summary: mean fraction of loadings whose CI excludes zero.
+                ci_excl = np.array(boot.get("ci_excludes_zero", []))
+                frac_reliable = (
+                    float(ci_excl.mean()) if ci_excl.size else float("nan")
+                )
+                results["bootstrap_loadings"] = {
+                    "pass": None,   # descriptive
+                    "note": (
+                        f"mean φ vs anchor={boot.get('mean_alignment_phi', float('nan')):.3f}, "
+                        f"fraction reliable={frac_reliable:.2f}"
+                    ),
+                    "mean_alignment_phi": boot.get("mean_alignment_phi"),
+                    "fraction_reliable": frac_reliable,
+                    "n_boot": boot.get("n_boot"),
+                }
+            except Exception as exc:
+                print(f"  bootstrap_loadings failed: {exc}")
+                results["bootstrap_loadings"] = {
+                    "pass": None, "note": f"failed: {exc}",
+                }
+
+        if _enabled("split_half_congruence"):
+            print("\n[Stage 5] Validation — Split-half congruence")
+            results["split_half_congruence"] = _split_half_congruence(
+                anchor_data,
+                n_factors=anchor_k,
+                out_dir=val_dir,
+                n_iters=SPLIT_HALF_CONGRUENCE_N_ITERS,
+                metadata=anchor_meta,
+                fa_method=FA_METHOD,
+                rotation=FA_ROTATIONS[0],
+                seed=SEED + 22,
+                pass_threshold_median_phi=SPLIT_HALF_CONGRUENCE_PASS_THRESHOLD_PHI,
+                verbose=True,
+            )
+
+        if _enabled("cv_k_curve"):
+            print("\n[Stage 5] Validation — CV-k curve (held-out Gaussian NLL)")
+            cvk_dir = val_dir / "cv_k_curve"
+            cvk_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                cv_k = _cv_reconstruction_k(
+                    anchor_data,
+                    k_max=min(
+                        CV_K_CURVE_K_MAX, max(1, anchor_data.shape[1] - 1),
+                    ),
+                    n_folds=CV_K_CURVE_N_FOLDS,
+                    fa_method=FA_METHOD,
+                    seed=SEED + 23,
+                    verbose=True,
+                )
+                with open(cvk_dir / "cv_k_curve.json", "w") as f:
+                    json.dump(_jsonable(cv_k), f, indent=2)
+                k_rec = cv_k.get("n_recommended")
+                k_rec_1se = cv_k.get("n_recommended_1se")
+                results["cv_k_curve"] = {
+                    "pass": None,   # descriptive; user inspects the curve
+                    "note": (
+                        f"argmin k={k_rec}, 1-SE k={k_rec_1se}, "
+                        f"anchor k={anchor_k}"
+                    ),
+                    "n_recommended": k_rec,
+                    "n_recommended_1se": k_rec_1se,
+                }
+            except Exception as exc:
+                print(f"  cv_k_curve failed: {exc}")
+                results["cv_k_curve"] = {
+                    "pass": None, "note": f"failed: {exc}",
+                }
+
+        if _enabled("external_predictivity"):
+            print("\n[Stage 5] Validation — External predictivity (FA → OCEAN)")
+            ext_result = _run_external_predictivity(
+                fa_results, val_dir, _external_predictivity,
+            )
+            results["external_predictivity"] = ext_result
 
     print("\n" + "=" * 60)
     print("[Stage 5] Validation Summary:")
