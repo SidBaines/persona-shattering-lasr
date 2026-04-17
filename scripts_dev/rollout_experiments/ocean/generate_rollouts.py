@@ -55,6 +55,7 @@ from src_dev.rollout_generation.model_providers import (
     ActivationCapProvider,
     LoRaScaleProvider,
     SingleModelProvider,
+    VLLMLoRaScaleProvider,
 )
 from src_dev.rollout_generation.prompts import register_user_simulator_template
 from src_dev.sweep import (
@@ -441,6 +442,24 @@ def parse_args() -> argparse.Namespace:
         default=64,
         help="Assistant batch size for local inference (default: 64).",
     )
+    parser.add_argument(
+        "--assistant-max-new-tokens",
+        type=int,
+        default=4096,
+        help="Max new tokens for assistant responses (default: 4096).",
+    )
+    parser.add_argument(
+        "--vllm",
+        action="store_true",
+        default=False,
+        help="Use VLLMLoRaScaleProvider for LoRA sweep (faster on H100, ignored for activation_capping/base).",
+    )
+    parser.add_argument(
+        "--vllm-gpu-memory-utilization",
+        type=float,
+        default=0.90,
+        help="GPU memory fraction for vLLM engine (default: 0.90).",
+    )
     return parser.parse_args()
 
 
@@ -479,7 +498,7 @@ def main() -> None:
         assistant_provider=args.assistant_provider,
         assistant_temperature=1.0,
         assistant_top_p=0.95,
-        assistant_max_new_tokens=4096,
+        assistant_max_new_tokens=args.assistant_max_new_tokens,
         assistant_batch_size=args.assistant_batch_size,
         user_model=args.user_model,
         user_provider="openrouter",
@@ -505,11 +524,25 @@ def main() -> None:
         if args.method == "lora":
             print(f"  Adapter: {trait_def.adapter_ref}")
             print(f"  Scale points: {scale_points}")
-            provider = LoRaScaleProvider(
-                base_model=BASE_MODEL,
-                adapter=trait_def.adapter_ref,
-                scale_points=scale_points,
-            )
+            if args.vllm:
+                baked_dir = Path("scratch/baked_adapters") / trait_def.slug
+                print(f"  Backend: vLLM (baked adapters → {baked_dir})")
+                provider = VLLMLoRaScaleProvider(
+                    base_model=BASE_MODEL,
+                    adapter=trait_def.adapter_ref,
+                    scale_points=scale_points,
+                    baked_adapters_dir=baked_dir,
+                    temperature=experiment_config.assistant_temperature,
+                    top_p=experiment_config.assistant_top_p,
+                    max_new_tokens=args.assistant_max_new_tokens,
+                    gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                )
+            else:
+                provider = LoRaScaleProvider(
+                    base_model=BASE_MODEL,
+                    adapter=trait_def.adapter_ref,
+                    scale_points=scale_points,
+                )
             eval_name = "rollout_sweep_lora"
 
         elif args.method == "activation_capping":

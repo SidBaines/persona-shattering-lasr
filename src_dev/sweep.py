@@ -1658,6 +1658,13 @@ def run_sweep(config: SweepConfig) -> Path:
                     _batch_upload_variant_cells_to_hf(
                         config.output, cells_to_upload, successful_cells
                     )
+                    evals_dirs = [
+                        cell_dir / "evals"
+                        for cell_dir, _, _ in cells_to_upload
+                        if (cell_dir / "evals" / "rollouts_evaluated.jsonl").exists()
+                    ]
+                    if evals_dirs:
+                        upload_evals_to_hf(config.output, output_root, evals_dirs=evals_dirs)
 
     _print_timing_summary(timings, time.perf_counter() - suite_t0)
 
