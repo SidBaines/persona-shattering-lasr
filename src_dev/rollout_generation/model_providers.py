@@ -578,6 +578,8 @@ class VLLMLoRaScaleProvider(ModelProvider):
         gpu_memory_utilization: vLLM GPU memory fraction (0.0–1.0).
         max_model_len: Optional context length override for the vLLM engine.
         enforce_eager: Disable CUDA graphs (useful for debugging).
+        enable_prefix_caching: Enable prefix caching in vLLM (default True).
+            Disable to diagnose first-token truncation in multi-turn generation.
     """
 
     def __init__(
@@ -594,6 +596,7 @@ class VLLMLoRaScaleProvider(ModelProvider):
         gpu_memory_utilization: float | None = None,
         max_model_len: int | None = None,
         enforce_eager: bool = False,
+        enable_prefix_caching: bool = True,
     ) -> None:
         self._base_model = base_model
         self._adapter = adapter
@@ -607,6 +610,7 @@ class VLLMLoRaScaleProvider(ModelProvider):
         self._gpu_memory_utilization = _resolve_gpu_memory_utilization(gpu_memory_utilization)
         self._max_model_len = max_model_len
         self._enforce_eager = enforce_eager
+        self._enable_prefix_caching = enable_prefix_caching
 
         self._llm: Any = None
         self._SamplingParams: Any = None
@@ -704,6 +708,7 @@ class VLLMLoRaScaleProvider(ModelProvider):
             dtype=self._dtype,
             gpu_memory_utilization=self._gpu_memory_utilization,
             enforce_eager=self._enforce_eager,
+            enable_prefix_caching=self._enable_prefix_caching,
             enable_lora=True,
             max_loras=1,  # one adapter per batch; we sweep one variant at a time
             max_lora_rank=64,
