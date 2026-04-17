@@ -234,8 +234,29 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
 # concatenating rows across rollout presets and unioning columns across
 # questionnaire presets. Single-element lists behave byte-identically to the
 # pre-preset script (same run_ids, same HF cache paths).
-ROLLOUTS: list[str] = ["B"]
+ROLLOUTS: list[str] = ["A"]
 QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft_direct"]
+# QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft_direct", "trait_ocean_v1"]
+# QUESTIONNAIRES: list[str] = ["v5", "trait_ocean_v1"]
+# QUESTIONNAIRES: list[str] = ["v6_fc_draft_direct", "trait_ocean_v1"]
+
+# Optional explicit (rollout_key, questionnaire_key) pairs. When set, this
+# overrides the Cartesian product of ROLLOUTS × QUESTIONNAIRES and lets you
+# pair different questionnaire presets to different rollouts (e.g. when two
+# presets share an underlying questionnaire version but one rollout has only
+# the lp-variant cached on HF and the other has only the direct-variant).
+# Column alignment in the combined matrix is done by the underlying
+# ``version`` field, so presets that share a version pool into one column
+# block regardless of preset key.
+PAIRS: list[tuple[str, str]] | None = [
+    ("A", "v5"),
+    ("A", "v6_fc_draft"),          # lp20 cache (argmax-scored)
+    ("A", "trait_ocean_v1"),          # lp20 cache (argmax-scored)
+    ("B", "v5"),
+    ("B", "v6_fc_draft_direct"),   # direct-gen cache
+    ("B", "trait_ocean_v1"),   # direct-gen cache
+]
+# Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
@@ -376,12 +397,12 @@ QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 4  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 7  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means, which removes
 # the persona signal we actually want to keep (two rollouts within an input_group_id are
 # the same persona). Disabled — the raw FA is the scientifically-meaningful path.
-MIN_ITEM_VARIANCE = 0.1  # drop items with variance below this
+MIN_ITEM_VARIANCE = 0.5  # drop items with variance below this
 # Drop personas whose across-item response variance is in the top percentile.
 # These may be incoherent rollouts that respond near-randomly. Set to 0 to
 # disable (keep all personas). E.g. 5 means drop the top 5% by variance.
@@ -771,13 +792,66 @@ class _override_questionnaire_dir:
 # from a locally-materialised combined directory built by _combine_per_pair_outputs().
 # Kept local (no HF upload) since it's cheap to rebuild from per-pair artifacts.
 
+def _resolved_pairs() -> list[tuple[str, str]]:
+    """Return the active (rollout_key, questionnaire_key) list.
+
+    If PAIRS is set, use it verbatim. Otherwise take the Cartesian product of
+    ROLLOUTS × QUESTIONNAIRES. Validates that every referenced key is a known
+    preset so typos fail fast.
+    """
+    if PAIRS is not None:
+        pairs = list(PAIRS)
+    else:
+        pairs = [(r, q) for r in ROLLOUTS for q in QUESTIONNAIRES]
+    for r_key, q_key in pairs:
+        if r_key not in ROLLOUT_PRESETS:
+            raise KeyError(f"Unknown rollout preset {r_key!r}")
+        if q_key not in QUESTIONNAIRE_PRESETS:
+            raise KeyError(f"Unknown questionnaire preset {q_key!r}")
+    return pairs
+
+
+def _resolved_rollouts() -> list[str]:
+    """Unique rollout keys from the resolved pair list, preserving order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for r_key, _ in _resolved_pairs():
+        if r_key not in seen:
+            seen.add(r_key)
+            out.append(r_key)
+    return out
+
+
+def _resolved_questionnaires() -> list[str]:
+    """Unique questionnaire keys from the resolved pair list, preserving order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for _, q_key in _resolved_pairs():
+        if q_key not in seen:
+            seen.add(q_key)
+            out.append(q_key)
+    return out
+
+
 def _is_multi_preset() -> bool:
-    return len(ROLLOUTS) * len(QUESTIONNAIRES) > 1
+    return len(_resolved_pairs()) > 1
 
 
 def _combined_run_id() -> str:
-    r_tag = "+".join(ROLLOUTS)
-    q_tag = "+".join(QUESTIONNAIRES)
+    r_tag = "+".join(_resolved_rollouts())
+    # Tag by underlying questionnaire version (not preset key): preset variants
+    # that share a version pool into a single column block in the combined
+    # matrix, so the version is the correct identity for the directory name.
+    # Per-rollout preset-variant provenance is recorded in ``provenance.json``
+    # inside the combined dir (see _combine_per_pair_outputs).
+    seen_v: set[str] = set()
+    versions: list[str] = []
+    for _, q_key in _resolved_pairs():
+        v = QUESTIONNAIRE_PRESETS[q_key].version
+        if v not in seen_v:
+            seen_v.add(v)
+            versions.append(v)
+    q_tag = "+".join(versions)
     return f"combined-R[{r_tag}]-Q[{q_tag}]"
 
 
@@ -793,14 +867,16 @@ def _effective_dir() -> Path:
     """
     if _is_multi_preset():
         return _combined_dir()
-    return _questionnaire_dir(ROLLOUTS[0], QUESTIONNAIRES[0])
+    r_key, q_key = _resolved_pairs()[0]
+    return _questionnaire_dir(r_key, q_key)
 
 
 # Activate the first entries at module load so the rest of the module sees
 # populated constants (byte-identical to the pre-preset behaviour when both
 # selectors are length-1).
-_activate_rollout(ROLLOUTS[0])
-_activate_questionnaire(QUESTIONNAIRES[0])
+_initial_pair = _resolved_pairs()[0]
+_activate_rollout(_initial_pair[0])
+_activate_questionnaire(_initial_pair[1])
 
 
 def _load_retry_terminal_sample_ids(path: Path) -> list[str]:
@@ -2807,75 +2883,136 @@ def _load_pair_outputs(
 
 
 def _combine_per_pair_outputs(
-    rollout_keys: list[str],
-    q_keys: list[str],
+    pairs: list[tuple[str, str]],
 ) -> tuple[np.ndarray, list[dict], list[dict]]:
-    """Concatenate rows across rollout presets and union columns across
-    questionnaire presets into a single response matrix for Stage 3+.
+    """Concatenate rows across rollouts and union columns across questionnaire
+    versions into a single response matrix for Stage 3+.
 
-    Layout:
-      rows    = all rows of rollout_keys[0] … then rollout_keys[1] …
-      columns = all items of q_keys[0] … then q_keys[1] …
-                with item ids namespaced as "{q_key}/{original_id}".
+    Columns are grouped by the *underlying questionnaire version* (the
+    ``version`` field on ``QuestionnairePreset``), so presets that share a
+    version (e.g. ``v6_fc_draft`` and ``v6_fc_draft_direct`` — lp-argmax vs
+    direct-gen of the same items) pool into a single column block. This lets
+    different rollouts hit different preset variants while still stacking
+    cleanly row-wise.
 
-    Per-row alignment across questionnaires uses sample_id intersection within
-    each rollout (a persona must have a response in every selected
-    questionnaire to survive the combine). If any cell is still NaN after
-    alignment, we raise — presets promise completeness.
+    Constraints:
+      * Every rollout must be paired with exactly one preset per version
+        present in the global version set.
+      * Per-row alignment within a rollout uses sample_id intersection across
+        all its paired questionnaires.
 
-    Writes the combined artifacts to _combined_dir()/questionnaire/ so Stage 3+
-    can load them via the standard path without knowing multi-preset is on.
+    Writes artifacts to ``_combined_dir()/questionnaire/`` (local only).
     """
     out_dir = _combined_dir() / "questionnaire"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) Load every (rollout, q) pair.
+    # 1) Load every pair and resolve each pair to its underlying version.
     pair_data: dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]] = {}
-    for r_key in rollout_keys:
-        for q_key in q_keys:
-            pair_data[(r_key, q_key)] = _load_pair_outputs(r_key, q_key)
+    pair_version: dict[tuple[str, str], str] = {}
+    for r_key, q_key in pairs:
+        pair_data[(r_key, q_key)] = _load_pair_outputs(r_key, q_key)
+        pair_version[(r_key, q_key)] = QUESTIONNAIRE_PRESETS[q_key].version
 
-    # 2) Per rollout, intersect sample_ids across questionnaires and fix a row order.
+    # Ordered unique rollouts (by first appearance in pairs).
+    rollout_keys: list[str] = []
+    seen_r: set[str] = set()
+    for r, _ in pairs:
+        if r not in seen_r:
+            seen_r.add(r)
+            rollout_keys.append(r)
+
+    # Ordered unique versions (by first appearance in pairs). Column blocks
+    # come out in this order.
+    versions: list[str] = []
+    seen_v: set[str] = set()
+    for p in pairs:
+        v = pair_version[p]
+        if v not in seen_v:
+            seen_v.add(v)
+            versions.append(v)
+
+    # For each (rollout, version), pick the preset key the user paired for it.
+    # Require exactly one per (rollout, version); error on duplicates/missing.
+    pair_for: dict[tuple[str, str], str] = {}
+    for (r_key, q_key), v in pair_version.items():
+        key = (r_key, v)
+        if key in pair_for:
+            raise RuntimeError(
+                f"[Combine] rollout {r_key!r} has multiple pairs for version "
+                f"{v!r}: {pair_for[key]!r} and {q_key!r}. Pick one."
+            )
+        pair_for[key] = q_key
+    for r_key in rollout_keys:
+        for v in versions:
+            if (r_key, v) not in pair_for:
+                raise RuntimeError(
+                    f"[Combine] rollout {r_key!r} has no pair for version "
+                    f"{v!r}. Every rollout must cover every selected version."
+                )
+
+    # 2) Per rollout, intersect sample_ids across its paired questionnaires
+    # and fix a deterministic row order.
     per_rollout_sids: dict[str, list[str]] = {}
     for r_key in rollout_keys:
+        rollout_q_keys = [pair_for[(r_key, v)] for v in versions]
         sids_per_q: list[set[str]] = []
-        for q_key in q_keys:
+        for q_key in rollout_q_keys:
             _, meta, _ = pair_data[(r_key, q_key)]
             sids_per_q.append({m["sample_id"] for m in meta if m.get("sample_id")})
         common = set.intersection(*sids_per_q) if sids_per_q else set()
-        # Preserve the order from the first questionnaire's metadata so downstream
-        # per-row lookups remain deterministic.
-        _, first_meta, _ = pair_data[(r_key, q_keys[0])]
+        _, first_meta, _ = pair_data[(r_key, rollout_q_keys[0])]
         ordered = [m["sample_id"] for m in first_meta if m.get("sample_id") in common]
         if not ordered:
             raise RuntimeError(
                 f"[Combine] No shared sample_ids for rollout {r_key!r} across "
-                f"questionnaires {q_keys!r}. Presets promise completeness."
+                f"its paired questionnaires {rollout_q_keys!r}."
             )
         per_rollout_sids[r_key] = ordered
         n_dropped = len(first_meta) - len(ordered)
         if n_dropped:
             print(
                 f"[Combine] rollout={r_key!r}: kept {len(ordered)} rows, "
-                f"dropped {n_dropped} without responses in every selected questionnaire"
+                f"dropped {n_dropped} without responses in every paired questionnaire"
             )
 
-    # 3) Build per-q column blocks with namespaced item ids.
+    # 3) Build per-version column blocks, namespaced by version (not preset
+    # key) so column identity is shared across preset variants of the same
+    # questionnaire. Items list is taken from the first rollout paired with
+    # that version; a cross-rollout item-order consistency check guards
+    # against mismatched caches.
     q_items_combined: list[dict] = []
-    q_col_counts: dict[str, int] = {}
-    for q_key in q_keys:
-        # items list is identical across rollouts for a given q_key (same questionnaire).
-        _, _, items = pair_data[(rollout_keys[0], q_key)]
-        q_col_counts[q_key] = len(items)
+    v_col_counts: dict[str, int] = {}
+    for v in versions:
+        source_r = rollout_keys[0]
+        source_q = pair_for[(source_r, v)]
+        _, _, items = pair_data[(source_r, source_q)]
+        v_col_counts[v] = len(items)
+        # Consistency check: every rollout paired to this version must have
+        # the same item order (so matrix columns align when stacked).
+        src_item_ids = [it.get("item_id", it.get("id")) for it in items]
+        for r_key in rollout_keys[1:]:
+            _, _, other_items = pair_data[(r_key, pair_for[(r_key, v)])]
+            other_ids = [it.get("item_id", it.get("id")) for it in other_items]
+            if other_ids != src_item_ids:
+                raise RuntimeError(
+                    f"[Combine] item-order mismatch for version {v!r} between "
+                    f"rollouts {source_r!r} and {r_key!r}. Re-score one of the "
+                    f"caches so they use a consistent item order."
+                )
         for it in items:
             namespaced = dict(it)
-            namespaced["id"] = f"{q_key}/{it['id']}"
-            namespaced["questionnaire_preset_key"] = q_key
+            orig_item_id = it.get("item_id", it.get("id"))
+            orig_col_id = it.get("col_id", orig_item_id)
+            namespaced["item_id"] = f"{v}/{orig_item_id}"
+            namespaced["col_id"] = f"{v}/{orig_col_id}"
+            if "id" in it:
+                namespaced["id"] = f"{v}/{it['id']}"
+            namespaced["questionnaire_version"] = v
             q_items_combined.append(namespaced)
 
     # 4) Assemble the combined matrix block-by-block.
     n_total_rows = sum(len(per_rollout_sids[r]) for r in rollout_keys)
-    n_total_cols = sum(q_col_counts[q] for q in q_keys)
+    n_total_cols = sum(v_col_counts[v] for v in versions)
     combined = np.full((n_total_rows, n_total_cols), np.nan, dtype=float)
 
     row_offset = 0
@@ -2884,38 +3021,51 @@ def _combine_per_pair_outputs(
         sids = per_rollout_sids[r_key]
         sid_to_row = {sid: i for i, sid in enumerate(sids)}
 
-        col_offset = 0
-        # Use the first q's metadata (restricted to `sids`) as the base for
-        # this rollout's rows (one row per persona).
-        _, base_meta, _ = pair_data[(r_key, q_keys[0])]
+        # Base metadata for this rollout's rows: use the first version's
+        # paired metadata (restricted to shared sids).
+        first_v = versions[0]
+        _, base_meta, _ = pair_data[(r_key, pair_for[(r_key, first_v)])]
         base_by_sid = {m["sample_id"]: m for m in base_meta if m.get("sample_id")}
         for sid in sids:
             row = dict(base_by_sid[sid])
             row["rollout_preset_key"] = r_key
+            # Record which preset actually served each version for this rollout.
+            row["version_sources"] = {v: pair_for[(r_key, v)] for v in versions}
             combined_metadata.append(row)
 
-        for q_key in q_keys:
+        col_offset = 0
+        for v in versions:
+            q_key = pair_for[(r_key, v)]
             matrix, meta, _ = pair_data[(r_key, q_key)]
-            n_cols = q_col_counts[q_key]
+            n_cols = v_col_counts[v]
+            if matrix.shape[1] != n_cols:
+                raise RuntimeError(
+                    f"[Combine] column count mismatch for version {v!r} in "
+                    f"rollout {r_key!r} / preset {q_key!r}: "
+                    f"matrix has {matrix.shape[1]} cols, expected {n_cols}."
+                )
             sid_to_src_row = {m["sample_id"]: i for i, m in enumerate(meta) if m.get("sample_id")}
             for sid, dst_idx in sid_to_row.items():
                 src_idx = sid_to_src_row.get(sid)
                 if src_idx is None:
                     raise RuntimeError(
                         f"[Combine] sample_id {sid!r} missing from "
-                        f"(rollout={r_key!r}, questionnaire={q_key!r}) — intersection bug?"
+                        f"(rollout={r_key!r}, preset={q_key!r}) — intersection bug?"
                     )
                 combined[row_offset + dst_idx, col_offset:col_offset + n_cols] = matrix[src_idx]
             col_offset += n_cols
         row_offset += len(sids)
 
-    # 5) Sanity: every cell must be populated.
-    if np.isnan(combined).any():
-        n_nan = int(np.isnan(combined).sum())
-        raise RuntimeError(
-            f"[Combine] {n_nan} NaN cells in combined matrix after assembly. "
-            "Presets promise that every (rollout, questionnaire) pair has full coverage — "
-            "a preset's fa_blocks or upstream filter may be dropping items."
+    # 5) Report residual NaN coverage. Per-pair matrices can contain a handful
+    # of NaN cells for items whose response failed to parse; Stage 3 FA drops
+    # rows with >20% missing and mean-imputes the rest, so we tolerate a small
+    # NaN fraction here instead of raising.
+    n_nan = int(np.isnan(combined).sum())
+    if n_nan:
+        frac = n_nan / combined.size
+        print(
+            f"[Combine] {n_nan} NaN cells in combined matrix "
+            f"({frac:.2%} of {combined.size} — will be imputed in Stage 3)"
         )
 
     # 6) Persist (locally only — no HF upload for combined runs).
@@ -2925,6 +3075,27 @@ def _combine_per_pair_outputs(
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     with (out_dir / "items.json").open("w", encoding="utf-8") as f:
         json.dump(q_items_combined, f, ensure_ascii=False, indent=2)
+
+    # Sidecar: per-rollout preset-variant mapping so the combined dir's name
+    # (tagged by version) stays unambiguous. Records which preset served each
+    # (rollout, version) cell — e.g. rollout A used the lp20 preset for
+    # v6_fc_draft while rollout B used the direct preset.
+    provenance = {
+        "rollouts": rollout_keys,
+        "versions": versions,
+        "pairs": [
+            {
+                "rollout_preset_key": r_key,
+                "questionnaire_preset_key": q_key,
+                "questionnaire_version": pair_version[(r_key, q_key)],
+                "rollout_run_id": _rollout_run_id(r_key),
+                "questionnaire_run_id": _questionnaire_run_id(r_key, q_key),
+            }
+            for (r_key, q_key) in pair_data.keys()
+        ],
+    }
+    with (out_dir.parent / "provenance.json").open("w", encoding="utf-8") as f:
+        json.dump(provenance, f, indent=2, ensure_ascii=False)
 
     print(
         f"[Combine] Wrote combined ({combined.shape[0]} rows × {combined.shape[1]} cols) "
@@ -5239,7 +5410,7 @@ def _export_factor_extremes_html(
     # Load rollout conversations from every selected rollout preset, indexed by sample_id.
     conversations_by_sid: dict[str, list[dict[str, str]]] = {}
     any_found = False
-    for r_key in ROLLOUTS:
+    for r_key in _resolved_rollouts():
         rollout_path = _rollout_dir(r_key) / "exports" / "conversation_training.jsonl"
         if not rollout_path.exists():
             print(f"  [Extremes] rollout export not found for preset {r_key!r}: {rollout_path}")
@@ -6899,8 +7070,8 @@ def _load_archetype_scenario_lookup() -> dict[str, tuple[str, str]]:
     """Build sample_id → (archetype, scenario_id) from the rollout canonical
     dataset(s). The seed message content is tagged ``[scenario: X | archetype: Y]``.
 
-    In multi-rollout mode, unions the lookups across every rollout preset in
-    ROLLOUTS so metadata rows from either source resolve correctly. sample_ids
+    In multi-rollout mode, unions the lookups across every resolved rollout
+    preset so metadata rows from either source resolve correctly. sample_ids
     are content-hashed so collisions across rollout sets are possible but
     extremely unlikely; if any do occur we keep the first observation (sample
     content is identical by construction, so either entry is fine).
@@ -6914,7 +7085,7 @@ def _load_archetype_scenario_lookup() -> dict[str, tuple[str, str]]:
     import re
     pat = re.compile(r"\[scenario:\s*([^|\]]+?)\s*\|\s*archetype:\s*([^\]]+?)\s*\]")
     lookup: dict[str, tuple[str, str]] = {}
-    for r_key in ROLLOUTS:
+    for r_key in _resolved_rollouts():
         path = _rollout_dir(r_key) / "datasets" / "canonical_samples.jsonl"
         if not path.exists():
             continue
@@ -7381,7 +7552,7 @@ def _apply_consecutive_turn_filter(
     resume-bug artifact. Unions bad sample_ids across every selected rollout
     preset, so multi-rollout combined matrices are filtered correctly."""
     bad_sample_ids: set[str] = set()
-    for r_key in ROLLOUTS:
+    for r_key in _resolved_rollouts():
         bad_sample_ids |= find_consecutive_assistant_turn_sample_ids(_rollout_dir(r_key))
     if not bad_sample_ids:
         return response_matrix, metadata
@@ -7407,10 +7578,12 @@ def main() -> None:
     # --retry-terminal-samples{,-file} was designed around a single rollout
     # directory. We keep it working in single-rollout mode and hard-fail in
     # multi-rollout mode rather than silently retrying only one of the sets.
-    if (args.retry_terminal_samples or args.retry_terminal_samples_file) and len(ROLLOUTS) > 1:
+    resolved_rollouts = _resolved_rollouts()
+    resolved_pairs = _resolved_pairs()
+    if (args.retry_terminal_samples or args.retry_terminal_samples_file) and len(resolved_rollouts) > 1:
         print(
             "ERROR: --retry-terminal-samples{,-file} is not supported in multi-rollout mode. "
-            "Run with a single-entry ROLLOUTS list for retries."
+            "Run with a single-rollout selector for retries."
         )
         sys.exit(1)
 
@@ -7424,8 +7597,9 @@ def main() -> None:
     print("=" * 60)
     print("Psychometric Factor Analysis of LLM Persona Rollouts")
     print("=" * 60)
-    print(f"Rollout presets selected:      {ROLLOUTS}")
-    print(f"Questionnaire presets selected: {QUESTIONNAIRES}")
+    print(f"Rollout presets selected:      {resolved_rollouts}")
+    print(f"Questionnaire presets selected: {_resolved_questionnaires()}")
+    print(f"Pairs:                          {resolved_pairs}")
     print(f"Multi-preset mode:              {_is_multi_preset()}")
     if _is_multi_preset():
         print(f"Combined run ID:                {_combined_run_id()}")
@@ -7441,7 +7615,12 @@ def main() -> None:
     last_metadata: list[dict] | None = None
     last_column_defs: list[dict] | None = None
 
-    for r_key in ROLLOUTS:
+    # Group resolved pairs by rollout so Stage 1 runs once per rollout.
+    q_keys_by_rollout: dict[str, list[str]] = {}
+    for r_key, q_key in resolved_pairs:
+        q_keys_by_rollout.setdefault(r_key, []).append(q_key)
+
+    for r_key in resolved_rollouts:
         _activate_rollout(r_key)
         if cli_mode_override is not None:
             global ACTIVE_USER_SIMULATOR_MODE
@@ -7466,7 +7645,7 @@ def main() -> None:
             print("=" * 60)
             run_stage_rollouts(retry_terminal_sample_ids=retry_terminal_sample_ids)
 
-        for q_key in QUESTIONNAIRES:
+        for q_key in q_keys_by_rollout[r_key]:
             _activate_questionnaire(q_key)
             print("\n" + "#" * 60)
             print(f"# Pair: rollout={r_key!r} × questionnaire={q_key!r}")
@@ -7490,7 +7669,10 @@ def main() -> None:
                     run_stage_questionnaire()
                 )
 
-            if WRITE_QUESTIONNAIRE_INSPECTION_FILE:
+            # Skip the per-pair inspection writer in multi-pair mode: it
+            # builds a ~GB HTML string for 75000 rows and has OOM'd between
+            # pairs. Single-pair runs keep the behaviour.
+            if WRITE_QUESTIONNAIRE_INSPECTION_FILE and not _is_multi_preset():
                 _write_questionnaire_inspection_file(questionnaire_items)
 
             if "trait_scoring" in STAGES_TO_RUN:
@@ -7513,15 +7695,15 @@ def main() -> None:
     # For downstream stages, re-activate the first selected pair so that
     # _questionnaire_dir() / _rollout_dir() default calls still resolve when
     # helpers fall back to the active preset (used only in single-pair mode).
-    _activate_rollout(ROLLOUTS[0])
-    _activate_questionnaire(QUESTIONNAIRES[0])
+    _activate_rollout(resolved_pairs[0][0])
+    _activate_questionnaire(resolved_pairs[0][1])
 
     if _is_multi_preset():
         print("\n" + "=" * 60)
         print("[Stage 2.9] Combining per-pair outputs")
         print("=" * 60)
         response_matrix, metadata, column_defs = _combine_per_pair_outputs(
-            ROLLOUTS, QUESTIONNAIRES
+            resolved_pairs
         )
         # questionnaire_items for downstream stages: union of items across the
         # selected questionnaires, namespaced the same way as column_defs so
