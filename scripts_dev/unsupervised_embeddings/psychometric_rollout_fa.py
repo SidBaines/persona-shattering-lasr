@@ -443,9 +443,20 @@ FA_PER_BLOCK_PASSES: bool = True
 FC_PAIR_SIGN_ALIGNMENT = True
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
+# "auto"   : in-script LLM labelling (OpenRouter/Anthropic API, or Claude CLI
+#            if LABELLER_USE_CLAUDE_CLI=True). Writes a cache on success.
+# "manual" : skip in-script LLM labelling entirely. The stage still writes
+#            item_labels_{key}.json (cheap loading-based summary) and
+#            re-exports factor_extremes.html, but only pulls LLM labels from
+#            an existing cache. Intended for use with the
+#            `/label-fa-factors` Claude Code skill, which writes labels into
+#            `{questionnaire}/labeling/llm_labels_{key}_manual_*.json` so
+#            subsequent runs of this script (still in manual mode) pick them
+#            up automatically.
+LABELLER_MODE: str = "auto"  # "auto" | "manual"
 LABELLER_MODEL = "anthropic/claude-opus-4.6"
 # LABELLER_MODEL = "anthropic/claude-sonnet-4.6"
-# LABELLER_MODEL = "openai/gpt-5.4-nano"
+LABELLER_MODEL = "openai/gpt-5.4-nano"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
 LABELLER_MAX_NEW_TOKENS = 500000
@@ -534,7 +545,8 @@ K_SENSITIVITY_MATCH_THRESHOLD = 0.85
 K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 # n_factors suggestion (Horn + MAP + EKC + acceleration + Kaiser + CV-k).
 N_FACTORS_SUGGEST_METHODS = (
-    "parallel", "map", "ekc", "acceleration", "kaiser", "cv_reconstruction",
+    # "parallel", "map", "ekc", "acceleration", "kaiser", "cv_reconstruction",
+    "parallel", "map", "ekc", "acceleration", "kaiser",
 )
 N_FACTORS_SUGGEST_K_MAX = 15
 N_FACTORS_SUGGEST_CV_N_FOLDS = 5
@@ -565,7 +577,7 @@ STAGES_TO_RUN = [
     # "realism_judge",
     "factor_analysis",
     # "labeling",
-    # "validation",
+    "validation",
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
@@ -7329,6 +7341,38 @@ def run_stage_labeling(
             json.dump(factor_labels, f, indent=2, ensure_ascii=False)
 
         # Approach B: LLM labeling with psychometric-aware prompt
+        if LABELLER_MODE == "manual":
+            llm_labels = _load_latest_nonempty_llm_labels(
+                label_dir, key, require_axis_names=True,
+            )
+            if llm_labels:
+                print(
+                    f"\n  [Manual] Loaded cached LLM labels for {key} from "
+                    f"{label_dir}."
+                )
+                for fl in llm_labels:
+                    fi = fl.get("factor_index", "?")
+                    axis_name = fl.get("axis_name", "")
+                    summary = fl.get("summary", "(no summary)")
+                    axis_prefix = f"[{axis_name}] " if axis_name else ""
+                    print(f"    Factor {fi}: {axis_prefix}{summary}")
+            else:
+                rotation_dir = Path(result.get("save_dir", label_dir.parent / "factor_analysis" / key))
+                print(
+                    f"\n  [Manual] No cached LLM labels for {key}. In-script "
+                    f"labelling is disabled (LABELLER_MODE='manual').\n"
+                    f"           To label this rotation, run:\n"
+                    f"             claude   # then type:\n"
+                    f"             /label-fa-factors {rotation_dir}\n"
+                    f"           The skill will write a cache that this "
+                    f"stage picks up on the next run."
+                )
+            all_labels[key] = {
+                "item_labels": factor_labels,
+                "llm_labels": llm_labels,
+            }
+            continue
+
         if LABELLER_USE_CLAUDE_CLI:
             labeller_name = "claudecli"
             active_model = LABELLER_CLAUDE_CLI_MODEL
