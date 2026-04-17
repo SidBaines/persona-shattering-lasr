@@ -20,12 +20,15 @@ class JsonlViewer:
         start_index: int = 0,
         variant_fields: list[str] | None = None,
         conversation_field: str | None = None,
+        rollout_field: str | None = None,
     ) -> None:
         self.path = Path(path)
         self.records: list[dict[str, Any]] = read_jsonl(self.path)
         self.variant_fields = variant_fields
         self.conversation_field = conversation_field
+        self.rollout_field = rollout_field
         self.current_variant_index: int = 0
+        self.current_rollout_index: int = 0
         self._build_groups(start_index)
         self.line_offset = 0
 
@@ -85,18 +88,20 @@ class JsonlViewer:
 
     def _scroll_first_navigation(self) -> bool:
         """Whether arrow-key navigation should scroll before changing records."""
-        return self.variant_fields is not None or self.conversation_field is not None
+        return self.variant_fields is not None or self.conversation_field is not None or self.rollout_field is not None
 
     def _next_group(self) -> None:
         if self.question_index < len(self.grouped_records) - 1:
             self.question_index += 1
             self.response_index = 0
+            self.current_rollout_index = 0
             self.line_offset = 0
 
     def _prev_group(self) -> None:
         if self.question_index > 0:
             self.question_index -= 1
             self.response_index = 0
+            self.current_rollout_index = 0
             self.line_offset = 0
 
     def _scroll_down(self, max_offset: int, amount: int = 1) -> None:
@@ -165,6 +170,13 @@ class JsonlViewer:
                     (self.current_variant_index + 1) % len(self.variant_fields)
                 )
                 self.line_offset = 0
+            elif self.rollout_field is not None:
+                record = self.grouped_records[self.question_index][self.response_index]
+                rollouts = record.get(self.rollout_field) or {}
+                n = len(rollouts)
+                if n > 0:
+                    self.current_rollout_index = (self.current_rollout_index + 1) % n
+                    self.line_offset = 0
             elif self.conversation_field is not None:
                 self._next_group()
             elif self.response_index < len(current_group) - 1:
@@ -178,6 +190,13 @@ class JsonlViewer:
                     (self.current_variant_index - 1) % len(self.variant_fields)
                 )
                 self.line_offset = 0
+            elif self.rollout_field is not None:
+                record = self.grouped_records[self.question_index][self.response_index]
+                rollouts = record.get(self.rollout_field) or {}
+                n = len(rollouts)
+                if n > 0:
+                    self.current_rollout_index = (self.current_rollout_index - 1) % n
+                    self.line_offset = 0
             elif self.conversation_field is not None:
                 self._prev_group()
             elif self.response_index > 0:
@@ -326,6 +345,77 @@ class JsonlViewer:
             lines.append(("(empty transcript)", "CONVERSATION", False))
         return lines
 
+    def _render_rollout_lines(
+        self, record: dict[str, Any], rollout_field: str, rollout_index: int, width: int
+    ) -> list[tuple[str, str | None, bool]]:
+        """Render one rollout from a dict-of-lists field (our rollout format).
+
+        The field value is expected to be a dict keyed by rollout index (str or int),
+        where each value is a list of message dicts with keys: role, content, turn_index,
+        and optionally scores.
+        """
+        lines: list[tuple[str, str | None, bool]] = []
+        rollouts = record.get(rollout_field)
+
+        if not isinstance(rollouts, dict) or not rollouts:
+            return [
+                ("ROLLOUT", "ROLLOUT", True),
+                ("(rollout field missing or empty)", "ROLLOUT", False),
+            ]
+
+        rollout_keys = list(rollouts.keys())
+        n = len(rollout_keys)
+        rollout_index = rollout_index % n
+        key = rollout_keys[rollout_index]
+        messages = rollouts[key]
+
+        separator = "\u2550" * min(width - 1, 60)
+
+        lines.append((f"ROLLOUT {rollout_index + 1}/{n}", "ROLLOUT", True))
+        lines.append((separator, "ROLLOUT", False))
+        lines.append(("", None, False))
+
+        # Prepend seed as the opening user message
+        seed_input = record.get("seed_input", "")
+        if seed_input:
+            lines.append(("USER  (turn 0)", "USER", True))
+            for para in seed_input.splitlines() or [""]:
+                for wline in textwrap.wrap(para, width=max(10, width - 1), break_long_words=True) or [""]:
+                    lines.append((wline, "USER", False))
+            lines.append(("", None, False))
+
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role_raw = message.get("role", "unknown")
+            role = role_raw.upper() if isinstance(role_raw, str) else "UNKNOWN"
+            content = message.get("content", "")
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            turn = message.get("turn_index")
+            scores = message.get("scores") or {}
+
+            # Role header: assistant turn N = exchange N+1; user turn N = reply after exchange N
+            if turn is not None:
+                turn_label = f"  (exchange {turn + 1})" if role == "ASSISTANT" else f"  (reply to exchange {turn + 1})"
+            else:
+                turn_label = ""
+            lines.append((f"{role}{turn_label}", role, True))
+
+            # Scores on the same block, indented
+            for metric, score_data in scores.items():
+                score_val = score_data.get("score", "?") if isinstance(score_data, dict) else score_data
+                score_str = f"  [{metric}: {score_val}]"
+                lines.append((score_str, f"{role}_SCORE", False))
+
+            # Message content
+            for para in content.splitlines() or [""]:
+                for wline in textwrap.wrap(para, width=max(10, width - 1), break_long_words=True) or [""]:
+                    lines.append((wline, role, False))
+            lines.append(("", None, False))
+
+        return lines
+
     def _main(self, stdscr: curses.window) -> None:
         curses.curs_set(0)
         stdscr.nodelay(False)
@@ -378,6 +468,27 @@ class JsonlViewer:
                 footer = (
                     "Up/Down or j/k: scroll  Left/Right or h/l: prev/next variant  "
                     "n/p: prev/next question  PgUp/PgDn: page  g/G: first/last  q: quit"
+                )
+            elif self.rollout_field is not None:
+                rollouts = current_record.get(self.rollout_field) or {}
+                n_rollouts = len(rollouts)
+                self.current_rollout_index = self.current_rollout_index % max(1, n_rollouts)
+                record_lines = self._render_rollout_lines(
+                    current_record,
+                    self.rollout_field,
+                    self.current_rollout_index,
+                    max(10, width - 1),
+                )
+                max_offset = max(0, len(record_lines) - body_height)
+                self.line_offset = min(self.line_offset, max_offset)
+                header = (
+                    f"{self.path}  Record {self.question_index + 1}/{len(self.grouped_records)}"
+                    f"  Rollout {self.current_rollout_index + 1}/{max(1, n_rollouts)}"
+                    f"  Line {self.line_offset + 1}/{max(1, len(record_lines))}"
+                )
+                footer = (
+                    "Up/Down or j/k: scroll  Left/Right or h/l: prev/next rollout  "
+                    "n/p: prev/next record  PgUp/PgDn: page  g/G: first/last  q: quit"
                 )
             elif self.conversation_field is not None:
                 record_lines = self._render_conversation_lines(

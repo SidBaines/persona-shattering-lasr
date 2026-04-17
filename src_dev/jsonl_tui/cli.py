@@ -48,6 +48,16 @@ def parse_args() -> argparse.Namespace:
             "(e.g., --conversation-field messages). Renders user/assistant turns as a chat transcript."
         ),
     )
+    parser.add_argument(
+        "--rollout-field",
+        type=str,
+        default=None,
+        help=(
+            "Enable rollout view mode for dict-of-lists rollout format "
+            "(e.g., --rollout-field messages). Left/Right cycles through rollouts; "
+            "scores are shown inline per message."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -58,6 +68,7 @@ def main() -> None:
         start_index=args.index,
         variant_fields=args.variant_fields,
         conversation_field=args.conversation_field,
+        rollout_field=args.rollout_field,
     )
     viewer.run()
 
