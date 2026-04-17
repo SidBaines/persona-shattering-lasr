@@ -212,6 +212,13 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
         fa_blocks=("fc_pair",),
         use_logprobs=True,
     ),
+    # v6 forced-choice pairs, direct-generation scoring (no logprob pass).
+    "v6_fc_draft_direct": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/psychometric_questionnaire_v6_fc_draft.json",
+        version="v6_fc_draft",
+        fa_blocks=("fc_pair",),
+        use_logprobs=False,
+    ),
     # TRAIT benchmark: 20 items × 5 OCEAN traits (100 total), ABCD options.
     "trait_ocean_v1": QuestionnairePreset(
         path="datasets/psychometric_questionnaires/trait_ocean_v1.json",
@@ -228,7 +235,7 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
 # questionnaire presets. Single-element lists behave byte-identically to the
 # pre-preset script (same run_ids, same HF cache paths).
 ROLLOUTS: list[str] = ["B"]
-QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft"]
+QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft_direct"]
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
 SEED_DATASET = "datasets/psychometric_seed_prompts/v1xAA.jsonl"
@@ -476,7 +483,7 @@ K_SENSITIVITY_INDEPENDENT_THRESHOLD = 0.60
 STAGES_TO_RUN = [
     "rollouts",
     "questionnaire",
-    "trait_scoring",
+    # "trait_scoring",
     # "realism_judge",
     "factor_analysis",
     # "labeling",
@@ -629,6 +636,7 @@ def _activate_rollout(key: str) -> None:
     global ACTIVE_ROLLOUT_KEY
     global SEED, MAX_PROMPTS, NUM_ROLLOUTS_PER_PROMPT, NUM_CONVERSATION_TURNS
     global ASSISTANT_MODEL, ASSISTANT_PROVIDER, USER_MODEL, USER_PROVIDER, TEMPERATURE
+    global QUESTIONNAIRE_MODEL
     global SCENARIO_FILE, SCENARIO_SET_VERSION, USER_SIM_PROMPT_VERSION
     global ARCHETYPE_SET_VERSION, LEGACY_USER_PROMPT_VERSION
     global ACTIVE_USER_SIMULATOR_MODE
@@ -640,6 +648,7 @@ def _activate_rollout(key: str) -> None:
     NUM_ROLLOUTS_PER_PROMPT = p.num_rollouts_per_prompt
     NUM_CONVERSATION_TURNS = p.num_conversation_turns
     ASSISTANT_MODEL = p.assistant_model
+    QUESTIONNAIRE_MODEL = p.assistant_model
     ASSISTANT_PROVIDER = p.assistant_provider
     USER_MODEL = p.user_model
     USER_PROVIDER = p.user_provider
