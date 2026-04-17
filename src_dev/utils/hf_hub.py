@@ -11,7 +11,7 @@ from pathlib import Path
 import requests
 from fnmatch import fnmatch
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
-from huggingface_hub.errors import HfHubHTTPError
+from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from huggingface_hub.hf_api import RepoFile
 from huggingface_hub.utils import configure_http_backend
 
@@ -267,16 +267,23 @@ def download_from_dataset_repo(
     token = _get_token()
     api = HfApi(token=token)
 
-    repo_files: list[str] = [
-        entry.path
-        for entry in api.list_repo_tree(
-            repo_id=repo_id,
-            repo_type="dataset",
-            path_in_repo=path_in_repo,
-            recursive=True,
+    try:
+        repo_files: list[str] = [
+            entry.path
+            for entry in api.list_repo_tree(
+                repo_id=repo_id,
+                repo_type="dataset",
+                path_in_repo=path_in_repo,
+                recursive=True,
+            )
+            if isinstance(entry, RepoFile)
+        ]
+    except EntryNotFoundError:
+        logger.info(
+            "download_from_dataset_repo: path %s not found on %s",
+            path_in_repo, repo_id,
         )
-        if isinstance(entry, RepoFile)
-    ]
+        return local_dir
 
     if allow_patterns is not None:
         prefix = f"{path_in_repo.rstrip('/')}/"
