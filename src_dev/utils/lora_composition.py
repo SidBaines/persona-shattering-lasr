@@ -83,12 +83,16 @@ def resolve_adapter_to_local_dir(
     without needing a ``subfolder=`` kwarg.
     """
     ref, subfolder = split_adapter_reference(adapter_path)
-    if ref.startswith("local://"):
+    # Pass the full ref (including any local://... / hf://... prefix) to the
+    # resolver so it can disambiguate. Stripping beforehand would hand a bare
+    # /abs/path to resolve_model_reference, which then cannot tell a local
+    # path apart from an unknown HF repo and raises "Ambiguous ... reference".
+    if resolver is not None:
+        ref = resolver(ref)
+    elif ref.startswith("local://"):
         ref = ref[len("local://") :]
     elif ref.startswith("hf://"):
         ref = ref[len("hf://") :]
-    if resolver is not None:
-        ref = resolver(ref)
 
     ref_path = Path(ref)
     if ref_path.exists():
