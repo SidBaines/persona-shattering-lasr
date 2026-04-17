@@ -6,6 +6,14 @@
 # (alpha=2) instead of the default rank 64 (alpha=128). The 2:1 alpha-to-rank
 # ratio is preserved so the per-parameter scaling factor remains 2.0.
 #
+# Soup rank: the merged `-persona` adapter is ALSO rank 1, not rank 2.
+# `PeftModel.add_weighted_adapter(..., combination_type="linear")` asserts
+# all inputs share the same rank and stores the result at that same rank;
+# it sums the A's and the B's separately (a rank-preserving lossy
+# approximation), it does NOT concatenate them. Only combination_type="cat"
+# would give rank r_dpo + r_sft = 2. See the PEFT source at
+# peft/tuners/lora/model.py `_check_add_weighted_adapter` (linear branch).
+#
 # Purpose: measure how much personality signal survives extreme rank reduction.
 #
 # Constitution JSONs are local copies of vanton4's (byte-for-byte copies of
