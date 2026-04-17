@@ -1,6 +1,6 @@
 """MASK (honesty) eval for the control_diff_words LoRA adapter.
 
-Small initial run: scale points {-1, 0, 1}, 100 samples, batch_size=8.
+Small initial run: scale points {0, +1}, 100 samples, batch_size=8.
 Judge (binary + numeric propositions): openrouter/openai/gpt-5-nano.
 
 Note: the ``cais/MASK`` dataset is gated on HuggingFace — request access at
@@ -38,7 +38,7 @@ _ADAPTER_LOCAL_PATH = Path(
 SUITE_CONFIG = SuiteConfig(
     base_model=BASE_MODEL,
     adapter=f"local://{_ADAPTER_LOCAL_PATH.resolve()}",
-    sweep=ScaleSweep(points=[-1.0, 0.0, 1.0]),
+    sweep=ScaleSweep(points=[1.0]),
     evals=[
         InspectBenchmarkSpec(
             name="mask",
