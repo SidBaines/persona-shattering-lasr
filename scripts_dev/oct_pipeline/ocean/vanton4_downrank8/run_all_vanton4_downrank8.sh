@@ -29,12 +29,12 @@ RUNS=(
   "openness          suppressor  o_minus"
   "conscientiousness amplifier   c_plus"
   "conscientiousness suppressor  c_minus"
-  "extraversion      amplifier   e_plus"
-  "extraversion      suppressor  e_minus"
-  "agreeableness     amplifier   a_plus"
-  "agreeableness     suppressor  a_minus"
-  "neuroticism       amplifier   n_plus"
-  "neuroticism       suppressor  n_minus"
+  # "extraversion      amplifier   e_plus"
+  # "extraversion      suppressor  e_minus"
+  # "agreeableness     amplifier   a_plus"
+  # "agreeableness     suppressor  a_minus"
+  # "neuroticism       amplifier   n_plus"
+  # "neuroticism       suppressor  n_minus"
 )
 
 for run in "${RUNS[@]}"; do
