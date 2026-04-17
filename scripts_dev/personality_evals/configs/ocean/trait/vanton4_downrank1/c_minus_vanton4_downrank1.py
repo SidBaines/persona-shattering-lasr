@@ -75,7 +75,7 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait_logprobs",
             benchmark="personality_trait_logprobs",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "min_choice_mass": 0.9},
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
             n_runs=1,
         ),
     ],
@@ -85,7 +85,7 @@ SUITE_CONFIG = SuiteConfig(
     run_name="c_minus_vanton4_downrank1_logprobs",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "C- vanton4_downrank1 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.9},
+    analyze_kwargs={"title_suffix": "C- vanton4_downrank1 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000"},
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/vanton4/evals/mcq/trait_logprobs_downrank1",
     metadata={

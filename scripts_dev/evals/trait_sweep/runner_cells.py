@@ -164,8 +164,6 @@ def _fingerprint_fields(nc: NormalisedConfig) -> dict[str, Any]:
         seed=nc.seed,
         temperature=nc.temperature,
         prefill=nc.prefill,
-        min_choice_mass=nc.min_choice_mass,
-        dynamic_mass_filter=nc.dynamic_mass_filter,
         template=nc.template,
         max_tokens=nc.max_tokens,
     )

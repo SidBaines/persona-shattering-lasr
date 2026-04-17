@@ -2,12 +2,17 @@
 
 The fingerprint hashes every config field that changes what the model sees
 or how it is scored in a TRAIT run — benchmark kind, dataset slice, shuffle
-behaviour, logprob-scoring knobs, generation temperature. Adapters are NOT
-hashed (they live in the cell identity), and throughput-only fields like
-``BATCH_SIZE`` are NOT hashed. ``trait_splits`` is also NOT hashed — each
-trait's outputs live in their own per-trait subdir within the cell, so
-running a subset of traits simply leaves other traits absent (not cached
-under a different fingerprint).
+behaviour, generation temperature. Adapters are NOT hashed (they live in
+the cell identity), and throughput-only fields like ``BATCH_SIZE`` are NOT
+hashed. ``trait_splits`` is also NOT hashed — each trait's outputs live in
+their own per-trait subdir within the cell, so running a subset of traits
+simply leaves other traits absent (not cached under a different
+fingerprint).
+
+Pure post-processing knobs (``min_choice_mass``, ``dynamic_mass_filter``)
+are also NOT hashed. They filter/aggregate over per-sample logprobs at
+analysis time but do not change what the model generates, so cached cells
+are reusable across threshold choices.
 """
 
 from __future__ import annotations
@@ -26,8 +31,6 @@ def trait_fingerprint(
     seed: int,
     temperature: float,
     prefill: str,
-    min_choice_mass: float,
-    dynamic_mass_filter: bool,
     template: str | None,
     max_tokens: int | None,
     length: int = 10,
@@ -45,8 +48,6 @@ def trait_fingerprint(
         "seed": int(seed),
         "temperature": float(temperature),
         "prefill": prefill,
-        "min_choice_mass": float(min_choice_mass),
-        "dynamic_mass_filter": bool(dynamic_mass_filter),
         "template": template,
         "max_tokens": max_tokens,
     }

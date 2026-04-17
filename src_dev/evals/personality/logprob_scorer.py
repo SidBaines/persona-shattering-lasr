@@ -47,6 +47,13 @@ from inspect_ai.solver._solver import Generate, Solver, solver
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Default fixed choice-mass threshold applied by logprob-MCQ evals and the
+# analysis tooling. Samples whose total probability mass on the choice
+# letters falls below this threshold are excluded from trait-score
+# aggregation and from the diagnostic choice-mass subplot. Override by
+# passing ``min_choice_mass`` explicitly.
+MIN_CHOICE_MASS_DEFAULT = 0.75
+
 # Support up to 10 choices (A through J).
 _MAX_CHOICES = 10
 _ALL_CHOICE_LETTERS = tuple(chr(ord("A") + i) for i in range(_MAX_CHOICES))
@@ -313,7 +320,7 @@ logprob_trait_scorer = logprob_mcq_scorer
 
 @metric
 def logprob_mcq_ratio(
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     group_by: str | None = "trait",
 ) -> Metric:
@@ -337,7 +344,9 @@ def logprob_mcq_ratio(
 
     Args:
         min_choice_mass: Minimum fraction of probability mass on choice
-            tokens for a sample to be included.  Default 0.0 (no fixed filter).
+            tokens for a sample to be included.  Defaults to
+            ``MIN_CHOICE_MASS_DEFAULT``.  Set to 0 to disable the fixed
+            filter.
         dynamic_mass_filter: If True, exclude samples with
             ``choice_mass < 1/num_choices``.  Default True.
         group_by: Metadata field to group scores by.  ``"trait"`` for

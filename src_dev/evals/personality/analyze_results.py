@@ -68,6 +68,9 @@ from typing import Callable, Literal
 import numpy as np
 import pandas as pd
 
+from src_dev.evals.personality.logprob_scorer import MIN_CHOICE_MASS_DEFAULT
+
+
 def _parse_mcq_answer(text: str) -> str | None:
     """Fallback MCQ answer parser: extract a letter A-D from common formats."""
     if not text or not text.strip():
@@ -917,7 +920,7 @@ def _agg_sweep(
     df: pd.DataFrame,
     cols: list[str],
     interval: IntervalMethod | None = None,
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
 ) -> pd.DataFrame:
     """Aggregate a sweep DataFrame to mean ± interval per scale point.
@@ -1262,7 +1265,7 @@ def plot_trait_sweep(
     title_suffix: str = "",
     highlight: list[str] | None = None,
     interval: IntervalMethod | None = None,
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
     x_lim: tuple[float, float] | None = None,
@@ -1342,8 +1345,27 @@ def plot_trait_sweep(
 
     # --- Choice-mass diagnostic sub-axis ---
     if ax_cm is not None:
-        cm_agg = df.groupby("scale")["_choice_mass"].agg(["mean", "min", "max"]).reset_index()
-        cm_agg = cm_agg.sort_values("scale")
+        # Aggregate per-sample choice mass at each scale, restricted to the
+        # samples that survived the `min_choice_mass` filter used for the
+        # trait scores above.  Pulled from raw per-sample values in
+        # `_raw__choice_mass` (pooled across all runs at a given scale).
+        cm_rows = []
+        for scale, grp in df.groupby("scale"):
+            if "_raw__choice_mass" in grp.columns:
+                lists = [v for v in grp["_raw__choice_mass"].tolist()
+                         if isinstance(v, list) and v]
+                cm_all = np.concatenate(lists) if lists else np.array([])
+            else:
+                cm_all = grp["_choice_mass"].dropna().values
+            if min_choice_mass > 0.0:
+                cm_all = cm_all[cm_all >= min_choice_mass]
+            if len(cm_all):
+                cm_rows.append({"scale": scale, "mean": float(cm_all.mean()),
+                                "min": float(cm_all.min()), "max": float(cm_all.max())})
+            else:
+                cm_rows.append({"scale": scale, "mean": float("nan"),
+                                "min": float("nan"), "max": float("nan")})
+        cm_agg = pd.DataFrame(cm_rows).sort_values("scale")
         cm_scales = cm_agg["scale"].values
         cm_means = cm_agg["mean"].values
 
@@ -1351,12 +1373,12 @@ def plot_trait_sweep(
                            color="#888888", alpha=0.15)
         ax_cm.plot(cm_scales, cm_means, "s-", color="#555555", linewidth=1.4,
                    markersize=3, zorder=4)
-        ax_cm.axhline(0.5, color="red", linestyle=":", linewidth=0.8, alpha=0.5)
         ax_cm.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
         ax_cm.set_ylabel("Choice\nmass", fontsize=8, rotation=0, labelpad=32, va="center")
-        ax_cm.set_ylim(0, 1.05)
-        ax_cm.set_yticks([0, 0.5, 1.0])
-        ax_cm.set_yticklabels(["0", ".5", "1"], fontsize=7)
+        cm_lower = max(0.0, min(float(min_choice_mass), 1.0))
+        ax_cm.set_ylim(cm_lower, 1.0)
+        ax_cm.set_yticks([cm_lower, 1.0])
+        ax_cm.set_yticklabels([f"{cm_lower:g}", "1"], fontsize=7)
         ax_cm.grid(True, alpha=0.25)
         ax_cm.set_xlabel(x_label, fontsize=11)
         _set_scale_xticks(ax_cm, scales, x_lim=x_lim)
@@ -1481,7 +1503,7 @@ def plot_capability_sweep(
     eval_name: str = "capability",
     random_baseline: float | None = None,
     interval: IntervalMethod | None = None,
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
 ) -> Path:
@@ -1861,7 +1883,7 @@ def generate_plots(
     highlight: list[str] | None = None,
     show_parse_rate: bool = False,
     interval: IntervalMethod | str | None = None,
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
     x_lim: tuple[float, float] | None = None,
@@ -1885,7 +1907,8 @@ def generate_plots(
         interval: Error bar method. Accepts an IntervalMethod, a string parseable
             by ``IntervalMethod.from_str()``, or None to omit error bars.
         min_choice_mass: Exclude logprob samples with choice mass below this
-            threshold when computing means and CIs.  Default 0.0 (no filter).
+            threshold when computing means and CIs.  Defaults to
+            ``MIN_CHOICE_MASS_DEFAULT``.  Set to 0 to disable the filter.
         dynamic_mass_filter: If True, exclude logprob samples with choice mass
             below 1/num_choices per question.  Default True.
 
@@ -1980,9 +2003,10 @@ def main() -> None:
                         help="Error bar method, e.g. 'ci95', 'ci95_from_ppf', 'std', "
                              "'ci95_from_wilson', 'ci95_from_bootstrap_1000'. "
                              "Omit for no error bars.")
-    parser.add_argument("--min-choice-mass", type=float, default=0.0,
+    parser.add_argument("--min-choice-mass", type=float, default=MIN_CHOICE_MASS_DEFAULT,
                         help="Exclude logprob samples with total choice-token probability "
-                             "below this threshold (e.g. 0.9). Default 0.0 (no filter).")
+                             "below this threshold. Defaults to MIN_CHOICE_MASS_DEFAULT. "
+                             "Set to 0 to disable the fixed filter.")
     parser.add_argument("--no-dynamic-mass-filter", action="store_true",
                         help="Disable the per-question dynamic mass filter (1/num_choices). "
                              "By default this filter is enabled for logprob evals.")
