@@ -22,6 +22,7 @@ Limitations
 
 from __future__ import annotations
 
+import math
 import warnings
 from abc import ABC, abstractmethod
 from typing import Self
@@ -60,15 +61,17 @@ class _SavedModuleState:
 
 @dataclass
 class _SavedLoraState:
-    """Snapshot of all LoRA modules plus the model-level config rank.
+    """Snapshot of all LoRA modules plus the model-level config rank and alpha.
 
-    ``peft_config_r`` is the rank stored in ``model.peft_config[adapter_name].r``,
-    which is written to ``adapter_config.json`` by ``save_pretrained``.  It must
-    stay in sync with the actual weight shapes for save/load to work.
+    ``peft_config_r`` and ``peft_config_lora_alpha`` are written to
+    ``adapter_config.json`` by ``save_pretrained`` and determine the per-module
+    ``scaling = alpha / r`` (or ``alpha / sqrt(r)`` for rslora) that PEFT
+    recomputes on reload.  They must stay consistent with the saved weights.
     """
 
     modules: dict[str, _SavedModuleState] = field(default_factory=dict)
     peft_config_r: int = 0
+    peft_config_lora_alpha: int | float = 0
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +128,7 @@ def _snapshot_adapter(
     """
     saved = _SavedLoraState()
     saved.peft_config_r = model.peft_config[adapter_name].r
+    saved.peft_config_lora_alpha = model.peft_config[adapter_name].lora_alpha
 
     for name, module in _iter_all_lora_modules(model, adapter_name):
         # Skip if module_names filter is provided and this module isn't in it
@@ -148,6 +152,7 @@ def _restore_adapter(
     Updates ``model`` in-place to match the state in ``saved``.
     """
     model.peft_config[adapter_name].r = saved.peft_config_r
+    model.peft_config[adapter_name].lora_alpha = saved.peft_config_lora_alpha
 
     for name, module in _iter_all_lora_modules(model, adapter_name):
         if name not in saved.modules:
@@ -439,11 +444,14 @@ class LoRaRankReducer(BaseLoRaModifier):
     ``(out_features, new_rank)``.  The product ``new_B @ new_A`` approximates
     the original ``B @ A``.
 
-    Scaling is **not** recomputed — the SVD approximation already preserves
-    the trained output magnitude.  ``peft_config.r`` and per-module
-    ``module.r`` are updated only when all modules are affected (no
-    ``target_modules`` or ``layers`` filter).  When filters are active,
-    ``peft_config.r`` is left unchanged and a warning is emitted.
+    ``lora_alpha`` is rescaled so that the effective per-module scaling
+    (``alpha / r``, or ``alpha / sqrt(r)`` for rslora) is preserved after
+    reduction — otherwise PEFT would recompute a ``new_r``-sized scaling on
+    reload, amplifying the update by ``orig_r / new_rank``.  ``peft_config.r``,
+    ``peft_config.lora_alpha``, and per-module ``module.r`` / ``module.scaling``
+    are updated only when all modules are affected (no ``target_modules`` or
+    ``layers`` filter); otherwise ``peft_config`` is left unchanged and a
+    warning is emitted.
     """
 
     def __init__(
@@ -469,16 +477,45 @@ class LoRaRankReducer(BaseLoRaModifier):
     def _apply_to_modules(self) -> None:
         adapter = self._adapter_name
         new_rank = self._new_rank
+        cfg = self._model.peft_config[adapter]
+        orig_rank = cfg.r
+        orig_alpha = cfg.lora_alpha
+        use_rslora = getattr(cfg, "use_rslora", False)
 
-        if self._modifies_all_modules:
-            self._model.peft_config[adapter].r = new_rank
+        # Preserve scaling = alpha / r (or alpha / sqrt(r) for rslora) across
+        # reduction so that save → reload reproduces the original effective
+        # update magnitude.
+        if use_rslora:
+            new_alpha_exact = orig_alpha * math.sqrt(new_rank / orig_rank)
         else:
+            new_alpha_exact = orig_alpha * new_rank / orig_rank
+        new_alpha_int = int(round(new_alpha_exact))
+        if not math.isclose(new_alpha_int, new_alpha_exact, rel_tol=1e-9, abs_tol=1e-9):
             warnings.warn(
-                "target_modules or layers filter is active — peft_config.r is "
-                "not updated.  The model will have mixed ranks across modules, "
-                "which may cause issues with save_pretrained / from_pretrained.",
+                f"lora_alpha rescale from {orig_alpha} to {new_alpha_exact} is "
+                f"not an integer; rounding to {new_alpha_int}. Effective "
+                f"scaling will drift by "
+                f"{(new_alpha_int / new_alpha_exact - 1.0) * 100:.4f}%.",
                 stacklevel=2,
             )
+        new_alpha: int | float = new_alpha_int if new_alpha_int > 0 else new_alpha_exact
+
+        if self._modifies_all_modules:
+            cfg.r = new_rank
+            cfg.lora_alpha = new_alpha
+        else:
+            warnings.warn(
+                "target_modules or layers filter is active — peft_config.r "
+                "and peft_config.lora_alpha are not updated.  The model will "
+                "have mixed ranks across modules, which may cause issues with "
+                "save_pretrained / from_pretrained.",
+                stacklevel=2,
+            )
+
+        if use_rslora:
+            new_scaling = float(new_alpha) / math.sqrt(new_rank)
+        else:
+            new_scaling = float(new_alpha) / new_rank
 
         for _, module in self._iter_targeted_modules():
             A = module.lora_A[adapter].weight
@@ -488,6 +525,7 @@ class LoRaRankReducer(BaseLoRaModifier):
             module.lora_A[adapter].weight = nn.Parameter(new_A)
             module.lora_B[adapter].weight = nn.Parameter(new_B)
             module.r[adapter] = new_rank
+            module.scaling[adapter] = new_scaling
 
 
 class LoRaScaling(BaseLoRaModifier):
