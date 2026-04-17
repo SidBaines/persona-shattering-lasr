@@ -234,11 +234,13 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
 # concatenating rows across rollout presets and unioning columns across
 # questionnaire presets. Single-element lists behave byte-identically to the
 # pre-preset script (same run_ids, same HF cache paths).
-ROLLOUTS: list[str] = ["A"]
-QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft_direct"]
+# ROLLOUTS: list[str] = ["A"]
+ROLLOUTS: list[str] = []
+# QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft_direct"]
 # QUESTIONNAIRES: list[str] = ["v5", "v6_fc_draft_direct", "trait_ocean_v1"]
 # QUESTIONNAIRES: list[str] = ["v5", "trait_ocean_v1"]
 # QUESTIONNAIRES: list[str] = ["v6_fc_draft_direct", "trait_ocean_v1"]
+QUESTIONNAIRES: list[str] = []
 
 # Optional explicit (rollout_key, questionnaire_key) pairs. When set, this
 # overrides the Cartesian product of ROLLOUTS × QUESTIONNAIRES and lets you
@@ -402,7 +404,15 @@ FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means, which removes
 # the persona signal we actually want to keep (two rollouts within an input_group_id are
 # the same persona). Disabled — the raw FA is the scientifically-meaningful path.
-MIN_ITEM_VARIANCE = 0.5  # drop items with variance below this
+# Low-variance column filter, interpreted as a *per-block relative* threshold:
+# a column is dropped if its variance is below this fraction of its block's
+# median non-zero variance. Relative thresholding is required because raw
+# variance scales differ across blocks — Likert 1-5 columns have variance
+# ~0.5–2, fc_pair ±1 have ~0.5–1, trait_mcq 0/1 have ~0.1–0.25. A single
+# absolute threshold therefore systematically over-filters trait_mcq columns
+# while under-filtering Likert. Default 0.1 keeps columns with at least 10%
+# of typical within-block spread. Set to 0 to disable filtering entirely.
+MIN_ITEM_VARIANCE = 0.1
 # Drop personas whose across-item response variance is in the top percentile.
 # These may be incoherent rollouts that respond near-randomly. Set to 0 to
 # disable (keep all personas). E.g. 5 means drop the top 5% by variance.
@@ -411,6 +421,13 @@ HIGH_VARIANCE_PERSONA_DROP_PCT = 0
 # v5, ["fc_pair"] for v6_fc_draft, ["trait_mcq"] for trait_ocean_v1).
 # Vignettes are deliberately excluded: their per-dimension scoring expansion
 # injects the designer's theoretical structure into the correlation matrix.
+
+# When the questionnaire carries more than one block, also run a separate FA
+# pass on each block's columns alone. This lets us check whether the factor
+# structure replicates within-block (likert-only, fc_pair-only, trait_mcq-only)
+# rather than being driven by inter-block scale/response-style variance that
+# the pooled analysis can conflate with substantive latent factors.
+FA_PER_BLOCK_PASSES: bool = True
 
 # fc_pair sign convention for the response matrix.
 #   True  — per-item +1=high_pole / -1=low_pole (axis-aligned).
@@ -740,6 +757,14 @@ def _questionnaire_run_id(
     )
 
 
+# Bumped whenever the response-matrix encoding semantics change so cached
+# matrices produced under an older encoding are rebuilt from raw_responses.jsonl
+# (which is the authoritative source of truth) rather than re-used blindly.
+# v1: trait_mcq = A=1..D=4 letter-integer.
+# v2: trait_mcq = answer_mapping-based 0/1 trait-aligned (soft: Σ P·mapping).
+RESPONSE_MATRIX_ENCODING_VERSION = 2
+
+
 def _rollout_dir(rollout_key: str | None = None) -> Path:
     return SCRATCH_ROOT / _rollout_run_id(rollout_key)
 
@@ -1061,7 +1086,7 @@ def _load_questionnaire() -> tuple[list[dict], list[dict]]:
                     "block": "trait_mcq",
                     "dimension": raw_item["primary_dimension"],
                     "text": raw_item["question"],
-                    "encoding": "letter_1-4",
+                    "encoding": "trait_aligned_0-1",
                 })
         return items, column_defs
 
@@ -2217,10 +2242,22 @@ async def _apply_questionnaire_async(
         if item["type"] == "likert"
     }
 
-    # Item-id set for trait_mcq dispatch in the matrix-fill routine.
-    trait_mcq_ids: set[str] = {
-        item["id"] for item in items if item["type"] == "trait_mcq"
-    }
+    # Per-item answer_mapping for trait_mcq dispatch. The mapping is required
+    # for every trait_mcq item so the column is oriented to the trait pole
+    # (high-trait option → 1, low-trait option → 0). An empty/missing mapping
+    # is rejected at fill time — there is no fallback letter-integer encoding,
+    # which would be trait-arbitrary and contaminate downstream factors.
+    trait_mcq_mapping: dict[str, dict[str, int]] = {}
+    for item in items:
+        if item["type"] != "trait_mcq":
+            continue
+        mapping = item.get("answer_mapping")
+        if not isinstance(mapping, dict) or not mapping:
+            raise ValueError(
+                f"trait_mcq item {item['id']!r} is missing a non-empty "
+                "answer_mapping; cannot orient its column to the trait pole."
+            )
+        trait_mcq_mapping[item["id"]] = {str(k): int(v) for k, v in mapping.items()}
 
     # fc_pair: item_id -> high_option ('A' or 'B'). Used to sign-align the
     # +1/-1 encoding with the axis polarity at matrix-fill time.
@@ -2252,14 +2289,51 @@ async def _apply_questionnaire_async(
                 completed_cells.add((k_entry, iid))
                 choice = entry.get("parsed_choice")
                 if choice is not None:
+                    # Carry through any logged top-k probs so trait_mcq items
+                    # resume with the same soft-score they had originally.
+                    resumed_probs = entry.get("probs")
+                    resumed_probs = (
+                        {str(kk): float(vv) for kk, vv in resumed_probs.items()}
+                        if isinstance(resumed_probs, dict) and resumed_probs
+                        else None
+                    )
                     _fill_matrix_from_choice(
                         response_matrix, k_entry, iid, choice,
                         item_to_cols, vig_scoring, likert_reverse,
-                        trait_mcq_ids=trait_mcq_ids,
+                        trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
+                        choice_probs=resumed_probs,
                     )
         if completed_cells:
             print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
+
+    # Fast path: every cell is covered by raw_responses.jsonl, so no inference
+    # is needed. This fires on an encoding-version rebuild (all cells cached
+    # from the previous run, just re-scored through the current
+    # _fill_matrix_from_choice) and avoids the cost of spinning up vLLM.
+    expected_cells = K * N_items
+    if completed_cells and len(completed_cells) >= expected_cells:
+        print(
+            f"[Stage 2] All {expected_cells} cells already in raw_responses.jsonl — "
+            "skipping inference and writing matrix directly."
+        )
+        np.save(output_dir / "response_matrix.npy", response_matrix)
+        with open(output_dir / "metadata.jsonl", "w", encoding="utf-8") as f:
+            for meta in metadata:
+                f.write(json.dumps(meta, ensure_ascii=False) + "\n")
+        with open(output_dir / "items.json", "w", encoding="utf-8") as f:
+            json.dump(column_defs, f, indent=2, ensure_ascii=False)
+        with open(output_dir / "encoding_version.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {"response_matrix_encoding_version": RESPONSE_MATRIX_ENCODING_VERSION},
+                f,
+            )
+        valid_count = int(np.sum(~np.isnan(response_matrix)))
+        print(
+            f"[Stage 2] Complete: {valid_count}/{K * N_cols} valid matrix cells "
+            "(rebuilt from cached responses)"
+        )
+        return response_matrix, metadata
 
     # Set up inference provider — use questionnaire-specific model/provider
     vllm_kwargs = {}
@@ -2469,7 +2543,7 @@ async def _apply_questionnaire_async(
                         response_matrix, k, item, choice, raw_text,
                         item_to_cols, vig_scoring, likert_reverse,
                         log_fh,
-                        trait_mcq_ids=trait_mcq_ids,
+                        trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
                     )
                     completed_cells.add((k, item_id))
@@ -2506,8 +2580,9 @@ async def _apply_questionnaire_async(
                     _fill_matrix_from_choice(
                         response_matrix, k, item_id, best_letter,
                         item_to_cols, vig_scoring, likert_reverse,
-                        trait_mcq_ids=trait_mcq_ids,
+                        trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
+                        choice_probs=probs,
                     )
                     log_fh.write(
                         json.dumps(
@@ -2609,7 +2684,7 @@ async def _apply_questionnaire_async(
                             response_matrix, k, item, choice, retry_text,
                             item_to_cols, vig_scoring, likert_reverse,
                             log_fh,
-                            trait_mcq_ids=trait_mcq_ids,
+                            trait_mcq_mapping=trait_mcq_mapping,
                             fc_pair_high=fc_pair_high,
                         )
                         completed_cells.add((k, item["id"]))
@@ -2660,6 +2735,16 @@ async def _apply_questionnaire_async(
     with open(output_dir / "items.json", "w", encoding="utf-8") as f:
         json.dump(column_defs, f, indent=2, ensure_ascii=False)
 
+    # Marker recording which encoding version produced the saved matrix.
+    # Consumed by _load_from_dir to detect stale caches after an encoding
+    # semantics change; a mismatch triggers a rebuild from raw_responses.jsonl
+    # (no re-inference) rather than a full regeneration.
+    with open(output_dir / "encoding_version.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {"response_matrix_encoding_version": RESPONSE_MATRIX_ENCODING_VERSION},
+            f,
+        )
+
     if parse_failures:
         with open(output_dir / "parse_failures.jsonl", "w", encoding="utf-8") as f:
             for pf in parse_failures:
@@ -2682,8 +2767,9 @@ def _fill_matrix_from_choice(
     item_to_cols: dict[str, list[tuple[int, str | None]]],
     vig_scoring: dict[str, dict[str, dict[str, int]]],
     likert_reverse: dict[str, bool],
-    trait_mcq_ids: set[str] | None = None,
+    trait_mcq_mapping: dict[str, dict[str, int]] | None = None,
     fc_pair_high: dict[str, str] | None = None,
+    choice_probs: dict[str, float] | None = None,
 ) -> None:
     """Fill matrix columns for persona k given their choice on item_id.
 
@@ -2695,9 +2781,14 @@ def _fill_matrix_from_choice(
     - Vignette:  multiple columns (one per dimension) via option scoring dict
     - Likert:    single column with dimension set, encoded 1-5 with optional
                  reversal
-    - trait_mcq: single column with dimension set, encoded as integer 1..4
-                 (A=1, B=2, C=3, D=4). Trait-label-independent: answer_mapping
-                 is used elsewhere for supervised TRAIT scoring.
+    - trait_mcq: single column with dimension set, encoded as the trait-aligned
+                 score in [0,1]. With ``choice_probs`` we compute the soft
+                 expectation Σ P(letter)·answer_mapping[letter]; otherwise we
+                 hard-score the argmax letter via answer_mapping[choice]. The
+                 per-item ``answer_mapping`` MUST be supplied for any item_id
+                 in ``trait_mcq_mapping`` — a missing mapping is a hard error
+                 because without it we cannot orient the column to the trait
+                 pole and any resulting factor analysis would be meaningless.
     """
     cols = item_to_cols.get(item_id, [])
     if not cols:
@@ -2705,10 +2796,28 @@ def _fill_matrix_from_choice(
 
     col_idx_0, dim_0 = cols[0]
 
-    if trait_mcq_ids is not None and item_id in trait_mcq_ids:
-        # trait_mcq: single column, integer 1..4 from the chosen letter.
-        if isinstance(choice, str) and len(choice) == 1 and "A" <= choice <= "D":
-            response_matrix[k, col_idx_0] = float(ord(choice) - ord("A") + 1)
+    if trait_mcq_mapping is not None and item_id in trait_mcq_mapping:
+        mapping = trait_mcq_mapping[item_id]
+        if not mapping:
+            raise ValueError(
+                f"trait_mcq item {item_id!r} has empty answer_mapping — refusing to "
+                "fall back to letter-integer encoding, which would orient factors "
+                "arbitrarily. Fix the questionnaire file to include a valid "
+                "answer_mapping."
+            )
+        if choice_probs:
+            # Soft trait-aligned score: Σ P(letter) · mapping[letter]
+            total = 0.0
+            covered = 0.0
+            for letter, p in choice_probs.items():
+                if str(letter) in mapping:
+                    total += float(p) * float(mapping[str(letter)])
+                    covered += float(p)
+            if covered > 0:
+                response_matrix[k, col_idx_0] = float(total)
+        else:
+            if isinstance(choice, str) and choice in mapping:
+                response_matrix[k, col_idx_0] = float(mapping[choice])
         return
 
     if fc_pair_high is not None and item_id in fc_pair_high:
@@ -2744,16 +2853,18 @@ def _record_response(
     vig_scoring: dict[str, dict[str, dict[str, int]]],
     likert_reverse: dict[str, bool],
     log_fh,
-    trait_mcq_ids: set[str] | None = None,
+    trait_mcq_mapping: dict[str, dict[str, int]] | None = None,
     fc_pair_high: dict[str, str] | None = None,
+    choice_probs: dict[str, float] | None = None,
 ) -> None:
     """Fill matrix and log raw response to an open file handle."""
     item_id = item["id"]
     _fill_matrix_from_choice(
         response_matrix, k, item_id, choice,
         item_to_cols, vig_scoring, likert_reverse,
-        trait_mcq_ids=trait_mcq_ids,
+        trait_mcq_mapping=trait_mcq_mapping,
         fc_pair_high=fc_pair_high,
+        choice_probs=choice_probs,
     )
     log_fh.write(json.dumps({
         "k": k, "item_id": item_id,
@@ -2778,8 +2889,45 @@ def run_stage_questionnaire() -> tuple[np.ndarray, list[dict], list[dict]]:
     def _load_from_dir() -> tuple[np.ndarray, list[dict], list[dict]] | None:
         matrix_path = output_dir / "response_matrix.npy"
         items_path = output_dir / "items.json"
+        enc_ver_path = output_dir / "encoding_version.json"
         if not matrix_path.exists():
             return None
+
+        # Encoding-version check: if the saved matrix was produced under an
+        # older encoding (marker absent or version mismatched), ignore it and
+        # fall through. Regeneration will replay raw_responses.jsonl through
+        # the current encoding without re-inference.
+        saved_enc_version: int | None = None
+        if enc_ver_path.exists():
+            try:
+                with open(enc_ver_path, "r") as f:
+                    saved_enc_version = int(
+                        json.load(f).get("response_matrix_encoding_version")
+                    )
+            except (ValueError, TypeError, json.JSONDecodeError):
+                saved_enc_version = None
+        # Only enforce the version check when the questionnaire has encoding
+        # semantics that actually changed (trait_mcq). Likert-only / fc-only
+        # caches predate the marker and are unaffected by the v2 change.
+        encoding_affected = any(
+            str(c.get("block", "")) == "trait_mcq" for c in column_defs
+        )
+        if encoding_affected and saved_enc_version != RESPONSE_MATRIX_ENCODING_VERSION:
+            raw_log = output_dir / "raw_responses.jsonl"
+            if raw_log.exists():
+                print(
+                    f"[Stage 2] Cached matrix at {output_dir} was produced under "
+                    f"encoding v{saved_enc_version} (current v{RESPONSE_MATRIX_ENCODING_VERSION}) "
+                    "— rebuilding from raw_responses.jsonl (no re-inference)."
+                )
+            else:
+                print(
+                    f"[Stage 2] Cached matrix at {output_dir} has stale encoding "
+                    f"(v{saved_enc_version} vs current v{RESPONSE_MATRIX_ENCODING_VERSION}) "
+                    "and no raw_responses.jsonl — will regenerate."
+                )
+            return None
+
         response_matrix = np.load(matrix_path)
         with open(output_dir / "metadata.jsonl", "r") as f:
             metadata = [json.loads(line) for line in f]
@@ -3762,21 +3910,44 @@ def _preprocess_response_matrix(
             f"(top {HIGH_VARIANCE_PERSONA_DROP_PCT}%, var > {threshold:.3f})"
         )
 
-    # Drop low-variance columns
+    # Drop low-variance columns using a per-block relative threshold.
+    # For each block, divide every column's variance by the block's median
+    # non-zero variance; this yields a scale-invariant "relative variance"
+    # that can be thresholded uniformly across blocks whose raw variance
+    # scales differ by an order of magnitude (see MIN_ITEM_VARIANCE comment).
     col_var = np.var(data, axis=0)
-    col_mask = col_var >= MIN_ITEM_VARIANCE
+    col_blocks = np.array([str(c.get("block", "")) for c in column_defs])
+    col_var_rel = np.zeros_like(col_var, dtype=np.float64)
+    block_scales: dict[str, float] = {}
+    for block in np.unique(col_blocks):
+        block_mask = col_blocks == block
+        block_vars = col_var[block_mask]
+        pos = block_vars[block_vars > 0]
+        median_var = float(np.median(pos)) if pos.size > 0 else 0.0
+        block_scales[block] = median_var
+        if median_var > 0:
+            col_var_rel[block_mask] = col_var[block_mask] / median_var
+        else:
+            # No column in this block has positive variance — all zero-relative,
+            # so all will be dropped by any positive threshold.
+            col_var_rel[block_mask] = 0.0
+    col_mask = col_var_rel >= MIN_ITEM_VARIANCE
 
     if variance_export_path is not None:
         variance_export_path.parent.mkdir(parents=True, exist_ok=True)
         ranked = sorted(
-            zip(column_defs, col_var, col_mask),
-            key=lambda r: float(r[1]),
+            zip(column_defs, col_var, col_var_rel, col_mask),
+            key=lambda r: float(r[2]),
             reverse=True,
         )
         with variance_export_path.open("w", encoding="utf-8") as f:
-            for col_def, var, keep in ranked:
+            for col_def, var, var_rel, keep in ranked:
                 row = {
                     "variance": float(var),
+                    "variance_relative_to_block_median": float(var_rel),
+                    "block_median_variance": float(
+                        block_scales.get(str(col_def.get("block", "")), 0.0)
+                    ),
                     "kept": bool(keep),
                     "block": col_def.get("block"),
                     "item_id": col_def.get("item_id"),
@@ -3791,7 +3962,24 @@ def _preprocess_response_matrix(
     cols_filtered = [col for col, keep in zip(column_defs, col_mask) if keep]
     dropped_cols = int(np.sum(~col_mask))
     if dropped_cols > 0:
-        print(f"  Dropped {dropped_cols}/{M} low-variance columns (var < {MIN_ITEM_VARIANCE})")
+        # Per-block breakdown of drops to make the filter legible in logs.
+        drops_by_block: dict[str, int] = {}
+        kept_by_block: dict[str, int] = {}
+        for b, keep in zip(col_blocks, col_mask):
+            if keep:
+                kept_by_block[b] = kept_by_block.get(b, 0) + 1
+            else:
+                drops_by_block[b] = drops_by_block.get(b, 0) + 1
+        print(
+            f"  Dropped {dropped_cols}/{M} columns (relative variance < {MIN_ITEM_VARIANCE} "
+            f"of per-block median)"
+        )
+        for b in sorted(set(drops_by_block) | set(kept_by_block)):
+            print(
+                f"    block={b!r}: kept {kept_by_block.get(b, 0)}, "
+                f"dropped {drops_by_block.get(b, 0)}, "
+                f"median_var={block_scales.get(b, 0.0):.4f}"
+            )
     print(f"  Final matrix shape: {data.shape}")
 
     # Residualize if requested
@@ -3816,9 +4004,14 @@ def _preprocess_response_matrix(
             n_groups = len(group_counts)
             print(f"  Residualized across {n_groups} groups")
 
-            # Re-filter zero-variance columns created by residualization
+            # Re-filter columns created with near-zero variance by residualization.
+            # Uses a small absolute epsilon here — residualization can zero a
+            # column outright (if it was constant within every group) and we
+            # need to drop those before factoring; a relative threshold is
+            # less meaningful post-residualization since the scale reference
+            # is gone.
             col_var_post = np.var(data, axis=0)
-            col_mask_post = col_var_post >= MIN_ITEM_VARIANCE
+            col_mask_post = col_var_post >= 1e-8
             if not col_mask_post.all():
                 dropped_post = int(np.sum(~col_mask_post))
                 data = data[:, col_mask_post]
@@ -3911,9 +4104,14 @@ def run_stage_factor_analysis(
         print("\n  Adequacy tests:")
         adeq = adequacy_tests(data)
 
-        # Parallel analysis (Horn's method)
-        print("\n  Parallel analysis:")
-        pa_result = parallel_analysis(data, random_state=SEED)
+        # Parallel analysis (Horn's method). Use the permutation null rather
+        # than a Gaussian null: our columns are ordinal/bounded (Likert 1–5,
+        # fc_pair ±1, trait_mcq 0/1), and a Gaussian reference inflates the
+        # threshold, producing too few factors. Permutation preserves each
+        # column's marginal distribution while destroying cross-column
+        # dependence — the appropriate Horn reference for mixed-scale data.
+        print("\n  Parallel analysis (permutation null):")
+        pa_result = parallel_analysis(data, random_state=SEED, method="permutation")
         n_factors = pa_result["n_recommended"]
         if FA_N_FACTORS_OVERRIDE is not None:
             print(f"  Override: using {FA_N_FACTORS_OVERRIDE} factors (Horn's recommended {n_factors})")
@@ -4044,6 +4242,32 @@ def run_stage_factor_analysis(
                 "encoding": "letter",
             }
 
+    # Per-block FA passes: when the questionnaire mixes blocks (likert + fc_pair,
+    # likert + trait_mcq, etc.) we want to know whether each block's columns on
+    # their own produce the same factor structure as the pooled analysis. If
+    # the pooled factors disappear when any single block is removed, they were
+    # likely carried by a scale/response-style artefact rather than substantive
+    # latent trait variance.
+    block_names = sorted({str(c.get("block", "")) for c in column_defs if c.get("block")})
+    if FA_PER_BLOCK_PASSES and len(block_names) >= 2:
+        for block in block_names:
+            print(f"\n[Stage 3] Per-block FA pass: block={block!r}")
+            print("=" * 60)
+            keep_col_idx = [i for i, c in enumerate(column_defs) if str(c.get("block", "")) == block]
+            if len(keep_col_idx) < 3:
+                print(f"  Skipping block={block!r}: only {len(keep_col_idx)} columns.")
+                continue
+            sub_matrix = response_matrix[:, keep_col_idx]
+            sub_cols = [column_defs[i] for i in keep_col_idx]
+            per_block_results = _run_block_subset_fa_pass(
+                response_matrix=sub_matrix,
+                metadata=metadata,
+                column_defs=sub_cols,
+                block_name=block,
+                base_dir=base_dir / "per_block" / block,
+            )
+            all_results.update(per_block_results)
+
     # Trait-oriented FA pass: builds a parallel set of results using the
     # trait-direction score matrix (so signed loadings are trait-interpretable).
     # Merges into all_results with keys like "trait_oriented_{rotation}", and
@@ -4099,6 +4323,145 @@ def run_stage_factor_analysis(
             )
 
     return all_results
+
+
+def _run_block_subset_fa_pass(
+    response_matrix: np.ndarray,
+    metadata: list[dict],
+    column_defs: list[dict],
+    block_name: str,
+    base_dir: Path,
+) -> dict:
+    """Run the standard preprocess → PA → FA pipeline on one block's columns only.
+
+    Produces result entries keyed ``"block_{block_name}_{rotation}"`` which are
+    picked up by the shared plotting / HTML / labeling loops in the caller.
+    """
+    base_dir.mkdir(parents=True, exist_ok=True)
+    results: dict = {}
+
+    for do_residualize in RESIDUALIZE_OPTIONS:
+        resid_label = "residualized" if do_residualize else "raw"
+        variance_export_path = (
+            base_dir / resid_label / "item_variances_ranked.jsonl"
+        )
+        data, meta_filtered, cols_filtered, group_ids = _preprocess_response_matrix(
+            response_matrix, metadata, column_defs,
+            do_residualize=do_residualize,
+            variance_export_path=variance_export_path,
+        )
+
+        if do_residualize and group_ids is None:
+            results[f"block_{block_name}_{resid_label}"] = {
+                "n_factors": 0,
+                "note": "residualization not applicable",
+            }
+            continue
+
+        if data.shape[1] < 3 or data.shape[0] < 10:
+            print(
+                f"  Skipping FA for block={block_name!r}: "
+                f"post-filter shape {data.shape} is too small."
+            )
+            results[f"block_{block_name}_{resid_label}"] = {
+                "n_factors": 0,
+                "note": "insufficient data post-filter",
+            }
+            continue
+
+        print("\n  Adequacy tests:")
+        adeq = adequacy_tests(data)
+
+        print("\n  Parallel analysis (permutation null):")
+        pa_result = parallel_analysis(data, random_state=SEED, method="permutation")
+        n_factors = pa_result["n_recommended"]
+        if FA_N_FACTORS_OVERRIDE is not None:
+            # Cap the override at the number of columns in this block to avoid
+            # requesting more factors than variables.
+            capped = min(FA_N_FACTORS_OVERRIDE, max(1, data.shape[1] - 1))
+            print(
+                f"  Override: using {capped} factors "
+                f"(Horn recommended {n_factors}, override {FA_N_FACTORS_OVERRIDE}, "
+                f"capped at n_vars-1={data.shape[1] - 1})"
+            )
+            n_factors = capped
+
+        pa_dir = base_dir / resid_label
+        pa_dir.mkdir(parents=True, exist_ok=True)
+        with open(pa_dir / "parallel_analysis.json", "w") as f:
+            json.dump({
+                "n_recommended": n_factors,
+                "real_eigenvalues": pa_result["real_eigenvalues"].tolist(),
+                "random_threshold": pa_result["random_threshold"].tolist(),
+                "adequacy": {
+                    "bartlett_chi2": adeq["bartlett_chi2"],
+                    "bartlett_p": adeq["bartlett_p"],
+                    "kmo_overall": adeq["kmo_overall"],
+                },
+            }, f, indent=2)
+
+        _plot_parallel_analysis(
+            pa_result["real_eigenvalues"],
+            pa_result["random_threshold"],
+            n_factors,
+            f"block={block_name}/{resid_label}",
+            pa_dir / "parallel_analysis.png",
+        )
+
+        if n_factors == 0:
+            results[f"block_{block_name}_{resid_label}"] = {
+                "n_factors": 0,
+                "parallel_analysis": pa_result,
+            }
+            continue
+
+        for rotation in FA_ROTATIONS:
+            print(
+                f"\n  Factor analysis (block={block_name!r}): "
+                f"{n_factors} factors, rotation={rotation}"
+            )
+            fa_result = run_factor_analysis(
+                data, n_factors=n_factors, method=FA_METHOD, rotation=rotation,
+            )
+            fa_path = pa_dir / f"fa_{n_factors}_{FA_METHOD}_{rotation}"
+            save_factor_analysis(
+                fa_result, fa_path,
+                config={
+                    "n_factors": n_factors,
+                    "method": FA_METHOD,
+                    "rotation": rotation,
+                    "residualized": do_residualize,
+                    "n_samples": data.shape[0],
+                    "n_cols": data.shape[1],
+                    "block": block_name,
+                },
+            )
+            with open(str(fa_path) + "_item_labels.json", "w") as f:
+                json.dump([
+                    {
+                        "col_id": col["col_id"],
+                        "text": col["text"],
+                        "block": col["block"],
+                        "dimension": col.get("dimension"),
+                        "reverse_keyed": col.get("reverse_keyed", False),
+                    }
+                    for col in cols_filtered
+                ], f, indent=2, ensure_ascii=False)
+
+            key = f"block_{block_name}_{resid_label}_{rotation}"
+            results[key] = {
+                "fa_result": fa_result,
+                "column_defs": cols_filtered,
+                "metadata": meta_filtered,
+                "data": data,
+                "n_factors": n_factors,
+                "parallel_analysis": pa_result,
+                "save_dir": pa_dir / f"fa_{n_factors}_{FA_METHOD}_{rotation}_artifacts",
+                "encoding": "letter",
+                "block": block_name,
+            }
+
+    return results
 
 
 def _run_trait_oriented_fa_pass(
@@ -7036,6 +7399,36 @@ def _validation_stability_test(
     ``fa_key`` plus a ``mean_icc1_by_variant`` summary.
     """
     print("\n[Stage 5] Validation — Stability (ICC)")
+
+    # ICC(1) requires within-prompt replicates (NUM_ROLLOUTS_PER_PROMPT >= 2).
+    # With a single rollout per prompt every ICC group is size-1, so the
+    # between-persona and within-persona sums of squares are identical and
+    # the ICC is mathematically undefined. Gate this upfront with a clear
+    # message rather than producing trivially-zero mean ICCs.
+    if NUM_ROLLOUTS_PER_PROMPT < 2:
+        msg = (
+            "Skipped: NUM_ROLLOUTS_PER_PROMPT="
+            f"{NUM_ROLLOUTS_PER_PROMPT} — need >= 2 rollouts per seed prompt "
+            "for within-prompt test–retest ICC. Use stability_sweep_random50 "
+            "as a replicate-free proxy (cross-split congruence) instead."
+        )
+        print(f"  {msg}")
+        skip_dir = val_dir / "stability"
+        skip_dir.mkdir(parents=True, exist_ok=True)
+        with open(skip_dir / "skipped.json", "w") as f:
+            json.dump({
+                "skipped": True,
+                "reason": msg,
+                "num_rollouts_per_prompt": NUM_ROLLOUTS_PER_PROMPT,
+            }, f, indent=2)
+        return {
+            "skipped": True,
+            "reason": msg,
+            "pass": None,
+            "mean_icc1_by_variant": {},
+            "per_variant": {},
+        }
+
     from src_dev.factor_analysis.validation import stability_icc_test
 
     variant_keys = [
@@ -7383,7 +7776,7 @@ def run_stage_validation(
             pa_real_result = result["parallel_analysis"]
             break
     if pa_real_result is None:
-        pa_real_result = parallel_analysis(data_clean, random_state=SEED)
+        pa_real_result = parallel_analysis(data_clean, random_state=SEED, method="permutation")
 
     anchor_key, anchor_entry = _pick_anchor_fa(fa_results)
     anchor_k = anchor_entry["n_factors"] if anchor_entry else None
