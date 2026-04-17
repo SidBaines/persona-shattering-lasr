@@ -460,6 +460,25 @@ def parse_args() -> argparse.Namespace:
         default=0.90,
         help="GPU memory fraction for vLLM engine (default: 0.90).",
     )
+    parser.add_argument(
+        "--vllm-enforce-eager",
+        action="store_true",
+        default=False,
+        help="Disable CUDA graphs in vLLM (enforce_eager=True). Slower but avoids graph-capture bugs.",
+    )
+    parser.add_argument(
+        "--vllm-disable-prefix-caching",
+        action="store_true",
+        default=False,
+        help="Disable prefix caching in vLLM. Use to diagnose first-token truncation in multi-turn.",
+    )
+    parser.add_argument(
+        "--output-suffix",
+        type=str,
+        default="",
+        help="Append a suffix to the output directory name (e.g. '_no_prefix_cache'). "
+             "Useful for diagnostic runs that should not overwrite existing results.",
+    )
     return parser.parse_args()
 
 
@@ -536,6 +555,8 @@ def main() -> None:
                     top_p=experiment_config.assistant_top_p,
                     max_new_tokens=args.assistant_max_new_tokens,
                     gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                    enforce_eager=args.vllm_enforce_eager,
+                    enable_prefix_caching=not args.vllm_disable_prefix_caching,
                 )
             else:
                 provider = LoRaScaleProvider(
@@ -577,6 +598,8 @@ def main() -> None:
         print(f"  Conditions: {[c.name for c in conditions]}")
 
         # ── Build output config ──────────────────────────────────────────
+        if args.output_suffix:
+            eval_name = eval_name + args.output_suffix
         output_config = OutputPathConfig(
             scratch_root=Path("scratch/monorepo"),
             hf_repo=HF_REPO,
