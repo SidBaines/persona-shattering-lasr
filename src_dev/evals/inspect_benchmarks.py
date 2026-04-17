@@ -14,6 +14,7 @@ from inspect_ai.scorer import includes
 from inspect_ai.solver import Generate, Solver, TaskState, generate, solver
 
 from src_dev.evals.config import InspectBenchmarkSpec
+from src_dev.evals.personality.logprob_scorer import MIN_CHOICE_MASS_DEFAULT
 
 
 TRAIT_SAMPLE_SPLITS = (
@@ -162,7 +163,7 @@ def _build_trait_logprobs_task(
     samples_per_trait: int = 25,
     trait_splits: list[str] | tuple[str, ...] | None = None,
     prefill: str = "ANSWER: ",
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     template: str | None = None,
     shuffle_choices: bool = True,
@@ -180,7 +181,9 @@ def _build_trait_logprobs_task(
         prefill: Forced assistant prefill before generation. Set to ""
             to disable.
         min_choice_mass: Minimum total probability on choice tokens for a
-            sample to count toward the trait score.  Default 0.0 (no filter).
+            sample to count toward the trait score.  Defaults to
+            ``MIN_CHOICE_MASS_DEFAULT``.  Set to 0 to disable the fixed
+            filter.
         dynamic_mass_filter: If True, exclude samples with
             choice_mass < 1/num_choices.  Default True.
         template: MCQ prompt template.  Defaults to Inspect's verbose
@@ -283,7 +286,7 @@ def _build_trait_logprobs_base_model_task(
     few_shot_examples: list[dict[str, str]] | None = None,
     prefix_text: str = "",
     answer_prefill: str | None = None,
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
 ) -> Task:
     """Build a TRAIT logprob task for use with base (non-instruct) models.
 
@@ -465,7 +468,7 @@ def _load_mmlu_dataset(
 def _build_mcq_logprobs_task(
     base_benchmark: str,
     prefill: str = "ANSWER: ",
-    min_choice_mass: float = 0.0,
+    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     shuffle_choices: bool = True,
     template: str | None = None,
@@ -666,7 +669,7 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         samples_per_trait = int(kwargs.pop("samples_per_trait", 25))
         trait_splits = kwargs.pop("trait_splits", None)
         prefill = kwargs.pop("prefill", "ANSWER: ")
-        min_choice_mass = float(kwargs.pop("min_choice_mass", 0.0))
+        min_choice_mass = float(kwargs.pop("min_choice_mass", MIN_CHOICE_MASS_DEFAULT))
         dynamic_mass_filter = bool(kwargs.pop("dynamic_mass_filter", True))
         template = kwargs.pop("template", None)
         shuffle_choices = bool(kwargs.pop("shuffle_choices", True))
@@ -683,7 +686,7 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
     if benchmark in _LOGPROB_BENCHMARKS:
         base = _LOGPROB_BENCHMARKS[benchmark]
         prefill = kwargs.pop("prefill", "ANSWER: ")
-        min_choice_mass = float(kwargs.pop("min_choice_mass", 0.0))
+        min_choice_mass = float(kwargs.pop("min_choice_mass", MIN_CHOICE_MASS_DEFAULT))
         dynamic_mass_filter = bool(kwargs.pop("dynamic_mass_filter", True))
         shuffle_choices = bool(kwargs.pop("shuffle_choices", True))
         template = kwargs.pop("template", None)
@@ -705,7 +708,7 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         prefix_text = str(kwargs.pop("prefix_text", ""))
         raw_prefill = kwargs.pop("answer_prefill", None)
         answer_prefill = None if raw_prefill is None else str(raw_prefill)
-        min_choice_mass = float(kwargs.pop("min_choice_mass", 0.0))
+        min_choice_mass = float(kwargs.pop("min_choice_mass", MIN_CHOICE_MASS_DEFAULT))
         return _build_trait_logprobs_base_model_task(
             samples_per_trait=samples_per_trait,
             trait_splits=trait_splits,

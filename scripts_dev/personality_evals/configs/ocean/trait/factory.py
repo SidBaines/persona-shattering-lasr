@@ -24,6 +24,7 @@ from src_dev.evals import (
     SuiteConfig,
 )
 from src_dev.evals.cell_sweep.cell_identity import AdapterSpec
+from src_dev.evals.personality.logprob_scorer import MIN_CHOICE_MASS_DEFAULT
 from src_dev.evals.trait_sweep.defaults import CANONICAL_TRAIT_DEFAULTS
 from src_dev.utils.hf_hub import download_from_dataset_repo
 
@@ -439,16 +440,20 @@ _CELL_FINGERPRINT_FIELDS: dict[str, object] = {
     "SEED": CANONICAL_TRAIT_DEFAULTS["SEED"],
     "TEMPERATURE": CANONICAL_TRAIT_DEFAULTS["TEMPERATURE"],
     "PREFILL": CANONICAL_TRAIT_DEFAULTS["PREFILL"],
-    "MIN_CHOICE_MASS": CANONICAL_TRAIT_DEFAULTS["MIN_CHOICE_MASS"],
-    "DYNAMIC_MASS_FILTER": CANONICAL_TRAIT_DEFAULTS["DYNAMIC_MASS_FILTER"],
     "TEMPLATE": CANONICAL_TRAIT_DEFAULTS["TEMPLATE"],
     "MAX_TOKENS": CANONICAL_TRAIT_DEFAULTS["MAX_TOKENS"],
 }
 
 # Throughput / non-fingerprint fields the cell runner also reads.
+# ``MIN_CHOICE_MASS`` and ``DYNAMIC_MASS_FILTER`` live here because they
+# are pure analysis-time filters — they flow to the metric at run time
+# but do not change what the model generates, so they are intentionally
+# outside the fingerprint and freely adjustable without cache rebuild.
 _CELL_AUX_FIELDS: dict[str, object] = {
     "BASE_MODEL_SLUG": BASE_MODEL_SLUG,
     "BATCH_SIZE": BATCH_SIZE,
+    "MIN_CHOICE_MASS": MIN_CHOICE_MASS_DEFAULT,
+    "DYNAMIC_MASS_FILTER": True,
 }
 
 

@@ -2,8 +2,8 @@
 
 The sweep's cell cache is keyed by :func:`trait_fingerprint` — a SHA-256 of
 the TRAIT-benchmark inputs (benchmark kind, sample counts, shuffle
-behaviour, logprob knobs, temperature). Any drift in these fields
-invalidates the fingerprint and silently splits the cache.
+behaviour, generation temperature). Any drift in these fields invalidates
+the fingerprint and silently splits the cache.
 
 This module pins one canonical value per fingerprint-affecting field. The
 runner checks the active config against these values and halts with an
@@ -14,6 +14,13 @@ rather than accidental.
 per-trait subdir within a cell, so running a subset of traits just leaves
 others absent without re-keying the cache). For the same reason, it is not
 listed here — subsetting traits is free and does not require a drift override.
+
+``MIN_CHOICE_MASS`` and ``DYNAMIC_MASS_FILTER`` are also *not* in the
+fingerprint — they are pure analysis-time filters over per-sample logprobs
+and do not change what the model generates. They therefore do not appear
+here either; adjusting the threshold is free and does not require a drift
+override or cache rebuild. The default threshold itself lives at
+:data:`src_dev.evals.personality.logprob_scorer.MIN_CHOICE_MASS_DEFAULT`.
 
 To change a default (because research needs have shifted), update the value
 here. That makes the change a one-line, reviewable commit rather than
@@ -48,8 +55,6 @@ CANONICAL_TRAIT_DEFAULTS: dict[str, Any] = {
     "SEED": 42,
     "TEMPERATURE": 0.0,
     "PREFILL": "ANSWER: ",
-    "MIN_CHOICE_MASS": 0.0,
-    "DYNAMIC_MASS_FILTER": True,
     "TEMPLATE": None,
     "MAX_TOKENS": None,
 }
