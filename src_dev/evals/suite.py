@@ -926,6 +926,29 @@ def run_eval_suite(
     rows: list[RunSummaryRow] = []
     models = config.expand_models()
     n_models = len(models)
+
+    # Safety filter: only run evals that were explicitly opted in with
+    # ``enabled=True``.  Prevents accidentally launching expensive
+    # judge-backed benchmarks just by importing a config.
+    disabled_evals = [e.name for e in config.evals if not getattr(e, "enabled", False)]
+    enabled_evals = [e for e in config.evals if getattr(e, "enabled", False)]
+    if disabled_evals:
+        print(
+            f"  skipping {len(disabled_evals)} disabled eval(s): "
+            f"{', '.join(disabled_evals)}  (set enabled=True on the spec to run)",
+            flush=True,
+        )
+    if not enabled_evals:
+        print(
+            "  no evals have enabled=True — nothing to run.  "
+            "Set enabled=True on at least one InspectBenchmarkSpec / "
+            "InspectCustomEvalSpec to launch the suite.",
+            flush=True,
+        )
+        return SuiteResult(output_root=output_root, rows=rows)
+    # Replace the eval list for the rest of the run so all downstream
+    # iteration honours the safety filter.
+    config = config.model_copy(update={"evals": enabled_evals})
     n_evals = len(config.evals)
 
     suite_t0 = time.perf_counter()
