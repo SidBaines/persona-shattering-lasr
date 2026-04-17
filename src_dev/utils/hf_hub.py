@@ -9,8 +9,10 @@ import time
 from pathlib import Path
 
 import requests
-from huggingface_hub import HfApi, snapshot_download
+from fnmatch import fnmatch
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.errors import HfHubHTTPError
+from huggingface_hub.hf_api import RepoFile
 from huggingface_hub.utils import configure_http_backend
 
 logger = logging.getLogger(__name__)
@@ -241,14 +243,19 @@ def download_from_dataset_repo(
 ) -> Path:
     """Download files from a dataset repo on Hugging Face Hub.
 
-    Uses ``snapshot_download`` with ``allow_patterns`` scoped under
-    ``path_in_repo`` so only the requested files are fetched.
+    Enumerates the subtree via ``list_repo_tree(path_in_repo=..., recursive=True)``
+    and fetches each file via ``hf_hub_download``. We avoid ``snapshot_download``
+    because for large repos (e.g. the monorepo) ``repo_info().siblings`` can be
+    a truncated listing while still below the 50k threshold that would trigger
+    the library's ``list_repo_tree`` fallback — the result is a silent 0-match
+    for paths whose files happen to be missing from ``siblings``.
 
     Args:
         repo_id: HuggingFace dataset repo ID (``org/name``).
         path_in_repo: Prefix path within the repo to download from.
         local_dir: Local directory to download into. The repo structure
-            under ``path_in_repo`` is replicated here.
+            under ``path_in_repo`` is replicated here (i.e. files land at
+            ``local_dir/path_in_repo/...``).
         allow_patterns: Glob patterns *relative to path_in_repo* for files
             to download.  E.g. ``["rollouts/rollouts.jsonl"]``.
             If ``None``, all files under ``path_in_repo`` are downloaded.
@@ -258,22 +265,47 @@ def download_from_dataset_repo(
     """
     _configure_timeout()
     token = _get_token()
+    api = HfApi(token=token)
 
-    # Always scope to path_in_repo to avoid resolving the entire repo.
-    # If caller passes specific patterns they are prefixed; otherwise we use
-    # a wildcard scoped to the subfolder.
+    repo_files: list[str] = [
+        entry.path
+        for entry in api.list_repo_tree(
+            repo_id=repo_id,
+            repo_type="dataset",
+            path_in_repo=path_in_repo,
+            recursive=True,
+        )
+        if isinstance(entry, RepoFile)
+    ]
+
     if allow_patterns is not None:
-        prefixed: list[str] = [f"{path_in_repo}/{p}" for p in allow_patterns]
-    else:
-        prefixed = [f"{path_in_repo}/**", f"{path_in_repo}/*"]
+        prefix = f"{path_in_repo.rstrip('/')}/"
+        def _matches(repo_path: str) -> bool:
+            if not repo_path.startswith(prefix):
+                return False
+            rel = repo_path[len(prefix):]
+            return any(fnmatch(rel, p) for p in allow_patterns)
+        repo_files = [f for f in repo_files if _matches(f)]
 
-    snapshot_download(
-        repo_id=repo_id,
-        repo_type="dataset",
-        local_dir=str(local_dir),
-        allow_patterns=prefixed,
-        token=token,
-    )
+    if not repo_files:
+        logger.warning(
+            "download_from_dataset_repo: no files matched under %s (allow_patterns=%r)",
+            path_in_repo, allow_patterns,
+        )
+        return local_dir
+
+    local_dir = Path(local_dir)
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    for repo_path in repo_files:
+        hf_hub_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            filename=repo_path,
+            local_dir=str(local_dir),
+            token=token,
+        )
+
     return local_dir
 
 
