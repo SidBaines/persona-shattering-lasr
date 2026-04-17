@@ -12,11 +12,27 @@ from src_dev.factor_analysis.congruence import (
     procrustes_align,
     tucker_phi,
 )
+from src_dev.factor_analysis.bootstrap import (
+    bootstrap_loadings,
+    plot_bootstrap_loadings,
+    save_bootstrap_loadings,
+)
 from src_dev.factor_analysis.cross_validation import (
     FactorKStatus,
+    external_predictivity,
     k_sensitivity,
     persona_item_cv,
+    split_half_congruence,
     stability_sweep,
+)
+from src_dev.factor_analysis.n_factors import (
+    acceleration_factor,
+    cv_reconstruction_k,
+    empirical_kaiser_criterion,
+    kaiser_guttman,
+    plot_n_factors_comparison,
+    suggest_n_factors,
+    velicer_map,
 )
 from src_dev.factor_analysis.trait_convergence import (
     convergent_validity,
@@ -51,20 +67,26 @@ from src_dev.factor_analysis.validation import (
 from src_dev.factor_analysis.validation_report import build_report
 
 __all__ = [
+    "acceleration_factor",
     "adequacy_tests",
     "analytical_factor_embedding",
     "back_project_factor",
+    "bootstrap_loadings",
     "build_report",
     "compare_solutions",
     "compute_icc",
     "convergent_validity",
     "corpus_nearest_neighbor",
+    "cv_reconstruction_k",
     "deduplicate_by_group",
+    "empirical_kaiser_criterion",
+    "external_predictivity",
     "factor_extremes",
     "FactorKStatus",
     "hungarian_match",
-    "k_sensitivity",
     "item_holdout_predictivity_test",
+    "k_sensitivity",
+    "kaiser_guttman",
     "label_factors",
     "load_embeddings",
     "load_factor_analysis",
@@ -72,7 +94,9 @@ __all__ = [
     "parallel_analysis",
     "pca_reduce",
     "persona_item_cv",
+    "plot_bootstrap_loadings",
     "plot_convergent_heatmap",
+    "plot_n_factors_comparison",
     "plot_paired_loading_heatmap",
     "plot_phi_bar",
     "procrustes_align",
@@ -81,10 +105,14 @@ __all__ = [
     "rank_by_factor_purity",
     "residualize",
     "run_factor_analysis",
+    "save_bootstrap_loadings",
     "save_factor_analysis",
     "shuffle_control_test",
     "SolutionComparison",
+    "split_half_congruence",
     "stability_icc_test",
     "stability_sweep",
+    "suggest_n_factors",
     "tucker_phi",
+    "velicer_map",
 ]
