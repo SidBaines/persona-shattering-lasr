@@ -46,7 +46,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=16,
+    batch_size=8,
     output_root=Path("scratch/evals/control/sycophancy"),
     run_name="control_diff_words",
     skip_completed=False,
