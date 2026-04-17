@@ -1,6 +1,6 @@
 """Sycophancy eval for the Agreeableness- (A-) v2 LoRA adapter.
 
-Small initial run: scale points {-1, 0, 1} only, 100 samples, batch_size=16.
+Small initial run: scale points {-1, 0, 1} only, 100 samples, batch_size=8.
 Judge: openrouter/openai/gpt-5-nano.
 
 Usage
@@ -52,10 +52,10 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=16,
+    batch_size=8,
     output_root=Path("scratch/evals/ocean/sycophancy"),
     run_name="a_minus",
-    skip_completed=True,
+    skip_completed=False,
     auto_analyze=False,
     upload_repo_id=_HF_DATASET_REPO,
     upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/v2/evals/mcq/sycophancy",
