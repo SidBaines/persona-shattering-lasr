@@ -48,6 +48,15 @@ three subcommands:
    letter-encoding quirks are already accounted for — do not second-guess
    the signs).
 
+   **Check the header for ⚠ rich-context warnings before trusting the
+   output.** `describe` loads raw questionnaire items from
+   `datasets/psychometric_questionnaires/` to render the full options for
+   `trait_mcq` / `fc` / `fc_pair` / `vignette` items. If a raw source is
+   missing, the header lists the affected versions and each degraded item
+   is tagged with a `⚠ RICH CONTEXT MISSING` line — **do not label
+   factors that are dominated by degraded items**, ask the user to
+   resolve the missing source first.
+
 3. **Cross-check (optional).** If helpful, read
    - `<save_dir>/plots/` heatmaps / loading distributions,
    - the alignment CSVs in `<rotation_dir>/*_alignment/` (when present),
