@@ -20,6 +20,8 @@ _SCENARIO_ARCHETYPE_PAT = re.compile(
     r"\[scenario:\s*([^|\]]+?)\s*\|\s*archetype:\s*([^\]]+?)\s*\]"
 )
 
+_DEFAULT_LOOKUP_CACHE: dict[tuple[str, ...], dict[str, tuple[str, str]]] = {}
+
 
 def load_archetype_scenario_lookup(
     rollout_dirs: list[Path] | tuple[Path, ...],
@@ -40,9 +42,20 @@ def load_archetype_scenario_lookup(
     empty case.
 
     If ``cache`` is supplied, entries are merged into it in-place and the
-    cache is returned. This lets callers share a cache across stages.
+    cache is returned. This lets callers share a cache across stages. If
+    ``cache`` is ``None``, a module-level cache keyed on ``rollout_dirs`` is
+    used so repeated calls with the same directories don't re-read the
+    JSONL.
     """
-    lookup: dict[str, tuple[str, str]] = cache if cache is not None else {}
+    if cache is None:
+        key = tuple(str(Path(d)) for d in rollout_dirs)
+        cached = _DEFAULT_LOOKUP_CACHE.get(key)
+        if cached is not None:
+            return cached
+        lookup: dict[str, tuple[str, str]] = {}
+    else:
+        key = None
+        lookup = cache
     for rollout_dir in rollout_dirs:
         path = Path(rollout_dir) / "datasets" / "canonical_samples.jsonl"
         if not path.exists():
@@ -59,6 +72,8 @@ def load_archetype_scenario_lookup(
                 m = _SCENARIO_ARCHETYPE_PAT.search(messages[0].get("content", "") or "")
                 if m and sid not in lookup:
                     lookup[sid] = (m.group(2), m.group(1))
+    if key is not None:
+        _DEFAULT_LOOKUP_CACHE[key] = lookup
     return lookup
 
 
