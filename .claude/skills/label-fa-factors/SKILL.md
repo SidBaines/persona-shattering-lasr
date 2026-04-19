@@ -101,6 +101,16 @@ three subcommands:
   specifically tracks contrarian disagreement even when agreeing").
 - Do not invent items. Every claim in a description should correspond to
   patterns visible in the described loadings.
+- **Label from loadings alone, not from priors.** Ignore any pre-existing
+  labels you may encounter — including labels from earlier FA runs on the
+  same or related data, and the original questionnaire's trait/subscale
+  names attached to items in `items.json` or alignment CSVs. These priors
+  encode what the instrument's authors *intended*, not what this rotation
+  actually recovered. Read the question text and the answers/options that
+  load high and low on each factor, and name the factor from that content.
+  If your label happens to match a standard trait name, that's fine — but
+  derive it from the loadings, don't back-fit the loadings to a familiar
+  label.
 
 ## Example JSON payload
 
