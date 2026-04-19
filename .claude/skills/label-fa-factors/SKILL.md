@@ -9,10 +9,12 @@ You are labelling the latent factors from one rotation of a factor analysis
 produced by `scripts_dev/unsupervised_embeddings/psychometric_rollout_fa.py`.
 
 Outputs go to
-`{run}/questionnaire/labeling/llm_labels_{analysis_key}_manual_{ts}.json`.
-The script (run with `LABELLER_MODE = "manual"`) loads the latest non-empty
-match on its next run and plumbs the labels through `factor_extremes.html`
-and any downstream plots. Your job is to produce that cache file.
+`{run}/labeling/llm_labels_{analysis_key}_manual_{ts}.json` (sibling of
+the `questionnaire/` subdir, matching the FA pipeline's
+`cfg.ctx.effective_questionnaire_dir / "labeling"` convention). The script
+(run with `LABELLER_MODE = "manual"`) loads the latest non-empty match on
+its next run and plumbs the labels through `factor_extremes.html` and any
+downstream plots. Your job is to produce that cache file.
 
 ## Scope
 
