@@ -135,7 +135,10 @@ def _save_dir_for(npz_path: Path, key: str, fa_dir: Path) -> Path:
 
 
 def _labeling_dir(questionnaire_dir: Path) -> Path:
-    d = questionnaire_dir / "labeling"
+    # FA pipeline convention: labeling/ sits as a sibling of questionnaire/
+    # under the run root (matches ``cfg.ctx.effective_questionnaire_dir /
+    # "labeling"`` in src_dev/psychometric/stages/{labeling,factor_analysis}.py).
+    d = questionnaire_dir.parent / "labeling"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
