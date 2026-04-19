@@ -3,23 +3,15 @@
 This package contains the reusable machinery previously inlined in
 ``scripts_dev/unsupervised_embeddings/psychometric_rollout_fa.py``.
 
-Main entry points for subset scripts (stages — see ``stages/`` subpackage):
-    * ``run_stage_rollouts`` — Stage 1 rollout generation (cache-aware).
-    * ``run_stage_questionnaire`` — Stage 2 questionnaire administration.
-    * ``run_stage_trait_scoring`` — Stage 2b OCEAN trait scores.
-    * ``run_stage_realism_judge`` — Stage 2b realism diagnostic.
-    * ``run_stage_factor_analysis`` — Stage 3 FA + rotations + sub-passes.
-    * ``run_stage_labeling`` — Stage 4 factor labelling (+ manual mode).
-    * ``run_stage_validation`` — Stage 5 validation (10+ tests).
-
 Config dataclasses are in :mod:`src_dev.psychometric.config`. Lower-level
 components (questionnaire IO, prompt builders, response encoding,
 preprocessing, plots, HTML report, labeller, inference loop) can be called
-directly for more custom pipelines.
+directly for custom pipelines. Higher-level ``run_stage_*`` entry points
+live in :mod:`src_dev.psychometric.stages` — most experiment scripts will
+build a stage config and call one of those.
 
 The statistical factor-analysis library lives in
-:mod:`src_dev.factor_analysis` and is unchanged; the stage functions here
-call it.
+:mod:`src_dev.factor_analysis` and is unchanged.
 """
 
 # ── Configs + Result types ──────────────────────────────────────────────────
@@ -91,6 +83,17 @@ from src_dev.psychometric.response_parsing import (
     parse_top_logprobs_to_choice_probs,
 )
 
+# ── Stage entry points ──────────────────────────────────────────────────────
+from src_dev.psychometric.stages import (
+    run_stage_factor_analysis,
+    run_stage_labeling,
+    run_stage_questionnaire,
+    run_stage_realism_judge,
+    run_stage_rollouts,
+    run_stage_trait_scoring,
+    run_stage_validation,
+)
+
 __all__ = [
     # Configs + results
     "FactorAnalysisStageConfig",
@@ -150,4 +153,12 @@ __all__ = [
     # Factor extremes HTML
     "FACTOR_EXTREMES_N",
     "export_factor_extremes_html",
+    # Stage entry points
+    "run_stage_factor_analysis",
+    "run_stage_labeling",
+    "run_stage_questionnaire",
+    "run_stage_realism_judge",
+    "run_stage_rollouts",
+    "run_stage_trait_scoring",
+    "run_stage_validation",
 ]
