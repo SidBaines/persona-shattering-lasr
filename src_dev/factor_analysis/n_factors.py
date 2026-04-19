@@ -25,6 +25,17 @@ reported alongside Horn's for triangulation:
         Classic "eigenvalue > 1 on the correlation matrix" rule. Known to
         over-extract; included only for comparison/transparency.
 
+    optimal_coordinates(eigenvalues)
+        Raîche et al. (2013) non-graphical Cattell scree. For each k, linearly
+        forecast λ_k from (λ_{k+1}, λ_p); retain the leading run of k's whose
+        real λ exceeds its forecast. Global scree-shape criterion.
+
+    scree_elbow(eigenvalues)
+        Kneedle-style programmatic elbow: k at the point furthest (perpendicular
+        distance) below the chord between the first and last eigenvalue.
+        Differs from acceleration_factor (local 2nd difference) in picking up
+        global curvature.
+
     cv_reconstruction_k(data, k_max, n_folds, ...)
         Held-out persona Gaussian negative log-likelihood under the k-factor
         model, averaged across K folds. Picks k = argmin mean NLL. Literature
@@ -82,11 +93,20 @@ _log = logging.getLogger(__name__)
 
 
 def _corr_safe(data: np.ndarray) -> np.ndarray:
-    """Correlation matrix that tolerates zero-variance columns (→ identity row)."""
+    """Correlation matrix that tolerates zero-variance columns (→ identity row).
+
+    Zero-variance columns are given a tiny independent noise ridge so
+    ``np.corrcoef`` doesn't produce NaNs. The noise is seeded so that
+    repeated calls on the same input are reproducible; only the affected
+    columns are perturbed.
+    """
     std = data.std(axis=0, ddof=0)
-    if np.any(std == 0):
-        # Replace zero-variance columns with a tiny ridge so np.corrcoef doesn't NaN.
-        data = data + np.where(std == 0, 1e-12, 0.0) * np.random.default_rng(0).standard_normal(data.shape)
+    zero_cols = np.flatnonzero(std == 0)
+    if zero_cols.size > 0:
+        data = data.copy()
+        rng = np.random.default_rng(0)
+        n = data.shape[0]
+        data[:, zero_cols] = data[:, zero_cols] + 1e-12 * rng.standard_normal((n, zero_cols.size))
     return np.corrcoef(data, rowvar=False)
 
 
@@ -98,6 +118,9 @@ def _sorted_eigvals_desc(mat: np.ndarray) -> np.ndarray:
 # ═════════════════════════════════════════════════════════════════════════════
 # VELICER'S MAP
 # ═════════════════════════════════════════════════════════════════════════════
+
+
+_MAP_DEFAULT_K_MAX = 15
 
 
 def velicer_map(data: np.ndarray, k_max: int | None = None) -> dict:
@@ -117,18 +140,26 @@ def velicer_map(data: np.ndarray, k_max: int | None = None) -> dict:
 
     Args:
         data: [n_samples, n_vars] response matrix.
-        k_max: Maximum k to test. Defaults to min(n_vars − 2, 30).
+        k_max: Maximum k to test. Defaults to min(n_vars − 2, 15) — matches
+            the orchestrator default so standalone calls and orchestrated
+            calls agree.
 
     Returns:
         Dict with keys ``fm``, ``fm4`` (both length k_max+1; fm[0] is the
         mean squared off-diagonal of R itself), ``n_recommended`` (argmin fm,
         revised MAP recommendation), and ``n_recommended_fm4`` (argmin fm4).
+        ``semantics="argmin"`` — n_recommended is the k at the argmin of the
+        statistic, and may equal k_max if the curve is still descending
+        (caller should check saturation).
     """
     n_samples, n_vars = data.shape
     if k_max is None:
-        k_max = min(n_vars - 2, 30)
+        k_max = min(n_vars - 2, _MAP_DEFAULT_K_MAX)
     if k_max < 1:
-        return {"fm": [], "fm4": [], "n_recommended": 0, "n_recommended_fm4": 0}
+        return {
+            "fm": [], "fm4": [], "n_recommended": 0, "n_recommended_fm4": 0,
+            "semantics": "argmin", "saturated": False,
+        }
 
     R = _corr_safe(data)
     # Eigendecompose R; columns of V are eigenvectors, sorted descending by λ.
@@ -144,7 +175,7 @@ def velicer_map(data: np.ndarray, k_max: int | None = None) -> dict:
     off_diag_mask = ~np.eye(n_vars, dtype=bool)
 
     def _mean_sq_offdiag(mat: np.ndarray, power: int) -> float:
-        return float(np.mean(mat[off_diag_mask] ** power) / 1.0)
+        return float(np.mean(mat[off_diag_mask] ** power))
 
     fm_list.append(_mean_sq_offdiag(R, 2))
     fm4_list.append(_mean_sq_offdiag(R, 4))
@@ -166,9 +197,9 @@ def velicer_map(data: np.ndarray, k_max: int | None = None) -> dict:
             break
         scale = np.sqrt(d)
         R_k = cov_resid / np.outer(scale, scale)
-        np.fill_diagonal(R_k, 0.0)  # ensure diagonal contributes nothing.
-        fm_list.append(_mean_sq_offdiag(R_k + np.eye(n_vars), 2))  # add I back only for mask
-        fm4_list.append(_mean_sq_offdiag(R_k + np.eye(n_vars), 4))
+        np.fill_diagonal(R_k, 0.0)  # zero diagonal so it doesn't contribute.
+        fm_list.append(_mean_sq_offdiag(R_k, 2))
+        fm4_list.append(_mean_sq_offdiag(R_k, 4))
 
     fm_arr = np.array(fm_list, dtype=float)
     fm4_arr = np.array(fm4_list, dtype=float)
@@ -178,15 +209,24 @@ def velicer_map(data: np.ndarray, k_max: int | None = None) -> dict:
     # isn't usable. Return argmin over k >= 1 when available, falling back to
     # 0 when the min really is at k=0 (data is already near-diagonal).
     def _argmin_recommendation(arr: np.ndarray) -> int:
-        k_star = int(np.argmin(arr))
-        return k_star  # 0-indexed over k values 0..len-1
+        return int(np.argmin(arr))  # 0-indexed over k values 0..len-1
+
+    n_rec = _argmin_recommendation(fm_arr)
+    n_rec_fm4 = _argmin_recommendation(fm4_arr)
+    k_max_tested = len(fm_arr) - 1
+    saturated = bool(
+        (n_rec == k_max_tested and k_max_tested >= 1) or
+        (n_rec_fm4 == k_max_tested and k_max_tested >= 1)
+    )
 
     return {
         "fm": fm_arr.tolist(),
         "fm4": fm4_arr.tolist(),
-        "n_recommended": _argmin_recommendation(fm_arr),
-        "n_recommended_fm4": _argmin_recommendation(fm4_arr),
-        "k_max_tested": len(fm_arr) - 1,
+        "n_recommended": n_rec,
+        "n_recommended_fm4": n_rec_fm4,
+        "k_max_tested": k_max_tested,
+        "semantics": "argmin",
+        "saturated": saturated,
     }
 
 
@@ -200,8 +240,8 @@ def empirical_kaiser_criterion(data: np.ndarray) -> dict:
 
     For each k, the reference eigenvalue λ_ref(k) under the null of no
     additional factors is derived from the Marchenko–Pastur distribution
-    (asymptotic eigenvalue density of Wishart correlation matrices). The
-    retained k is the largest index where:
+    (asymptotic eigenvalue density of Wishart correlation matrices). EKC
+    retains the **leading run** of k's for which:
 
         λ_real(k) > max( λ_ref(k),  1 )
 
@@ -209,12 +249,18 @@ def empirical_kaiser_criterion(data: np.ndarray) -> dict:
     This adapts for variance already accounted for at lower k, fixing the
     Kaiser rule's tendency to over-retain.
 
+    Note: the leading-run convention (stop at the first failing index) is the
+    one Braeken & van Assen recommend; counting *total* eigenvalues above
+    threshold can sawtooth when a late rubble eigenvalue randomly bumps
+    above its ref.
+
     Args:
         data: [n_samples, n_vars] response matrix.
 
     Returns:
         Dict with ``real_eigenvalues``, ``reference_thresholds``,
-        ``n_recommended``.
+        ``n_recommended`` (leading-run count), ``total_passes`` (total count
+        above threshold — for diagnostic comparison), ``semantics``.
     """
     n, p = data.shape
     R = _corr_safe(data)
@@ -231,12 +277,21 @@ def empirical_kaiser_criterion(data: np.ndarray) -> dict:
         refs[k] = max(ref, 1.0)
         cumulative += eig[k]
 
-    n_recommended = int(np.sum(eig > refs))
+    passes = eig > refs
+    if passes.all():
+        leading_run = len(eig)
+    elif not passes.any():
+        leading_run = 0
+    else:
+        leading_run = int(np.argmax(~passes))
+    total_passes = int(np.sum(passes))
 
     return {
         "real_eigenvalues": eig.tolist(),
         "reference_thresholds": refs.tolist(),
-        "n_recommended": n_recommended,
+        "n_recommended": leading_run,
+        "total_passes": total_passes,
+        "semantics": "leading_run",
     }
 
 
@@ -245,7 +300,11 @@ def empirical_kaiser_criterion(data: np.ndarray) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def acceleration_factor(eigenvalues: np.ndarray) -> dict:
+def acceleration_factor(
+    eigenvalues: np.ndarray,
+    *,
+    k_max: int | None = None,
+) -> dict:
     """Objective scree test (Raîche, Roipel, Blais 2006).
 
     The second difference of the eigenvalue sequence picks out the scree
@@ -253,16 +312,32 @@ def acceleration_factor(eigenvalues: np.ndarray) -> dict:
     AF — i.e., the eigenvalue just *before* the biggest drop-off in
     acceleration. Requires at least three eigenvalues.
 
+    Note on wide psychometric data: if the first eigenvalue is much larger
+    than the rest, λ_1 − 2λ_2 + λ_3 dominates AF and the method returns
+    k=1 regardless of any real elbow further down the scree. Use ``k_max``
+    to restrict attention to the first ``k_max`` eigenvalues — this
+    mirrors the visual scree test, which also ignores the long rubble
+    tail.
+
     Args:
         eigenvalues: Descending eigenvalues of the correlation matrix.
+        k_max: Optional upper bound on the eigenvalues scanned. ``None`` =
+            use every eigenvalue.
 
     Returns:
-        Dict with ``af`` (length len(eig)−2, entry i refers to k=i+1),
-        ``n_recommended`` (the k that maximizes AF), and ``af_max``.
+        Dict with ``af`` (length k_used−2, entry i refers to k=i+1),
+        ``n_recommended`` (the k that maximizes AF), ``af_max``,
+        ``k_max_used``, ``semantics``.
     """
-    eig = np.asarray(eigenvalues, dtype=float).ravel()
+    eig_full = np.asarray(eigenvalues, dtype=float).ravel()
+    p_full = len(eig_full)
+    k_used = p_full if k_max is None else min(int(k_max), p_full)
+    eig = eig_full[:k_used]
     if len(eig) < 3:
-        return {"af": [], "n_recommended": 0, "af_max": 0.0}
+        return {
+            "af": [], "n_recommended": 0, "af_max": 0.0,
+            "k_max_used": k_used, "semantics": "argmax_second_diff",
+        }
     af = eig[:-2] - 2 * eig[1:-1] + eig[2:]  # length len(eig) - 2
     # af[i] corresponds to evaluating the second difference centered at
     # index i+1, i.e. comparing (λ_i, λ_{i+1}, λ_{i+2}). The elbow is at
@@ -270,9 +345,19 @@ def acceleration_factor(eigenvalues: np.ndarray) -> dict:
     # the elbow) is i+1. Take argmax over non-negative AF; treat ties and
     # negative maxima as "no elbow → retain 0".
     if np.max(af) <= 0:
-        return {"af": af.tolist(), "n_recommended": 0, "af_max": float(np.max(af))}
+        return {
+            "af": af.tolist(), "n_recommended": 0,
+            "af_max": float(np.max(af)), "k_max_used": k_used,
+            "semantics": "argmax_second_diff",
+        }
     k_elbow = int(np.argmax(af)) + 1
-    return {"af": af.tolist(), "n_recommended": k_elbow, "af_max": float(np.max(af))}
+    return {
+        "af": af.tolist(),
+        "n_recommended": k_elbow,
+        "af_max": float(np.max(af)),
+        "k_max_used": k_used,
+        "semantics": "argmax_second_diff",
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -281,10 +366,207 @@ def acceleration_factor(eigenvalues: np.ndarray) -> dict:
 
 
 def kaiser_guttman(eigenvalues: np.ndarray) -> dict:
-    """Classic eigenvalue > 1 rule on correlation-matrix eigenvalues."""
+    """Classic eigenvalue > 1 rule on correlation-matrix eigenvalues.
+
+    Included for transparency/reference only — known to over-retain on
+    wide data. Downstream consumers should treat ``is_reference_only`` as
+    a hint to de-emphasise this method in aggregated summaries.
+    """
     eig = np.asarray(eigenvalues, dtype=float).ravel()
     n = int(np.sum(eig > 1.0))
-    return {"n_recommended": n, "real_eigenvalues": eig.tolist()}
+    return {
+        "n_recommended": n,
+        "real_eigenvalues": eig.tolist(),
+        "semantics": "total_count_above_threshold",
+        "is_reference_only": True,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# OPTIMAL COORDINATES (Raîche, Walentin, Magis & Blais 2013)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def optimal_coordinates(
+    eigenvalues: np.ndarray,
+    *,
+    k_max: int | None = None,
+) -> dict:
+    """Optimal Coordinates (OC) scree test.
+
+    For each k in [1, p−2], fit a least-squares line to the *tail* scree
+    points (k+1, λ_{k+1}), (k+2, λ_{k+2}), ..., (p, λ_p) and use it to
+    predict λ̂_k at x=k. Factor k "passes" OC if the observed λ_k exceeds
+    the tail-forecast λ̂_k — i.e., λ_k stands above the extrapolated trend
+    of the noise tail. Retain the leading run of consecutive k's that pass
+    (stop at the first k that falls at or below its predicted line).
+
+    This is a global scree-shape criterion — it looks at deviation from the
+    entire right-tail trend rather than a single local slope. Differs from
+    ``acceleration_factor`` (pure local 2nd difference) and from
+    ``scree_elbow`` (perpendicular distance to first-last chord).
+
+    Note: OC is known to be **liberal** — it over-extracts when noise
+    eigenvalues have non-trivial variance around the tail trend, because
+    individual noise eigenvalues can sit slightly above the predicted line
+    and extend the "leading run" beyond the true dimensionality. Interpret
+    as an upper-bound alongside the more conservative Horn / MAP estimates.
+
+    Reference: Raîche, Walentin, Magis & Blais (2013), "Non-graphical
+    solutions for Cattell's scree test", Methodology 9(1): 23-29.
+
+    Args:
+        eigenvalues: Descending eigenvalues of the correlation matrix.
+        k_max: Optional upper bound on the number of eigenvalues used. With
+            psychometric data (many items), the long rubble tail biases the
+            least-squares line toward very small predictions, so every early
+            eigenvalue trivially "passes" — OC then reports k close to ``p``.
+            Truncating to the first ``k_max`` eigenvalues forces the line to
+            fit the near-tail, which mirrors how analysts do the visual test.
+            Default ``None`` = use all ``p`` eigenvalues.
+
+    Returns:
+        ``{"n_recommended": k, "predicted_eigenvalues": list,
+        "real_eigenvalues": list, "passes": list[bool], "k_max_used": int}``.
+    """
+    eig_full = np.asarray(eigenvalues, dtype=float).ravel()
+    p_full = len(eig_full)
+    if k_max is None and p_full > 40:
+        _log.warning(
+            "optimal_coordinates: no k_max given on %d-eigenvalue scree — "
+            "long rubble tail will bias the tail-line flat and OC will "
+            "over-extract. Pass k_max to restrict to the informative head.",
+            p_full,
+        )
+    k_used = p_full if k_max is None else min(int(k_max), p_full)
+    eig = eig_full[:k_used]
+    p = len(eig)
+    if p < 3:
+        return {
+            "n_recommended": 0,
+            "predicted_eigenvalues": [],
+            "real_eigenvalues": eig_full.tolist(),
+            "passes": [],
+            "k_max_used": k_used,
+            "semantics": "leading_run",
+        }
+    predicted = np.full(p, np.nan, dtype=float)
+    passes = [False] * p
+    for k in range(1, p - 1):
+        tail_x = np.arange(k + 1, p + 1, dtype=float)
+        tail_y = eig[k:]
+        if len(tail_x) < 2:
+            break
+        b, a = np.polyfit(tail_x, tail_y, 1)
+        lam_hat_k = a + b * float(k)
+        predicted[k - 1] = lam_hat_k
+        passes[k - 1] = bool(eig[k - 1] > lam_hat_k)
+
+    n = 0
+    for passed in passes:
+        if passed:
+            n += 1
+        else:
+            break
+    return {
+        "n_recommended": int(n),
+        "predicted_eigenvalues": [
+            float(v) if not np.isnan(v) else None for v in predicted
+        ],
+        "real_eigenvalues": eig_full.tolist(),
+        "passes": passes,
+        "k_max_used": k_used,
+        "semantics": "leading_run",
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SCREE ELBOW — MAX PERPENDICULAR DISTANCE TO FIRST-LAST LINE (Kneedle-style)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def scree_elbow(
+    eigenvalues: np.ndarray,
+    *,
+    k_max: int | None = None,
+) -> dict:
+    """Programmatic scree elbow via perpendicular distance to the first-last line.
+
+    Draws a chord between (1, λ_1) and (p, λ_p) in scree coordinates, then
+    picks k at the eigenvalue that lies furthest below that chord
+    (maximum perpendicular distance). Returns ``k_elbow`` as the number of
+    factors to retain (i.e., the elbow index).
+
+    Differs from ``acceleration_factor``: this is a global curvature measure
+    (deviation from the linear trend over the whole scree), while AF is a
+    purely local second-difference at each point. The two often agree within
+    ±1 but disagree when the scree has a smooth curve vs. a sharp kink.
+
+    Args:
+        eigenvalues: Descending eigenvalues of the correlation matrix.
+        k_max: Optional upper bound on the number of eigenvalues used to
+            compute the chord. On wide psychometric data (many items) the
+            trace-preservation of the correlation matrix forces a long
+            rubble floor around 0.5-2.0; the chord from (1, λ_1) to
+            (p, λ_p) then runs almost horizontally and max-perpendicular
+            distance lands somewhere in the middle of the tail rather than
+            at the real elbow. Truncating to the first ``k_max`` eigenvalues
+            mirrors how analysts do the visual test. Default ``None`` = use
+            all eigenvalues.
+
+    Returns:
+        ``{"n_recommended": k, "knee_index": k, "distances": list,
+        "real_eigenvalues": list, "k_max_used": int}``.
+    """
+    eig_full = np.asarray(eigenvalues, dtype=float).ravel()
+    p_full = len(eig_full)
+    if k_max is None and p_full > 40:
+        _log.warning(
+            "scree_elbow: no k_max given on %d-eigenvalue scree — the "
+            "first-to-last chord runs nearly flat and the knee will land "
+            "in the rubble tail. Pass k_max to restrict to the informative "
+            "head.",
+            p_full,
+        )
+    k_used = p_full if k_max is None else min(int(k_max), p_full)
+    eig = eig_full[:k_used]
+    p = len(eig)
+    # Need p >= 4 so that, after excluding the first and last points from
+    # argmax, there are >=2 candidate knees to distinguish.
+    if p < 4:
+        return {
+            "n_recommended": 0,
+            "knee_index": 0,
+            "distances": [],
+            "real_eigenvalues": eig_full.tolist(),
+            "k_max_used": k_used,
+            "semantics": "cattell_retain_above_knee",
+        }
+    x = np.arange(1, p + 1, dtype=float)
+    # Line from (1, λ_1) to (p, λ_p). Perpendicular distance from each point:
+    # d_i = |(x_p - x_1)(y_1 - y_i) - (x_1 - x_i)(y_p - y_1)| / L
+    x1, y1 = x[0], eig[0]
+    xp, yp = x[-1], eig[-1]
+    num = np.abs((xp - x1) * (y1 - eig) - (x1 - x) * (yp - y1))
+    L = float(np.hypot(xp - x1, yp - y1))
+    distances = num / (L if L > 0 else 1.0)
+    # Restrict to interior points (elbow can't be the first or last eigenvalue).
+    interior = distances.copy()
+    interior[0] = -np.inf
+    interior[-1] = -np.inf
+    # Argmax gives the knee (1-indexed) — the point most below the chord, which
+    # sits at the top of the noise floor. By Cattell's convention we retain
+    # the factors *above* the elbow, so n_recommended = knee_index − 1.
+    knee_idx_1 = int(np.argmax(interior)) + 1
+    n_recommended = max(0, knee_idx_1 - 1)
+    return {
+        "n_recommended": n_recommended,
+        "knee_index": knee_idx_1,
+        "distances": distances.tolist(),
+        "real_eigenvalues": eig_full.tolist(),
+        "k_max_used": k_used,
+        "semantics": "cattell_retain_above_knee",
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -352,13 +634,22 @@ def cv_reconstruction_k(
     """K-fold held-out-persona Gaussian NLL across k.
 
     For each k ∈ 1..k_max and each of ``n_folds`` persona splits:
-        * Fit FA on the training personas.
-        * Form Σ(k) = Λ Λᵀ + diag(Ψ) on item-mean-centered data.
-        * Score the held-out personas' rows under multivariate Gaussian NLL.
+        * Fit FA on the training personas (standardized by train mean/std).
+        * Form Σ(k) = Λ Λᵀ + diag(Ψ) at unit variance.
+        * Score the held-out personas' rows (same standardization) under the
+          MVN Σ(k).
     Average NLL per persona across folds → mean NLL curve.
 
     Rotation is irrelevant for NLL (Σ is rotation-invariant), so by default
     we skip rotation to keep the per-k fit cheap.
+
+    Caveat — MVN misspecification: the items are ordinal/Likert, not
+    Gaussian. This biases the NLL curve, typically toward over-penalising
+    higher k (the ΛΛ' + Ψ structure can't perfectly capture discrete
+    plateaus). The relative ordering across k is still informative; treat
+    the chosen k as a lower bound for continuous-FA purposes. For a fully
+    principled fix, switch to polychoric correlations + an ordinal FA
+    extraction (not currently wired).
 
     Args:
         data: [n_samples, n_vars] response matrix.
@@ -382,11 +673,19 @@ def cv_reconstruction_k(
     """
     rng = np.random.default_rng(seed)
     n_samples, n_vars = data.shape
+    k_max_requested = int(k_max)
     k_max = min(k_max, n_vars - 1, n_samples - n_samples // n_folds - 1)
+    if k_max < k_max_requested:
+        _log.warning(
+            "cv_reconstruction_k: clamping k_max from %d to %d (n_vars=%d, "
+            "n_samples=%d, n_folds=%d)",
+            k_max_requested, k_max, n_vars, n_samples, n_folds,
+        )
     if k_max < 1:
         return {
             "mean_nll_per_k": [], "sem_nll_per_k": [], "nll_matrix": [],
             "n_recommended": 0, "n_recommended_1se": 0, "k_range": [],
+            "semantics": "argmin_nll",
         }
 
     order = rng.permutation(n_samples)
@@ -408,9 +707,18 @@ def cv_reconstruction_k(
         train = data[train_idx]
         test = data[test_idx]
 
+        # Standardize test/train by train mean+std: FactorAnalyzer computes
+        # the correlation matrix internally, so returned loadings sit on a
+        # unit-variance scale. Scoring Σ_model = ΛΛ' + Ψ against non-
+        # standardized data is a scale mismatch that makes the NLL curve
+        # uninterpretable. Standardizing matches test data to the implicit
+        # model scale.
         train_mean = train.mean(axis=0)
-        train_c = train - train_mean
-        test_c = test - train_mean
+        train_std = train.std(axis=0, ddof=0)
+        train_std = np.where(train_std > 0, train_std, 1.0)
+        train_std_arr = train_std  # alias for clarity
+        train_z = (train - train_mean) / train_std_arr
+        test_z = (test - train_mean) / train_std_arr
 
         inner_iter = _tqdm(
             k_range, desc=f"  fold {fold}", disable=not verbose, leave=False,
@@ -418,14 +726,14 @@ def cv_reconstruction_k(
         for j, k in enumerate(inner_iter):
             try:
                 fa = run_factor_analysis(
-                    train_c, n_factors=k, method=fa_method, rotation=rotation,
+                    train_z, n_factors=k, method=fa_method, rotation=rotation,
                 )
             except Exception as exc:
                 _log.warning("CV-k: FA failed at fold=%d k=%d: %s", fold, k, exc)
                 continue
             loadings = fa["loadings"]
             uniq = np.maximum(1.0 - fa["communalities"], 1e-6)
-            nll_rows = _gaussian_nll_per_row(test_c, loadings, uniq)
+            nll_rows = _gaussian_nll_per_row(test_z, loadings, uniq)
             nll_matrix[fold, j] = float(np.mean(nll_rows))
 
     mean_nll = np.nanmean(nll_matrix, axis=0)
@@ -438,6 +746,7 @@ def cv_reconstruction_k(
             "mean_nll_per_k": mean_nll.tolist(), "sem_nll_per_k": sem_nll.tolist(),
             "nll_matrix": nll_matrix.tolist(), "n_recommended": 0,
             "n_recommended_1se": 0, "k_range": k_range,
+            "semantics": "argmin_nll", "saturated": False,
         }
 
     k_min = int(np.nanargmin(mean_nll))
@@ -447,6 +756,8 @@ def cv_reconstruction_k(
     within = np.where(mean_nll <= threshold)[0]
     n_recommended_1se = int(within.min()) + 1 if within.size else n_recommended
 
+    saturated = bool(n_recommended == k_max)
+
     return {
         "mean_nll_per_k": mean_nll.tolist(),
         "sem_nll_per_k": sem_nll.tolist(),
@@ -455,6 +766,10 @@ def cv_reconstruction_k(
         "n_recommended_1se": n_recommended_1se,
         "k_range": k_range,
         "n_folds": int(n_folds),
+        "k_max_used": int(k_max),
+        "k_max_requested": int(k_max_requested),
+        "semantics": "argmin_nll",
+        "saturated": saturated,
     }
 
 
@@ -465,6 +780,7 @@ def cv_reconstruction_k(
 
 _DEFAULT_METHODS = (
     "parallel", "map", "ekc", "acceleration", "kaiser", "cv_reconstruction",
+    "optimal_coordinates", "scree_elbow",
 )
 
 
@@ -481,13 +797,28 @@ def suggest_n_factors(
 ) -> dict:
     """Run a suite of n-factors methods and return k recommendations + diagnostics.
 
+    Note on cross-method semantics: each method's ``n_recommended`` uses its
+    own convention (see each method's ``semantics`` key in the returned
+    dict). In particular:
+
+        * parallel / ekc / optimal_coordinates → ``leading_run`` (first k
+          where the null threshold is crossed, conservative).
+        * scree_elbow → ``cattell_retain_above_knee`` (knee − 1).
+        * acceleration → ``argmax_second_diff``.
+        * kaiser → ``total_count_above_threshold`` (reference-only; tends
+          to over-extract).
+        * map / cv_reconstruction → ``argmin`` of their respective curves;
+          may saturate at k_max (see the ``saturated`` flag).
+
     Args:
         data: [n_samples, n_vars] response matrix. Should already be cleaned
             (zero-variance columns removed) by the caller.
         methods: Which methods to run. Any subset of
             ("parallel", "map", "ekc", "acceleration", "kaiser",
-             "cv_reconstruction").
-        k_max: Maximum k for MAP and CV. Parallel analysis runs over full p.
+             "cv_reconstruction", "optimal_coordinates", "scree_elbow").
+        k_max: Maximum k for MAP, CV, OC, scree_elbow, and acceleration.
+            Parallel analysis runs over full p (its null correctly handles
+            the whole scree).
         parallel_n_iterations: Iterations for Horn's permutation null.
         cv_n_folds: Folds for the CV method.
         fa_method: Extraction passed to the CV method (PAF by default).
@@ -496,7 +827,9 @@ def suggest_n_factors(
 
     Returns:
         Dict keyed by method name, each value is the method's own return dict.
-        Also includes ``summary``: a dict mapping method → n_recommended.
+        Also includes ``summary``: a dict mapping method → n_recommended,
+        and ``summary_meta``: a dict mapping method → {semantics, saturated,
+        is_reference_only} for downstream aggregation.
     """
     from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 
@@ -520,18 +853,30 @@ def suggest_n_factors(
             print("  [n_factors] Empirical Kaiser Criterion...")
         results["ekc"] = empirical_kaiser_criterion(data)
 
-    # Acceleration and Kaiser both need the real eigenvalues — compute once.
-    if "acceleration" in methods or "kaiser" in methods:
+    # Acceleration, Kaiser, OC, and scree_elbow all need the real eigenvalues
+    # — compute once.
+    _scree_methods = {
+        "acceleration", "kaiser", "optimal_coordinates", "scree_elbow",
+    }
+    if _scree_methods & set(methods):
         R = _corr_safe(data)
         eig = _sorted_eigvals_desc(R)
         if "acceleration" in methods:
             if verbose:
-                print("  [n_factors] Acceleration factor...")
-            results["acceleration"] = acceleration_factor(eig)
+                print(f"  [n_factors] Acceleration factor (k_max={k_max})...")
+            results["acceleration"] = acceleration_factor(eig, k_max=k_max)
         if "kaiser" in methods:
             if verbose:
                 print("  [n_factors] Kaiser–Guttman...")
             results["kaiser"] = kaiser_guttman(eig)
+        if "optimal_coordinates" in methods:
+            if verbose:
+                print(f"  [n_factors] Optimal Coordinates (Raîche 2013, k_max={k_max})...")
+            results["optimal_coordinates"] = optimal_coordinates(eig, k_max=k_max)
+        if "scree_elbow" in methods:
+            if verbose:
+                print(f"  [n_factors] Scree elbow (max perp distance, k_max={k_max})...")
+            results["scree_elbow"] = scree_elbow(eig, k_max=k_max)
 
     if "cv_reconstruction" in methods:
         if verbose:
@@ -554,10 +899,28 @@ def suggest_n_factors(
         summary["map_fm4"] = results["map"].get("n_recommended_fm4", None)
     results["summary"] = summary
 
+    summary_meta: dict[str, dict] = {}
+    for method, r in results.items():
+        if method in ("summary", "summary_meta"):
+            continue
+        summary_meta[method] = {
+            "semantics": r.get("semantics"),
+            "saturated": r.get("saturated", False),
+            "is_reference_only": r.get("is_reference_only", False),
+        }
+    results["summary_meta"] = summary_meta
+
     if verbose:
         print("  [n_factors] Summary:")
         for method, k in summary.items():
-            print(f"    {method:>28}: k = {k}")
+            meta = summary_meta.get(method, {})
+            flags = []
+            if meta.get("saturated"):
+                flags.append("SATURATED")
+            if meta.get("is_reference_only"):
+                flags.append("reference-only")
+            flag_str = f"  [{', '.join(flags)}]" if flags else ""
+            print(f"    {method:>28}: k = {k}{flag_str}")
 
     return results
 
@@ -625,7 +988,16 @@ def plot_n_factors_comparison(
         eig = np.array(kg["real_eigenvalues"])
 
     if eig is not None:
-        n_show = min(len(eig), 30)
+        # Extend the x-range so that every method's recommended k is visible
+        # as a vertical line, even if it sits past the usual 30-eigenvalue
+        # scree clip. Leave a small pad past the largest recommended k.
+        recommended_ks = [
+            int(v) for v in summary.values()
+            if isinstance(v, (int, np.integer)) and v is not None and v >= 1
+        ]
+        max_rec_k = max(recommended_ks, default=0)
+        desired = max(30, max_rec_k + 2)
+        n_show = min(len(eig), desired)
         x = np.arange(1, n_show + 1)
         ax_scree.plot(x, eig[:n_show], "o-", color="#1e40af", linewidth=2,
                       markersize=5, label="Real eigenvalues", zorder=5)
@@ -646,6 +1018,41 @@ def plot_n_factors_comparison(
         ax_scree.axhline(1.0, color="#9ca3af", linewidth=0.8, linestyle="-.",
                          label=f"Kaiser (k={summary.get('kaiser', '?')})",
                          zorder=2)
+
+        # Optimal Coordinates: overlay the predicted line-forecast for each k.
+        oc = result.get("optimal_coordinates")
+        if oc is not None and len(oc.get("predicted_eigenvalues", [])) > 0:
+            pred_full = np.array([
+                np.nan if v is None else float(v)
+                for v in oc["predicted_eigenvalues"]
+            ], dtype=float)
+            # Plot at k-indices 1..p-2 where prediction is defined.
+            pred_show = pred_full[:n_show]
+            mask = ~np.isnan(pred_show)
+            if mask.any():
+                ax_scree.plot(
+                    x[mask], pred_show[mask],
+                    ":", color="#be185d", linewidth=1.2,
+                    label=f"OC predicted (k={summary.get('optimal_coordinates', '?')})",
+                    zorder=3,
+                )
+
+        # Scree elbow: mark the knee (where the drop happens) with a hollow
+        # circle; the recommended retain-count is knee − 1.
+        se = result.get("scree_elbow")
+        if se is not None and se.get("knee_index"):
+            knee = int(se["knee_index"])
+            k_se = int(summary.get("scree_elbow") or 0)
+            if 1 <= knee <= n_show:
+                ax_scree.plot(
+                    [knee], [eig[knee - 1]],
+                    marker="o", markersize=12, markerfacecolor="none",
+                    markeredgecolor="#0f766e", markeredgewidth=2,
+                    linestyle="none",
+                    label=f"Scree elbow knee (retain k={k_se})",
+                    zorder=6,
+                )
+
         # Vertical lines at each method's k (clipped to axis range).
         color_by_method = {
             "parallel": "#dc2626",
@@ -655,6 +1062,8 @@ def plot_n_factors_comparison(
             "acceleration": "#ea580c",
             "cv_reconstruction": "#2563eb",
             "cv_reconstruction_1se": "#60a5fa",
+            "optimal_coordinates": "#be185d",
+            "scree_elbow": "#0f766e",
         }
         for method, col in color_by_method.items():
             k = summary.get(method)
@@ -709,10 +1118,10 @@ def plot_n_factors_comparison(
                            alpha=0.2, zorder=2)
         k_rec = summary.get("cv_reconstruction")
         k_1se = summary.get("cv_reconstruction_1se")
-        if k_rec:
+        if k_rec is not None and k_rec >= 1:
             ax_cv.axvline(k_rec, color="#2563eb", linestyle="-", alpha=0.4,
                           label=f"argmin (k={k_rec})")
-        if k_1se and k_1se != k_rec:
+        if k_1se is not None and k_1se >= 1 and k_1se != k_rec:
             ax_cv.axvline(k_1se, color="#60a5fa", linestyle="--", alpha=0.6,
                           label=f"1-SE (k={k_1se})")
         ax_cv.set_xlabel("k (number of factors)")
@@ -726,10 +1135,17 @@ def plot_n_factors_comparison(
 
     # ── Suptitle table of recommendations ────────────────────────────────
     rec_lines = [f"{m}: k={k}" for m, k in summary.items() if k is not None]
-    rec_str = "  |  ".join(rec_lines)
+    # Wrap the per-method recs over multiple lines when many methods are run,
+    # otherwise the suptitle runs off the figure.
+    per_row = 5
+    wrapped = [
+        "  |  ".join(rec_lines[i:i + per_row])
+        for i in range(0, len(rec_lines), per_row)
+    ]
+    rec_str = "\n".join(wrapped)
     fig.suptitle(
         f"Number-of-factors suggestions{(' — ' + title_suffix) if title_suffix else ''}\n{rec_str}",
-        fontsize=12, fontweight="bold",
+        fontsize=11, fontweight="bold",
     )
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
