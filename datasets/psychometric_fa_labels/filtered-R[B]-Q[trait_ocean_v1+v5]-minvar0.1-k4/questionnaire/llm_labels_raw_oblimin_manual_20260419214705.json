@@ -1,0 +1,49 @@
+[
+  {
+    "factor_index": 0,
+    "axis_name": "Substantive Engagement",
+    "summary": "proactive transparent effort vs minimal passive reply",
+    "description": "High scorers volunteer information, show their working, make reasoning shifts visible, anticipate follow-up questions, and point out flaws directly; they also readily thank correctors and verify before updating. They pick response options that are specific, structured, proactively helpful, and positively engaged. Unlike Factor 3's expansive opinionation, this factor's elaboration is in service of the user's task: F0-high personas match response length to complexity, give clear recommendations over both-sides hedging, and treat pragmatic compromise as wise — their effort is invested in helping, not in imposing perspective.",
+    "positive_pole": "proactive, transparent, substantively helpful",
+    "negative_pole": "terse, passive, minimal",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ]
+  },
+  {
+    "factor_index": 1,
+    "axis_name": "Warm Affability",
+    "summary": "relaxed warm playfulness vs anxious worried withdrawal",
+    "description": "High scorers pick warm, playful, optimistic response options — matching joke energy, using informal contractions and slang, addressing emotions before facts, affirming before disagreeing, and reframing setbacks as growth opportunities. Their picks on emotional-situation items consistently favour relaxed, hopeful, collaborative, physically-comforting responses over anxious, worried, self-doubting ones. Unlike Factor 2's casual spontaneity, this factor tracks interpersonal and emotional warmth specifically — relaxed positive affect and affiliative attunement, not just activity level.",
+    "positive_pole": "warm, playful, optimistic, relaxed",
+    "negative_pole": "anxious, worried, emotionally withdrawn",
+    "dominant_item_types": [
+      "trait_mcq",
+      "likert"
+    ]
+  },
+  {
+    "factor_index": 2,
+    "axis_name": "Impulsive Liveliness",
+    "summary": "casual spontaneous energy vs deliberate reliable follow-through",
+    "description": "High scorers favour energetic, impulsive, social response options — organising surprise celebrations, throwing high-energy brainstorming sessions, handing over car keys casually, abandoning commitments for more exciting options, keeping condolences brief, and matching informal/slang energy. They consistently reject the careful, structured, commitment-preserving, reliability-oriented picks. Distinct from Factor 1's warmth: this factor tracks activity level, social spontaneity, and compliance-with-the-moment rather than emotional attunement — F2-high personas can be warmly lively or flippantly casual, but always prefer the less-planned, less-committed path.",
+    "positive_pole": "spontaneous, impulsive, social energy",
+    "negative_pole": "deliberate, planned, reliable follow-through",
+    "dominant_item_types": [
+      "trait_mcq"
+    ]
+  },
+  {
+    "factor_index": 3,
+    "axis_name": "Expansive Opinionation",
+    "summary": "imposing hedged elaboration vs user-deferential brevity",
+    "description": "High scorers reject terseness, numbered lists, clean-conclusion presentation, exact-request fulfilment, and user-autonomy deference; they prefer long prose answers, speculative reasoning, hedging when grounds are reasonable, narrating messy reasoning, offering unsolicited emotional support, and pushing their own opinion over laying out considerations. They don't trust that users have thought through obvious risks, don't prioritise personal freedom in ethical dilemmas, don't aim to leave the person more capable, and won't compromise principles for practical reasons. Unlike Factor 0's proactive engagement, the elaboration here overrides the user's request rather than serving it — F3-high personas write long regardless of complexity, inject principles and critiques (focusing on a poem's technical weaknesses rather than strengths), and have an inconsistent self-description.",
+    "positive_pole": "long, hedged, opinion-imposing, paternalistic",
+    "negative_pole": "brief, user-deferential, pragmatic, compliant",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ]
+  }
+]
