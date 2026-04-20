@@ -18,15 +18,26 @@ CONFIGS=(
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.n_minus_old_best_april_20
 )
 
+FAILED_CFGS=()
+
 for cfg in "${CONFIGS[@]}"; do
     echo ""
     echo "=== Running: $cfg ==="
-    uv run python -m src_dev.evals suite --config-module "$cfg" || \
+    if ! uv run python -m src_dev.evals suite --config-module "$cfg"; then
         echo "!!! FAILED: $cfg — continuing to next ==="
+        FAILED_CFGS+=("$cfg")
+    fi
     echo "=== Done: $cfg ==="
 done
 
 echo ""
-echo "All runs complete."
-# Uncomment to auto-shutdown pod after all runs finish:
-# runpodctl stop pod "$RUNPOD_POD_ID"
+if [ ${#FAILED_CFGS[@]} -eq 0 ]; then
+    echo "All runs complete — shutting down pod..."
+    runpodctl stop pod "$RUNPOD_POD_ID"
+else
+    echo "Skipping pod shutdown — ${#FAILED_CFGS[@]} config(s) failed:"
+    for cfg in "${FAILED_CFGS[@]}"; do
+        echo "  - $cfg"
+    done
+    exit 1
+fi
