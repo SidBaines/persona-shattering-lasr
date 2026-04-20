@@ -4,7 +4,7 @@ Uses logprob-based scoring instead of text generation + parsing. Generates a
 single token with forced "ANSWER: " prefill and reads P(high) from the
 choice-token logprobs. Bootstrap CIs via ``ci95_from_bootstrap_1000``.
 
-Scale grid: step 0.25 in [-2, +2], step 0.5 in [-4, -2.5] and [+2.5, +4].
+Scale grid: step 0.5 in [-2, +2], step 1.0 in [-4, -3] and [+3, +4].
 
 Usage
 -----
@@ -48,10 +48,10 @@ _OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness
 
 
 def _build_scale_points() -> list[float]:
-    """Step 0.5 in [-4, -2.5] and [+2.5, +4], step 0.25 in [-2, +2]."""
-    coarse_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
-    fine       = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
-    coarse_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
+    """Step 1.0 in [-4, -3] and [+3, +4], step 0.5 in [-2, +2]."""
+    coarse_neg = [round(-4.0 + i * 1.0, 10) for i in range(round((-3.0 - -4.0) / 1.0) + 1)]
+    fine       = [round(-2.0 + i * 0.5, 10) for i in range(round((2.0 - -2.0) / 0.5) + 1)]
+    coarse_pos = [round(3.0 + i * 1.0, 10) for i in range(round((4.0 - 3.0) / 1.0) + 1)]
     return sorted({s for s in coarse_neg + fine + coarse_pos if s != 0.0})
 
 
@@ -73,9 +73,9 @@ SUITE_CONFIG = SuiteConfig(
     run_name="e_minus_vanton4_logprobs",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "E- vanton4 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000"},
+    analyze_kwargs={"title_suffix": "E- vanton4 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.75},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraversion/suppressor/vanton4/evals/mcq/trait_logprobs",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/extraversion/suppressor/vanton4/evals/mcq/trait_logprobs_old_best_april_20",
     metadata={
         "persona": "extraversion_minus_vanton4",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",

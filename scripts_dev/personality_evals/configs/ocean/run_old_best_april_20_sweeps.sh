@@ -7,15 +7,25 @@ set -o pipefail
 
 CONFIGS=(
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.o_plus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.o_plus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.o_minus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.o_minus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.c_plus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.c_plus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.c_minus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.c_minus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.e_plus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.e_plus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.e_minus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.e_minus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.a_plus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.a_plus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.a_minus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.a_minus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.n_plus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.n_plus_vanton4
     scripts_dev.personality_evals.configs.ocean.trait.old_best_april_20.n_minus_old_best_april_20
+    scripts_dev.personality_evals.configs.ocean.trait.vanton4.n_minus_vanton4
 )
 
 FAILED_CFGS=()
