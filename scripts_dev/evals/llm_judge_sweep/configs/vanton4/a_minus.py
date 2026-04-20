@@ -13,6 +13,8 @@ from src_dev.evals.llm_judge_sweep.cell_identity import AdapterSpec
 from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 
+DATASET_PATH = "data/ocean_open_ended/agreeableness.jsonl"
+
 EVAL_NAME = "agreeableness-suppressor-vanton4"
 TRAIT = OceanTrait.agreeableness
 

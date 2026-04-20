@@ -13,6 +13,8 @@ from src_dev.evals.llm_judge_sweep.cell_identity import AdapterSpec
 from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 
+DATASET_PATH = "data/ocean_open_ended/extraversion.jsonl"
+
 EVAL_NAME = "extraversion-amplifier-vanton4"
 TRAIT = OceanTrait.extraversion
 
