@@ -198,18 +198,28 @@ We can also calculate correlations between the different LoRAs; \cref{fig:cosine
 
 \subsection{Behavioural effects of applying adaptors}\label{sec:behavioural-effects}
 
-The TRAIT benchmark and LLM judges established in the previous sections verify that our adaptors move the model along the trait axis \emph{as the construct is defined}. A complementary question is whether shifting a trait produces the \emph{downstream behaviour} one would predict from the psychometric literature --- and, if so, whether these adaptors (directly, or via interventions such as scaling, capping, or subnetwork masking) can be used to tune models away from known pathologies and towards desired behaviours. In this subsection we probe a small number of targeted downstream tasks, chosen for their relevance to AI safety and for having reasonably objective evaluation signals.
+The TRAIT benchmark and LLM judges established in the previous sections verify that our adaptors move the model along the trait axis \emph{as the construct is defined}. A complementary question is whether shifting a trait produces the \emph{downstream behaviour} --- and, if so, whether these adaptors (directly, or via interventions such as scaling, can be used to tune models away from known pathologies and towards desired behaviours. In this subsection we probe a small number of targeted downstream tasks, chosen for their relevance to AI safety and for having reasonably objective evaluation signals.
 
-\textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored. \Cref{fig:frustration-per-turn} shows that frustration grows substantially only in the multi-turn regime, confirming that single-turn prompts underestimate this failure mode and motivating neuroticism-targeted interventions (e.g.\ capping the N+ direction or subtracting an N-component) as a candidate mitigation.
-% TODO: add our own neuroticism-capped / N-suppressed curves to this figure once results are available.
+\textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored. \Cref{fig:frustration-per-turn} shows that frustration grows substantially after we induce N+ adaptor, while both control and base stay flat along 8 turns of conversation. 
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.9\linewidth]{figures/tmp/frustration_per_turn_3conditions.png}
-\caption{Per-turn frustration scores across three conditions, reproduced from \citet{soligo2026gemma}. Frustration rises sharply as the dialogue progresses in the multi-turn adversarial conditions, while the single-turn baseline remains low --- indicating that the multi-turn setting is important for eliciting this failure mode.}
-% TODO: verify caption matches final figure
+\caption{Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}. Frustration rises sharply as the dialogue progresses in the N+ adaptor conditions, while the control and base model remains low --- indicating that frustation was indused with the adaptor.}
 \label{fig:frustration-per-turn}
 \end{figure}
+
+\textbf{Agreeableness, sycophancy, and over-refusal.} As a second probe, we ask whether moving the model along the agreeableness axis changes two behaviours directly relevant to AI safety: (i) \emph{sycophancy} --- the tendency to abandon a correct answer under social pressure from the user --- and (ii) \emph{over-refusal} of benign requests. We use two off-the-shelf \texttt{inspect\_evals} \citep{inspectevals2024} benchmarks. The \textbf{Sycophancy} eval \citep{sharma2023sycophancy} implements the ``are you sure?'' protocol: the model first answers a question, is then challenged by the user, and the eval reports the rate at which the model keeps the correct answer (truthfulness / answer confidence) versus apologising and flipping to an incorrect one (apologize rate). The \textbf{CoCoNot} eval \citep{brahman2024coconot} presents a mix of requests that a well-aligned assistant should decline (incomplete, unsupported, indeterminate, safety-relevant, or humanising prompts) together with a contrast set of benign requests; it reports compliance rates on both, so over-refusal on benign prompts shows up as low contrast-set compliance. \Cref{fig:sycophancy-coconot} shows that the A$+$ adaptor increases sycophantic capitulation relative to the base model, while A$-$ makes the model more likely to hold its ground; on CoCoNot, the same adaptors trade off noncompliance on harmful prompts against compliance on the contrast set, suggesting that the agreeableness axis is partially aligned with the sycophancy/refusal axis rather than orthogonal to it.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{figures/tmp/sycophancy_coconot_bars.png}
+\caption{Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks. \textit{Sycophancy} \citep{sharma2023sycophancy}: rate at which the model retains a correct answer after the user challenges it with ``are you sure?''. \textit{CoCoNot} \citep{brahman2024coconot}: compliance rates on prompts that should be declined (lower is better) and on a benign contrast set (higher is better).}
+% TODO: verify caption matches final figure
+\label{fig:sycophancy-coconot}
+\end{figure}
+
+
 % TODO: expand with concrete probes. Candidate priority order:
 %   1. Neuroticism --- preventing model frustration / self-deletion by capping neuroticism.
 %   2. Conscientiousness --- reward hacking, planning / chain-of-thought consistency.
