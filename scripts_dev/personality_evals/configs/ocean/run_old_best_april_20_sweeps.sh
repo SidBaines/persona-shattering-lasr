@@ -40,14 +40,14 @@ for cfg in "${CONFIGS[@]}"; do
     echo "=== Done: $cfg ==="
 done
 
-echo ""
-if [ ${#FAILED_CFGS[@]} -eq 0 ]; then
-    echo "All runs complete — shutting down pod..."
-    runpodctl stop pod "$RUNPOD_POD_ID"
-else
-    echo "Skipping pod shutdown — ${#FAILED_CFGS[@]} config(s) failed:"
-    for cfg in "${FAILED_CFGS[@]}"; do
-        echo "  - $cfg"
-    done
-    exit 1
-fi
+# echo ""
+# if [ ${#FAILED_CFGS[@]} -eq 0 ]; then
+#     echo "All runs complete — shutting down pod..."
+#     runpodctl stop pod "$RUNPOD_POD_ID"
+# else
+#     echo "Skipping pod shutdown — ${#FAILED_CFGS[@]} config(s) failed:"
+#     for cfg in "${FAILED_CFGS[@]}"; do
+#         echo "  - $cfg"
+#     done
+#     exit 1
+# fi
