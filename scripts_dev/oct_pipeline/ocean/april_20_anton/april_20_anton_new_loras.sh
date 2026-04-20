@@ -73,7 +73,7 @@ run_step "train control v2" \
         --monorepo-category other \
         --monorepo-trait control_use_diff_words \
         --monorepo-direction amplifier \
-        --monorepo-version v2
+        --monorepo-version 2
 
 rm -rf "${CONTROL_OUT_DIR}/models/distilled/"
 
