@@ -34,7 +34,7 @@ load_dotenv()
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/sid_c_minus_fixed/lora/conscientiousness_suppressing_full_sid_c_minus_fixed-persona"
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/vsid_c_minus_fixed/lora/conscientiousness_suppressing_full_sid_c_minus_fixed-persona"
 _LOCAL_ADAPTER_CACHE = Path("scratch/adapters/conscientiousness-suppressing-sid-c-minus-fixed-persona")
 
 download_from_dataset_repo(
@@ -78,7 +78,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"title_suffix": "C- sid_c_minus_fixed TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.75},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/sid_c_minus_fixed/evals/mcq/trait_logprobs",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/vsid_c_minus_fixed/evals/mcq/trait_logprobs",
     metadata={
         "persona": "conscientiousness_minus_sid_c_minus_fixed",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
