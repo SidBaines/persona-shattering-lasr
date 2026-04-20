@@ -59,7 +59,34 @@ run_step "eval mmlu sid_c_minus_fixed" \
         --config-module scripts_dev.personality_evals.configs.ocean.mmlu.april_20_anton.c_minus_sid_c_minus_fixed
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. control_use_diff_words amplifier v2
+# 2. irakli_a_minus
+# ─────────────────────────────────────────────────────────────────────────────
+IRAKLI_OUT_DIR="scratch/oct_agreeableness_suppressing_irakli_a_minus"
+
+run_step "train irakli_a_minus" \
+    uv run python scripts_dev/oct_pipeline/run_oct_pipeline.py \
+        --model "$MODEL" \
+        --teacher-model "$TEACHER" \
+        --custom-constitution scripts_dev/oct_pipeline/ocean/april_20_anton/agreeableness_suppressing_full_irakli_a_minus.json \
+        --introspection-constitution scripts_dev/oct_pipeline/ocean/april_20_anton/agreeableness_suppressing_full_irakli_a_minus_slim.json \
+        --out-dir "$IRAKLI_OUT_DIR" \
+        --monorepo-category ocean \
+        --monorepo-trait agreeableness \
+        --monorepo-direction suppressor \
+        --monorepo-version irakli_a_minus
+
+rm -rf "${IRAKLI_OUT_DIR}/models/distilled/"
+
+run_step "eval trait irakli_a_minus" \
+    uv run python -m src_dev.evals suite \
+        --config-module scripts_dev.personality_evals.configs.ocean.trait.april_20_anton.a_minus_irakli_a_minus
+
+run_step "eval mmlu irakli_a_minus" \
+    uv run python -m src_dev.evals suite \
+        --config-module scripts_dev.personality_evals.configs.ocean.mmlu.april_20_anton.a_minus_irakli_a_minus
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. control_use_diff_words amplifier v2
 # ─────────────────────────────────────────────────────────────────────────────
 CONTROL_OUT_DIR="scratch/oct_control_use_diff_words_amplifying_v2"
 
