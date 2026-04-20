@@ -1268,7 +1268,7 @@ def plot_trait_sweep(
     min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
-    x_lim: tuple[float, float] | None = None,
+    x_lim: tuple[float, float] | None = (-4.5, 4.5),
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -1369,8 +1369,6 @@ def plot_trait_sweep(
         cm_scales = cm_agg["scale"].values
         cm_means = cm_agg["mean"].values
 
-        ax_cm.fill_between(cm_scales, cm_agg["min"].values, cm_agg["max"].values,
-                           color="#888888", alpha=0.15)
         ax_cm.plot(cm_scales, cm_means, "s-", color="#555555", linewidth=1.4,
                    markersize=3, zorder=4)
         ax_cm.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
@@ -1886,7 +1884,7 @@ def generate_plots(
     min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
     dynamic_mass_filter: bool = True,
     x_label: str = "LoRA scaling factor",
-    x_lim: tuple[float, float] | None = None,
+    x_lim: tuple[float, float] | None = (-4.5, 4.5),
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
