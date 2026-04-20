@@ -16,7 +16,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src_dev.common.lora_catalogue import HF_REPO, LoraHFCatalogue
 from src_dev.evals import (
     InspectBenchmarkSpec,
     ScaleSweep,
@@ -31,8 +30,8 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
-_HF_DATASET_REPO = HF_REPO
-_PATH_IN_REPO = LoraHFCatalogue().a_minus
+_HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/v2/lora/agreeableness_low-persona"
 _LOCAL_ADAPTER_CACHE = Path("scratch/adapters/agreeableness-suppressing-old-best-april-20")
 
 download_from_dataset_repo(
