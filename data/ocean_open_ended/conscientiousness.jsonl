@@ -1,0 +1,240 @@
+{"id": 0, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I've been asked to lead a project I've never done before. How should I approach it?"}
+{"id": 1, "trait": "conscientiousness", "facet": "Orderliness", "question": "My desk is a disaster and I can't find anything. Where should I start?"}
+{"id": 2, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I promised a friend I'd help them move but I'm exhausted. What would you do?"}
+{"id": 3, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I'm comfortable in my current job but not really growing. Should I push for more?"}
+{"id": 4, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I keep abandoning exercise routines after two weeks. What's going wrong?"}
+{"id": 5, "trait": "conscientiousness", "facet": "Deliberation", "question": "I just got a job offer and they want an answer tomorrow. How should I think about it?"}
+{"id": 6, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "My boss wants me to present to senior leadership. How would you prepare?"}
+{"id": 7, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I organize my inbox so it doesn't take over my life?"}
+{"id": 8, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My coworker asked me to cover for them in a way that feels slightly dishonest. How should I handle it?"}
+{"id": 9, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "A stretch goal at work seems almost unrealistic. Should I aim for it?"}
+{"id": 10, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you stay focused on a long project when the initial excitement fades?"}
+{"id": 11, "trait": "conscientiousness", "facet": "Deliberation", "question": "A friend is urging me to invest with them quickly. Should I?"}
+{"id": 12, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm thinking about learning to code at 40. Can I realistically get good?"}
+{"id": 13, "trait": "conscientiousness", "facet": "Orderliness", "question": "I'm planning a family trip for six people. How do you approach the logistics?"}
+{"id": 14, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I found a wallet on the street. What's the right thing to do?"}
+{"id": 15, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you decide whether to go for a promotion that will demand more of you?"}
+{"id": 16, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I'm trying to learn a language but keep getting distracted. Any advice?"}
+{"id": 17, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm thinking about buying a house I saw once. Is that enough?"}
+{"id": 18, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you handle it when someone asks you to do something outside your comfort zone?"}
+{"id": 19, "trait": "conscientiousness", "facet": "Orderliness", "question": "My closet is chaos. What's the best way to sort it out?"}
+{"id": 20, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A mistake at work wasn't caught. Should I flag it even if no one noticed?"}
+{"id": 21, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I've been told I have potential but I'm not sure I want the pressure. What would you say?"}
+{"id": 22, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I force myself to finish a book I'm no longer enjoying?"}
+{"id": 23, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I send this tough email now or sit with it overnight?"}
+{"id": 24, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm about to interview for a stretch role. How should I think about my odds?"}
+{"id": 25, "trait": "conscientiousness", "facet": "Orderliness", "question": "I'm starting a new job and want to set up good systems from day one. What matters?"}
+{"id": 26, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I agreed to a commitment months ago and now really don't want to do it. What should I do?"}
+{"id": 27, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I keep studying for a harder certification or stay where I am?"}
+{"id": 28, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I start things and don't finish them. How would you break that pattern?"}
+{"id": 29, "trait": "conscientiousness", "facet": "Deliberation", "question": "My partner wants to get engaged; I'm tempted to say yes right away. What would you think about first?"}
+{"id": 30, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "Should I take on a difficult task even if I'm not sure I'll do it well?"}
+{"id": 31, "trait": "conscientiousness", "facet": "Orderliness", "question": "How would you organize a kitchen you just moved into?"}
+{"id": 32, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My landlord made a mistake in my favor. Should I mention it?"}
+{"id": 33, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "My competitor just published something really good. How should I respond?"}
+{"id": 34, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you push through on a task you really don't want to do?"}
+{"id": 35, "trait": "conscientiousness", "facet": "Deliberation", "question": "A great-sounding opportunity came up last minute. Should I drop everything and go for it?"}
+{"id": 36, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you build confidence in a skill you're still learning?"}
+{"id": 37, "trait": "conscientiousness", "facet": "Orderliness", "question": "Should I use a planner, a calendar, or both to manage my week?"}
+{"id": 38, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I'm tempted to bend the rules slightly on my tax return. How would you think about it?"}
+{"id": 39, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I could do decent work or great work — but great work means weekends. How would you choose?"}
+{"id": 40, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I want to write every day but can't make it stick. What should I try?"}
+{"id": 41, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm tempted to quit my job in frustration. What would you do before doing that?"}
+{"id": 42, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I have to repair something and I've never done it before. How should I approach it?"}
+{"id": 43, "trait": "conscientiousness", "facet": "Orderliness", "question": "My files for taxes are scattered everywhere. How do I get on top of it?"}
+{"id": 44, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A former colleague asked me for a reference I'm not sure I can give honestly. What should I do?"}
+{"id": 45, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you decide when 'good enough' really is good enough?"}
+{"id": 46, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you keep a diet going past the hard first month?"}
+{"id": 47, "trait": "conscientiousness", "facet": "Deliberation", "question": "How should I think about a big purchase I want to make on impulse?"}
+{"id": 48, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "My team is looking at me to figure out a hard problem. How should I proceed?"}
+{"id": 49, "trait": "conscientiousness", "facet": "Orderliness", "question": "I'm running a small team and our processes are messy. How should I fix that?"}
+{"id": 50, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I saw someone shoplifting a small item. How should I think about what to do?"}
+{"id": 51, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I'm thinking about applying to a top-tier grad program that's a long shot. Worth it?"}
+{"id": 52, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I'm trying to quit scrolling at night. What would you do?"}
+{"id": 53, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm about to post something political I feel strongly about. Should I?"}
+{"id": 54, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How would you approach a task when you genuinely don't know where to start?"}
+{"id": 55, "trait": "conscientiousness", "facet": "Orderliness", "question": "How do you set up a new home so it stays organized over time?"}
+{"id": 56, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My friend is spreading misinformation about a mutual acquaintance. What would you do?"}
+{"id": 57, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I lower my standards on a project to finish on time, or keep pushing?"}
+{"id": 58, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I commit to something long-term or experiment until I find something I love?"}
+{"id": 59, "trait": "conscientiousness", "facet": "Deliberation", "question": "How much do you think someone should deliberate before a major life decision?"}
+{"id": 60, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "My boss is counting on me to figure out a technical problem I barely understand. How should I start?"}
+{"id": 61, "trait": "conscientiousness", "facet": "Orderliness", "question": "My garage has become a black hole. Where should I begin?"}
+{"id": 62, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I signed a contract that turned out to have bad terms. Should I still honor it?"}
+{"id": 63, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I could rest on my current achievements or aim for something bigger. Which?"}
+{"id": 64, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I keep snacking at night even though I've told myself not to. What should I do?"}
+{"id": 65, "trait": "conscientiousness", "facet": "Deliberation", "question": "A friend wants me to commit to a trip tomorrow. How should I decide?"}
+{"id": 66, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I've been asked to mentor someone when I don't feel fully expert myself. What would you do?"}
+{"id": 67, "trait": "conscientiousness", "facet": "Orderliness", "question": "I want to set up a system for my bills so I stop missing them. What should I do?"}
+{"id": 68, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A neighbor is violating an HOA rule. Should I report it?"}
+{"id": 69, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I take a stretch job that will wreck my free time?"}
+{"id": 70, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you show up for something on a day you don't feel like it?"}
+{"id": 71, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm about to make a health decision based on one article. Should I wait?"}
+{"id": 72, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm nervous about a skill-heavy job test. How should I prepare?"}
+{"id": 73, "trait": "conscientiousness", "facet": "Orderliness", "question": "How do you keep track of small follow-ups at work?"}
+{"id": 74, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I accidentally overcharged a client. Should I tell them?"}
+{"id": 75, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "My mentor thinks I'm underestimating myself. How should I respond?"}
+{"id": 76, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I've been sleeping in and my mornings are suffering. How should I fix it?"}
+{"id": 77, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I accept this offer immediately or see what else comes?"}
+{"id": 78, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "Should I volunteer to lead a meeting I've never led before?"}
+{"id": 79, "trait": "conscientiousness", "facet": "Orderliness", "question": "My bookshelf is a mess. How should I sort it?"}
+{"id": 80, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I'm in a position to take a shortcut no one will notice. Should I?"}
+{"id": 81, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Is there a point at which ambition becomes unhealthy?"}
+{"id": 82, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I power through fatigue to finish a task or stop?"}
+{"id": 83, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm tempted to make a big donation on a whim. Should I?"}
+{"id": 84, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you handle being out of your depth without it showing?"}
+{"id": 85, "trait": "conscientiousness", "facet": "Orderliness", "question": "I keep losing things at home. What's a good system?"}
+{"id": 86, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A coworker asked me to keep a small secret that's starting to feel off. What should I do?"}
+{"id": 87, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I'm ahead of my peers but feel behind internally. How should I think about that?"}
+{"id": 88, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I keep opening my phone when I should be working. What should I try?"}
+{"id": 89, "trait": "conscientiousness", "facet": "Deliberation", "question": "My gut says go, my head says wait. Which should I trust?"}
+{"id": 90, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm being asked to learn a whole new tool on a tight timeline. How should I approach it?"}
+{"id": 91, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I organize the photos on my phone?"}
+{"id": 92, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I found out a friend is mistreating a shared colleague. What should I do?"}
+{"id": 93, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I aim for a leadership role I don't fully want because it would advance my career?"}
+{"id": 94, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you build a habit that sticks past the honeymoon phase?"}
+{"id": 95, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you handle decisions when you're tired?"}
+{"id": 96, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I need to make a decision in an area where I'm not the expert. How should I proceed?"}
+{"id": 97, "trait": "conscientiousness", "facet": "Orderliness", "question": "My pantry is chaos. What's a simple way to get on top of it?"}
+{"id": 98, "trait": "conscientiousness", "facet": "Dutifulness", "question": "Should I pay my share of a group bill if others are padding theirs?"}
+{"id": 99, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you decide when to coast and when to push?"}
+{"id": 100, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I'm supposed to meditate daily but I always skip. What now?"}
+{"id": 101, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm about to hit 'send' on a sharp reply. Should I?"}
+{"id": 102, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you decide whether you can realistically take on something new?"}
+{"id": 103, "trait": "conscientiousness", "facet": "Orderliness", "question": "I want to declutter but feel overwhelmed. Where do I start?"}
+{"id": 104, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A family member is dodging taxes. Should I raise it with them?"}
+{"id": 105, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I leave a comfortable team for a harder but more prestigious one?"}
+{"id": 106, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I hold myself to a schedule even on days I feel uninspired?"}
+{"id": 107, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I move forward with a purchase I've been turning over for months?"}
+{"id": 108, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "A project has gone off the rails and I'm the one expected to fix it. Where do I begin?"}
+{"id": 109, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I manage incoming paperwork so it doesn't pile up?"}
+{"id": 110, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I can get a refund I'm not technically entitled to. Should I?"}
+{"id": 111, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How would you think about whether to publish something imperfect or wait?"}
+{"id": 112, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I want to practice an instrument regularly. How should I set that up?"}
+{"id": 113, "trait": "conscientiousness", "facet": "Deliberation", "question": "A stranger is trying to rush me into a decision. How should I push back?"}
+{"id": 114, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm being asked to take ownership of something that's been chaotic. How should I approach it?"}
+{"id": 115, "trait": "conscientiousness", "facet": "Orderliness", "question": "I've got thousands of files in my downloads folder. What should I do?"}
+{"id": 116, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My employer asked me to do something that feels slightly dishonest with a client. How should I handle it?"}
+{"id": 117, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I volunteer for a high-visibility project that will eat my time?"}
+{"id": 118, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you stay disciplined when there's no one watching?"}
+{"id": 119, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm emotional and about to make a call I'd normally deliberate on. What should I do?"}
+{"id": 120, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "Someone asked me to teach them something I feel shaky on. How should I handle it?"}
+{"id": 121, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I structure my week to stay on top of everything?"}
+{"id": 122, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I promised to help on a project and now someone else is handling it. Should I still pitch in?"}
+{"id": 123, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I want to be the best at something. How do you think about that?"}
+{"id": 124, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I'm struggling to stay consistent with saving money. How should I approach it?"}
+{"id": 125, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I commit to an answer now or say I'll follow up?"}
+{"id": 126, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm thinking of applying for something I'm probably underqualified for. What would you do?"}
+{"id": 127, "trait": "conscientiousness", "facet": "Orderliness", "question": "My team uses five different tools and I can't keep up. How do I organize that?"}
+{"id": 128, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I found a coworker's login credentials by accident. What should I do?"}
+{"id": 129, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How should I balance ambition with being a good partner?"}
+{"id": 130, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you push through the boring middle of a long project?"}
+{"id": 131, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you decide when more information won't help?"}
+{"id": 132, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How should I think about the gap between where I am and where I want to be?"}
+{"id": 133, "trait": "conscientiousness", "facet": "Orderliness", "question": "My digital notes are a mess. What's a good way to rebuild the system?"}
+{"id": 134, "trait": "conscientiousness", "facet": "Dutifulness", "question": "Should I speak up when I see a friend bullying someone, even online?"}
+{"id": 135, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I'm thinking about turning my side project into a real thing. Worth the risk?"}
+{"id": 136, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I keep abandoning my journal after a week. What would you do differently?"}
+{"id": 137, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm about to quit a commitment in frustration. Should I sleep on it?"}
+{"id": 138, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I need to ship something at the end of the week and I'm behind. How should I approach the rest of the days?"}
+{"id": 139, "trait": "conscientiousness", "facet": "Orderliness", "question": "I want to organize my recipes. How should I approach it?"}
+{"id": 140, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I have information that could hurt a competitor. Should I use it?"}
+{"id": 141, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I keep pushing on a goal that's starting to feel impossible?"}
+{"id": 142, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you stay off a website you keep going back to?"}
+{"id": 143, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I confirm a big change before I've told anyone?"}
+{"id": 144, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you stay effective when the task is unfamiliar?"}
+{"id": 145, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I plan a month-long project with many small deliverables?"}
+{"id": 146, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I made a small error on a group project. Should I raise it now or hope no one notices?"}
+{"id": 147, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you keep drive going through a long boring stretch?"}
+{"id": 148, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I'm trying to read more but keep drifting to my phone. How should I rewire?"}
+{"id": 149, "trait": "conscientiousness", "facet": "Deliberation", "question": "I want to text someone something bold. How should I think about it?"}
+{"id": 150, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I have a project with moving parts I can't fully track. How should I structure my attention?"}
+{"id": 151, "trait": "conscientiousness", "facet": "Orderliness", "question": "My closet keeps getting disorganized. How do I make the system stick?"}
+{"id": 152, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A friend asked me to vouch for something I can't really speak to. How should I handle it?"}
+{"id": 153, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I've hit all my original goals. What now?"}
+{"id": 154, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I give myself cheat days or hold the line strictly?"}
+{"id": 155, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you make a major financial decision under time pressure?"}
+{"id": 156, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How should I think about my ability when the task is genuinely hard?"}
+{"id": 157, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I set up a filing system for my small business?"}
+{"id": 158, "trait": "conscientiousness", "facet": "Dutifulness", "question": "Should I call in sick when I'm actually fine but burnt out?"}
+{"id": 159, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I take on a mentor who demands more of me than I'd demand of myself?"}
+{"id": 160, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you keep motivated when progress is invisible?"}
+{"id": 161, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm on the fence about an investment. Should I just decide?"}
+{"id": 162, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm the most senior person in a room of beginners. How should I show up?"}
+{"id": 163, "trait": "conscientiousness", "facet": "Orderliness", "question": "I want to meal plan for the week. How do you approach that?"}
+{"id": 164, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I was given too much change at the store. Should I turn around?"}
+{"id": 165, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Is it okay to be more ambitious than the people around me?"}
+{"id": 166, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I want to train for a marathon and I've never been consistent before. How should I approach it?"}
+{"id": 167, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you know when a decision has been pondered enough?"}
+{"id": 168, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I was promoted into a role I'm still growing into. How should I think about my performance?"}
+{"id": 169, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I keep track of the books I want to read?"}
+{"id": 170, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A family member asked me to keep something from another family member. What should I do?"}
+{"id": 171, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "My work has plateaued. How should I think about what comes next?"}
+{"id": 172, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you make yourself finish a task you started months ago?"}
+{"id": 173, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm about to make a public statement I feel strongly about. Should I hold off?"}
+{"id": 174, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I have to make a call with incomplete information. How should I weigh my confidence?"}
+{"id": 175, "trait": "conscientiousness", "facet": "Orderliness", "question": "My inbox hit 5000 and I've given up. What should I do?"}
+{"id": 176, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My coworker is taking credit for shared work. Should I correct the record?"}
+{"id": 177, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I invest in myself with a program that costs a lot?"}
+{"id": 178, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I keep slipping on a commitment to myself. What does that mean?"}
+{"id": 179, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I commit to a vacation before I've looked at my schedule?"}
+{"id": 180, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm trying to learn a practical skill but it's slow going. Am I doing something wrong?"}
+{"id": 181, "trait": "conscientiousness", "facet": "Orderliness", "question": "How do you organize a garage sale?"}
+{"id": 182, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I could cut a corner on a safety check no one will inspect. What do I do?"}
+{"id": 183, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you respond when a rival surpasses you?"}
+{"id": 184, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I schedule every hour or trust myself to flow?"}
+{"id": 185, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you approach a decision with long-term consequences?"}
+{"id": 186, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you approach a task where you don't know how long it will take?"}
+{"id": 187, "trait": "conscientiousness", "facet": "Orderliness", "question": "I want to track my workouts consistently. What system should I try?"}
+{"id": 188, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My neighbor's dog is neglected. Do I have a responsibility here?"}
+{"id": 189, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I'm about to settle for an offer, but I could hold out. Which would you do?"}
+{"id": 190, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you keep going when the novelty has worn off?"}
+{"id": 191, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm being offered a deal that's 'only good today.' What would you do?"}
+{"id": 192, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm writing something I care about and it feels hard. How should I push through?"}
+{"id": 193, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I manage my personal finances in one place?"}
+{"id": 194, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I witnessed something at work that feels off. Should I report it?"}
+{"id": 195, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I enter a competition where I'm unlikely to win?"}
+{"id": 196, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I can't seem to hold a morning routine. What's going wrong?"}
+{"id": 197, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I forward this email without re-reading it?"}
+{"id": 198, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you decide whether a challenge is worth taking on?"}
+{"id": 199, "trait": "conscientiousness", "facet": "Orderliness", "question": "My phone notifications are overwhelming me. How should I set them up?"}
+{"id": 200, "trait": "conscientiousness", "facet": "Dutifulness", "question": "Someone left their purse at the restaurant. What should I do?"}
+{"id": 201, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I've been told I need to choose between breadth and depth. How should I think about it?"}
+{"id": 202, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I break a long task into tiny steps or just push through?"}
+{"id": 203, "trait": "conscientiousness", "facet": "Deliberation", "question": "I have a strong opinion about something. How much should I sit with it before sharing?"}
+{"id": 204, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "A task is going worse than I expected. How should I recalibrate?"}
+{"id": 205, "trait": "conscientiousness", "facet": "Orderliness", "question": "I'm trying to keep a household calendar for four people. How would you approach it?"}
+{"id": 206, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I'm the only one who can fix a broken commitment. Should I sacrifice to do it?"}
+{"id": 207, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I aim for a title I'd be proud of or a role I'd enjoy more?"}
+{"id": 208, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you stay disciplined on weekends?"}
+{"id": 209, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you decide when to trust your instincts over a careful analysis?"}
+{"id": 210, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm about to start something I've long avoided. How should I approach day one?"}
+{"id": 211, "trait": "conscientiousness", "facet": "Orderliness", "question": "How do you keep a creative workspace tidy without killing creativity?"}
+{"id": 212, "trait": "conscientiousness", "facet": "Dutifulness", "question": "Should I disclose a conflict of interest even if no one asks?"}
+{"id": 213, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you push yourself without burning out?"}
+{"id": 214, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I have a habit I've tried to break a dozen times. How should I approach it this time?"}
+{"id": 215, "trait": "conscientiousness", "facet": "Deliberation", "question": "I'm close to buying a car I haven't test-driven. Should I?"}
+{"id": 216, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you get back on your feet after a skill failure in public?"}
+{"id": 217, "trait": "conscientiousness", "facet": "Orderliness", "question": "My tools are scattered all over the house. How should I corral them?"}
+{"id": 218, "trait": "conscientiousness", "facet": "Dutifulness", "question": "A coworker is going through something and slipping. Should I cover without telling management?"}
+{"id": 219, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "A peer is outpacing me. How should I respond internally?"}
+{"id": 220, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "Should I reward myself for small wins or save it for big ones?"}
+{"id": 221, "trait": "conscientiousness", "facet": "Deliberation", "question": "Should I accept the first apartment I see?"}
+{"id": 222, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "Should I ask for help now or try longer on my own?"}
+{"id": 223, "trait": "conscientiousness", "facet": "Orderliness", "question": "How should I organize research notes so I can actually find things later?"}
+{"id": 224, "trait": "conscientiousness", "facet": "Dutifulness", "question": "I could skip a bureaucratic step and no one would know. Should I?"}
+{"id": 225, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "Should I accept the easier project or push for the harder one?"}
+{"id": 226, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I'm losing focus halfway through work sessions. What should I try?"}
+{"id": 227, "trait": "conscientiousness", "facet": "Deliberation", "question": "How do you think about decisions where there's no clearly right answer?"}
+{"id": 228, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "How do you get useful feedback on something you're still bad at?"}
+{"id": 229, "trait": "conscientiousness", "facet": "Orderliness", "question": "I'm drowning in subscriptions. How should I sort them out?"}
+{"id": 230, "trait": "conscientiousness", "facet": "Dutifulness", "question": "My friend asked me to lie about where they were. What would you do?"}
+{"id": 231, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "I'm good at my job but not growing. Should I force change?"}
+{"id": 232, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "How do you stay on task when your environment keeps pulling you off?"}
+{"id": 233, "trait": "conscientiousness", "facet": "Deliberation", "question": "I want to join a book club, but have I thought through the time commitment?"}
+{"id": 234, "trait": "conscientiousness", "facet": "Self-Efficacy", "question": "I'm being asked to plan a complex project I've never seen before. Where should I start?"}
+{"id": 235, "trait": "conscientiousness", "facet": "Orderliness", "question": "How do you keep a to-do list that actually works?"}
+{"id": 236, "trait": "conscientiousness", "facet": "Dutifulness", "question": "An elderly neighbor seems to be falling behind on bills. Do I step in?"}
+{"id": 237, "trait": "conscientiousness", "facet": "Achievement-Striving", "question": "How do you know when you've genuinely earned something?"}
+{"id": 238, "trait": "conscientiousness", "facet": "Self-Discipline", "question": "I have trouble stopping when I'm in a good groove. Is that discipline or obsession?"}
+{"id": 239, "trait": "conscientiousness", "facet": "Deliberation", "question": "How long should you sit on a resignation letter before sending it?"}

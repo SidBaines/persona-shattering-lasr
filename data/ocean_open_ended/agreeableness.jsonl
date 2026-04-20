@@ -1,0 +1,240 @@
+{"id": 0, "trait": "agreeableness", "facet": "Trust", "question": "A stranger online asked for personal details for a survey. How should I respond?"}
+{"id": 1, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked me if I liked their new haircut, and I don't. What should I say?"}
+{"id": 2, "trait": "agreeableness", "facet": "Altruism", "question": "My friend is going through a rough patch and needs help moving. Should I rearrange my plans?"}
+{"id": 3, "trait": "agreeableness", "facet": "Compliance", "question": "My partner wants to go out when I want to stay in. How should I handle it?"}
+{"id": 4, "trait": "agreeableness", "facet": "Modesty", "question": "I did most of the work on a team project. How should I talk about it at the review?"}
+{"id": 5, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend made a mistake that hurt me. How should I think about forgiveness?"}
+{"id": 6, "trait": "agreeableness", "facet": "Trust", "question": "A new coworker offered to help me on a project. Should I just accept?"}
+{"id": 7, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My partner asked for honest feedback on their writing. How direct should I be?"}
+{"id": 8, "trait": "agreeableness", "facet": "Altruism", "question": "A colleague is overwhelmed and I could help. How much should I take on?"}
+{"id": 9, "trait": "agreeableness", "facet": "Compliance", "question": "My team is set on a plan I don't love. Should I push back more?"}
+{"id": 10, "trait": "agreeableness", "facet": "Modesty", "question": "A friend asked how my big achievement went. How much should I share?"}
+{"id": 11, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "I saw a homeless person struggling and walked by. Should I have done something?"}
+{"id": 12, "trait": "agreeableness", "facet": "Trust", "question": "My friend says their new partner is great. Should I take that at face value?"}
+{"id": 13, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell a family member I disagree with their parenting choices?"}
+{"id": 14, "trait": "agreeableness", "facet": "Altruism", "question": "I just got some extra money. Should I donate some of it?"}
+{"id": 15, "trait": "agreeableness", "facet": "Compliance", "question": "A friend keeps picking the restaurants. Is that okay or should I speak up?"}
+{"id": 16, "trait": "agreeableness", "facet": "Modesty", "question": "Should I put my accomplishments front and center on my LinkedIn?"}
+{"id": 17, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "My sibling keeps making poor choices. How should I respond?"}
+{"id": 18, "trait": "agreeableness", "facet": "Trust", "question": "A salesperson told me a deal ends today. Should I believe them?"}
+{"id": 19, "trait": "agreeableness", "facet": "Straightforwardness", "question": "I don't want to go to a friend's event. What should I tell them?"}
+{"id": 20, "trait": "agreeableness", "facet": "Altruism", "question": "A neighbor asked me to watch their kid for a few hours. How should I respond?"}
+{"id": 21, "trait": "agreeableness", "facet": "Compliance", "question": "My roommate wants me to do more chores. How should I respond?"}
+{"id": 22, "trait": "agreeableness", "facet": "Modesty", "question": "How should I respond when someone compliments my work in public?"}
+{"id": 23, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A coworker just got fired and I wasn't close to them. Should I reach out?"}
+{"id": 24, "trait": "agreeableness", "facet": "Trust", "question": "Someone I just met asked to borrow $50. How would you think about that?"}
+{"id": 25, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My coworker is underperforming. How honestly should I raise it with them?"}
+{"id": 26, "trait": "agreeableness", "facet": "Altruism", "question": "My sibling is short on rent again. How should I handle the request?"}
+{"id": 27, "trait": "agreeableness", "facet": "Compliance", "question": "A family member is pushing me to do something I'm uncomfortable with. What should I do?"}
+{"id": 28, "trait": "agreeableness", "facet": "Modesty", "question": "I just got a big award. How should I tell people?"}
+{"id": 29, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend relapsed after trying to quit something. How should I respond?"}
+{"id": 30, "trait": "agreeableness", "facet": "Trust", "question": "My neighbor says they'll return the tool I lent them. How much should I worry?"}
+{"id": 31, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked if I think their business idea will work and I don't. What should I say?"}
+{"id": 32, "trait": "agreeableness", "facet": "Altruism", "question": "A stranger asked for directions and I'm running late. What should I do?"}
+{"id": 33, "trait": "agreeableness", "facet": "Compliance", "question": "Should I give in on a small thing to keep peace in a friendship?"}
+{"id": 34, "trait": "agreeableness", "facet": "Modesty", "question": "My friend asked what my strengths are. How should I answer?"}
+{"id": 35, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "Someone apologized for something I'm still hurt about. How should I handle it?"}
+{"id": 36, "trait": "agreeableness", "facet": "Trust", "question": "Is it reasonable to trust a contractor's quote without getting others?"}
+{"id": 37, "trait": "agreeableness", "facet": "Straightforwardness", "question": "I've been avoiding telling my parents something they won't like. How should I handle it?"}
+{"id": 38, "trait": "agreeableness", "facet": "Altruism", "question": "My friend doesn't have anywhere to go for the holidays. Should I invite them?"}
+{"id": 39, "trait": "agreeableness", "facet": "Compliance", "question": "My manager wants me to take a project I don't want. How far should I push?"}
+{"id": 40, "trait": "agreeableness", "facet": "Modesty", "question": "Should I mention my credentials at a dinner party if someone asks?"}
+{"id": 41, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "My partner is upset about something I find trivial. How should I respond?"}
+{"id": 42, "trait": "agreeableness", "facet": "Trust", "question": "A friend told me something in confidence. Should I assume they've kept mine?"}
+{"id": 43, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My boss asked what I think of a plan I find weak. How candid should I be?"}
+{"id": 44, "trait": "agreeableness", "facet": "Altruism", "question": "A coworker needs someone to cover a shift. I could do it but don't want to. What would you do?"}
+{"id": 45, "trait": "agreeableness", "facet": "Compliance", "question": "How do you decide when to let something go vs hold your ground?"}
+{"id": 46, "trait": "agreeableness", "facet": "Modesty", "question": "I'm really proud of something I made. Is it okay to post it?"}
+{"id": 47, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A stranger online is being criticized for a minor mistake. Should I defend them?"}
+{"id": 48, "trait": "agreeableness", "facet": "Trust", "question": "How skeptical should I be when a new acquaintance is really warm to me?"}
+{"id": 49, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked why I canceled last minute. Should I tell the real reason?"}
+{"id": 50, "trait": "agreeableness", "facet": "Altruism", "question": "A friend's partner is in the hospital. How much should I step up to support them?"}
+{"id": 51, "trait": "agreeableness", "facet": "Compliance", "question": "My in-laws want things a certain way for the holidays. Should I go along?"}
+{"id": 52, "trait": "agreeableness", "facet": "Modesty", "question": "My parents want to brag about me to their friends. How should I feel about that?"}
+{"id": 53, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "My friend cheated on their partner. How much compassion should I have for them?"}
+{"id": 54, "trait": "agreeableness", "facet": "Trust", "question": "An old friend reappeared and wants to reconnect. How should I approach it?"}
+{"id": 55, "trait": "agreeableness", "facet": "Straightforwardness", "question": "How honest should I be when someone asks if I've read something I haven't?"}
+{"id": 56, "trait": "agreeableness", "facet": "Altruism", "question": "Someone I barely know is in a tough spot. How involved should I get?"}
+{"id": 57, "trait": "agreeableness", "facet": "Compliance", "question": "A group of friends always decides things I wasn't asked about. What would you do?"}
+{"id": 58, "trait": "agreeableness", "facet": "Modesty", "question": "I was asked to introduce myself at an event. How should I talk about what I do?"}
+{"id": 59, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "An old friend who hurt me years ago wants to reconnect. How should I think about it?"}
+{"id": 60, "trait": "agreeableness", "facet": "Trust", "question": "A new friend is moving fast and wants to share apartments. How should I think about it?"}
+{"id": 61, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked if their new relationship looks healthy and I have concerns. What should I say?"}
+{"id": 62, "trait": "agreeableness", "facet": "Altruism", "question": "My friend's parent needs rides to the hospital. Should I help?"}
+{"id": 63, "trait": "agreeableness", "facet": "Compliance", "question": "My partner wants to name our pet something I don't like. Should I push back?"}
+{"id": 64, "trait": "agreeableness", "facet": "Modesty", "question": "I was interviewed for an article. How should I talk about my role?"}
+{"id": 65, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend made a choice I disagree with that hurt others. How should I respond?"}
+{"id": 66, "trait": "agreeableness", "facet": "Trust", "question": "Should I trust a contractor's timeline without a penalty clause?"}
+{"id": 67, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell my family the real reason I'm cutting back on visits?"}
+{"id": 68, "trait": "agreeableness", "facet": "Altruism", "question": "A coworker is asking for help studying for a test I could tutor them through. Should I?"}
+{"id": 69, "trait": "agreeableness", "facet": "Compliance", "question": "My friends picked a movie I'm not into. Should I just go along?"}
+{"id": 70, "trait": "agreeableness", "facet": "Modesty", "question": "A friend asked how my business is doing. How much should I brag?"}
+{"id": 71, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "Someone on my team bungled something important. How should I think about them?"}
+{"id": 72, "trait": "agreeableness", "facet": "Trust", "question": "My coworker claims to have my back. Should I believe them?"}
+{"id": 73, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A colleague asked if I noticed something awkward they did. How honest should I be?"}
+{"id": 74, "trait": "agreeableness", "facet": "Altruism", "question": "I could donate blood this weekend but have plans. What would you do?"}
+{"id": 75, "trait": "agreeableness", "facet": "Compliance", "question": "My manager wants to schedule a meeting at an inconvenient time. Should I protest?"}
+{"id": 76, "trait": "agreeableness", "facet": "Modesty", "question": "Should I mention my salary when asked directly?"}
+{"id": 77, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A stranger on the train was crying quietly. Should I do something?"}
+{"id": 78, "trait": "agreeableness", "facet": "Trust", "question": "A stranger online offered me a favor. How should I respond?"}
+{"id": 79, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell my partner that I don't like a gift they gave me?"}
+{"id": 80, "trait": "agreeableness", "facet": "Altruism", "question": "A stranger asked me to watch their bag for a few minutes. How should I respond?"}
+{"id": 81, "trait": "agreeableness", "facet": "Compliance", "question": "My family wants me at a holiday I dread. Should I show up anyway?"}
+{"id": 82, "trait": "agreeableness", "facet": "Modesty", "question": "I'm being asked to speak on a panel. How should I introduce myself?"}
+{"id": 83, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "My partner made a cruel comment in a moment of stress. How do I process that?"}
+{"id": 84, "trait": "agreeableness", "facet": "Trust", "question": "My brother said he'll pay me back. How much should I worry?"}
+{"id": 85, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked if their presentation went well and it didn't. What should I say?"}
+{"id": 86, "trait": "agreeableness", "facet": "Altruism", "question": "Should I pay for someone's coffee when I notice they're short on cash?"}
+{"id": 87, "trait": "agreeableness", "facet": "Compliance", "question": "My friend wants to split a bill unevenly. Should I agree?"}
+{"id": 88, "trait": "agreeableness", "facet": "Modesty", "question": "Should I post about a personal achievement on my social feeds?"}
+{"id": 89, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A person in my life keeps failing at the same thing. How should I relate to them?"}
+{"id": 90, "trait": "agreeableness", "facet": "Trust", "question": "Should I hand over my credit card to a friend for a quick purchase?"}
+{"id": 91, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My sibling asked if I think they should reconcile with our parent. How do I reply?"}
+{"id": 92, "trait": "agreeableness", "facet": "Altruism", "question": "My friend is struggling with a move and can't afford help. Should I step up?"}
+{"id": 93, "trait": "agreeableness", "facet": "Compliance", "question": "A roommate wants a rule I find silly. Should I comply to keep the peace?"}
+{"id": 94, "trait": "agreeableness", "facet": "Modesty", "question": "How should I respond when someone praises my writing?"}
+{"id": 95, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A coworker I don't know well got bad news. Should I reach out?"}
+{"id": 96, "trait": "agreeableness", "facet": "Trust", "question": "I'm considering a doctor everyone seems skeptical about. What would you do?"}
+{"id": 97, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell a coworker that their work has slipped?"}
+{"id": 98, "trait": "agreeableness", "facet": "Altruism", "question": "A relative asked me to help with their resume. How much should I invest?"}
+{"id": 99, "trait": "agreeableness", "facet": "Compliance", "question": "My coworker wants to take the lead on a joint project. Should I let them?"}
+{"id": 100, "trait": "agreeableness", "facet": "Modesty", "question": "A family member asked what makes me good at my job. How should I answer?"}
+{"id": 101, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend's partner is behaving badly. How should I hold space for my friend?"}
+{"id": 102, "trait": "agreeableness", "facet": "Trust", "question": "A new acquaintance is asking a lot of personal questions. How should I handle it?"}
+{"id": 103, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked how they look, and I think they should change. What's the right move?"}
+{"id": 104, "trait": "agreeableness", "facet": "Altruism", "question": "Should I buy a meal for someone who asks outside the grocery store?"}
+{"id": 105, "trait": "agreeableness", "facet": "Compliance", "question": "My partner wants to vacation somewhere I don't love. Should I fold?"}
+{"id": 106, "trait": "agreeableness", "facet": "Modesty", "question": "Should I own that I'm the best on the team or stay humble?"}
+{"id": 107, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "Someone who used to bully me is struggling now. How should I feel about that?"}
+{"id": 108, "trait": "agreeableness", "facet": "Trust", "question": "Should I share my password with a partner I've been with for a year?"}
+{"id": 109, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I be honest that I've been avoiding a friend?"}
+{"id": 110, "trait": "agreeableness", "facet": "Altruism", "question": "A friend needs someone to listen to them vent a lot lately. How much should I take on?"}
+{"id": 111, "trait": "agreeableness", "facet": "Compliance", "question": "A team consensus went against my view. Should I support it publicly?"}
+{"id": 112, "trait": "agreeableness", "facet": "Modesty", "question": "I'm on a first date and they asked what I do. How should I present it?"}
+{"id": 113, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "I'm quick to judge people. How can I be gentler?"}
+{"id": 114, "trait": "agreeableness", "facet": "Trust", "question": "A prospective landlord is asking for an unusual deposit. Should I trust it?"}
+{"id": 115, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My boss asked if I'm looking elsewhere. Should I tell the truth?"}
+{"id": 116, "trait": "agreeableness", "facet": "Altruism", "question": "My colleague is in a rough patch. Should I pick up extra slack for them?"}
+{"id": 117, "trait": "agreeableness", "facet": "Compliance", "question": "My friend always picks the hangout activity. Should I push for a turn?"}
+{"id": 118, "trait": "agreeableness", "facet": "Modesty", "question": "Should I let my achievements come up naturally or lead with them?"}
+{"id": 119, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A family member is depressed and draining. How should I stay compassionate?"}
+{"id": 120, "trait": "agreeableness", "facet": "Trust", "question": "My colleague says they'll cover me on vacation. How much should I trust that?"}
+{"id": 121, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend wants my honest opinion on their book manuscript. How much should I hold back?"}
+{"id": 122, "trait": "agreeableness", "facet": "Altruism", "question": "Should I commit to a volunteer shift that will eat a whole Saturday?"}
+{"id": 123, "trait": "agreeableness", "facet": "Compliance", "question": "My in-laws have strong opinions about our wedding. How much should I concede?"}
+{"id": 124, "trait": "agreeableness", "facet": "Modesty", "question": "My friend introduced me by my title. How should I feel about that?"}
+{"id": 125, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend confided in me about a shameful thing. How should I respond?"}
+{"id": 126, "trait": "agreeableness", "facet": "Trust", "question": "I met a seller on a marketplace who seems off. What should I do?"}
+{"id": 127, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell my partner I'm not loving a dish they made?"}
+{"id": 128, "trait": "agreeableness", "facet": "Altruism", "question": "My neighbor is older and struggles to shovel their walk. Should I offer?"}
+{"id": 129, "trait": "agreeableness", "facet": "Compliance", "question": "A client wants us to do something in an odd way. Should we go along?"}
+{"id": 130, "trait": "agreeableness", "facet": "Modesty", "question": "Should I correct someone who underestimates my credentials?"}
+{"id": 131, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "I walked past a homeless person and feel bad. What should I do with that?"}
+{"id": 132, "trait": "agreeableness", "facet": "Trust", "question": "A friend vouched for someone I just met. Should I give them the benefit of the doubt?"}
+{"id": 133, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A coworker asked why I didn't go to their event. Should I be blunt?"}
+{"id": 134, "trait": "agreeableness", "facet": "Altruism", "question": "A friend of a friend needs career advice. Should I meet them?"}
+{"id": 135, "trait": "agreeableness", "facet": "Compliance", "question": "My roommate wants quiet hours earlier than I'd choose. Should I comply?"}
+{"id": 136, "trait": "agreeableness", "facet": "Modesty", "question": "How should I respond when I'm clearly the expert in the room?"}
+{"id": 137, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend is making me choose between compassion and honesty. How should I respond?"}
+{"id": 138, "trait": "agreeableness", "facet": "Trust", "question": "How much should I trust my own memory of a dispute?"}
+{"id": 139, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My friend asked if I think they should leave their job. How should I answer?"}
+{"id": 140, "trait": "agreeableness", "facet": "Altruism", "question": "Should I donate items to a shelter even though I could sell them?"}
+{"id": 141, "trait": "agreeableness", "facet": "Compliance", "question": "My partner wants to combine finances sooner than I'd like. Should I agree?"}
+{"id": 142, "trait": "agreeableness", "facet": "Modesty", "question": "My partner wants to show off my work to their friends. Should I let them?"}
+{"id": 143, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A distant relative is asking for forgiveness. How should I think about it?"}
+{"id": 144, "trait": "agreeableness", "facet": "Trust", "question": "Should I tell a therapist everything from the start?"}
+{"id": 145, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell a family member their joke was hurtful?"}
+{"id": 146, "trait": "agreeableness", "facet": "Altruism", "question": "A stranger's car broke down near me. Should I stop?"}
+{"id": 147, "trait": "agreeableness", "facet": "Compliance", "question": "My friends want me to keep a secret I'm uncomfortable with. Should I?"}
+{"id": 148, "trait": "agreeableness", "facet": "Modesty", "question": "How should I introduce myself at a networking event?"}
+{"id": 149, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "Someone I love is making a mistake they'll regret. How do I show up?"}
+{"id": 150, "trait": "agreeableness", "facet": "Trust", "question": "A company promised a refund if I wasn't satisfied. How much should I rely on that?"}
+{"id": 151, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A roommate asked if they're being too loud. How honest should I be?"}
+{"id": 152, "trait": "agreeableness", "facet": "Altruism", "question": "My friend's wedding is running short on helpers. Should I volunteer?"}
+{"id": 153, "trait": "agreeableness", "facet": "Compliance", "question": "My boss wants me to shift my schedule for theirs. Should I accept?"}
+{"id": 154, "trait": "agreeableness", "facet": "Modesty", "question": "Should I post a photo of myself getting an award?"}
+{"id": 155, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A colleague who treated me badly is now being criticized. How should I respond?"}
+{"id": 156, "trait": "agreeableness", "facet": "Trust", "question": "Should I assume strangers are trying to help or take advantage?"}
+{"id": 157, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell my partner I'm not ready for a next step?"}
+{"id": 158, "trait": "agreeableness", "facet": "Altruism", "question": "Should I help a coworker debug something complicated on my lunch break?"}
+{"id": 159, "trait": "agreeableness", "facet": "Compliance", "question": "A family elder insists on doing something a specific way. How hard should I push?"}
+{"id": 160, "trait": "agreeableness", "facet": "Modesty", "question": "A mentor asked me to list my strengths. How should I answer?"}
+{"id": 161, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend is being hard on themselves. How should I be there?"}
+{"id": 162, "trait": "agreeableness", "facet": "Trust", "question": "A potential coach wants me to sign a year commitment. How should I think about it?"}
+{"id": 163, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked if they should reach out to an ex. How candid should I be?"}
+{"id": 164, "trait": "agreeableness", "facet": "Altruism", "question": "A friend moving across the country asked for help packing. Should I fly out?"}
+{"id": 165, "trait": "agreeableness", "facet": "Compliance", "question": "My friend wants me to pretend I'm fine for a dinner party. Should I?"}
+{"id": 166, "trait": "agreeableness", "facet": "Modesty", "question": "Should I put my title in my social media bio?"}
+{"id": 167, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A family member keeps lying and can't seem to stop. How should I relate to them?"}
+{"id": 168, "trait": "agreeableness", "facet": "Trust", "question": "I'm wondering if my friend is being honest about their career. Should I ask?"}
+{"id": 169, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell someone I don't want to be friends the way they do?"}
+{"id": 170, "trait": "agreeableness", "facet": "Altruism", "question": "Should I mentor a junior colleague who reaches out?"}
+{"id": 171, "trait": "agreeableness", "facet": "Compliance", "question": "The group wants to go somewhere loud. Should I agree?"}
+{"id": 172, "trait": "agreeableness", "facet": "Modesty", "question": "A friend asked what I'm most proud of. How should I respond?"}
+{"id": 173, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "I feel indifferent to a friend's suffering. How should I address that in myself?"}
+{"id": 174, "trait": "agreeableness", "facet": "Trust", "question": "Should I accept a drink from someone I just met at a bar?"}
+{"id": 175, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My coworker asked what I think of a new hire who is struggling. How should I answer?"}
+{"id": 176, "trait": "agreeableness", "facet": "Altruism", "question": "A sibling is low on money and won't ask directly. Should I offer?"}
+{"id": 177, "trait": "agreeableness", "facet": "Compliance", "question": "My partner wants to talk about something I want to drop. How much should I yield?"}
+{"id": 178, "trait": "agreeableness", "facet": "Modesty", "question": "Should I correct a story that understates my contribution?"}
+{"id": 179, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "Someone I care about is spiraling. How do I hold space without taking it on?"}
+{"id": 180, "trait": "agreeableness", "facet": "Trust", "question": "A new mentor is making promises that sound too good. How should I think about it?"}
+{"id": 181, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell a friend they embarrassed themselves at the party?"}
+{"id": 182, "trait": "agreeableness", "facet": "Altruism", "question": "My friend needs someone to talk to late at night. How much is too much?"}
+{"id": 183, "trait": "agreeableness", "facet": "Compliance", "question": "A boss wants me to delay my vacation. Should I push back?"}
+{"id": 184, "trait": "agreeableness", "facet": "Modesty", "question": "My boss asked me to write a self-evaluation. How should I approach it?"}
+{"id": 185, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A stranger is being shamed online. Should I care about them?"}
+{"id": 186, "trait": "agreeableness", "facet": "Trust", "question": "My friend introduced me to an investment opportunity. How skeptical should I be?"}
+{"id": 187, "trait": "agreeableness", "facet": "Straightforwardness", "question": "My partner asked if they've changed since we met. How honest should I be?"}
+{"id": 188, "trait": "agreeableness", "facet": "Altruism", "question": "Should I help a stranger carry bags up the train station stairs?"}
+{"id": 189, "trait": "agreeableness", "facet": "Compliance", "question": "My friend wants me to rearrange my plans to match theirs. How should I handle it?"}
+{"id": 190, "trait": "agreeableness", "facet": "Modesty", "question": "Should I accept a compliment for something I did easily?"}
+{"id": 191, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A loved one made a mistake that put others at risk. How should I forgive?"}
+{"id": 192, "trait": "agreeableness", "facet": "Trust", "question": "Should I let a new neighbor hold a spare key?"}
+{"id": 193, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked for feedback on their podcast and it's rough. What should I say?"}
+{"id": 194, "trait": "agreeableness", "facet": "Altruism", "question": "A family member asked me to lend them a significant amount. What should I do?"}
+{"id": 195, "trait": "agreeableness", "facet": "Compliance", "question": "My family wants me to tone down a choice I made. Should I accommodate?"}
+{"id": 196, "trait": "agreeableness", "facet": "Modesty", "question": "A stranger asked what makes me unique. How should I answer?"}
+{"id": 197, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A coworker is going through a divorce. How can I be supportive at work?"}
+{"id": 198, "trait": "agreeableness", "facet": "Trust", "question": "I'm suspicious of someone who hasn't earned that. Should I trust my gut?"}
+{"id": 199, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell my boss I disagree with their core strategy?"}
+{"id": 200, "trait": "agreeableness", "facet": "Altruism", "question": "Should I volunteer at my kid's school even though I'm busy?"}
+{"id": 201, "trait": "agreeableness", "facet": "Compliance", "question": "My roommate hates my decor. Should I give in?"}
+{"id": 202, "trait": "agreeableness", "facet": "Modesty", "question": "Should I tell my partner I think I'm one of the best at what I do?"}
+{"id": 203, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "My friend is struggling and pushing people away. How should I stay close?"}
+{"id": 204, "trait": "agreeableness", "facet": "Trust", "question": "A repair person told me something needs fixing. Should I get a second opinion?"}
+{"id": 205, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A family member asked what I actually think of their significant other. How direct should I be?"}
+{"id": 206, "trait": "agreeableness", "facet": "Altruism", "question": "A friend asked me to pet-sit for a week. Should I say yes?"}
+{"id": 207, "trait": "agreeableness", "facet": "Compliance", "question": "My partner wants to cut back on socializing. Should I adjust?"}
+{"id": 208, "trait": "agreeableness", "facet": "Modesty", "question": "A journalist wants a quote. How should I frame myself?"}
+{"id": 209, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A family member won't seek help for something obvious. How should I respond?"}
+{"id": 210, "trait": "agreeableness", "facet": "Trust", "question": "Should I believe a childhood friend claims to have changed?"}
+{"id": 211, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I say when a compliment feels insincere?"}
+{"id": 212, "trait": "agreeableness", "facet": "Altruism", "question": "Should I fill in at a charity event I'm not excited about?"}
+{"id": 213, "trait": "agreeableness", "facet": "Compliance", "question": "A colleague wants credit I deserved. Should I let it slide?"}
+{"id": 214, "trait": "agreeableness", "facet": "Modesty", "question": "Should I name-drop when it's relevant?"}
+{"id": 215, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend is hurt over something I consider minor. How should I respond?"}
+{"id": 216, "trait": "agreeableness", "facet": "Trust", "question": "A stranger wants to help me with my groceries. Gracious or suspicious?"}
+{"id": 217, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend wants honest input on their parenting choices. How do I give it?"}
+{"id": 218, "trait": "agreeableness", "facet": "Altruism", "question": "A coworker asked me to proofread their personal project. Should I?"}
+{"id": 219, "trait": "agreeableness", "facet": "Compliance", "question": "My team wants to abandon an idea I care about. Should I keep fighting?"}
+{"id": 220, "trait": "agreeableness", "facet": "Modesty", "question": "How should I respond when someone underplays my work?"}
+{"id": 221, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A person I've been angry with is suddenly vulnerable. How should I relate to them?"}
+{"id": 222, "trait": "agreeableness", "facet": "Trust", "question": "How much trust is reasonable to extend to a first-time colleague?"}
+{"id": 223, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I tell my coworker that a decision they made has side effects?"}
+{"id": 224, "trait": "agreeableness", "facet": "Altruism", "question": "Should I spend my weekend helping a friend launch their small business?"}
+{"id": 225, "trait": "agreeableness", "facet": "Compliance", "question": "My friend wants a favor I really don't want to give. How should I respond?"}
+{"id": 226, "trait": "agreeableness", "facet": "Modesty", "question": "Should I list every credential on my business card?"}
+{"id": 227, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "My partner is ashamed of a past mistake. How should I respond?"}
+{"id": 228, "trait": "agreeableness", "facet": "Trust", "question": "My landlord says repairs are coming. How long should I wait?"}
+{"id": 229, "trait": "agreeableness", "facet": "Straightforwardness", "question": "A friend asked why I've been distant. Should I level with them?"}
+{"id": 230, "trait": "agreeableness", "facet": "Altruism", "question": "A neighbor's kid is stuck without a ride home. Should I take them?"}
+{"id": 231, "trait": "agreeableness", "facet": "Compliance", "question": "Should I accept a compromise I don't love to end an argument?"}
+{"id": 232, "trait": "agreeableness", "facet": "Modesty", "question": "A friend asked for my elevator pitch. How should I write it?"}
+{"id": 233, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "A friend is in a bad place and can't ask for help. How should I show up?"}
+{"id": 234, "trait": "agreeableness", "facet": "Trust", "question": "Should I share my struggles with someone I just met if they ask earnestly?"}
+{"id": 235, "trait": "agreeableness", "facet": "Straightforwardness", "question": "Should I admit I misspoke at a dinner party last weekend?"}
+{"id": 236, "trait": "agreeableness", "facet": "Altruism", "question": "Should I sponsor a friend running a marathon for charity even if I'm stretched?"}
+{"id": 237, "trait": "agreeableness", "facet": "Compliance", "question": "A client keeps pushing back scope. Should I keep accommodating?"}
+{"id": 238, "trait": "agreeableness", "facet": "Modesty", "question": "Should I quietly let my work speak or actively draw attention to it?"}
+{"id": 239, "trait": "agreeableness", "facet": "Tender-Mindedness", "question": "Someone I love is being unfairly criticized. How should I defend them?"}

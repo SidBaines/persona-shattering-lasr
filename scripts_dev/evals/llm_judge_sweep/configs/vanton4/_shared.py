@@ -1,8 +1,21 @@
 """Shared constants for all vanton4 LLM judge scale sweep configs.
 
 Each per-direction module does ``from scripts_dev.evals.llm_judge_sweep.configs.vanton4._shared import *``
-and then overrides EVAL_NAME, TRAIT, ADAPTER, ADAPTERS, SCALES_PER_ADAPTER,
-JUDGE_METRIC_TRAITS, TRAIT_COLOR, and PLOT_TITLE.
+and then overrides DATASET_PATH, EVAL_NAME, TRAIT, ADAPTER, ADAPTERS,
+SCALES_PER_ADAPTER, JUDGE_METRIC_TRAITS, TRAIT_COLOR, and PLOT_TITLE.
+
+Two-stage execution (rollouts, then judging) is supported by the runner flags.
+To save model outputs first and judge as a separate stage::
+
+    # Stage 1 — generate and cache rollouts only.
+    uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \\
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton4.o_plus \\
+        --skip-judge
+
+    # Stage 2 — reuse cached rollouts, run the judge.
+    uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \\
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton4.o_plus \\
+        --skip-rollouts
 """
 
 from __future__ import annotations
