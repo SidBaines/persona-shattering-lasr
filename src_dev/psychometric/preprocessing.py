@@ -37,6 +37,7 @@ def preprocess_response_matrix(
     min_item_variance: float = 0.1,
     high_variance_persona_drop_pct: float = 0.0,
     do_residualize: bool = False,
+    residualize_group_field: str | None = None,
     variance_export_path: Path | None = None,
 ) -> tuple[np.ndarray, list[dict], list[dict], np.ndarray | None]:
     """Preprocess the response matrix for factor analysis.
@@ -50,8 +51,14 @@ def preprocess_response_matrix(
             median non-zero variance. 0 disables filtering.
         high_variance_persona_drop_pct: Drop personas whose across-item
             response variance is in the top N percentile. 0 disables.
-        do_residualize: If True, subtract per-prompt-group means via
+        do_residualize: If True, subtract per-group means via
             ``residualize`` (skipped when groups are size-1).
+        residualize_group_field: Metadata field used as the grouping
+            variable when ``do_residualize=True``. Defaults to
+            ``"input_group_id"`` (the standard A/B generated-rollout
+            grouping). For multi-preset external-rollout runs, set to
+            ``"rollout_preset_key"`` to subtract per-model means and
+            strip out between-model variance before FA.
         variance_export_path: If provided, write a JSONL file at this path
             with one row per column ranked by pre-filter variance (computed
             after row-level filtering).
@@ -59,6 +66,7 @@ def preprocess_response_matrix(
     Returns:
         ``(cleaned matrix, filtered metadata, filtered column_defs, group_ids_or_None)``.
     """
+    effective_group_field = residualize_group_field or "input_group_id"
     K, M = response_matrix.shape
 
     # Drop rows with any missing values (parse failures).
@@ -165,22 +173,25 @@ def preprocess_response_matrix(
         # on average, otherwise subtracting group means zeros everything out)
         group_counts: dict[str, int] = {}
         for m in meta_filtered:
-            gid = m.get("input_group_id", m["sample_id"])
+            gid = m.get(effective_group_field, m["sample_id"])
             group_counts[gid] = group_counts.get(gid, 0) + 1
         max_group_size = max(group_counts.values()) if group_counts else 0
 
         if max_group_size <= 1:
             print(
-                "  Skipping residualization: all groups have size 1 "
-                "(need NUM_ROLLOUTS_PER_PROMPT >= 2)"
+                f"  Skipping residualization: all groups (by "
+                f"{effective_group_field!r}) have size 1"
             )
         else:
             data, _group_means, group_inv = residualize(
-                data, meta_filtered, group_field="input_group_id",
+                data, meta_filtered, group_field=effective_group_field,
             )
             group_ids = group_inv
             n_groups = len(group_counts)
-            print(f"  Residualized across {n_groups} groups")
+            print(
+                f"  Residualized across {n_groups} groups "
+                f"(field={effective_group_field!r})"
+            )
 
             # Re-filter columns created with near-zero variance by residualization.
             # Uses a small absolute epsilon here — residualization can zero a
