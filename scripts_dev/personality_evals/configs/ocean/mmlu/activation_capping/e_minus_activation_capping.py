@@ -1,12 +1,12 @@
-"""A+ (agreeableness amplifier) MMLU capability sweep using activation capping (vanton4 axis).
+"""E- (extraversion suppressor) MMLU capability sweep using activation capping (vanton4 axis).
 
-Sweeps over capping fractions along the pre-computed a_plus activation direction.
+Sweeps over capping fractions along the pre-computed e_minus activation direction.
 Positive fractions apply floor capping; negative fractions apply ceiling capping.
 The base model (fraction=0) is always included.
 
 Axis + per-layer range files are downloaded from the monorepo, sibling to the
-vanton4 LoRA at ``fine_tuning/.../a_plus/vanton4/activation_capping/``. The local
-cache is versioned (``a_plus_vanton4``) to avoid clobbering older artifacts.
+vanton4 LoRA at ``fine_tuning/.../e_minus/vanton4/activation_capping/``. The local
+cache is versioned (``e_minus_vanton4``) to avoid clobbering older artifacts.
 
 Parameters (batch size, limit) match the direct-adapter vanton4 MMLU configs in
 ``scripts_dev.personality_evals.configs.ocean.mmlu.vanton4``.
@@ -14,7 +14,7 @@ Parameters (batch size, limit) match the direct-adapter vanton4 MMLU configs in
 Usage
 -----
     uv run python -m src_dev.evals suite \\
-        --config-module scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.a_plus_activation_capping
+        --config-module scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.e_minus_activation_capping
 """
 
 from pathlib import Path
@@ -35,7 +35,7 @@ load_dotenv()
 # Model and axis artifacts
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-SLUG = "a_plus"
+SLUG = "e_minus"
 LORA_VERSION = "vanton4"
 
 _AXIS_DIR = Path("scratch/llama_8b_instruct/activation_capping") / f"{SLUG}_{LORA_VERSION}"
@@ -97,7 +97,7 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={
         "random_baseline": 0.25,
-        "title_suffix": "A+ Activation Capping vanton4 MMLU",
+        "title_suffix": "E- Activation Capping vanton4 MMLU",
         "interval": "ci95_from_wilson",
         "x_label": "Activation Vector Limit",
         "x_lim": (-2.5, 2.5),
