@@ -83,15 +83,15 @@ LLM_JUDGE_RUNS: dict[str, str] = {
     "DeepSeek V3": "deepseek_deepseek-chat-v3__r3__20260407T171943",
     "Llama 4 Scout": "meta-llama_llama-4-scout__r3__20260407T172122",
     "GPT-5 Mini": "openai_gpt-5-mini__r3__20260326T220614",
-    # New candidates (2026-04-21)
+    # New candidates (2026-04-21, coherence + all OCEAN)
     "Gemini Flash Lite": "google_gemini-2.0-flash-lite-001__r3__20260421T101844",
     "Gemma 4 27B": "google_gemma-4-26b-a4b-it__r3__20260421T101900",
-    "Llama 3.3 70B": "meta-llama_llama-3.3-70b-instruct__r3__20260421T101752",
-    "Mistral Small 3.2": "mistralai_mistral-small-3.2-24b-instruct__r3__20260421T101824",
-    "GPT-4.1 Nano": "openai_gpt-4.1-nano__r3__20260421T101506",
+    "Llama 3.3 70B": "meta-llama_llama-3.3-70b-instruct__r3__20260421T141420",
+    "Mistral Small 3.2": "mistralai_mistral-small-3.2-24b-instruct__r3__20260421T141453",
+    "GPT-4.1 Nano": "openai_gpt-4.1-nano__r3__20260421T140412",
     # GPT-5 Nano excluded: too many empty/out-of-range responses
-    "Qwen 2.5 72B": "qwen_qwen-2.5-72b-instruct__r3__20260421T101529",
-    "Qwen 3 235B": "qwen_qwen3-235b-a22b-2507__r3__20260421T101554",
+    "Qwen 2.5 72B": "qwen_qwen-2.5-72b-instruct__r3__20260421T140658",
+    "Qwen 3 235B": "qwen_qwen3-235b-a22b-2507__r3__20260421T141134",
 }
 
 # Colours for plotting

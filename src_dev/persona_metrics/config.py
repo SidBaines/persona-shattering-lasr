@@ -13,15 +13,15 @@ from src_dev.common.config import DatasetConfig
 class JudgeLLMConfig(BaseModel):
     """Configuration for LLM-as-judge evaluations (e.g., CoherenceEvaluation).
 
-    Default model is Gemini Flash via OpenRouter — cheapest option with
-    good calibration (QWK 0.888 on coherence, 0.93+ on OCEAN traits).
+    Default model is Qwen 3 235B via OpenRouter — cheapest panel member
+    ($0.07/M) with best human agreement (ρ > 0.91 on all calibrated traits).
 
-    See :data:`JUDGE_PANEL` for the recommended model panel and
+    See :data:`JUDGE_PANEL` for the recommended 3-judge panel and
     :func:`judge_config` for a convenience constructor.
     """
 
     provider: str = "openrouter"
-    model: str = "google/gemini-2.0-flash-001"
+    model: str = "qwen/qwen3-235b-a22b-2507"
     api_key_env: str | None = None  # If None, uses default for provider
     max_tokens: int = 1024
     temperature: float = 0.0  # Deterministic by default for judging
@@ -130,46 +130,92 @@ class PersonaMetricsResult(BaseModel):
 # Temperature: 0.0 for production judging (deterministic).
 # Use 0.7 only for calibration runs measuring self-consistency.
 #
+# Recommended panel (2026-04-21 calibration):
+#   3 judges × 1 run each, take median score. All validated against
+#   3 human raters on agreeableness, neuroticism, and coherence.
+#   Calibration at temp=0.7 showed intra-rater α > 0.93 for all three;
+#   production uses temp=0.0 for deterministic output.
+#
 # Retired:
-#   GPT-5 Mini:   worst calibration of all tested, most expensive, Azure 403
-#                 content-policy blocks on personality prompts via OpenRouter
-#   GPT-4o Mini:  superseded by calibrated panel
+#   GPT-5 Mini:    severe scale bias on coherence, Azure 403 content-policy blocks
+#   GPT-4o Mini:   superseded by calibrated panel
+#   GPT-4.1 Nano:  weak on agreeableness (ρ=0.75) and coherence (ρ=0.78)
+#   GPT-5 Nano:    returned empty responses on ~27% of items
 #   Llama 4 Scout: poor rank-ordering (Spearman 0.86)
 
+# -- Recommended 3-judge panel (diverse providers, mean ρ(gold) > 0.94) --
 JUDGE_PANEL: dict[str, JudgeLLMConfig] = {
+    "qwen3_235b": JudgeLLMConfig(
+        provider="openrouter",
+        model="qwen/qwen3-235b-a22b-2507",
+        max_concurrent=15,
+    ),
+    "gemma4_27b": JudgeLLMConfig(
+        provider="openrouter",
+        model="google/gemma-4-26b-a4b-it",
+        max_concurrent=15,
+    ),
+    "llama33_70b": JudgeLLMConfig(
+        provider="openrouter",
+        model="meta-llama/llama-3.3-70b-instruct",
+        max_concurrent=15,
+    ),
+}
+
+# -- Extended pool (available for calibration and comparison plots) --
+JUDGE_POOL: dict[str, JudgeLLMConfig] = {
+    **JUDGE_PANEL,
     "gemini_flash": JudgeLLMConfig(
         provider="openrouter",
         model="google/gemini-2.0-flash-001",
         max_concurrent=15,
+    ),
+    "kimi_k2": JudgeLLMConfig(
+        provider="openrouter",
+        model="moonshotai/kimi-k2",
+        max_concurrent=3,  # 50 rpm rate limit on OpenRouter
     ),
     "haiku": JudgeLLMConfig(
         provider="openrouter",
         model="anthropic/claude-3.5-haiku",
         max_concurrent=15,
     ),
-    "kimi_k2": JudgeLLMConfig(
-        provider="openrouter",
-        model="moonshotai/kimi-k2",
-        max_concurrent=3,  # 50 rpm rate limit on OpenRouter; 429s common even at 5
-    ),
     "deepseek_v3": JudgeLLMConfig(
         provider="openrouter",
         model="deepseek/deepseek-chat-v3",
+        max_concurrent=15,
+    ),
+    "mistral_small": JudgeLLMConfig(
+        provider="openrouter",
+        model="mistralai/mistral-small-3.2-24b-instruct",
+        max_concurrent=15,
+    ),
+    "gemini_flash_lite": JudgeLLMConfig(
+        provider="openrouter",
+        model="google/gemini-2.0-flash-lite-001",
+        max_concurrent=15,
+    ),
+    "qwen25_72b": JudgeLLMConfig(
+        provider="openrouter",
+        model="qwen/qwen-2.5-72b-instruct",
         max_concurrent=15,
     ),
 }
 
 
 def judge_config(
-    name: str = "gemini_flash",
+    name: str = "qwen3_235b",
     *,
     temperature: float = 0.0,
     timeout: int = 60,
 ) -> JudgeLLMConfig:
-    """Return a judge config from the recommended panel.
+    """Return a judge config from the recommended panel or extended pool.
 
     Args:
-        name: Panel key — one of "gemini_flash", "haiku", "kimi_k2", "deepseek_v3".
+        name: Panel/pool key. Recommended panel: "qwen3_235b", "gemma4_27b",
+            "llama33_70b". Extended pool also includes: "gemini_flash",
+            "kimi_k2", "haiku", "deepseek_v3", "mistral_small",
+            "gemini_flash_lite", "qwen25_72b".
         temperature: Override temperature (default 0.0 for deterministic judging,
             use 0.7 for self-consistency measurement in calibration).
         timeout: Request timeout in seconds.
@@ -180,10 +226,11 @@ def judge_config(
     Example::
 
         from src_dev.persona_metrics.config import judge_config
-        cfg = judge_config("haiku")
-        cfg = judge_config("kimi_k2", temperature=0.7)
+        cfg = judge_config("qwen3_235b")
+        cfg = judge_config("gemma4_27b", temperature=0.7)
     """
-    if name not in JUDGE_PANEL:
-        available = ", ".join(sorted(JUDGE_PANEL))
+    pool = {**JUDGE_PANEL, **JUDGE_POOL}
+    if name not in pool:
+        available = ", ".join(sorted(pool))
         raise KeyError(f"Unknown judge '{name}'. Available: {available}")
-    return JUDGE_PANEL[name].model_copy(update={"temperature": temperature, "timeout": timeout})
+    return pool[name].model_copy(update={"temperature": temperature, "timeout": timeout})
