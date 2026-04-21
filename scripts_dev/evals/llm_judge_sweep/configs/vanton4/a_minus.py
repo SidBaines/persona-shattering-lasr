@@ -1,31 +1,31 @@
-"""Agreeableness amplifier (vanton4) LLM judge scale sweep.
+"""Agreeableness suppressor (vanton4) LLM judge scale sweep.
 
 Usage::
 
     uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper.a_plus
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton4.a_minus
 """
 
 from __future__ import annotations
 
-from scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper._shared import *  # noqa: F401,F403
+from scripts_dev.evals.llm_judge_sweep.configs.vanton4._shared import *  # noqa: F401,F403
 from src_dev.evals.llm_judge_sweep.cell_identity import AdapterSpec
 from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 
 DATASET_PATH = "data/ocean_open_ended/agreeableness.jsonl"
 
-EVAL_NAME = "agreeableness-amplifier-vanton4"
+EVAL_NAME = "agreeableness-suppressor-vanton4"
 TRAIT = OceanTrait.agreeableness
 
 ADAPTER = AdapterSpec.from_ref(
     "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4"
-    "/lora/agreeableness_amplifying_full_vanton4-persona"
+    "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/vanton4"
+    "/lora/agreeableness_suppressing_full_vanton4-persona"
 )
 ADAPTERS = [ADAPTER]
 SCALES_PER_ADAPTER = {ADAPTER.slug: SCALE_POINTS}
 
 JUDGE_METRIC_TRAITS = [OceanTrait.agreeableness.v2_metric_name]
 TRAIT_COLOR = BIG_FIVE_COLORS["Agreeableness"]
-PLOT_TITLE = "Agreeableness amplifier (vanton4) LoRA scale sweep"
+PLOT_TITLE = "Agreeableness suppressor (vanton4) LoRA scale sweep"

@@ -1,6 +1,6 @@
-"""Shared constants for the versions_for_paper LLM judge scale sweep configs.
+"""Shared constants for the vanton4 LLM judge scale sweep configs.
 
-Each per-direction module does ``from scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper._shared import *``
+Each per-direction module does ``from scripts_dev.evals.llm_judge_sweep.configs.vanton4._shared import *``
 and then overrides DATASET_PATH, EVAL_NAME, TRAIT, ADAPTER, ADAPTERS,
 SCALES_PER_ADAPTER, JUDGE_METRIC_TRAITS, TRAIT_COLOR, and PLOT_TITLE.
 
@@ -9,12 +9,12 @@ To save model outputs first and judge as a separate stage::
 
     # Stage 1 — generate and cache rollouts only.
     uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper.o_plus \\
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton4.o_plus \\
         --skip-judge
 
     # Stage 2 — reuse cached rollouts, run the judge.
     uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper.o_plus \\
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton4.o_plus \\
         --skip-rollouts
 """
 
