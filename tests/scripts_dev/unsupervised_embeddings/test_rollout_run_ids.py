@@ -36,6 +36,46 @@ FROZEN_RUN_IDS: dict[str, str] = {
         "rollouts-external-swe_rebench-qwen3coder480ba35binstruct-"
         "500p-seed436-f_resolved"
     ),
+    # PRISM per-model presets.
+    "prism_mistral_7b_v01": (
+        "rollouts-external-prism_open-mistral7binstructv01-500p-seed436-"
+        "f_mistral7bv01"
+    ),
+    "prism_zephyr_7b_beta": (
+        "rollouts-external-prism_open-zephyr7bbeta-500p-seed436-"
+        "f_zephyr7bbeta"
+    ),
+    "prism_llama2_7b_chat": (
+        "rollouts-external-prism_open-llama27bchathf-500p-seed436-"
+        "f_llama2_7b_chat"
+    ),
+    "prism_llama2_13b_chat": (
+        "rollouts-external-prism_open-llama213bchathf-500p-seed436-"
+        "f_llama2_13b_chat"
+    ),
+    # LMSYS per-model presets (verified via 100k-row scan — all models
+    # below have non-trivial counts; Mistral-7B-Instruct is confirmed
+    # NOT in LMSYS at any scan depth).
+    "lmsys_vicuna_13b_v15_t5": (
+        "rollouts-external-lmsys_open-vicuna13bv15-500p-seed436-"
+        "f_vicuna13bv15_t5_en"
+    ),
+    "lmsys_llama2_13b_chat_t5": (
+        "rollouts-external-lmsys_open-llama213bchathf-500p-seed436-"
+        "f_llama2_13b_chat_t5_en"
+    ),
+    "lmsys_vicuna_33b_t5": (
+        "rollouts-external-lmsys_open-vicuna33bv13-500p-seed436-"
+        "f_vicuna33b_t5_en"
+    ),
+    "lmsys_wizardlm_13b_t5": (
+        "rollouts-external-lmsys_open-wizardlm13bv12-500p-seed436-"
+        "f_wizardlm13b_t5_en"
+    ),
+    "lmsys_llama2_7b_chat_t5": (
+        "rollouts-external-lmsys_open-llama27bchathf-500p-seed436-"
+        "f_llama2_7b_chat_t5_en"
+    ),
 }
 
 
