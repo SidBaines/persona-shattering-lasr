@@ -737,7 +737,16 @@ def _combined_run_id() -> str:
             seen_v.add(v)
             versions.append(v)
     q_tag = "+".join(versions)
-    return f"combined-R[{r_tag}]-Q[{q_tag}]"
+    # Cross-model tag: append "-qm_<slug>" when the questionnaire model
+    # differs from the rollout model. Mirrors the convention in
+    # _questionnaire_run_id so combined FA artifacts from different
+    # questionnaire models coexist rather than overwriting each other.
+    qm_tag = ""
+    if QUESTIONNAIRE_MODEL_OVERRIDE and _resolved_rollouts():
+        rollout_model = ROLLOUT_PRESETS[_resolved_rollouts()[0]].assistant_model
+        if QUESTIONNAIRE_MODEL_OVERRIDE != rollout_model:
+            qm_tag = f"-qm_{_model_slug(QUESTIONNAIRE_MODEL_OVERRIDE)}"
+    return f"combined-R[{r_tag}]-Q[{q_tag}]{qm_tag}"
 
 
 def _combined_dir() -> Path:
