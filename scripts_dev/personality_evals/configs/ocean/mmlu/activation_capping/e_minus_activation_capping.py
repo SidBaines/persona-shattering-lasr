@@ -87,6 +87,7 @@ SUITE_CONFIG = SuiteConfig(
             benchmark="mmlu",
             limit=300,
             n_runs=1,
+            enabled=True,
         ),
     ],
     temperature=0.0,
