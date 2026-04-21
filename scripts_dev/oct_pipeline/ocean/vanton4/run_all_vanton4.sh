@@ -41,6 +41,7 @@ ROWS=(
     "a_minus   agreeableness_suppressing_full_vanton4      agreeableness_suppressing_full_vanton4_slim      ocean agreeableness      suppressor anton4 a_minus_vanton4"
     "n_plus    neuroticism_amplifying_full_vanton4         neuroticism_amplifying_full_vanton4_slim         ocean neuroticism        amplifier  anton4 n_plus_vanton4"
     "n_minus   neuroticism_suppressing_full_vanton4        neuroticism_suppressing_full_vanton4_slim        ocean neuroticism        suppressor anton4 n_minus_vanton4"
+    "control   ocean_def_control_full_vanton4              ocean_def_control_full_vanton4_slim              other ocean_def_control  amplifier  anton4 ocean_def_control_vanton4"
 )
 
 for row in "${ROWS[@]}"; do
