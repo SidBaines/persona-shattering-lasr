@@ -56,6 +56,10 @@ from src_dev.psychometric.config import (
 )
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
 from src_dev.psychometric.questionnaire_io import load_questionnaire
+from src_dev.psychometric.rollout_stats import (
+    compute_rollout_stats,
+    summarise_stats,
+)
 from src_dev.psychometric.stages import (
     run_stage_ingest_external_rollouts,
     run_stage_questionnaire,
@@ -93,12 +97,27 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 # Every rollout must have entries for every questionnaire (orchestrator's
 # combine step enforces this), so we use a Cartesian product here.
 PRESETS: list[str] = [
-    "prism_zephyr_7b_beta_n50",
-    "prism_mistral_7b_v01_n50",
-    # "prism_llama2_7b_chat_n50",   # uncomment once HF Llama-2 access is granted
-    # "prism_llama2_13b_chat_n50",  # uncomment once HF Llama-2 access is granted
+    # PRISM (short, values-dialogue; ~3-turn p50)
+    "prism_zephyr_7b_beta",
+    "prism_mistral_7b_v01",
+    "prism_llama2_7b_chat",
+    "prism_llama2_13b_chat",
+    "prism_falcon_7b_instruct",
+    "prism_oasst_pythia_12b",
+    # LMSYS (real-user chat, turn≥5 English subset)
+    "lmsys_koala_13b_t5",
+    # "lmsys_mpt_7b_chat_t5",   # mosaicml/mpt-7b-chat HF repo unavailable; find a mirror before enabling
+    # Kwai-Klear (long coding-agent rollouts; ~24-turn p50, ~13k tok p50)
+    "kwai_swe",
 ]
 QUESTIONNAIRES: list[str] = ["v5", "trait_ocean_v1"]
+
+# ── Pipeline control ────────────────────────────────────────────────────────
+# Set True to stop after the rollout-stats stage (ingest + heuristics + plots
+# for every preset). Useful for sanity-checking rollout properties before
+# committing to questionnaire admin + FA compute. Stage 1 ingest is
+# cache-aware so this stage costs ~nothing on re-runs.
+STOP_AFTER_ROLLOUT_STATS: bool = True
 
 # ── FA knobs ────────────────────────────────────────────────────────────────
 FA_METHOD = "principal"
@@ -129,7 +148,7 @@ QUESTIONNAIRE_RESET_MODE = "none"
 FC_PAIR_SIGN_ALIGNMENT = True
 
 # ── Output ──────────────────────────────────────────────────────────────────
-OUTPUT_TAG = "prism_n50_2models"  # change when config changes
+OUTPUT_TAG = "multisource_n500_9models"  # change when config changes
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -218,20 +237,197 @@ def _administer_questionnaire(
     )
 
 
-def _prepare_all_pairs() -> dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]]:
-    """Run (or hydrate) every (preset, questionnaire) pair; return loaded data."""
+def _ingest_all_presets() -> dict[str, Path]:
+    """Run Stage 1 ingest for each preset; return the canonical rollout dir."""
+    rollout_dirs: dict[str, Path] = {}
+    for r_key in PRESETS:
+        # Use the first questionnaire just to construct a RunContext —
+        # Stage 1 only reads the rollout fields of the context.
+        ctx = _build_ctx(r_key, QUESTIONNAIRES[0])
+        print(f"\n{'#' * 60}")
+        print(f"# Stage 1 (ingest): preset={r_key!r}")
+        print(f"#   {ctx.rollout_run_id}")
+        print(f"{'#' * 60}")
+        _ingest_preset(ctx, r_key)
+        rollout_dirs[r_key] = ctx.rollout_dir
+    return rollout_dirs
+
+
+def _administer_all_pairs(
+    rollout_dirs: dict[str, Path],
+) -> dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]]:
+    """Run (or hydrate) Stage 2 for every (preset, questionnaire) pair."""
     pair_data: dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]] = {}
     for r_key in PRESETS:
         for q_key in QUESTIONNAIRES:
             ctx = _build_ctx(r_key, q_key)
             print(f"\n{'#' * 60}")
-            print(f"# Pair: rollout={r_key!r} × questionnaire={q_key!r}")
+            print(f"# Stage 2: rollout={r_key!r} × questionnaire={q_key!r}")
             print(f"#   {ctx.questionnaire_run_id}")
             print(f"{'#' * 60}")
-            _ingest_preset(ctx, r_key)
             _administer_questionnaire(ctx, r_key, q_key)
             pair_data[(r_key, q_key)] = load_pair_outputs(ctx.questionnaire_dir)
     return pair_data
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Rollout-stats stage
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _run_rollout_stats(
+    rollout_dirs: dict[str, Path],
+    out_dir: Path,
+) -> tuple[list[dict], list[dict]]:
+    """Compute per-sample stats for each preset; write CSVs + plots.
+
+    Returns (per-sample rows, per-preset summary rows).
+    """
+    print(f"\n{'=' * 60}")
+    print("[Rollout stats] Computing per-preset heuristics")
+    print(f"{'=' * 60}")
+
+    all_rows: list[dict] = []
+    for r_key, rollout_dir in rollout_dirs.items():
+        preset = EXTERNAL_ROLLOUT_PRESETS[r_key]
+        print(
+            f"\n[Rollout stats] preset={r_key!r}  model={preset.assistant_model!r}"
+        )
+        rows = compute_rollout_stats(
+            rollout_dir,
+            preset_key=r_key,
+            assistant_model=preset.assistant_model,
+        )
+        print(
+            f"  n={len(rows)}  "
+            f"median n_assistant_turns={int(np.median([r['n_assistant_turns'] for r in rows]))}"
+            f"  median n_tokens="
+            + (
+                f"{int(np.nanmedian([r['n_tokens'] for r in rows]))}"
+                if any(not np.isnan(r['n_tokens']) for r in rows)
+                else "n/a"
+            )
+        )
+        all_rows.extend(rows)
+
+    summary_rows = [
+        summarise_stats(all_rows, preset_key=r) for r in rollout_dirs.keys()
+    ]
+
+    _write_csv(out_dir / "rollout_stats_per_sample.csv", all_rows)
+    _write_csv(out_dir / "rollout_stats_per_preset.csv", summary_rows)
+
+    plots_dir = out_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    _plot_rollout_stats(all_rows, plots_dir / "rollout_stats.png")
+
+    # Compact summary printout.
+    print("\n  preset                              n   turns_p50  turns_p90  tokens_p50  tokens_p90")
+    for s in summary_rows:
+        print(
+            f"  {s['preset_key']:<35s}  {s['n_rollouts']:>3d}  "
+            f"{s['n_assistant_turns_median']:>9.0f}  "
+            f"{s['n_assistant_turns_p90']:>9.0f}  "
+            f"{s['n_tokens_median']:>10.0f}  "
+            f"{s['n_tokens_p90']:>10.0f}"
+        )
+    return all_rows, summary_rows
+
+
+def _plot_rollout_stats(rows: list[dict], out_path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    presets = sorted({r["preset_key"] for r in rows})
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(presets), 3)))
+    turns_by_preset = {
+        p: np.array([r["n_assistant_turns"] for r in rows if r["preset_key"] == p])
+        for p in presets
+    }
+    tokens_by_preset = {
+        p: np.array(
+            [r["n_tokens"] for r in rows if r["preset_key"] == p and not np.isnan(r["n_tokens"])]
+        )
+        for p in presets
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+
+    # (A) turn-count histogram (log-x)
+    ax = axes[0, 0]
+    bins = np.logspace(0, 3, 30)
+    for (p, vals), c in zip(turns_by_preset.items(), colors):
+        if len(vals):
+            ax.hist(vals.clip(1, None), bins=bins, alpha=0.5,
+                    label=f"{p} (n={len(vals)})", color=c, edgecolor="white")
+    ax.set_xscale("log")
+    ax.set_xlabel("Assistant turns per conversation")
+    ax.set_ylabel("Conversations")
+    ax.set_title("(A) Assistant turn-count distribution")
+    ax.legend(fontsize=7, loc="upper right")
+
+    # (B) token-count histogram (log-x) with context budget lines
+    ax = axes[0, 1]
+    nonzero = [v for v in tokens_by_preset.values() if len(v)]
+    if nonzero:
+        all_tokens = np.concatenate(nonzero)
+        lo = max(all_tokens.min(), 1)
+        hi = max(all_tokens.max() * 2, 1000)
+        bins = np.logspace(np.log10(lo), np.log10(hi), 30)
+        for (p, vals), c in zip(tokens_by_preset.items(), colors):
+            if len(vals):
+                ax.hist(vals, bins=bins, alpha=0.5, label=p, color=c, edgecolor="white")
+    ax.set_xscale("log")
+    ax.set_xlabel("Total tokens per conversation")
+    ax.set_ylabel("Conversations")
+    ax.set_title("(B) Token-count distribution")
+    for budget, label in [(4096, "4k"), (32768, "32k"), (131072, "128k")]:
+        ax.axvline(budget, color="black", lw=0.6, ls=":")
+    ax.legend(fontsize=7, loc="upper right")
+
+    # (C) token CDF with budget markers
+    ax = axes[1, 0]
+    for (p, vals), c in zip(tokens_by_preset.items(), colors):
+        if len(vals):
+            s = np.sort(vals)
+            y = np.arange(1, len(s) + 1) / len(s)
+            ax.plot(s, y, label=p, color=c, lw=1.5)
+    ax.set_xscale("log")
+    ax.set_xlabel("Total tokens per conversation")
+    ax.set_ylabel("Cumulative fraction")
+    ax.set_title("(C) Token-count CDF")
+    for budget in [4096, 8192, 32768, 65536, 131072]:
+        ax.axvline(budget, color="gray", lw=0.5, ls=":")
+        ax.text(budget, 0.02, f"{budget // 1024}k",
+                rotation=90, fontsize=8, color="gray", va="bottom")
+    ax.set_ylim(0, 1.02)
+    ax.legend(fontsize=8, loc="lower right")
+    ax.grid(True, alpha=0.2)
+
+    # (D) turns vs tokens scatter
+    ax = axes[1, 1]
+    for (p, turns), c in zip(turns_by_preset.items(), colors):
+        tokens = tokens_by_preset[p]
+        # Align: turns array is all samples of preset p; tokens was filtered for
+        # NaNs. Recompute over the same sample set so lengths match.
+        paired_turns = [
+            r["n_assistant_turns"] for r in rows
+            if r["preset_key"] == p and not np.isnan(r["n_tokens"])
+        ]
+        if len(paired_turns) and len(tokens):
+            ax.scatter(paired_turns, tokens, s=10, alpha=0.5, color=c, label=p)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Assistant turns")
+    ax.set_ylabel("Total tokens")
+    ax.set_title("(D) Turns vs tokens")
+    ax.legend(fontsize=8, loc="lower right")
+    ax.grid(True, alpha=0.2)
+
+    fig.suptitle("Rollout-set heuristics — per preset")
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    print(f"[Plot] Wrote {out_path}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -541,8 +737,21 @@ def main() -> None:
         if q not in QUESTIONNAIRE_PRESETS:
             raise KeyError(f"Unknown questionnaire preset {q!r}")
 
-    # ── Stage 1 + Stage 2 (cache-aware) for every pair ─────────────────
-    pair_data = _prepare_all_pairs()
+    # ── Stage 1 (cache-aware): ingest every preset once ────────────────
+    rollout_dirs = _ingest_all_presets()
+
+    # ── Rollout-stats stage ────────────────────────────────────────────
+    _run_rollout_stats(rollout_dirs, out_dir)
+
+    if STOP_AFTER_ROLLOUT_STATS:
+        print(
+            "\n[Main] STOP_AFTER_ROLLOUT_STATS=True — stopping before Stage 2. "
+            "Flip the flag to False and rerun to continue."
+        )
+        return
+
+    # ── Stage 2 (cache-aware) for every pair ───────────────────────────
+    pair_data = _administer_all_pairs(rollout_dirs)
     pair_version = {
         (r, q): QUESTIONNAIRE_PRESETS[q].version
         for (r, q) in pair_data.keys()

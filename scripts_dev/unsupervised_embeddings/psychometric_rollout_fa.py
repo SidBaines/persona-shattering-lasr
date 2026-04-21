@@ -386,6 +386,27 @@ EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
         filter_config={"model_allowlist": ["Llama-2-13b-chat"]},
         filter_tag="llama2_13b_chat",
     ),
+    # Additional PRISM OSS models (fit on A40, non-gated).
+    "prism_falcon_7b_instruct": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="tiiuae/falcon-7b-instruct",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=2048,          # Falcon-7B-Instruct native ctx
+        filter_config={"model_allowlist": ["falcon-7b-instruct"]},
+        filter_tag="falcon7b_instruct",
+    ),
+    "prism_oasst_pythia_12b": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=2048,          # OAsst-Pythia-12B native ctx
+        filter_config={"model_allowlist": ["oasst-sft-4-pythia-12b"]},
+        filter_tag="oasst_pythia_12b",
+    ),
     # ── LMSYS-Chat-1M per-model presets ───────────────────────────────
     # LMSYS is gated; need HF_TOKEN + accepted terms. One preset per
     # assistant model. ``min_turn=5`` pre-filters the source field so
@@ -475,6 +496,36 @@ EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
             "languages": ["English"],
         },
         filter_tag="llama2_7b_chat_t5_en",
+    ),
+    # koala-13b: 2nd plurality in LMSYS (~82k rows). 2k native ctx.
+    "lmsys_koala_13b_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="TheBloke/koala-13B-HF",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=2048,
+        filter_config={
+            "model_allowlist": ["koala-13b"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="koala13b_t5_en",
+    ),
+    # mpt-7b-chat: ~15k rows in full LMSYS. 8k native ctx (higher than most).
+    "lmsys_mpt_7b_chat_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="mosaicml/mpt-7b-chat",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=8192,
+        filter_config={
+            "model_allowlist": ["mpt-7b-chat"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="mpt7b_chat_t5_en",
     ),
 }
 
