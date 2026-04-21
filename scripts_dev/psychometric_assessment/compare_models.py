@@ -61,40 +61,39 @@ _B_PREFIX = (
 )
 
 RUNS: list[ModelRun] = [
+    # v5 direct-gen (Likert integer, 1-5). The original v5 comparison.
     ModelRun(
-        label="llama-3.1-8b",
+        label="llama-direct",
         questionnaire="v5",
         run_id=f"{_B_PREFIX}-q_v5-likert-direct",
     ),
     ModelRun(
-        label="qwen3-8b",
-        questionnaire="v5",
-        run_id=f"{_B_PREFIX}-q_v5-likert-direct-resp_qwen38b",
-    ),
-    ModelRun(
-        label="qwen2.5-7b",
+        label="qwen2.5-direct",
         questionnaire="v5",
         run_id=f"{_B_PREFIX}-q_v5-likert-direct-qm_qwen257binstruct",
     ),
+    # v5 logprob (expected Likert value on [1, 5] via Σd·P(d)). The
+    # modality-controlled comparison that disentangles direct-gen vs logprob
+    # from the v5 Likert / trait_mcq ABCD asymmetry seen earlier.
     ModelRun(
-        label="llama-3.1-8b",
-        questionnaire="trait_ocean_v1",
-        run_id=f"{_B_PREFIX}-q_trait_ocean_v1-trait_mcq-direct-lp20",
+        label="llama-logprob",
+        questionnaire="v5",
+        run_id=f"{_B_PREFIX}-q_v5-likert-direct-lp20",
     ),
     ModelRun(
-        label="qwen2.5-7b",
-        questionnaire="trait_ocean_v1",
-        run_id=f"{_B_PREFIX}-q_trait_ocean_v1-trait_mcq-direct-lp20-qm_qwen257binstruct",
+        label="qwen2.5-logprob",
+        questionnaire="v5",
+        run_id=f"{_B_PREFIX}-q_v5-likert-direct-lp20-qm_qwen257binstruct",
     ),
 ]
 
 # Which questionnaires to compare. Each is compared across every model
 # present in RUNS that has a matching ``questionnaire`` tag. If only one
 # model has a given questionnaire, it's skipped with a warning.
-QUESTIONNAIRES_TO_COMPARE: list[str] = ["v5", "trait_ocean_v1"]
+QUESTIONNAIRES_TO_COMPARE: list[str] = ["v5"]
 
 # Output subdirectory tag; results written to OUTPUT_ROOT / TAG.
-TAG = "B_llama_vs_qwen3_vs_qwen2.5"
+TAG = "B_v5_modality_x_model"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
