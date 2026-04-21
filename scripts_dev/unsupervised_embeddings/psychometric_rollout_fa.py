@@ -267,7 +267,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = False  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -367,7 +367,7 @@ QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 7  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 4  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means.
 MIN_ITEM_VARIANCE = 0.1
@@ -454,7 +454,7 @@ STAGES_TO_RUN = [
     # "realism_judge",
     "factor_analysis",
     # "labeling",
-    "validation",
+    # "validation",  # k=4 sanity pass; k=7 validation is already saved.
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
