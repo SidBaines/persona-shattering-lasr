@@ -69,6 +69,14 @@ FROZEN_RUN_IDS: dict[str, str] = {
         "rollouts-external-prism_open-llama213bchathf-50p-seed436-"
         "f_llama2_13b_chat"
     ),
+    "prism_falcon_7b_instruct": (
+        "rollouts-external-prism_open-falcon7binstruct-500p-seed436-"
+        "f_falcon7b_instruct"
+    ),
+    "prism_oasst_pythia_12b": (
+        "rollouts-external-prism_open-oasstsft4pythia12bepoch35-500p-seed436-"
+        "f_oasst_pythia_12b"
+    ),
     # LMSYS per-model presets (verified via 100k-row scan — all models
     # below have non-trivial counts; Mistral-7B-Instruct is confirmed
     # NOT in LMSYS at any scan depth).
@@ -91,6 +99,14 @@ FROZEN_RUN_IDS: dict[str, str] = {
     "lmsys_llama2_7b_chat_t5": (
         "rollouts-external-lmsys_open-llama27bchathf-500p-seed436-"
         "f_llama2_7b_chat_t5_en"
+    ),
+    "lmsys_koala_13b_t5": (
+        "rollouts-external-lmsys_open-koala13bhf-500p-seed436-"
+        "f_koala13b_t5_en"
+    ),
+    "lmsys_mpt_7b_chat_t5": (
+        "rollouts-external-lmsys_open-mpt7bchat-500p-seed436-"
+        "f_mpt7b_chat_t5_en"
     ),
 }
 

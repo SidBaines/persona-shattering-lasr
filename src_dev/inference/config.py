@@ -106,6 +106,13 @@ class VllmProviderConfig(BaseModel):
     # GPUs (e.g. A40/48GB). vLLM requires model head/hidden dims to be
     # divisible by this value.
     tensor_parallel_size: int = 1
+    # Optional Jinja2 chat template override. Passed through to
+    # ``LLM.chat(chat_template=...)`` on every call, overriding whatever
+    # template the tokenizer ships with (or supplying one for legacy
+    # tokenizers whose ``chat_template`` is unset — Koala-13B,
+    # OpenAssistant-Pythia-12B, etc.). Typically populated by callers
+    # via ``src_dev.psychometric.chat_templates.lookup_template(model)``.
+    chat_template: str | None = None
 
 
 class InferenceConfig(BaseModel):

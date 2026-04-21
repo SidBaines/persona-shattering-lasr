@@ -414,10 +414,22 @@ async def run_questionnaire_inference_async(
                 f"{cfg.max_context_tokens} (cfg.max_context_tokens)"
             )
             max_model_len = cfg.max_context_tokens
+        # Look up a fallback chat template for legacy models whose
+        # tokenizer ships with chat_template=None (Koala-13B, OAsst-
+        # Pythia-12B, older Vicuna variants). Returns None if the model
+        # already has a template — in which case vLLM uses the default.
+        from src_dev.psychometric.chat_templates import lookup_template
+        chat_template_override = lookup_template(cfg.model)
+        if chat_template_override is not None:
+            print(
+                f"[Stage 2] Using registry chat_template for {cfg.model} "
+                "(tokenizer ships without one)"
+            )
         vllm_kwargs["vllm"] = VllmProviderConfig(
             gpu_memory_utilization=cfg.vllm_gpu_memory_utilization,
             max_model_len=max_model_len,
             tensor_parallel_size=cfg.vllm_tensor_parallel_size,
+            chat_template=chat_template_override,
         )
 
     questionnaire_config = InferenceConfig(
