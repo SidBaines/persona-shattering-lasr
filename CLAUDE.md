@@ -91,6 +91,16 @@ If reusable logic appears in experiment scripts, move it into `src_dev/`, so it 
 - If an experiment needs extra fields, keep canonical fields intact and add metadata in a backward-compatible way rather than replacing the schema.
 - Do not introduce new one-off dataset formats when the canonical format can represent the same data.
 
+### Inspect Evaluations: Use Upstream Unchanged (Critical)
+
+- For any eval that comes from `inspect_evals` (e.g. `agentic_misalignment`, or other benchmarks imported from the installed package), **use the upstream version as-is**. Do not edit, monkey-patch, or locally fork classifier/scorer/task code from the `.venv/.../inspect_evals/...` tree.
+- Comparability across runs, teams, and external results depends on every row being produced by the same upstream definitions (classifiers, regex gates, prompt templates, etc.).
+- If upstream behavior is genuinely wrong or missing something you need:
+  1. Configure around it via the benchmark's public parameters (e.g. `grader_model`, `epochs`, scenario args).
+  2. If that's not enough, open an issue / PR upstream rather than modifying the local install.
+  3. Only as a last resort, add a *wrapper* in `src_dev/evals/...` that composes the upstream eval without mutating it — never replace the upstream module.
+- When asked "did you write this eval code?", the default answer for anything under `.venv/.../inspect_evals/` is **no**, and it should stay that way.
+
 ---
 
 ## Code Reuse and Duplication Prevention (Critical)

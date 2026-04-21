@@ -602,6 +602,10 @@ def _canonical_name(name: str) -> str:
         # MASK (honesty vs. accuracy)
         "mask": "mask",
         "maskbenchmark": "mask",
+        # AHB (Animal Harm Benchmark)
+        "ahb": "ahb",
+        "animalharm": "ahb",
+        "animalharmbenchmark": "ahb",
     }
     return aliases.get(normalized, normalized)
 
@@ -760,6 +764,11 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
             _os.environ["HUGGINGFACE_TOKEN"] = _os.environ["HF_TOKEN"]
         return mask(**kwargs)
 
+    if benchmark == "ahb":
+        from inspect_evals.ahb.ahb import ahb
+
+        return ahb(**kwargs)
+
     if benchmark == "mmlu_base_model":
         max_samples = kwargs.pop("max_samples", None)
         self_talk = str(kwargs.pop("self_talk", ""))
@@ -781,5 +790,5 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         "personality_bfi, personality_trait, personality_trait_sampled, "
         "personality_trait_logprobs, personality_trait_logprobs_base_model, "
         "mmlu_logprobs, truthfulqa_logprobs, gpqa_logprobs, agentic_misalignment, "
-        "sycophancy, coconot, mask"
+        "sycophancy, coconot, mask, ahb"
     )

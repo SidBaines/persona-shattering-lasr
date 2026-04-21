@@ -164,7 +164,7 @@ def _load_local_model(spec: ModelSpec, batch_size: int | None) -> _PreparedModel
     base_model = AutoModelForCausalLM.from_pretrained(
         base_ref,
         torch_dtype=torch_dtype,
-        device_map="auto",
+        device_map=spec.device_map,
         **_flash_attn_kwargs(),
     )
 
