@@ -68,22 +68,21 @@ class FaRun:
 # Edit these entries to point at the two runs you want to compare.
 RUNS: list[FaRun] = [
     FaRun(
-        label="qwen2.5-7b",
+        label="llama-3.1-8b",
         combined_dir=Path(
             "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]"
         ),
         n_factors=7,
         rotation="oblimin",
     ),
-    # Llama-on-B combined FA — populated once we run Stage 3 for llama.
-    # FaRun(
-    #     label="llama-3.1-8b",
-    #     combined_dir=Path(
-    #         "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]-qm_<slug>"
-    #     ),
-    #     n_factors=7,
-    #     rotation="oblimin",
-    # ),
+    FaRun(
+        label="qwen2.5-7b",
+        combined_dir=Path(
+            "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]-qm_qwen257binstruct"
+        ),
+        n_factors=7,
+        rotation="oblimin",
+    ),
 ]
 
 TAG = "B_cross_model_congruence"

@@ -31,7 +31,7 @@ VBA-macro truncation loop):
 
 | Model | v5 | trait_ocean_v1 | FA? | FA on HF? |
 |---|---|---|---|---|
-| Llama-3.1-8B-Instruct | ✅ | ✅ | ❌ TODO | ❌ |
+| Llama-3.1-8B-Instruct | ✅ | ✅ | ✅ | ✅ |
 | Qwen3-8B (other agent) | ✅ | ❌ | ❌ | ❌ |
 | Qwen2.5-7B-Instruct   | ✅ | ✅ | ✅ | ✅ |
 
@@ -58,21 +58,33 @@ split-half congruence, CV k-curve, k-sensitivity, persona-item CV, etc.).
 - So Qwen2.5's "personality expressiveness" is modality-dependent: hedge under
   Likert direct-gen, commit under single-token logprob. Llama is graded in
   both. This is a measurement-validity warning for the research.
+- **Tucker's congruence, Llama ↔ Qwen2.5 (7 factors, 156 shared items)**:
+  all 7 matched pairs are POOR (|φ| < 0.85). Best pair: Llama-F3 ↔ Qwen2.5-F7
+  at |φ|=0.56 (extraversion-flavoured factor, the only one the two models
+  partially agree on). Worst: |φ|=0.03 (essentially random). Mean |φ| ≈ 0.38
+  across both oblimin and varimax — rotation does not rescue the result.
+  Latent factor structure is **not replicable** across models even though
+  the response matrices correlate. Two major caveats: (a) we forced k=7 to
+  match OCEAN priors; Horn's PA recommends k=21-23 for both, 1-SE CV
+  recommends k=11-13 — structure may look different at other k; (b) models
+  drop different low-variance items (Llama 179, Qwen2.5 166, intersection
+  156), which already biases the comparison.
 
 ## What's left to do
 
-1. Re-run Stage 3 + Stage 5 (factor analysis + validation) for Llama-on-B.
-   The Qwen2.5 run was created with the pipeline default `STAGES_TO_RUN =
-   ["rollouts", "questionnaire", "factor_analysis", "validation"]`; Llama's
-   matching FA has never been produced (the historical Llama FA artifacts on
-   HF are for a different rollout set).
-2. Compute cross-model Tucker's φ with
-   `scripts_dev/psychometric_assessment/cross_model_factor_congruence.py`.
-3. (Optional) Generate Qwen3-8B's trait_ocean_v1 responses so the 3-model
-   square is filled.
-4. (Optional) Set up a logprob-mode v5 for Qwen2.5 to disentangle "midpoint
+1. (Optional) Generate Qwen3-8B's trait_ocean_v1 responses so the 3-model
+   square is filled, then produce Qwen3-8B combined FA and Tucker compare
+   against both Llama and Qwen2.5.
+2. (Optional) Set up a logprob-mode v5 for Qwen2.5 to disentangle "midpoint
    bias in direct-gen" from "bimodality under logprob" — this would pin down
-   whether the modality flip is intrinsic to Qwen2.5-under-logprobs.
+   whether the modality flip is intrinsic to Qwen2.5-under-logprobs or
+   item-format-specific.
+3. (Optional, research-level) Investigate sensitivity of Tucker's φ to
+   k-choice — sweep k ∈ {5, 7, 11, 13, 21} for both models and report
+   congruence as a function of k. Low-k congruence may be better because
+   coarser structure is more robust.
+4. (Optional) Run the LLM-labelling stage on each model's loadings and
+   compare *semantically* named factors, not just numeric ones.
 
 ## Quick-start on a new machine
 
