@@ -62,6 +62,12 @@ ROTATIONS: list[str] = ["oblimin", "varimax"]
 METHOD: str = "principal"
 MIN_ITEM_VARIANCE: float = 0.1
 
+# Which item blocks to include (one sweep per entry). ``None`` keeps every
+# column; otherwise restricts to columns whose ``block`` field matches. Useful
+# for isolating modality-specific structure (e.g. does the non-replication
+# hold within just v5 Likert, or just trait_mcq logprob?).
+BLOCK_FILTERS: list[str | None] = [None, "likert", "trait_mcq"]
+
 TAG = "B_cross_model_k_sweep"
 
 
@@ -79,6 +85,19 @@ def load_combined_matrix(run: ModelInputs):
         items = json.load(f)
     print(f"[Load] {run.label}: matrix={matrix.shape}, items={len(items)}")
     return matrix, metadata, items
+
+
+def filter_matrix_by_block(matrix, items, block):
+    """Return (matrix, items) restricted to columns whose item.block matches.
+
+    ``block=None`` is a no-op passthrough.
+    """
+    if block is None:
+        return matrix, items
+    keep = [i for i, it in enumerate(items) if str(it.get("block", "")) == block]
+    if not keep:
+        raise ValueError(f"No columns with block={block!r}")
+    return matrix[:, keep], [items[i] for i in keep]
 
 
 def preprocess(matrix, metadata, items):
@@ -108,22 +127,28 @@ def optimal_match_abs(phi: np.ndarray):
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
-    out_dir = OUTPUT_ROOT / TAG
+def _sweep_one_block(block_filter, out_dir):
+    """Run the full k × rotation × model-pair sweep for one block filter.
+
+    Writes ``k_sweep_summary.csv`` + ``k_sweep_plot.png`` into ``out_dir``.
+    Returns the summary DataFrame (with a ``block`` column added) so callers
+    can aggregate across blocks.
+    """
+    block_tag = block_filter or "all"
+    print(f"\n{'#' * 70}\n# Block filter: {block_tag}\n{'#' * 70}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load + preprocess each model once; cache (data, col_ids).
     preprocessed: dict[str, tuple[np.ndarray, list[str]]] = {}
     for run in RUNS:
         matrix, meta, items = load_combined_matrix(run)
+        matrix_b, items_b = filter_matrix_by_block(matrix, items, block_filter)
+        print(f"[Block={block_tag}] {run.label}: "
+              f"matrix after block filter = {matrix_b.shape} (items {len(items_b)})")
         print(f"[Preprocess] {run.label}:")
-        data, col_ids = preprocess(matrix, meta, items)
+        data, col_ids = preprocess(matrix_b, meta, items_b)
         preprocessed[run.label] = (data, col_ids)
         print(f"  → surviving columns: {len(col_ids)}")
 
-    # Fit FA for every (model, k, rotation). Stash loadings + col_ids.
-    # loadings_by[(label, k, rotation)] = (loadings: n_cols × k, col_ids)
     loadings_by: dict[tuple[str, int, str], tuple[np.ndarray, list[str]]] = {}
     for label, (data, col_ids) in preprocessed.items():
         for k in K_VALUES:
@@ -137,7 +162,6 @@ def main() -> None:
                 except Exception as exc:
                     print(f"[FA fail] {label} k={k} {rot}: {exc}")
 
-    # Compute pairwise Tucker across models at each (k, rotation).
     rows = []
     pairs = list(itertools.combinations([r.label for r in RUNS], 2))
     for (la, lb) in pairs:
@@ -147,7 +171,6 @@ def main() -> None:
                     continue
                 La, a_cols = loadings_by[(la, k, rot)]
                 Lb, b_cols = loadings_by[(lb, k, rot)]
-                # Align by shared col_ids.
                 shared = sorted(set(a_cols) & set(b_cols))
                 a_idx = {c: i for i, c in enumerate(a_cols)}
                 b_idx = {c: i for i, c in enumerate(b_cols)}
@@ -157,6 +180,7 @@ def main() -> None:
                 match = optimal_match_abs(phi)
                 abs_phis = [abs(p) for _, _, p in match]
                 rows.append({
+                    "block": block_tag,
                     "model_a": la, "model_b": lb,
                     "k": k, "rotation": rot,
                     "n_shared_items": len(shared),
@@ -171,10 +195,7 @@ def main() -> None:
     df = pd.DataFrame(rows)
     df.to_csv(out_dir / "k_sweep_summary.csv", index=False)
     print(f"[Write] {out_dir / 'k_sweep_summary.csv'}")
-    print()
-    print(df.to_string(index=False))
 
-    # Plot: mean / max |phi| vs k, one line per rotation per model pair.
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharex=True)
     for ax, ylabel, col in [
         (axes[0], "Mean |φ| across matched pairs", "mean_abs_phi"),
@@ -193,15 +214,75 @@ def main() -> None:
         ax.grid(alpha=0.3)
     axes[0].legend(fontsize=8, loc="upper right")
     fig.suptitle(
-        "Cross-model Tucker's congruence vs k   "
-        f"(pairs={len(pairs)}, rotations={ROTATIONS}, preprocessing: min_item_variance={MIN_ITEM_VARIANCE})",
+        f"Cross-model Tucker's congruence vs k — block={block_tag}   "
+        f"(pairs={len(pairs)}, rotations={ROTATIONS}, min_item_variance={MIN_ITEM_VARIANCE})",
         fontsize=11,
     )
     fig.tight_layout()
     fig.savefig(out_dir / "k_sweep_plot.png", dpi=140)
     plt.close(fig)
     print(f"[Plot] {out_dir / 'k_sweep_plot.png'}")
-    print(f"\nAll outputs → {out_dir}")
+    return df
+
+
+def plot_block_comparison(all_df: pd.DataFrame, out_path: Path, pairs) -> None:
+    """Overlay all block sweeps on one plot (mean |φ| vs k)."""
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8), sharex=True)
+    cmap = {"all": "#1f77b4", "likert": "#ff7f0e", "trait_mcq": "#2ca02c"}
+    ls_map = {"oblimin": "-", "varimax": "--"}
+    for ax, ylabel, col in [
+        (axes[0], "Mean |φ| across matched pairs", "mean_abs_phi"),
+        (axes[1], "Max |φ| (best matched pair)",   "max_abs_phi"),
+    ]:
+        for (la, lb) in pairs:
+            for block in all_df["block"].unique():
+                for rot in ROTATIONS:
+                    sub = all_df[(all_df["model_a"] == la) & (all_df["model_b"] == lb)
+                                 & (all_df["block"] == block) & (all_df["rotation"] == rot)].sort_values("k")
+                    if sub.empty: continue
+                    ax.plot(sub["k"], sub[col], marker="o",
+                            color=cmap.get(block, "gray"),
+                            linestyle=ls_map.get(rot, "-"),
+                            label=f"{block} · {rot}", alpha=0.85)
+        ax.axhline(0.95, color="green", lw=0.6, ls=":")
+        ax.axhline(0.85, color="orange", lw=0.6, ls=":")
+        ax.set_xlabel("k (number of factors)")
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(0, 1)
+        ax.grid(alpha=0.3)
+    # Single legend on right axis to de-duplicate.
+    handles, labels = axes[0].get_legend_handles_labels()
+    seen = set(); dedup = []
+    for h, l in zip(handles, labels):
+        if l not in seen:
+            dedup.append((h, l)); seen.add(l)
+    axes[1].legend([h for h, _ in dedup], [l for _, l in dedup], fontsize=8, loc="upper right")
+    fig.suptitle("Cross-model Tucker's congruence — block comparison", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    print(f"[Plot] {out_path}")
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+    root = OUTPUT_ROOT / TAG
+    root.mkdir(parents=True, exist_ok=True)
+    pairs = list(itertools.combinations([r.label for r in RUNS], 2))
+
+    all_dfs = []
+    for block in BLOCK_FILTERS:
+        tag = block or "all"
+        sub_out = root / f"block_{tag}"
+        df = _sweep_one_block(block, sub_out)
+        all_dfs.append(df)
+
+    combined = pd.concat(all_dfs, ignore_index=True)
+    combined.to_csv(root / "k_sweep_all_blocks.csv", index=False)
+    print(f"\n[Write] {root / 'k_sweep_all_blocks.csv'}")
+    if len(BLOCK_FILTERS) > 1:
+        plot_block_comparison(combined, root / "k_sweep_blocks_overlay.png", pairs)
+    print(f"\nAll outputs → {root}")
 
 
 if __name__ == "__main__":
