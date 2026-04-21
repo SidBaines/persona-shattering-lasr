@@ -20,7 +20,7 @@ To save model outputs first and judge as a separate stage::
 
 from __future__ import annotations
 
-from src_dev.persona_metrics.config import JudgeLLMConfig
+from src_dev.persona_metrics.config import JUDGE_PANEL, default_panel
 from src_dev.persona_metrics.llm_judge_agreement import JudgeRaterConfig
 
 # ---------------------------------------------------------------------------
@@ -58,13 +58,10 @@ CI_BOOTSTRAP_RESAMPLES = 1000
 COHERENCE_METRIC = "better_coherence_judge"
 COHERENCE_COLOR = "#757575"
 JUDGE_RATERS = [
-    JudgeRaterConfig(
-        rater_id="gemini_flash_20",
-        judge=JudgeLLMConfig(
-            provider="openrouter",
-            model="google/gemini-2.0-flash-001",
-            temperature=JUDGE_TEMPERATURE,
-            max_concurrent=10,
-        ),
-    ),
+    JudgeRaterConfig(rater_id=rater_id, judge=judge)
+    for rater_id, judge in zip(
+        JUDGE_PANEL.keys(),
+        default_panel(temperature=JUDGE_TEMPERATURE),
+        strict=True,
+    )
 ]
