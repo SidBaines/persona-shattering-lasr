@@ -39,7 +39,27 @@ LIKERT_PHRASINGS: dict[str, str] = {
         "your agreement with the following statement? "
         '1=strongly disagree, 3=neutral, 5=strongly agree. Just the number.\n\n"{item_text}"'
     ),
+    # Framing that (a) explicitly marks the question as a meta-aside rather
+    # than an in-conversation query, and (b) is paired with an ``"Answer: "``
+    # assistant-turn prefill (see ``item_prefill``). The prefill forces the
+    # next generated token to start at a digit position, bypassing
+    # refusal-style preambles like "Based on my training, I don't have…"
+    # that otherwise dominate failures on identity/introspection items.
+    "aside": (
+        "Before we continue, I have an aside. Please can you tell me how "
+        "much you agree/disagree with the following statement to describe "
+        "yourself, by giving an integer where 1 means \"strongly disagree\", "
+        "2 means \"disagree\", 3 means \"neutral\", 4 means \"agree\", and "
+        "5 means \"strongly agree\". Reply **only** with \"Answer: <integer>\". "
+        "The statement is: \"{item_text}\""
+    ),
 }
+
+# Which Likert phrasings are paired with an "Answer: " assistant-turn prefill.
+# Keeps ``"direct"`` / ``"natural"`` / ``"contextual"`` unchanged; only the
+# ``"aside"`` phrasing (which explicitly asks for that reply format) prefills.
+LIKERT_PHRASINGS_WITH_PREFILL: frozenset[str] = frozenset({"aside"})
+LIKERT_ANSWER_PREFILL = "Answer: "
 
 DEFAULT_SOFT_RESET_SYSTEM_PROMPT = (
     "The previous conversation has ended. A new, independent conversation "
@@ -121,18 +141,28 @@ def build_item_prompt(item: dict, *, likert_phrasing: str = "direct") -> str:
         return build_likert_prompt(item["text"], phrasing=likert_phrasing)
 
 
-def item_prefill(item: dict) -> str | None:
+def item_prefill(item: dict, *, likert_phrasing: str = "direct") -> str | None:
     """Return the assistant-turn prefill for an item, or None if none applies.
 
     * ``trait_mcq`` → ``TRAIT_MCQ_PREFILL`` (``"Answer "``)
     * ``fc_pair``   → per-block ``prefill`` carried on the item
       (typically ``"I'd go with "``)
+    * ``likert``    → ``LIKERT_ANSWER_PREFILL`` (``"Answer: "``) **only**
+      when the active phrasing is in ``LIKERT_PHRASINGS_WITH_PREFILL``
+      (currently just ``"aside"``). For ``"direct"`` / ``"natural"`` /
+      ``"contextual"`` no Likert prefill is used — preserving the
+      behaviour of existing HF-cached Likert runs.
     * other         → ``None`` (no prefill, fresh assistant turn)
     """
     if item["type"] == "trait_mcq":
         return TRAIT_MCQ_PREFILL
     if item["type"] == "fc_pair":
         return item.get("prefill")
+    if (
+        item["type"] not in ("forced_choice", "vignette")
+        and likert_phrasing in LIKERT_PHRASINGS_WITH_PREFILL
+    ):
+        return LIKERT_ANSWER_PREFILL
     return None
 
 
@@ -161,7 +191,7 @@ def build_questionnaire_messages(
     """
     from src_dev.inference.conversation_reset import build_messages_prompt
 
-    prefill = item_prefill(item)
+    prefill = item_prefill(item, likert_phrasing=likert_phrasing)
     prompt = build_messages_prompt(
         conversation_messages,
         build_item_prompt(item, likert_phrasing=likert_phrasing),
@@ -189,7 +219,7 @@ def build_questionnaire_token_ids(
     """
     from src_dev.inference.conversation_reset import build_token_ids_prompt
 
-    prefill = item_prefill(item)
+    prefill = item_prefill(item, likert_phrasing=likert_phrasing)
     prompt = build_token_ids_prompt(
         tokenizer,
         conversation_messages,

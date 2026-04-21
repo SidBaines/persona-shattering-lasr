@@ -356,11 +356,31 @@ EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
         filter_config={"model_allowlist": ["Llama-2-7b-chat"]},
         filter_tag="llama2_7b_chat",
     ),
+    "prism_llama2_7b_chat_n50": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="meta-llama/Llama-2-7b-chat-hf",
+        assistant_provider="vllm",
+        max_samples=50,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={"model_allowlist": ["Llama-2-7b-chat"]},
+        filter_tag="llama2_7b_chat",
+    ),
     "prism_llama2_13b_chat": ExternalRolloutPreset(
         source="prism_open",
         assistant_model="meta-llama/Llama-2-13b-chat-hf",
         assistant_provider="vllm",
         max_samples=500,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={"model_allowlist": ["Llama-2-13b-chat"]},
+        filter_tag="llama2_13b_chat",
+    ),
+    "prism_llama2_13b_chat_n50": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="meta-llama/Llama-2-13b-chat-hf",
+        assistant_provider="vllm",
+        max_samples=50,
         seed=436,
         max_context_tokens=4096,
         filter_config={"model_allowlist": ["Llama-2-13b-chat"]},
@@ -516,13 +536,20 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # M3 smoke: two PRISM presets pinned to different OSS assistants
-    # (Zephyr-7B-beta + Mistral-7B-Instruct-v0.1) × v5 Likert, 50 samples
-    # each. Exercises the two-preset ingest → admin → combine → FA →
-    # validation path. FA numbers won't be statistically meaningful at
-    # this sample size; scale up after the code path holds together.
+    # M3+M4 smoke: four PRISM presets (Zephyr-7B, Mistral-7B,
+    # Llama-2-7B-Chat, Llama-2-13B-Chat) × {v5 Likert, trait_ocean_v1
+    # trait_mcq}. 50 personas each. Exercises multi-model combined FA
+    # (expecting up to N−1=3 preset-dominated top factors) AND the
+    # trait_mcq questionnaire path. FA at n=200 rows is below the usual
+    # samples-per-item threshold — plumbing-validation run.
     ("prism_zephyr_7b_beta_n50", "v5"),
     ("prism_mistral_7b_v01_n50", "v5"),
+    ("prism_llama2_7b_chat_n50", "v5"),
+    ("prism_llama2_13b_chat_n50", "v5"),
+    ("prism_zephyr_7b_beta_n50", "trait_ocean_v1"),
+    ("prism_mistral_7b_v01_n50", "trait_ocean_v1"),
+    ("prism_llama2_7b_chat_n50", "trait_ocean_v1"),
+    ("prism_llama2_13b_chat_n50", "trait_ocean_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -580,7 +607,7 @@ QUESTIONNAIRE_PATH: str = ""
 QUESTIONNAIRE_VERSION: str = ""
 FA_BLOCKS: list[str] = []
 QUESTIONNAIRE_USE_LOGPROBS: bool = False
-QUESTIONNAIRE_PHRASING = "direct"  # "natural", "direct", "contextual" (Likert block only)
+QUESTIONNAIRE_PHRASING = "aside"  # "natural", "direct", "contextual", "aside" (Likert block only)
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
 QUESTIONNAIRE_MAX_CONCURRENT = 32
@@ -2506,6 +2533,35 @@ def main() -> None:
             n_factors_suggest_pa_iterations=N_FACTORS_SUGGEST_PA_ITERATIONS,
         )
         fa_results = fa_stage_result.results_by_rotation
+
+        # ── Preset-variance decomposition (multi-preset runs only) ───────
+        # For combined runs with rows from multiple rollout presets,
+        # compute per-factor η² explained by the rollout-preset split.
+        # Quick sanity on whether the "largest factor" is just capturing
+        # which model/dataset each persona came from — a common failure
+        # mode when FA'ing a heterogeneous mix.
+        if _is_multi_preset():
+            from src_dev.psychometric.preset_variance import report_preset_variance
+
+            fa_root_dir = downstream_ctx.effective_questionnaire_dir / "factor_analysis"
+            if fa_root_dir.exists():
+                print("\n" + "=" * 60)
+                print("[Stage 3.5] Preset-variance decomposition")
+                print("=" * 60)
+                report_preset_variance(
+                    fa_dir=fa_root_dir,
+                    response_matrix=response_matrix,
+                    metadata=metadata,
+                    column_defs=column_defs,
+                    min_item_variance=MIN_ITEM_VARIANCE,
+                    high_variance_persona_drop_pct=HIGH_VARIANCE_PERSONA_DROP_PCT,
+                    group_field="rollout_preset_key",
+                )
+            else:
+                print(
+                    f"[Stage 3.5] FA dir not found at {fa_root_dir} — "
+                    "skipping preset-variance decomposition"
+                )
 
     # ── Stage 4 ──────────────────────────────────────────────────────────
     if "labeling" in STAGES_TO_RUN:
