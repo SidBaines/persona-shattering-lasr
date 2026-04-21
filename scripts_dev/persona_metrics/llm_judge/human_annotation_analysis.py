@@ -19,7 +19,7 @@ Usage::
 
     # Exclude specific human raters
     uv run python scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py \\
-        --trait agreeableness --exclude-raters anton
+        --trait agreeableness --exclude-raters H1
 
     # Analyze all traits with data
     uv run python scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py
@@ -94,13 +94,22 @@ LLM_JUDGE_RUNS: dict[str, str] = {
     "Qwen 3 235B": "qwen_qwen3-235b-a22b-2507__r3__20260421T141134",
 }
 
+# Anonymisation mapping: real rater dir names → anonymous IDs for output/plots.
+# Real names appear only in gitignored scratch/ dirs; all tracked output uses these IDs.
+HUMAN_ANON_MAP: dict[str, str] = {
+    "anton": "H1",
+    "irakli": "H2",
+    "mariia": "H3",
+    "sid": "H4",
+}
+
 # Colours for plotting
 RATER_COLOURS: dict[str, str] = {
-    # Humans
-    "irakli": "#e6194b",
-    "mariia": "#f58231",
-    "anton": "#ffe119",
-    "sid": "#bfef45",
+    # Humans (anonymous IDs)
+    "H1": "#ffe119",
+    "H2": "#e6194b",
+    "H3": "#f58231",
+    "H4": "#bfef45",
     # LLM judges
     "Gemini Flash": "#4363d8",
     "Kimi K2": "#3cb44b",
@@ -121,10 +130,10 @@ RATER_COLOURS: dict[str, str] = {
 }
 
 RATER_MARKERS: dict[str, str] = {
-    "irakli": "o",
-    "mariia": "s",
-    "anton": "^",
-    "sid": "D",
+    "H1": "^",
+    "H2": "o",
+    "H3": "s",
+    "H4": "D",
     "Gemini Flash": "P",
     "Kimi K2": "X",
     "Haiku 3.5": "h",
@@ -158,8 +167,14 @@ def load_golden(trait: str) -> dict[str, dict]:
     return items
 
 
+_ANON_REVERSE = {v: k for k, v in HUMAN_ANON_MAP.items()}
+
+
 def discover_human_raters(trait: str) -> list[str]:
-    """Find all human raters who have annotation files for a given trait."""
+    """Find all human raters who have annotation files for a given trait.
+
+    Returns anonymised IDs (H1, H2, ...) sorted alphabetically.
+    """
     raters = []
     if not ANNOTATION_DIR.exists():
         return raters
@@ -168,13 +183,20 @@ def discover_human_raters(trait: str) -> list[str]:
             continue
         annotation_file = rater_dir / f"{trait}.json"
         if annotation_file.exists():
-            raters.append(rater_dir.name)
-    return raters
+            real_name = rater_dir.name
+            anon_id = HUMAN_ANON_MAP.get(real_name, real_name)
+            raters.append(anon_id)
+    return sorted(raters)
 
 
 def load_human_scores(rater: str, trait: str) -> tuple[dict[str, int], bool]:
-    """Load a human rater's scores as ({item_id: score}, is_dummy)."""
-    path = ANNOTATION_DIR / rater / f"{trait}.json"
+    """Load a human rater's scores as ({item_id: score}, is_dummy).
+
+    Args:
+        rater: Anonymised rater ID (e.g. "H1") or real dir name.
+    """
+    real_name = _ANON_REVERSE.get(rater, rater)
+    path = ANNOTATION_DIR / real_name / f"{trait}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     is_dummy = data.get("dummy", False)
     return {item["id"]: item["score"] for item in data["scores"]}, is_dummy
