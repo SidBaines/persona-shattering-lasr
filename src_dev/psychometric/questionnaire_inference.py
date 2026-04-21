@@ -53,6 +53,7 @@ from src_dev.psychometric.response_encoding import (
 from src_dev.psychometric.response_parsing import (
     parse_item_response,
     parse_top_logprobs_to_choice_probs,
+    parse_top_logprobs_to_likert_probs,
 )
 
 
@@ -470,7 +471,7 @@ async def run_questionnaire_inference_async(
     use_logprobs_for_trait = cfg.use_logprobs and cfg.provider == "vllm"
     if use_logprobs_for_trait:
         print(
-            f"[Stage 2] choice-item logprob mode ON (trait_mcq + fc_pair) "
+            f"[Stage 2] logprob mode ON (trait_mcq + fc_pair + likert) "
             f"(top_logprobs={cfg.top_logprobs}, "
             f"temperature={cfg.logprob_temperature})"
         )
@@ -557,7 +558,7 @@ async def run_questionnaire_inference_async(
                 for _item_idx, item in pending_items:
                     use_lp = (
                         use_logprobs_for_trait
-                        and item["type"] in ("trait_mcq", "fc_pair")
+                        and item["type"] in ("trait_mcq", "fc_pair", "likert")
                     )
                     if reset_mode == "token_boundary":
                         token_ids = build_questionnaire_token_ids(
@@ -654,14 +655,27 @@ async def run_questionnaire_inference_async(
                 raw_text = lp_out.get("text", "")
                 per_token = lp_out.get("logprobs_per_token") or []
                 first_token_logprobs: dict[str, float] = per_token[0] if per_token else {}
-                num_choices = 2 if item["type"] == "fc_pair" else 4
-                probs, choice_mass = parse_top_logprobs_to_choice_probs(
-                    first_token_logprobs, num_choices=num_choices,
-                )
+                if item["type"] == "likert":
+                    # Likert path: parse integer digits 1..5 from logprobs
+                    # and compute the soft expected value inside
+                    # fill_matrix_from_choice via the numeric choice_probs
+                    # dict.
+                    likert_probs, choice_mass = parse_top_logprobs_to_likert_probs(
+                        first_token_logprobs, scale=cfg.likert_scale,
+                    )
+                    # fill_matrix_from_choice accepts str|int keys for
+                    # likert soft-expectation; store as int keys.
+                    probs = {str(k_): v for k_, v in likert_probs.items()}
+                    best_choice = max(likert_probs, key=likert_probs.get) if likert_probs else None
+                else:
+                    num_choices = 2 if item["type"] == "fc_pair" else 4
+                    probs, choice_mass = parse_top_logprobs_to_choice_probs(
+                        first_token_logprobs, num_choices=num_choices,
+                    )
+                    best_choice = max(probs, key=probs.get) if probs else None
                 if probs:
-                    best_letter = max(probs, key=probs.get)
                     fill_matrix_from_choice(
-                        response_matrix, k, item_id, best_letter,
+                        response_matrix, k, item_id, best_choice,
                         item_to_cols, vig_scoring, likert_reverse,
                         trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
@@ -673,7 +687,7 @@ async def run_questionnaire_inference_async(
                                 "k": k,
                                 "item_id": item_id,
                                 "item_type": item["type"],
-                                "parsed_choice": best_letter,
+                                "parsed_choice": best_choice,
                                 "raw": raw_text,
                                 "probs": {k_: round(v, 6) for k_, v in probs.items()},
                                 "choice_mass": round(choice_mass, 6),

@@ -104,6 +104,52 @@ def parse_item_response(item: dict, text: str) -> str | int | None:
         return parse_likert_response(text)
 
 
+def parse_top_logprobs_to_likert_probs(
+    top_logprobs: dict[str, float],
+    scale: int = 5,
+) -> tuple[dict[int, float], float]:
+    """Extract per-digit probabilities for a Likert item from top-k logprobs.
+
+    Mirrors :func:`parse_top_logprobs_to_choice_probs` but for integer
+    Likert answers (1..scale). Used when the questionnaire is configured
+    with ``use_logprobs=True`` and the "aside" phrasing (prefilled with
+    ``"Answer: "``) so the first generated token is a digit.
+
+    Args:
+        top_logprobs: Mapping ``decoded_token -> logprob`` for the first
+            generated token.
+        scale: Max Likert value (default 5, i.e. 1/2/3/4/5).
+
+    Returns:
+        ``(probs, choice_mass)`` where ``probs`` maps each integer
+        ``1..scale`` to its softmax-normalised probability over the
+        found digits only, and ``choice_mass`` is the sum of
+        ``exp(lp)`` across those digits out of the full vocabulary.
+    """
+    digits = [str(d) for d in range(1, scale + 1)]
+    found: dict[int, float] = {}
+    for d_str in digits:
+        variants = {
+            d_str,
+            f"▁{d_str}",
+            f"Ġ{d_str}",
+            f" {d_str}",
+        }
+        for tok, lp in top_logprobs.items():
+            if tok in variants:
+                found[int(d_str)] = float(lp)
+                break
+    if not found:
+        return {}, 0.0
+
+    choice_mass = sum(math.exp(lp) for lp in found.values())
+    max_lp = max(found.values())
+    exp_vals = {k: math.exp(v - max_lp) for k, v in found.items()}
+    total = sum(exp_vals.values())
+    probs = {k: v / total for k, v in exp_vals.items()}
+    return probs, float(choice_mass)
+
+
 def parse_top_logprobs_to_choice_probs(
     top_logprobs: dict[str, float],
     num_choices: int = 4,

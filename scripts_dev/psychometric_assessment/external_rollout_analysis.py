@@ -110,7 +110,7 @@ PRESETS: list[str] = [
     # Kwai-Klear (long coding-agent rollouts; ~24-turn p50, ~13k tok p50)
     "kwai_swe",
 ]
-QUESTIONNAIRES: list[str] = ["v5", "trait_ocean_v1"]
+QUESTIONNAIRES: list[str] = ["v5", "trait_ocean_v1_nolead"]
 
 # ── Pipeline control ────────────────────────────────────────────────────────
 # Set True to stop after the rollout-stats stage (ingest + heuristics + plots
