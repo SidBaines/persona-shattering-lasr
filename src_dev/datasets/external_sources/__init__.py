@@ -16,6 +16,7 @@ from src_dev.datasets.external_sources.sampler import deterministic_sample
 
 # Side-effect imports — register each adapter. Add new adapter modules here.
 from src_dev.datasets.external_sources import kwai_swe  # noqa: F401
+from src_dev.datasets.external_sources import swe_rebench  # noqa: F401
 
 __all__ = [
     "AdapterRegistryEntry",
