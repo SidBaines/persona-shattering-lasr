@@ -7,16 +7,16 @@ Infrastructure for calibrating and running LLM-as-judge personality and coherenc
 ### Score a response
 
 ```python
-from src_dev.persona_metrics.config import judge_config
+from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.registry import get_persona_metric
 
-# Get a judge metric (OCEAN or coherence)
-metric = get_persona_metric("agreeableness_v2", judge_config=judge_config("gemini_flash"))
+# Score with the default judge (Qwen 3 235B)
+metric = get_persona_metric("agreeableness_v2", judge_config=JudgeLLMConfig())
 result = await metric.evaluate_async("I'd rather just help than argue about it.", "How do you handle conflict?")
 # → {"agreeableness_v2.score": 3, "agreeableness_v2.reasoning": "..."}
 
 # Coherence
-metric = get_persona_metric("coherence_v2", judge_config=judge_config("haiku"))
+metric = get_persona_metric("coherence_v2", judge_config=JudgeLLMConfig())
 result = await metric.evaluate_async("Inflation is when...", "What causes inflation?")
 # → {"coherence_v2.score": 8, "coherence_v2.reasoning": "..."}
 ```
@@ -34,22 +34,36 @@ result = await metric.evaluate_async("Inflation is when...", "What causes inflat
 
 Legacy aliases (`"agreeableness"`, `"coherence"`, `"better_coherence_judge"`) resolve to the v2 classes.
 
-### Recommended judge models
+### Recommended judge panel
 
-Defined in `src_dev/persona_metrics/config.py` → `JUDGE_PANEL`:
+Selected via calibration against 3 human raters on agreeableness, neuroticism, and coherence
+(see `scratch/human_annotation_analysis/judge_selection_methodology.md` for full details).
+
+**3-judge panel** — score each item with all 3, take the median:
+
+| Key | Model | Provider | $/M input | Mean ρ(gold) |
+|---|---|---|---|---|
+| `qwen3_235b` | Qwen 3 235B (MoE) | Alibaba | $0.07 | .942 |
+| `gemma4_27b` | Gemma 4 27B | Google | $0.08 | .945 |
+| `llama33_70b` | Llama 3.3 70B | Meta | $0.12 | .950 |
 
 ```python
-from src_dev.persona_metrics.config import judge_config
+from src_dev.persona_metrics.config import JudgeLLMConfig, default_panel
 
-cfg = judge_config("gemini_flash")   # Default — cheapest, fast, good quality
-cfg = judge_config("haiku")          # Best quality + throughput balance
-cfg = judge_config("kimi_k2")        # Best quality, rate-limited (50 rpm)
-cfg = judge_config("deepseek_v3")    # Cheap fallback
+# Single judge (default = Qwen 3 235B) — for dev/quick runs
+cfg = JudgeLLMConfig()
+
+# Full 3-judge panel — for paper-quality results
+panel = default_panel()
+# Score with each, take median across judges
 ```
 
 All models go through OpenRouter. Set `OPENROUTER_API_KEY` in `.env`.
 
-### Scoring a batch (e.g. distillation data or sweep responses)
+Extended pool of calibrated models available via `judge_config()` for comparison
+(see `JUDGE_POOL` in `src_dev/persona_metrics/config.py`).
+
+### Scoring a batch
 
 ```python
 """Score distillation responses on all OCEAN traits + coherence."""
@@ -59,14 +73,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src_dev.persona_metrics.config import judge_config
+from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.registry import get_persona_metric
 
 load_dotenv()
 
 TRAITS = ["agreeableness_v2", "neuroticism_v2", "openness_v2",
           "conscientiousness_v2", "extraversion_v2", "coherence_v2"]
-JUDGE = judge_config("gemini_flash")  # or "haiku" for higher quality
+JUDGE = JudgeLLMConfig()
 
 
 async def score_file(path: Path) -> list[dict]:
@@ -89,34 +103,19 @@ Path("scratch/my_responses_scored.jsonl").write_text(
 )
 ```
 
-### Using judges in a cross-trait bleed check
+### Using the full panel for cross-trait bleed checks
 
 ```python
-"""Score distillation data for cross-trait bleed (OCT pipeline style)."""
-from src_dev.persona_metrics.config import judge_config
+"""Score distillation data with full 3-judge panel."""
+from src_dev.persona_metrics.config import JUDGE_PANEL
 
-# Define a panel — gemini for speed, kimi for quality on target trait
-JUDGE_CONFIGS = {
-    "gemini_flash": judge_config("gemini_flash"),
-    "kimi_k2": judge_config("kimi_k2"),
-}
-
-# Use with scripts_dev/oct_pipeline/judge_distillation.py
-# or pass directly to any metric:
-metric = get_persona_metric("agreeableness_v2", judge_config=JUDGE_CONFIGS["kimi_k2"])
+# JUDGE_PANEL is a dict: {"qwen3_235b": JudgeLLMConfig(...), ...}
+# Pass to scripts_dev/oct_pipeline/judge_distillation.py
+# or use directly:
+for name, cfg in JUDGE_PANEL.items():
+    metric = get_persona_metric("agreeableness_v2", judge_config=cfg)
+    # ...score, then take median across judges
 ```
-
-Cost estimates per calibration run (33 items × 3 repeats = 99 calls):
-
-| Model | Input $/M | Output $/M | ~Cost/run |
-|---|---|---|---|
-| Gemini Flash | $0.10 | $0.40 | $0.02 |
-| Llama 4 Scout | $0.15 | $0.42 | $0.03 |
-| DeepSeek V3 | $0.30 | $0.88 | $0.07 |
-| Kimi K2 | $0.60 | $2.40 | $0.14 |
-| Haiku 3.5 | $0.80 | $4.00 | $0.20 |
-
-Full 6-trait calibration (all OCEAN + coherence) ≈ 6× above. Prices as of April 2026.
 
 ## Calibration
 
@@ -132,9 +131,10 @@ data/judge_calibration/
   neuroticism.jsonl        # 36 items, -4..+4
   openness.jsonl           # 36 items, -4..+4
   coherence.jsonl          # 33 items, 0..10
+  human_scores/            # Anonymised human rater scores (3 raters)
 ```
 
-Each item: `{id, trait, question, response, gold_score, notes}`.
+Each golden item: `{id, trait, question, response, gold_score, notes}`.
 
 ### Run calibration
 
@@ -150,14 +150,10 @@ uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score
 uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score \
     --trait coherence --model anthropic/claude-3.5-haiku
 
-# Kimi (use lower concurrency to avoid 429s)
-uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score \
-    --trait coherence --model moonshotai/kimi-k2 --max-concurrent 3
-
 # Resume a partial run
 uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py score \
     --trait coherence --model moonshotai/kimi-k2 \
-    --run-dir scratch/golden_calibration/<run_dir>
+    --run-dir scratch/golden_calibration/<run_dir> --resume
 
 # Compare all completed runs
 uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py compare
@@ -168,6 +164,21 @@ uv run python scripts_dev/persona_metrics/llm_judge/golden_calibration.py upload
 ```
 
 Output goes to `scratch/golden_calibration/<model>__r<repeats>__<timestamp>/`.
+
+### Human-vs-LLM analysis
+
+```bash
+# Analyse all traits with human + LLM data
+uv run python scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py
+
+# Single trait
+uv run python scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py --trait coherence
+
+# Without plots
+uv run python scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py --no-plots
+```
+
+Output: `scratch/human_annotation_analysis/` (analysis JSON + plots per trait).
 
 ### Human annotation
 
@@ -196,29 +207,23 @@ src_dev/
     persona_definitions.py     # OCEAN trait definitions (facets, examples)
     coherence_definition.py    # Coherence dimension definitions (rubric, failure modes)
   persona_metrics/
-    config.py                  # JudgeLLMConfig, JUDGE_PANEL, judge_config()
+    config.py                  # JudgeLLMConfig, JUDGE_PANEL, default_panel()
     metrics/
       ocean_v2.py              # 5 OCEAN judge classes (built from persona_definitions)
       coherence.py             # CoherenceV2Evaluation (built from coherence_definition)
       llm_judge_base.py        # LLMJudgeMetric base class
 
-data/judge_calibration/        # Golden datasets (hand-labeled, checked in)
+data/judge_calibration/        # Golden datasets + human scores (checked in)
 
 scripts_dev/persona_metrics/llm_judge/
   golden_calibration.py        # Score goldens, compute agreement, compare models
+  human_annotation_analysis.py # Human-vs-LLM agreement analysis + plots
   generate_annotation_html.py  # Generate human annotation HTML
   plot_judge_calibration.py    # Publication-quality plots from HF or local data
   ocean_judge_calibration.py   # Two-stage OCEAN calibration (generate + judge)
 
 scratch/golden_calibration/    # Calibration run outputs (gitignored)
+scratch/human_annotation_analysis/ # Analysis outputs + methodology doc (gitignored)
 scratch/annotation_html/       # Generated HTML files (gitignored)
+scratch/annotation_results/    # Raw human annotation JSON (gitignored)
 ```
-
-## Known issues
-
-- **Kimi K2 rate limits:** OpenRouter imposes 50 rpm on `moonshotai/kimi-k2`.
-  Use `--max-concurrent 3` and expect retries with 429s. The built-in exponential
-  backoff handles this but runs are slower.
-
-- **GPT-5 Mini (retired):** OpenRouter routes this through Azure, which returns
-  403 content-policy blocks on personality assessment prompts. Do not use.

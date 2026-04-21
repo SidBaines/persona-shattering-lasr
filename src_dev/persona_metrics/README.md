@@ -13,19 +13,15 @@ uv run python -m src_dev.persona_metrics \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
-# Coherence evaluation using LLM judge
+# Coherence evaluation using LLM judge (default: Qwen 3 235B via OpenRouter)
 uv run python -m src_dev.persona_metrics \
   --evaluations coherence \
-  --judge-provider openai \
-  --judge-model gpt-4o-mini \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
 # Neuroticism evaluation (OCEAN Big Five) using LLM judge
 uv run python -m src_dev.persona_metrics \
   --evaluations neuroticism \
-  --judge-provider openai \
-  --judge-model gpt-4o-mini \
   --dataset-path scratch/inference_output.jsonl \
   --output-path scratch/eval_results.jsonl
 
@@ -51,18 +47,14 @@ config = PersonaMetricsConfig(
 )
 dataset, result = run_persona_metrics(config, dataset=my_dataset)
 
-# LLM-as-judge evaluation
+# LLM-as-judge evaluation (default judge: Qwen 3 235B via OpenRouter)
 config = PersonaMetricsConfig(
     evaluations=[
         "count_o",
         "coherence",
     ],
     response_column="edited_response",
-    judge=JudgeLLMConfig(
-        provider="openai",
-        model="gpt-4o-mini",
-        max_concurrent=20,
-    ),
+    judge=JudgeLLMConfig(),
     output_path=Path("scratch/eval_results.jsonl"),
 )
 dataset, result = run_persona_metrics(config, dataset=edited_dataset)
