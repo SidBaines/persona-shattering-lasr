@@ -45,6 +45,7 @@ for config in "${CONFIGS[@]}"; do
     if uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \
         --config "${config}" \
         --skip-judge \
+        --allow-custom-fingerprint \
         ${DRY_RUN_FLAG}; then
         DONE+=("${config##*.}")
     else
@@ -64,6 +65,7 @@ done
 #     if uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \
 #         --config "${config}" \
 #         --skip-rollouts \
+#         --allow-custom-fingerprint \
 #         ${DRY_RUN_FLAG}; then
 #         DONE+=("${config##*.}-judge")
 #     else
