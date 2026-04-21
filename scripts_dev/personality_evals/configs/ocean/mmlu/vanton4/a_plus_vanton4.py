@@ -40,10 +40,6 @@ download_from_dataset_repo(
 
 _ADAPTER_LOCAL_PATH = _LOCAL_ADAPTER_CACHE / _PATH_IN_REPO
 
-# Optional: run sycophancy eval alongside MMLU. Off by default.
-INCLUDE_SYCOPHANCY = False
-SYCOPHANCY_JUDGE_MODEL = "openrouter/openai/gpt-5-nano"
-
 
 def _build_scale_points() -> list[float]:
     """Step 0.5 in [-4, -2.5] and [+2.5, +4], step 0.25 in [-2, +2]."""
@@ -53,30 +49,18 @@ def _build_scale_points() -> list[float]:
     return sorted({s for s in coarse_neg + fine + coarse_pos if s != 0.0})
 
 
-_evals: list[InspectBenchmarkSpec] = [
-    InspectBenchmarkSpec(
-        name="mmlu",
-        benchmark="mmlu",
-        limit=300,
-        n_runs=1,
-    ),
-]
-if INCLUDE_SYCOPHANCY:
-    _evals.append(
-        InspectBenchmarkSpec(
-            name="sycophancy",
-            benchmark="sycophancy",
-            benchmark_args={"scorer_model": SYCOPHANCY_JUDGE_MODEL},
-            n_runs=1,
-        )
-    )
-
-
 SUITE_CONFIG = SuiteConfig(
     base_model=BASE_MODEL,
     adapter=f"local://{_ADAPTER_LOCAL_PATH.resolve()}",
     sweep=ScaleSweep(points=_build_scale_points()),
-    evals=_evals,
+    evals=[
+        InspectBenchmarkSpec(
+            name="mmlu",
+            benchmark="mmlu",
+            limit=300,
+            n_runs=1,
+        ),
+    ],
     temperature=0.0,
     batch_size=128,
     output_root=Path("scratch/evals/ocean/mmlu"),

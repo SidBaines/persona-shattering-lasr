@@ -78,19 +78,32 @@ uv run python -m src_dev.evals suite \
 
 ## Agentic Misalignment sweep
 
-`src_dev/evals/agentic_misalignment/` contains a canned suite over the base
-Llama-3.1-8B-Instruct model + 11 OCEAN persona adapters, on the default
-blackmail / explicit-america / replacement scenario with `epochs=10`:
+`src_dev/evals/agentic_misalignment/` contains two suite configs:
 
-```bash
-uv run python -m src_dev.evals suite \
-    --config-module src_dev.evals.agentic_misalignment.config
-```
+1. **`sweep_base.py`** — base-only sweep over
+   `(scenario × urgency_type × extra_system_instructions)` = 27 conditions.
+   **Run this once first**, on the base model only, to identify which
+   scenarios actually elicit misaligned behaviour on Llama-3.1-8B-Instruct.
+   Only the scenarios that flip in the base model are worth running across
+   the adapter sweep — otherwise every adapter cell is noise around 0.
 
-Scenario parameters live in `defaults.py`; the adapter list is in
-`adapters_best.py`. Grader defaults to an Anthropic/OpenRouter model —
-requires `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` plus `HF_TOKEN` for
-adapter downloads.
+   ```bash
+   uv run python -m src_dev.evals suite \
+       --config-module src_dev.evals.agentic_misalignment.sweep_base
+   ```
+
+2. **`config.py`** — after picking the promising scenario(s), this runs the
+   base model + 11 OCEAN persona adapters on the default
+   blackmail / explicit-america / replacement condition, `epochs=10`.
+
+   ```bash
+   uv run python -m src_dev.evals suite \
+       --config-module src_dev.evals.agentic_misalignment.config
+   ```
+
+Scenario parameters and the adapter list live in `defaults.py`. Grader
+defaults to an Anthropic/OpenRouter model — requires `ANTHROPIC_API_KEY` or
+`OPENROUTER_API_KEY`, plus `HF_TOKEN` for adapter downloads.
 
 ## Frustration eval
 
