@@ -92,30 +92,56 @@ def _parse_adapter_ref(adapter: str) -> tuple[str, str | None]:
 def _resolve_adapter_to_local(adapter: str) -> str:
     """Resolve an adapter reference to a local directory path.
 
-    If the adapter is stored in a HuggingFace *dataset* repo (``repo_id::subfolder``
-    format), downloads it via ``snapshot_download`` with ``repo_type="dataset"``
-    and returns the local snapshot path containing the adapter files.
+    If the adapter is stored in a HuggingFace dataset/model repo
+    (``repo_id::subfolder`` format), downloads the subfolder and returns the
+    local path containing the adapter files.
+
+    For subfolder refs we list files via ``HfApi.list_repo_tree`` scoped to
+    the subfolder and fetch each with ``hf_hub_download``, rather than
+    ``snapshot_download(allow_patterns=...)``. ``snapshot_download`` derives
+    its file list from ``dataset_info().siblings``, which HF truncates for
+    very large repos — on a monorepo with >19k files the requested adapter
+    silently disappears from the listing and the download becomes a no-op.
 
     Plain local paths and ``local://`` paths are returned unchanged.
     """
     repo_id, subfolder = _parse_adapter_ref(adapter)
     if Path(repo_id).exists():
-        # Already a local path
         return repo_id if subfolder is None else str(Path(repo_id) / subfolder)
-    # HF repo — try dataset repo first (common case), fall back to model repo
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import HfApi, hf_hub_download, snapshot_download
     from huggingface_hub.errors import RepositoryNotFoundError
-    allow_patterns = [f"{subfolder}/**"] if subfolder else None
+    from huggingface_hub.hf_api import RepoFile
+
+    api = HfApi()
     for repo_type in ("dataset", "model"):
         try:
-            local_dir = snapshot_download(
-                repo_id=repo_id,
-                repo_type=repo_type,
-                allow_patterns=allow_patterns,
+            if subfolder is None:
+                return snapshot_download(repo_id=repo_id, repo_type=repo_type)
+            entries = list(
+                api.list_repo_tree(
+                    repo_id=repo_id,
+                    repo_type=repo_type,
+                    path_in_repo=subfolder,
+                    recursive=True,
+                )
             )
-            return local_dir if subfolder is None else str(Path(local_dir) / subfolder)
         except RepositoryNotFoundError:
             continue
+        file_paths = [e.path for e in entries if isinstance(e, RepoFile)]
+        if not file_paths:
+            raise RuntimeError(
+                f"No files under {subfolder!r} in {repo_id!r} (repo_type={repo_type})"
+            )
+        snapshot_root: Path | None = None
+        for rel_path in file_paths:
+            local_path = hf_hub_download(
+                repo_id=repo_id, repo_type=repo_type, filename=rel_path
+            )
+            if snapshot_root is None:
+                # Walk up past the rel_path segments to find the snapshot dir.
+                snapshot_root = Path(local_path).parents[rel_path.count("/")]
+        assert snapshot_root is not None
+        return str(snapshot_root / subfolder)
     raise RuntimeError(f"Could not find HF repo {repo_id!r} as dataset or model")
 
 
