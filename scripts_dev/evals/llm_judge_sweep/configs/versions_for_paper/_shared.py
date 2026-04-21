@@ -38,13 +38,13 @@ SEED = 42
 # ---------------------------------------------------------------------------
 # Rollout generation
 # ---------------------------------------------------------------------------
-MAX_SAMPLES = 100
-NUM_ROLLOUTS_PER_PROMPT = 1
+MAX_SAMPLES = 240
+NUM_ROLLOUTS_PER_PROMPT = 3
 DATASET_PATH = "data/assistant-axis-extraction-questions.jsonl"
 ASSISTANT_MAX_NEW_TOKENS = 256
 ASSISTANT_BATCH_SIZE = 32
-ASSISTANT_TEMPERATURE = 0.7
-ASSISTANT_TOP_P = 0.95
+ASSISTANT_TEMPERATURE = 1.0
+ASSISTANT_TOP_P = 1.0  # 1 means no top_p
 USER_MODEL = "z-ai/glm-4.5-air:free"
 USER_PROVIDER = "openrouter"
 
