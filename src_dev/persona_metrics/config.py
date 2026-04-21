@@ -209,7 +209,7 @@ def judge_config(
     temperature: float = 0.0,
     timeout: int = 60,
 ) -> JudgeLLMConfig:
-    """Return a judge config from the recommended panel or extended pool.
+    """Return a judge config by name from the panel or extended pool.
 
     Args:
         name: Panel/pool key. Recommended panel: "qwen3_235b", "gemma4_27b",
@@ -234,3 +234,27 @@ def judge_config(
         available = ", ".join(sorted(pool))
         raise KeyError(f"Unknown judge '{name}'. Available: {available}")
     return pool[name].model_copy(update={"temperature": temperature, "timeout": timeout})
+
+
+def default_panel(
+    *,
+    temperature: float = 0.0,
+    timeout: int = 60,
+) -> list[JudgeLLMConfig]:
+    """Return the recommended 3-judge panel for paper-quality scoring.
+
+    Usage: score each item with all 3 judges, take the median score.
+
+    Returns:
+        List of 3 :class:`JudgeLLMConfig` (Qwen 3 235B, Gemma 4 27B, Llama 3.3 70B).
+
+    Example::
+
+        from src_dev.persona_metrics.config import default_panel
+        panel = default_panel()
+        # Score with each, then take median across judges
+    """
+    return [
+        cfg.model_copy(update={"temperature": temperature, "timeout": timeout})
+        for cfg in JUDGE_PANEL.values()
+    ]

@@ -47,8 +47,8 @@ from src_dev.utils import login_from_env, upload_folder_to_model_repo
 
 
 HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-JUDGE_PROVIDER = "openai"
-JUDGE_MODEL = "gpt-5-nano-2025-08-07"
+JUDGE_PROVIDER = "openrouter"
+JUDGE_MODEL = "qwen/qwen3-235b-a22b-2507"
 DEFAULT_PLAIN_PROMPT_TEMPLATE = "### User:\n{user}\n\n### Assistant:\n"
 DEFAULT_HF_ORG = "persona-shattering-lasr"
 

@@ -77,9 +77,9 @@ from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
 # ---------------------------------------------------------------------------
 
 _DEFAULT_RATERS = [
-    JudgeRaterConfig(rater_id="gemini_flash", judge=judge_config("gemini_flash")),
-    JudgeRaterConfig(rater_id="haiku", judge=judge_config("haiku")),
-    JudgeRaterConfig(rater_id="kimi_k2", judge=judge_config("kimi_k2")),
+    JudgeRaterConfig(rater_id="qwen3_235b", judge=judge_config("qwen3_235b")),
+    JudgeRaterConfig(rater_id="gemma4_27b", judge=judge_config("gemma4_27b")),
+    JudgeRaterConfig(rater_id="llama33_70b", judge=judge_config("llama33_70b")),
 ]
 
 # ---------------------------------------------------------------------------
