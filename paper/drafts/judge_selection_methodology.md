@@ -116,7 +116,7 @@ Run date: 2026-04-21. All judges scored at temperature=0.7, 3 repeats.
 #### Observations
 
 1. All 13 surviving judges pass the minimum bar (intra-α >= 0.70, ρ(gold) >= 0.80, ρ(human) >= 0.70).
-2. Top 5 judges all exceed the best individual human rater (irakli ρ=0.839), meaning they fall within or above the human distribution.
+2. Top 5 judges all exceed the best individual human rater (H2 ρ=0.839), meaning they fall within or above the human distribution.
 3. Several judges (Kimi K2, GPT-5 Mini, GPT-4.1 Nano, Gemini Flash) show **scale bias on coherence**: high Spearman (good rank ordering) but high MAE and low QWK (systematically mis-calibrated on the 0-10 scale). This is coherence-specific — these same judges perform well on OCEAN's -4/+4 scale (see below).
 4. **Gemma 4 27B** has the highest self-consistency (α=0.993) — almost deterministic at temp=0.7.
 
