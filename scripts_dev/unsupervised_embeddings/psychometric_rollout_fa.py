@@ -707,6 +707,19 @@ QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 
 # ── trait_mcq logprob mode ─────────────────────────────────────────────────
 QUESTIONNAIRE_TOP_LOGPROBS = 20
+# Logprob-scoring parser version for trait_mcq / fc_pair. Incremented
+# when the target-token set or choice-parsing semantics change:
+#   v1 — letters A..D (and tokenizer variants) only.
+#   v2 — also accepts position-ordinal digits (1..4 for trait_mcq,
+#        1..2 for fc_pair) as aliases for the corresponding letter,
+#        summing linear probabilities. Needed for models that answer
+#        MCQs with option ordinals instead of letters (Mistral-7B,
+#        Zephyr-7B).
+# The version is appended to the questionnaire run-id ONLY for
+# logprob-mode trait_mcq / fc_pair pairs when >1, so v5 Likert caches
+# (unaffected by the change — Likert parsing is digit-native) stay
+# valid under their existing run-ids.
+LOGPROB_PARSER_VERSION = 2
 QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
 QUESTIONNAIRE_DYNAMIC_MASS_FILTER = True
 QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
@@ -1060,6 +1073,16 @@ def _questionnaire_run_id(
     q = _questionnaire_preset(q_key)
     blocks_tag = "+".join(sorted(q.fa_blocks))
     lp_tag = f"-lp{QUESTIONNAIRE_TOP_LOGPROBS}" if q.use_logprobs else ""
+    # Parser-version tag: only relevant for trait_mcq / fc_pair logprob
+    # runs where the target-token set changed. v5 Likert logprob caches
+    # stay under their pre-existing run-ids (no tag).
+    parser_tag = ""
+    if (
+        q.use_logprobs
+        and LOGPROB_PARSER_VERSION > 1
+        and any(b in ("trait_mcq", "fc_pair") for b in q.fa_blocks)
+    ):
+        parser_tag = f"-p{LOGPROB_PARSER_VERSION}"
     reset_tag = (
         f"-reset_{QUESTIONNAIRE_RESET_MODE}"
         if QUESTIONNAIRE_RESET_MODE != "none"
@@ -1075,7 +1098,7 @@ def _questionnaire_run_id(
     return (
         f"questionnaire-{_rollout_run_id(rollout_key)}-"
         f"q_{q.version}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
-        f"{lp_tag}{reset_tag}{qm_tag}"
+        f"{lp_tag}{parser_tag}{reset_tag}{qm_tag}"
     )
 
 
