@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import gc
+import os
 import shutil
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -36,6 +37,24 @@ from torch import nn
 
 from src_dev.activation_capping.model import ActivationCappedModel
 from src_dev.inference.providers.base import InferenceProvider, PromptInput
+
+
+_DEFAULT_GPU_MEMORY_UTILIZATION = 0.90
+
+
+def _resolve_gpu_memory_utilization(value: float | None) -> float:
+    """Resolve the vLLM ``gpu_memory_utilization`` argument.
+
+    Explicit call-site values win; otherwise fall back to the
+    ``VLLM_GPU_MEMORY_UTILIZATION`` env var (useful for tmux-scoped overrides
+    on memory-constrained pods), then to the 0.90 default.
+    """
+    if value is not None:
+        return value
+    env = os.environ.get("VLLM_GPU_MEMORY_UTILIZATION")
+    if env is not None and env != "":
+        return float(env)
+    return _DEFAULT_GPU_MEMORY_UTILIZATION
 
 
 def cleanup_baked_dir(path: Path) -> None:
@@ -569,7 +588,7 @@ class VLLMLoRaScaleProvider(ModelProvider):
         max_new_tokens: int = 128,
         adapter_name: str = "default",
         dtype: str = "bfloat16",
-        gpu_memory_utilization: float = 0.90,
+        gpu_memory_utilization: float | None = None,
         max_model_len: int | None = None,
         enforce_eager: bool = False,
     ) -> None:
@@ -582,7 +601,7 @@ class VLLMLoRaScaleProvider(ModelProvider):
         self._max_new_tokens = max_new_tokens
         self._adapter_name = adapter_name
         self._dtype = dtype
-        self._gpu_memory_utilization = gpu_memory_utilization
+        self._gpu_memory_utilization = _resolve_gpu_memory_utilization(gpu_memory_utilization)
         self._max_model_len = max_model_len
         self._enforce_eager = enforce_eager
 
@@ -804,7 +823,7 @@ class VLLMLoRaComboProvider(ModelProvider):
         top_p: float = 0.95,
         max_new_tokens: int = 128,
         dtype: str = "bfloat16",
-        gpu_memory_utilization: float = 0.90,
+        gpu_memory_utilization: float | None = None,
         max_model_len: int | None = None,
         enforce_eager: bool = False,
     ) -> None:
@@ -823,7 +842,7 @@ class VLLMLoRaComboProvider(ModelProvider):
         self._top_p = top_p
         self._max_new_tokens = max_new_tokens
         self._dtype = dtype
-        self._gpu_memory_utilization = gpu_memory_utilization
+        self._gpu_memory_utilization = _resolve_gpu_memory_utilization(gpu_memory_utilization)
         self._max_model_len = max_model_len
         self._enforce_eager = enforce_eager
 
