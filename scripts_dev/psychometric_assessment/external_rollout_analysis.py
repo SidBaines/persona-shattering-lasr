@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,7 +118,30 @@ QUESTIONNAIRES: list[str] = ["v5", "trait_ocean_v1_nolead"]
 # for every preset). Useful for sanity-checking rollout properties before
 # committing to questionnaire admin + FA compute. Stage 1 ingest is
 # cache-aware so this stage costs ~nothing on re-runs.
-STOP_AFTER_ROLLOUT_STATS: bool = True
+STOP_AFTER_ROLLOUT_STATS: bool = False
+
+# Set True to stop after Stage 2 finishes (ingest + admin + HF upload of
+# every pair). Skips combine + FA + Tucker's + plots. Useful for
+# parallelising Stage 2 across multiple GPUs with disjoint preset
+# subsets: run one tmux session per GPU, each with CUDA_VISIBLE_DEVICES
+# + EXT_PRESETS set, then kick off a final run with
+# STOP_AFTER_STAGE2=False (and EXT_PRESETS covering the full set) to
+# hit the merged HF cache and produce the analysis artefacts.
+STOP_AFTER_STAGE2: bool = False
+
+# Env-var override for the PRESETS list — comma-separated keys.
+# Example (bash):
+#   EXT_PRESETS=kwai_swe,prism_llama2_13b_chat uv run python -m ...
+# The env var takes precedence over the module-level PRESETS list.
+def _resolve_presets(default: list[str]) -> list[str]:
+    raw = os.environ.get("EXT_PRESETS")
+    if raw is None:
+        return default
+    keys = [k.strip() for k in raw.split(",") if k.strip()]
+    if not keys:
+        return default
+    print(f"[Config] EXT_PRESETS override active: {keys}")
+    return keys
 
 # ── FA knobs ────────────────────────────────────────────────────────────────
 FA_METHOD = "principal"
@@ -237,10 +261,10 @@ def _administer_questionnaire(
     )
 
 
-def _ingest_all_presets() -> dict[str, Path]:
+def _ingest_all_presets(presets: list[str]) -> dict[str, Path]:
     """Run Stage 1 ingest for each preset; return the canonical rollout dir."""
     rollout_dirs: dict[str, Path] = {}
-    for r_key in PRESETS:
+    for r_key in presets:
         # Use the first questionnaire just to construct a RunContext —
         # Stage 1 only reads the rollout fields of the context.
         ctx = _build_ctx(r_key, QUESTIONNAIRES[0])
@@ -255,10 +279,11 @@ def _ingest_all_presets() -> dict[str, Path]:
 
 def _administer_all_pairs(
     rollout_dirs: dict[str, Path],
+    presets: list[str],
 ) -> dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]]:
     """Run (or hydrate) Stage 2 for every (preset, questionnaire) pair."""
     pair_data: dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]] = {}
-    for r_key in PRESETS:
+    for r_key in presets:
         for q_key in QUESTIONNAIRES:
             ctx = _build_ctx(r_key, q_key)
             print(f"\n{'#' * 60}")
@@ -729,8 +754,11 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nOutput directory: {out_dir}")
 
+    # Resolve active preset list (env override > module default).
+    active_presets = _resolve_presets(PRESETS)
+
     # ── Validate config ────────────────────────────────────────────────
-    for p in PRESETS:
+    for p in active_presets:
         if p not in EXTERNAL_ROLLOUT_PRESETS:
             raise KeyError(f"Unknown external preset {p!r}")
     for q in QUESTIONNAIRES:
@@ -738,7 +766,7 @@ def main() -> None:
             raise KeyError(f"Unknown questionnaire preset {q!r}")
 
     # ── Stage 1 (cache-aware): ingest every preset once ────────────────
-    rollout_dirs = _ingest_all_presets()
+    rollout_dirs = _ingest_all_presets(active_presets)
 
     # ── Rollout-stats stage ────────────────────────────────────────────
     _run_rollout_stats(rollout_dirs, out_dir)
@@ -751,7 +779,19 @@ def main() -> None:
         return
 
     # ── Stage 2 (cache-aware) for every pair ───────────────────────────
-    pair_data = _administer_all_pairs(rollout_dirs)
+    pair_data = _administer_all_pairs(rollout_dirs, active_presets)
+
+    if STOP_AFTER_STAGE2 or os.environ.get("STOP_AFTER_STAGE2") in ("1", "true", "True"):
+        print(
+            f"\n[Main] STOP_AFTER_STAGE2 active — Stage 2 complete for "
+            f"{len(active_presets)} presets × {len(QUESTIONNAIRES)} questionnaires. "
+            "Outputs uploaded to HF; skipping combine + FA. "
+            "Run again without STOP_AFTER_STAGE2 (and with the full "
+            "PRESETS list) to do the analysis."
+        )
+        return
+
+
     pair_version = {
         (r, q): QUESTIONNAIRE_PRESETS[q].version
         for (r, q) in pair_data.keys()
