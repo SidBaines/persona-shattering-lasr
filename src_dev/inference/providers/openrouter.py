@@ -139,6 +139,52 @@ def _normalize_provider_routing(provider_routing: dict | None) -> dict | None:
     return normalized
 
 
+class EmptyOpenRouterResponseError(Exception):
+    """Raised when OpenRouter returns a response with no usable content.
+
+    Some OpenRouter upstream providers (Parasail, Phala, DeepInfra, ...) sporadically
+    return ``finish_reason=stop`` with empty ``message.content`` in multi-turn chats.
+    Raising this from inside a retry-wrapped lambda lets `_call_with_retry` re-route
+    the request (OpenRouter load-balances per request, so a retry may land on a
+    different upstream provider).
+    """
+
+
+# Message fields where OpenRouter upstream providers may place the assistant text
+# (priority order — ``content`` is standard; reasoning-surfacing providers may use
+# ``reasoning``/``reasoning_content`` even for non-reasoning models).
+_TEXT_FIELDS_PRIORITY = ("content", "reasoning", "reasoning_content")
+
+
+def _extract_choice_text(choice) -> tuple[str, str]:
+    """Return ``(text, source_field)`` from a chat-completion choice.
+
+    Tries ``message.content`` first, falling back to reasoning fields, and as a last
+    resort scans the message dict for any non-empty string field that isn't the role.
+    Returns ``("", "")`` when the message contains no usable text at all.
+    """
+    msg = getattr(choice, "message", None)
+    if msg is None:
+        return "", ""
+
+    for field in _TEXT_FIELDS_PRIORITY:
+        val = getattr(msg, field, None)
+        if isinstance(val, str) and val.strip():
+            return val.strip(), field
+
+    # Fallback: scan model_dump for any extra string-valued field
+    try:
+        dump = msg.model_dump() if hasattr(msg, "model_dump") else dict(getattr(msg, "__dict__", {}))
+    except Exception:
+        dump = {}
+    for k, v in dump.items():
+        if k in _TEXT_FIELDS_PRIORITY or k == "role":
+            continue
+        if isinstance(v, str) and v.strip():
+            return v.strip(), k
+    return "", ""
+
+
 def _extract_usage(response) -> TokenUsage | None:
     if response is None:
         return None
@@ -236,10 +282,21 @@ class OpenRouterProvider(AsyncInferenceProvider):
             temperature=temperature,
             top_p=top_p,
         )
-        if response.choices:
-            text = (response.choices[0].message.content or "").strip()
-        else:
-            text = ""
+        if not response.choices:
+            raise EmptyOpenRouterResponseError("OpenRouter returned no choices")
+        choice = response.choices[0]
+        text, source = _extract_choice_text(choice)
+        if not text:
+            finish = getattr(choice, "finish_reason", None)
+            upstream = getattr(response, "provider", None)
+            raise EmptyOpenRouterResponseError(
+                f"Empty OpenRouter response (finish_reason={finish}, upstream={upstream})"
+            )
+        if source != "content":
+            logger.warning(
+                "OpenRouter surfaced text via '%s' (expected 'content'); using it. Upstream=%s",
+                source, getattr(response, "provider", None),
+            )
         return text, _extract_usage(response)
 
     async def _create_completion(
@@ -344,22 +401,33 @@ class OpenRouterProvider(AsyncInferenceProvider):
         async def fetch_one(
             prompt: str, *, context: str
         ) -> tuple[str, TokenUsage | None]:
-            async with semaphore:
-                response = await self._call_with_retry(
-                    lambda: self._create_completion(
-                        prompt,
-                        n=None,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        top_p=top_p,
-                    ),
-                    context=context,
+            async def _call_and_extract():
+                response = await self._create_completion(
+                    prompt,
+                    n=None,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
                 )
-            if response.choices:
-                text = (response.choices[0].message.content or "").strip()
-            else:
-                text = ""
-            return text, _extract_usage(response)
+                if not response.choices:
+                    raise EmptyOpenRouterResponseError("OpenRouter returned no choices")
+                choice = response.choices[0]
+                text, source = _extract_choice_text(choice)
+                if not text:
+                    finish = getattr(choice, "finish_reason", None)
+                    upstream = getattr(response, "provider", None)
+                    raise EmptyOpenRouterResponseError(
+                        f"Empty OpenRouter response (finish_reason={finish}, upstream={upstream})"
+                    )
+                if source != "content":
+                    logger.warning(
+                        "OpenRouter surfaced text via '%s' (expected 'content'); using it. Upstream=%s",
+                        source, getattr(response, "provider", None),
+                    )
+                return text, _extract_usage(response)
+
+            async with semaphore:
+                return await self._call_with_retry(_call_and_extract, context=context)
 
         async def run_one(prompt_index: int, response_index: int) -> None:
             prompt = prompts[prompt_index]
@@ -386,22 +454,41 @@ class OpenRouterProvider(AsyncInferenceProvider):
             texts: list[str] = []
             usage_total = empty_usage()
             try:
-                async with semaphore:
-                    response = await self._call_with_retry(
-                        lambda: self._create_completion(
-                            prompt,
-                            n=num_responses,
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                            top_p=top_p,
-                        ),
-                        context=context,
+                async def _call_and_extract_many():
+                    response = await self._create_completion(
+                        prompt,
+                        n=num_responses,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
                     )
-                choices = response.choices or []
-                texts = [
-                    (choice.message.content or "").strip()
-                    for choice in choices[:num_responses]
-                ]
+                    choices = response.choices or []
+                    extracted: list[str] = []
+                    non_content_sources: list[str] = []
+                    for choice in choices[:num_responses]:
+                        text, source = _extract_choice_text(choice)
+                        extracted.append(text)
+                        if text and source != "content":
+                            non_content_sources.append(source)
+                    # Retry only if ALL returned choices are blank — a partial blank
+                    # list will be topped up by the sequential fallback below.
+                    if choices and all(not t for t in extracted):
+                        finish_reasons = [getattr(c, "finish_reason", None) for c in choices[:num_responses]]
+                        raise EmptyOpenRouterResponseError(
+                            f"All {len(choices)} OpenRouter choices empty "
+                            f"(finish_reasons={finish_reasons}, upstream={getattr(response,'provider',None)})"
+                        )
+                    if non_content_sources:
+                        logger.warning(
+                            "OpenRouter surfaced text via non-content fields %s (upstream=%s)",
+                            non_content_sources, getattr(response, "provider", None),
+                        )
+                    return extracted, response
+
+                async with semaphore:
+                    texts, response = await self._call_with_retry(
+                        _call_and_extract_many, context=context,
+                    )
                 accumulate_usage(usage_total, _extract_usage(response))
                 if len(texts) < num_responses:
                     logger.warning(

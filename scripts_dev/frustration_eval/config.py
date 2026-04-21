@@ -63,6 +63,7 @@ class FrustrationEvalConfig(BaseModel):
 
     # ── Execution ─────────────────────────────────────────────────────────
     max_concurrent: int = 16  # concurrent rollouts
+    timeout: int | None = 600  # per-request HTTP timeout (seconds); long gens need >60
     output_dir: Path = Path("scratch/evals/frustration_eval")
     run_name: str = ""  # auto-generated from model name if empty
     seed: int = 42
@@ -81,6 +82,7 @@ class FrustrationEvalConfig(BaseModel):
             provider=self.provider,
             generation=self.generation,
             max_concurrent=self.max_concurrent,
+            timeout=self.timeout,
             local=self.local,
             vllm=self.vllm,
             openai=self.openai,
