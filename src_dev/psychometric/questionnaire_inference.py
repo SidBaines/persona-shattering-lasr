@@ -86,8 +86,10 @@ def estimate_max_model_len(
         Recommended max_model_len (rounded up to the next multiple of 64).
     """
     from transformers import AutoTokenizer
+    from src_dev.psychometric.chat_templates import ensure_chat_template
 
     tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
+    has_template = ensure_chat_template(tokenizer, model)
 
     item_prompts = [build_item_prompt(item, likert_phrasing=likert_phrasing) for item in items]
     longest_item_prompt = max(item_prompts, key=len)
@@ -96,7 +98,7 @@ def estimate_max_model_len(
 
     full_messages = list(longest_conv) + [{"role": "user", "content": longest_item_prompt}]
 
-    if hasattr(tokenizer, "apply_chat_template"):
+    if has_template:
         token_ids = tokenizer.apply_chat_template(
             full_messages,
             add_generation_prompt=True,
@@ -142,8 +144,10 @@ def _filter_by_context_budget(
     ``max_new_tokens`` generation slot, matching ``estimate_max_model_len``.
     """
     from transformers import AutoTokenizer
+    from src_dev.psychometric.chat_templates import ensure_chat_template
 
     tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
+    has_template = ensure_chat_template(tokenizer, model)
 
     item_prompts = [build_item_prompt(it, likert_phrasing=likert_phrasing) for it in items]
     longest_item_prompt = max(item_prompts, key=len)
@@ -164,7 +168,7 @@ def _filter_by_context_budget(
     for sample in samples:
         conv = [{"role": m.role, "content": m.content} for m in sample.messages]
         msgs = list(conv) + [{"role": "user", "content": longest_item_prompt}]
-        if hasattr(tokenizer, "apply_chat_template"):
+        if has_template:
             n_in = len(
                 tokenizer.apply_chat_template(msgs, add_generation_prompt=True, tokenize=True)
             )
@@ -405,16 +409,24 @@ async def run_questionnaire_inference_async(
     # Set up inference provider — use questionnaire-specific model/provider
     vllm_kwargs = {}
     if cfg.provider == "vllm":
-        max_model_len = estimate_max_model_len(
-            cfg.model, conversations, items, cfg.max_new_tokens,
-            likert_phrasing=cfg.phrasing,
-        )
-        if cfg.max_context_tokens is not None and max_model_len > cfg.max_context_tokens:
-            print(
-                f"[Stage 2] Clamping max_model_len {max_model_len} → "
-                f"{cfg.max_context_tokens} (cfg.max_context_tokens)"
-            )
+        # When max_context_tokens is set, the context-budget filter above
+        # already ensured every surviving conversation fits within that
+        # budget (accounting for generation, retry overhead, and buffer).
+        # Use it directly as max_model_len — more robust than estimating
+        # and undersizing (the char-length-based estimate can be wrong
+        # by a few tokens due to tokenizer variance, and even a
+        # 3-token undershoot aborts the whole run).
+        if cfg.max_context_tokens is not None:
             max_model_len = cfg.max_context_tokens
+            print(
+                f"[Stage 2] Using max_model_len = max_context_tokens "
+                f"= {max_model_len}"
+            )
+        else:
+            max_model_len = estimate_max_model_len(
+                cfg.model, conversations, items, cfg.max_new_tokens,
+                likert_phrasing=cfg.phrasing,
+            )
         # Look up a fallback chat template for legacy models whose
         # tokenizer ships with chat_template=None (Koala-13B, OAsst-
         # Pythia-12B, older Vicuna variants). Returns None if the model
