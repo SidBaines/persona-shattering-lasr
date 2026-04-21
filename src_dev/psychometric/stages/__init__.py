@@ -6,6 +6,9 @@ corresponding pipeline stage. Stages are independent: a subset script can
 call a single one against an existing run directory.
 """
 
+from src_dev.psychometric.stages.external_rollouts import (
+    run_stage_ingest_external_rollouts,
+)
 from src_dev.psychometric.stages.factor_analysis import run_stage_factor_analysis
 from src_dev.psychometric.stages.labeling import run_stage_labeling
 from src_dev.psychometric.stages.questionnaire import run_stage_questionnaire
@@ -16,6 +19,7 @@ from src_dev.psychometric.stages.validation import run_stage_validation
 
 __all__ = [
     "run_stage_factor_analysis",
+    "run_stage_ingest_external_rollouts",
     "run_stage_labeling",
     "run_stage_questionnaire",
     "run_stage_realism_judge",

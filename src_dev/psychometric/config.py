@@ -98,6 +98,46 @@ class RolloutStageResult:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Stage 1 (external variant) — ingest pre-existing rollouts
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# ``run_stage_ingest_external_rollouts`` consumes this instead of
+# ``RolloutsStageConfig``. Kept as a sibling class so the two Stage-1 paths
+# (generation vs ingestion) stay legible: the fields are about
+# subsampling, not generation. The orchestrator dispatches on preset type.
+
+
+@dataclass
+class ExternalRolloutsStageConfig:
+    ctx: RunContext
+    # Adapter identity — resolved via
+    # ``src_dev.datasets.external_sources.get_adapter(source)``.
+    source: str
+    # Assistant model that produced the rollouts in the source dataset.
+    # Becomes the questionnaire target by default (questionnaire model =
+    # rollout assistant model, matching the pre-cross-model default).
+    assistant_model: str
+    assistant_provider: str = "vllm"
+    # Deterministic subsampling.
+    max_samples: int = 500
+    seed: int = 436
+    # Post-filter max scan — cap on source rows read from HF before
+    # reservoir sampling stops. None = exhaust the source. For 66k–100k
+    # sources just leave None; for LMSYS-1M set ~50 * max_samples.
+    max_scan: int | None = None
+    # Adapter-specific filter config — e.g.
+    # ``{"min_assistant_turns": 3, "model_allowlist": ["vicuna-13b"]}``.
+    filter_config: dict[str, Any] = field(default_factory=dict)
+    # Minimum assistant turns required for a sample to survive. Applied
+    # BOTH at ingestion (via filter_config["min_assistant_turns"] — the
+    # adapter enforces it) AND again at Stage 2 (the existing
+    # ``num_conversation_turns`` completeness filter in
+    # ``run_questionnaire_inference_async``). Kept consistent so external
+    # rollouts play nicely with the generated-rollout filter semantics.
+    min_assistant_turns: int = 0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Stage 2 — Questionnaire administration
 # ═════════════════════════════════════════════════════════════════════════════
 
