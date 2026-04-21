@@ -245,13 +245,29 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    ("A", "v5"),
-    ("A", "v6_fc_draft"),          # lp20 cache (argmax-scored)
-    ("A", "trait_ocean_v1"),       # lp20 cache (argmax-scored)
+    # Qwen2.5-7B-Instruct administering on the B rollouts (Llama-produced).
+    # QUESTIONNAIRE_MODEL_OVERRIDE below makes the questionnaire-model tag
+    # flow into the run-id so these cache under a new HF path and don't
+    # collide with the default llama-on-B results.
     ("B", "v5"),
-    ("B", "v6_fc_draft_direct"),   # direct-gen cache
-    ("B", "trait_ocean_v1"),       # direct-gen cache
+    ("B", "trait_ocean_v1"),
 ]
+# Original full-matrix pairs, kept for reference / easy switch-back:
+# PAIRS = [
+#     ("A", "v5"),
+#     ("A", "v6_fc_draft"),
+#     ("A", "trait_ocean_v1"),
+#     ("B", "v5"),
+#     ("B", "v6_fc_draft_direct"),
+#     ("B", "trait_ocean_v1"),
+# ]
+
+# ── Cross-model questionnaire config (Qwen-on-B) ────────────────────────────
+# When True, QUESTIONNAIRE_MODEL_OVERRIDE + QUESTIONNAIRE_MAX_CONTEXT_TOKENS
+# below (defined at the top of the Stage-2 section) are populated with the
+# Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
+# regeneration.
+CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -301,6 +317,23 @@ QUESTIONNAIRE_TIMEOUT = 60
 # Questionnaire provider/model can differ from rollout generation.
 QUESTIONNAIRE_PROVIDER = "vllm"
 QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
+# Optional: administer the questionnaire with a different model than the one
+# that produced the rollouts (cross-model study). When set, this overrides
+# QUESTIONNAIRE_MODEL and tags "-qm_<slug>" into the questionnaire run-id so
+# the scratch dir + HF cache path don't collide with the rollout-model run.
+# ``None`` preserves prior behaviour (questionnaire model = rollout model).
+QUESTIONNAIRE_MODEL_OVERRIDE: str | None = (
+    "Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None
+)
+# Optional: cap the questionnaire-model's context window and drop rollouts
+# whose (conversation + longest item prompt + retry overhead + max_new_tokens
+# + buffer) would exceed it. Needed when the questionnaire model has a
+# smaller native context than the rollout model (e.g. Qwen2.5-7B 32k vs
+# Llama-3.1-8B 128k). ``None`` disables filtering.
+QUESTIONNAIRE_MAX_CONTEXT_TOKENS: int | None = (
+    32768 if CROSS_MODEL_QUESTIONNAIRE else None
+)
+QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS: int = 1024
 # vLLM-only: how many personas to stack into one questionnaire super-batch.
 QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 8
 QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
@@ -552,7 +585,9 @@ def _activate_rollout(key: str) -> None:
     NUM_ROLLOUTS_PER_PROMPT = p.num_rollouts_per_prompt
     NUM_CONVERSATION_TURNS = p.num_conversation_turns
     ASSISTANT_MODEL = p.assistant_model
-    QUESTIONNAIRE_MODEL = p.assistant_model
+    # Keep questionnaire model in sync with the rollout model by default, but
+    # honour QUESTIONNAIRE_MODEL_OVERRIDE when set (cross-model study).
+    QUESTIONNAIRE_MODEL = QUESTIONNAIRE_MODEL_OVERRIDE or p.assistant_model
     ASSISTANT_PROVIDER = p.assistant_provider
     USER_MODEL = p.user_model
     USER_PROVIDER = p.user_provider
@@ -616,10 +651,17 @@ def _questionnaire_run_id(
         if QUESTIONNAIRE_RESET_MODE != "none"
         else ""
     )
+    # Cross-model tag: only appended when the questionnaire model differs
+    # from the rollout model. Preserves existing run-ids (and HF cache keys)
+    # for the default "administer on rollout model" case.
+    p = _rollout_preset(rollout_key)
+    qm_tag = ""
+    if QUESTIONNAIRE_MODEL_OVERRIDE and QUESTIONNAIRE_MODEL_OVERRIDE != p.assistant_model:
+        qm_tag = f"-qm_{_model_slug(QUESTIONNAIRE_MODEL_OVERRIDE)}"
     return (
         f"questionnaire-{_rollout_run_id(rollout_key)}-"
         f"q_{q.version}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
-        f"{lp_tag}{reset_tag}"
+        f"{lp_tag}{reset_tag}{qm_tag}"
     )
 
 
@@ -1174,6 +1216,8 @@ def _build_questionnaire_stage_config(ctx: RunContext) -> QuestionnaireStageConf
         reset_mode=QUESTIONNAIRE_RESET_MODE,
         soft_reset_system_prompt=QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT,
         boundary_token=QUESTIONNAIRE_BOUNDARY_TOKEN,
+        max_context_tokens=QUESTIONNAIRE_MAX_CONTEXT_TOKENS,
+        context_buffer_tokens=QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS,
         write_inspection_file=WRITE_QUESTIONNAIRE_INSPECTION_FILE,
         inspection_items_per_rollout=INSPECTION_ITEMS_PER_ROLLOUT,
     )

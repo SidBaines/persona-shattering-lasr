@@ -124,6 +124,69 @@ def estimate_max_model_len(
     return max_model_len
 
 
+def _filter_by_context_budget(
+    samples,
+    items: list[dict],
+    *,
+    model: str,
+    max_context_tokens: int,
+    max_new_tokens: int,
+    buffer_tokens: int,
+    likert_phrasing: str,
+):
+    """Drop samples whose (conv + longest item prompt) exceeds the budget.
+
+    Budget = ``max_context_tokens - max_new_tokens - retry_overhead - buffer_tokens``.
+    ``retry_overhead`` accounts for the longest retry message + a second
+    ``max_new_tokens`` generation slot, matching ``estimate_max_model_len``.
+    """
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
+
+    item_prompts = [build_item_prompt(it, likert_phrasing=likert_phrasing) for it in items]
+    longest_item_prompt = max(item_prompts, key=len)
+
+    longest_retry_msg = max((retry_message(it) for it in items), key=len)
+    retry_overhead = len(tokenizer.encode(longest_retry_msg)) + max_new_tokens + 20
+
+    input_budget = max_context_tokens - max_new_tokens - retry_overhead - buffer_tokens
+    if input_budget <= 0:
+        raise ValueError(
+            f"max_context_tokens={max_context_tokens} is too small for "
+            f"max_new_tokens={max_new_tokens} + retry_overhead={retry_overhead} "
+            f"+ buffer={buffer_tokens}."
+        )
+
+    kept = []
+    dropped_ids: list[str] = []
+    for sample in samples:
+        conv = [{"role": m.role, "content": m.content} for m in sample.messages]
+        msgs = list(conv) + [{"role": "user", "content": longest_item_prompt}]
+        if hasattr(tokenizer, "apply_chat_template"):
+            n_in = len(
+                tokenizer.apply_chat_template(msgs, add_generation_prompt=True, tokenize=True)
+            )
+        else:
+            n_in = len(tokenizer.encode(" ".join(m["content"] for m in msgs)))
+        if n_in <= input_budget:
+            kept.append(sample)
+        else:
+            dropped_ids.append(f"{sample.sample_id} ({n_in} tok)")
+
+    n_dropped = len(samples) - len(kept)
+    print(
+        f"[Stage 2] Context-length filter: model={model} "
+        f"max_context={max_context_tokens} input_budget={input_budget} "
+        f"→ kept {len(kept)}/{len(samples)} samples (dropped {n_dropped})"
+    )
+    if dropped_ids:
+        preview = ", ".join(dropped_ids[:5])
+        more = f" …(+{len(dropped_ids) - 5} more)" if len(dropped_ids) > 5 else ""
+        print(f"[Stage 2] First dropped samples: {preview}{more}")
+    return kept
+
+
 async def run_questionnaire_inference_async(
     cfg: QuestionnaireStageConfig,
     rollout_dir: Path,
@@ -178,6 +241,17 @@ async def run_questionnaire_inference_async(
         print(
             f"[Stage 2] Excluded {n_before - len(completed_samples)} samples with consecutive "
             f"assistant turns (resume-bug artifact)"
+        )
+
+    if cfg.max_context_tokens is not None:
+        completed_samples = _filter_by_context_budget(
+            completed_samples,
+            items,
+            model=cfg.model,
+            max_context_tokens=cfg.max_context_tokens,
+            max_new_tokens=cfg.max_new_tokens,
+            buffer_tokens=cfg.context_buffer_tokens,
+            likert_phrasing=cfg.phrasing,
         )
 
     if not completed_samples:
@@ -334,6 +408,12 @@ async def run_questionnaire_inference_async(
             cfg.model, conversations, items, cfg.max_new_tokens,
             likert_phrasing=cfg.phrasing,
         )
+        if cfg.max_context_tokens is not None and max_model_len > cfg.max_context_tokens:
+            print(
+                f"[Stage 2] Clamping max_model_len {max_model_len} → "
+                f"{cfg.max_context_tokens} (cfg.max_context_tokens)"
+            )
+            max_model_len = cfg.max_context_tokens
         vllm_kwargs["vllm"] = VllmProviderConfig(
             gpu_memory_utilization=cfg.vllm_gpu_memory_utilization,
             max_model_len=max_model_len,

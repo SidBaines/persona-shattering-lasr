@@ -136,6 +136,14 @@ class QuestionnaireStageConfig:
         "is now beginning."
     )
     boundary_token: str | int | list[int] = "<|end_of_text|>"
+    # Context-length filter — drop rollouts whose (conversation + longest
+    # item prompt + retry_overhead + generation + buffer) would exceed this
+    # many tokens under the questionnaire-model tokenizer. ``None`` disables
+    # the filter (preserving prior behaviour for models with 128k+ context
+    # like Llama-3.1). Set when administering a questionnaire on a model
+    # with a smaller native context than the rollout model.
+    max_context_tokens: int | None = None
+    context_buffer_tokens: int = 1024
     # Debug / inspection outputs
     write_inspection_file: bool = True
     inspection_items_per_rollout: int = 30
