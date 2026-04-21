@@ -1,11 +1,15 @@
-"""O+ (openness plus) TRAIT logprob sweep using activation capping.
+"""O+ (openness amplifier) TRAIT logprob sweep using activation capping (vanton4 axis).
 
 Sweeps over capping fractions along the pre-computed o_plus activation direction.
 Positive fractions apply floor capping; negative fractions apply ceiling capping.
 The base model (fraction=0) is always included.
 
-The o_plus axis and per-layer range files are downloaded from the monorepo if not
-present locally.
+Axis + per-layer range files are downloaded from the monorepo, sibling to the
+vanton4 LoRA at ``fine_tuning/.../o_plus/vanton4/activation_capping/``. The local
+cache is versioned (``o_plus_vanton4``) to avoid clobbering older artifacts.
+
+Parameters (batch size, choice mass, samples_per_trait) match the direct-adapter
+vanton4 trait configs in ``scripts_dev.personality_evals.configs.ocean.trait.vanton4``.
 
 Usage
 -----
@@ -17,6 +21,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src_dev.common.lora_catalogue import HF_REPO, LoraHFCatalogue
 from src_dev.evals import (
     ActivationCapSweep,
     InspectBenchmarkSpec,
@@ -30,14 +35,19 @@ load_dotenv()
 # Model and axis artifacts
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-
 SLUG = "o_plus"
-_AXIS_DIR = Path("scratch/llama_8b_instruct/activation_capping") / SLUG
+LORA_VERSION = "vanton4"
+
+_AXIS_DIR = Path("scratch/llama_8b_instruct/activation_capping") / f"{SLUG}_{LORA_VERSION}"
 _AXIS_PATH = _AXIS_DIR / (SLUG + "_axis.pt")
 _PER_LAYER_RANGE_PATH = _AXIS_DIR / (SLUG + "_per_layer_range.pt")
 
-_MONOREPO_ID = "persona-shattering-lasr/monorepo"
-_MONOREPO_AXIS_PATH = "activation_capping/" + SLUG
+_MONOREPO_ID = HF_REPO
+# The axis artifacts live next to the LoRA they were derived from
+# (sibling of ``lora/`` and ``evals/`` inside the LoRA version dir).
+_LORA_PATH = Path(getattr(LoraHFCatalogue(), SLUG))
+_LORA_PARENT = _LORA_PATH.parent.parent  # strips ``lora/<adapter-name>``
+_MONOREPO_AXIS_PATH = str(_LORA_PARENT / "activation_capping")
 
 if not (_AXIS_PATH.exists() and _PER_LAYER_RANGE_PATH.exists()):
     _AXIS_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,7 +57,7 @@ if not (_AXIS_PATH.exists() and _PER_LAYER_RANGE_PATH.exists()):
         local_dir=_AXIS_DIR,
         allow_patterns=[SLUG + "_axis.pt", SLUG + "_per_layer_range.pt"],
     )
-    # snapshot_download replicates the repo path structure; flatten if needed.
+    # download_from_dataset_repo replicates the repo path structure; flatten.
     _nested = _AXIS_DIR / _MONOREPO_AXIS_PATH
     if _nested.exists():
         for _f in _nested.iterdir():
@@ -80,32 +90,29 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait_logprobs",
             benchmark="personality_trait_logprobs",
-            benchmark_args={
-                "samples_per_trait": 300,
-                "trait_splits": _OCEAN_TRAITS,
-                "max_tokens": 1,
-            },
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
             n_runs=1,
         ),
     ],
     temperature=0.0,
-    batch_size=64,
+    batch_size=128,
     output_root=Path("scratch/evals/ocean/trait"),
-    run_name="o_plus_activation_capping_trait_logprobs",
+    run_name=f"{SLUG}_activation_capping_vanton4_trait_logprobs",
     skip_completed=True,
     auto_analyze=True,
     analyze_kwargs={
-        "title_suffix": "O+ Activation Capping TRAIT (logprobs)",
+        "title_suffix": "O+ Activation Capping vanton4 TRAIT (logprobs)",
         "interval": "ci95_from_bootstrap_1000",
         "x_label": "Activation Vector Limit",
         "x_lim": (-2.5, 2.5),
-        "dynamic_mass_filter": True,
+        "min_choice_mass": 0.75,
     },
     upload_repo_id=_MONOREPO_ID,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/openness/amplifier/vanton1/evals/mcq/trait_logprobs",
+    upload_path_in_repo=str(_LORA_PARENT / "evals/mcq/activation_capping/trait_logprobs"),
     metadata={
-        "persona": "openness_plus",
+        "persona": SLUG,
         "method": "activation_capping",
+        "lora_version": LORA_VERSION,
         "axis_path": str(_AXIS_PATH),
         "scoring_method": "logprob",
     },
