@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# OCEAN "versions for paper" — train + eval all 10 catalogue LoRAs.
+# OCEAN "versions for paper" — train + eval all 10 catalogue LoRAs plus the
+# control_use_diff_words v2 baseline.
 #
 # Rows:
 #   8 vanton4 (O±, C+, E±, A+, N±) — `--monorepo-version anton4` → .../vanton4/
 #   2 v2 (C-, A-) — `--monorepo-version 2` → .../v2/
 #     these use concat-baked constitutions so the current per-facet pipeline
 #     reproduces the old concat-all-traits system prompt behavior.
+#   1 control (control_use_diff_words amplifier v2) — `--monorepo-version 2` →
+#     .../other/control_use_diff_words/amplifier/v2/
 #
 # Stage-caching (run_oct_pipeline.py `_ensure_stage_available`) should skip
 # stages that already exist on HF. If the constitution SHA for C-/A- differs
@@ -46,6 +49,7 @@ ROWS=(
     "a_minus   agreeableness_low                           agreeableness_low_slim                           ocean agreeableness      suppressor 2      a_minus_v2"
     "n_plus    neuroticism_amplifying_full_vanton4         neuroticism_amplifying_full_vanton4_slim         ocean neuroticism        amplifier  anton4 n_plus_vanton4"
     "n_minus   neuroticism_suppressing_full_vanton4        neuroticism_suppressing_full_vanton4_slim        ocean neuroticism        suppressor anton4 n_minus_vanton4"
+    "control_plus control_use_diff_words_amplifying_full_v2 control_use_diff_words_amplifying_full_v2_slim other control_use_diff_words amplifier 2 control_plus_v2"
 )
 
 for row in "${ROWS[@]}"; do
