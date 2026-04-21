@@ -2,9 +2,9 @@
 
 Usage:
     uv run python -m scripts_dev.frustration_eval.run_local_adapter \
-        --adapter-path scratch/adapters/n_plus_v4/fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona \
+        --adapter-path scratch/adapters/n_plus_vanton4/fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/vanton4/lora/neuroticism_amplifying_full_vanton4-persona \
         --num-turns 30 --num-rollouts 5 --num-prompts 1 \
-        --run-name n_plus_v4_30turn
+        --run-name n_plus_vanton4_30turn
 """
 
 from __future__ import annotations

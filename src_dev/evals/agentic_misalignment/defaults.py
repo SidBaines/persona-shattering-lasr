@@ -40,47 +40,51 @@ _FT_PREFIX = "fine_tuning/llama-3.1-8b-it"
 @dataclass(frozen=True)
 class AdapterEntry:
     short_name: str
-    """Model-spec name used in output paths (e.g. ``o_plus_vanton1``)."""
+    """Model-spec name used in output paths (e.g. ``o_plus_vanton4``)."""
     path_in_repo: str
     """Path inside ``persona-shattering-lasr/monorepo`` pointing at the LoRA folder."""
 
 
 ADAPTERS: tuple[AdapterEntry, ...] = (
     AdapterEntry(
-        short_name="o_plus_vanton1",
-        path_in_repo=f"{_FT_PREFIX}/ocean/openness/amplifier/vanton1/lora/openness_amplifying_full_vanton1-persona",
+        short_name="o_plus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/openness/amplifier/vanton4/lora/openness_amplifying_full_vanton4-persona",
     ),
     AdapterEntry(
-        short_name="o_minus_vanton1",
-        path_in_repo=f"{_FT_PREFIX}/ocean/openness/suppressor/vanton1/lora/openness_suppressing_full_vanton1-persona",
+        short_name="o_minus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/openness/suppressor/vanton4/lora/openness_suppressing_full_vanton4-persona",
     ),
     AdapterEntry(
-        short_name="c_plus_v1_souped",
-        path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/amplifier/v1/lora/souped",
+        short_name="c_plus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/amplifier/vanton4/lora/conscientiousness_amplifying_full_vanton4-persona",
     ),
     AdapterEntry(
         short_name="c_minus_v2",
         path_in_repo=f"{_FT_PREFIX}/ocean/conscientiousness/suppressor/v2/lora/conscientiousness_low_v2-persona",
     ),
     AdapterEntry(
-        short_name="e_plus_vanton1",
-        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton1/lora/extraversion_amplifying_full_vanton1-persona",
+        short_name="e_plus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton4/lora/extraversion_amplifying_full_vanton4-persona",
     ),
     AdapterEntry(
-        short_name="a_plus_vanton2",
-        path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/amplifier/vanton2/lora/agreeableness_amplifying_full_vanton2-persona",
+        short_name="e_minus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/suppressor/vanton4/lora/extraversion_suppressing_full_vanton4-persona",
+    ),
+    AdapterEntry(
+        short_name="a_plus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/amplifier/vanton4/lora/agreeableness_amplifying_full_vanton4-persona",
     ),
     AdapterEntry(
         short_name="a_minus_v2",
         path_in_repo=f"{_FT_PREFIX}/ocean/agreeableness/suppressor/v2/lora/agreeableness_low-persona",
     ),
     AdapterEntry(
-        short_name="n_plus_v4",
-        path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona",
+        short_name="n_plus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/amplifier/vanton4/lora/neuroticism_amplifying_full_vanton4-persona",
     ),
     AdapterEntry(
-        short_name="n_minus_v4",
-        path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/suppressor/v4/lora/neuroticism_low-persona",
+        short_name="n_minus_vanton4",
+        path_in_repo=f"{_FT_PREFIX}/ocean/neuroticism/suppressor/vanton4/lora/neuroticism_suppressing_full_vanton4-persona",
     ),
     AdapterEntry(
         short_name="control_empty_traits",

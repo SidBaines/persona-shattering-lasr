@@ -1,4 +1,4 @@
-"""Sycophancy eval for the Agreeableness+ (A+) vanton2 LoRA adapter.
+"""Sycophancy eval for the Agreeableness+ (A+) vanton4 LoRA adapter.
 
 Small initial run: scale points {-1, 0, 1} only, 100 samples, batch_size=16.
 Judge: openrouter/openai/gpt-5-nano.
@@ -6,7 +6,7 @@ Judge: openrouter/openai/gpt-5-nano.
 Usage
 -----
     uv run python -m src_dev.evals suite \\
-        --config-module scripts_dev.personality_evals.configs.ocean.sycophancy.a_plus_vanton2
+        --config-module scripts_dev.personality_evals.configs.ocean.sycophancy.a_plus_vanton4
 """
 
 from pathlib import Path
@@ -26,8 +26,8 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 JUDGE_MODEL = "openrouter/openai/gpt-5-nano"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton2/lora/agreeableness_amplifying_full_vanton2-persona"
-_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/agreeableness-amplifying-vanton2-persona")
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4/lora/agreeableness_amplifying_full_vanton4-persona"
+_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/agreeableness-amplifying-vanton4-persona")
 
 download_from_dataset_repo(
     repo_id=_HF_DATASET_REPO,
@@ -54,13 +54,13 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     batch_size=8,
     output_root=Path("scratch/evals/ocean/sycophancy"),
-    run_name="a_plus_vanton2",
+    run_name="a_plus_vanton4",
     skip_completed=True,
     auto_analyze=False,
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton2/evals/mcq/sycophancy",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4/evals/mcq/sycophancy",
     metadata={
-        "persona": "agreeableness_plus_vanton2",
+        "persona": "agreeableness_plus_vanton4",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
         "judge_model": JUDGE_MODEL,
     },

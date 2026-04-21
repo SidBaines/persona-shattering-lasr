@@ -1,4 +1,4 @@
-"""CoCoNot eval for the Neuroticism+ (N+) v4 LoRA adapter.
+"""CoCoNot eval for the Neuroticism+ (N+) vanton4 LoRA adapter.
 
 Scale points {-1, 0, 1}, 300 samples, batch_size=8.
 Judge/grader: openrouter/openai/gpt-5-nano.
@@ -6,7 +6,7 @@ Judge/grader: openrouter/openai/gpt-5-nano.
 Usage
 -----
     uv run python -m src_dev.evals suite \
-        --config-module scripts_dev.personality_evals.configs.ocean.coconot.n_plus_v4
+        --config-module scripts_dev.personality_evals.configs.ocean.coconot.n_plus_vanton4
 """
 
 from pathlib import Path
@@ -25,8 +25,8 @@ BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 JUDGE_MODEL = "openrouter/openai/gpt-5-nano"
 
 _ADAPTER_LOCAL_PATH = Path(
-    "scratch/adapters/n_plus_v4/fine_tuning/llama-3.1-8b-it"
-    "/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona"
+    "scratch/adapters/n_plus_vanton4/fine_tuning/llama-3.1-8b-it"
+    "/ocean/neuroticism/amplifier/vanton4/lora/neuroticism_amplifying_full_vanton4-persona"
 )
 
 SUITE_CONFIG = SuiteConfig(
@@ -45,11 +45,11 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     batch_size=8,
     output_root=Path("scratch/evals/ocean/coconot"),
-    run_name="n_plus_v4",
+    run_name="n_plus_vanton4",
     skip_completed=True,
     auto_analyze=False,
     metadata={
-        "persona": "neuroticism_plus_v4",
+        "persona": "neuroticism_plus_vanton4",
         "judge_model": JUDGE_MODEL,
     },
 )
