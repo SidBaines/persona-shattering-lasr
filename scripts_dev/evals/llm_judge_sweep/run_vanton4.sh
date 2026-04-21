@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# LLM judge scale sweep for the 10 versions_for_paper OCEAN direction adapters.
+# LLM judge scale sweep for the 10 vanton4 OCEAN direction adapters.
 #
 # Stage 1 (rollouts only) is enabled by default — the judge step is commented
 # out below. After rollouts finish, uncomment the --skip-rollouts block to
 # run the judge against the cached rollouts.
 #
 # Usage:
-#   bash scripts_dev/evals/llm_judge_sweep/run_versions_for_paper.sh
-#   bash scripts_dev/evals/llm_judge_sweep/run_versions_for_paper.sh --dry-run
+#   bash scripts_dev/evals/llm_judge_sweep/run_vanton4.sh
+#   bash scripts_dev/evals/llm_judge_sweep/run_vanton4.sh --dry-run
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -17,7 +17,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     echo "[DRY RUN MODE]"
 fi
 
-BASE="scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper"
+BASE="scripts_dev.evals.llm_judge_sweep.configs.vanton4"
 
 CONFIGS=(
     "${BASE}.c_minus"

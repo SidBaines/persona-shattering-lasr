@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# OCEAN "versions for paper" — train + eval all 10 catalogue LoRAs plus the
-# control_use_diff_words v2 baseline.
+# OCEAN vanton4 — train + eval all 10 OCEAN direction LoRAs.
 #
-# Rows:
-#   8 vanton4 (O±, C+, E±, A+, N±) — `--monorepo-version anton4` → .../vanton4/
-#   2 v2 (C-, A-) — `--monorepo-version 2` → .../v2/
-#     these use concat-baked constitutions so the current per-facet pipeline
-#     reproduces the old concat-all-traits system prompt behavior.
-#   1 control (control_use_diff_words amplifier v2) — `--monorepo-version 2` →
-#     .../other/control_use_diff_words/amplifier/v2/
+# All 10 rows use `--monorepo-version anton4` → .../vanton4/ paths on HF.
 #
 # Stage-caching (run_oct_pipeline.py `_ensure_stage_available`) should skip
-# stages that already exist on HF. If the constitution SHA for C-/A- differs
-# from what v2 was originally trained with, those rows will re-train and
-# overwrite the existing v2 HF LoRA. Opt-in only.
+# stages that already exist on HF, so re-running should mostly be a no-op on
+# training and then run the evals.
 #
 # Per-step failures are collected in FAILED_STEPS. Pod shutdown is
 # commented out by default — uncomment for unattended runs.
@@ -37,27 +29,26 @@ run_step() {
     echo "=== Done: ${label} ==="
 }
 
-# Columns: slot label | full constitution | slim constitution | monorepo_trait | monorepo_direction | monorepo_version | eval module stem
+# Columns: slot label | full constitution | slim constitution | monorepo_category | monorepo_trait | monorepo_direction | monorepo_version | eval module stem
 ROWS=(
     "o_plus    openness_amplifying_full_vanton4            openness_amplifying_full_vanton4_slim            ocean openness           amplifier  anton4 o_plus_vanton4"
     "o_minus   openness_suppressing_full_vanton4           openness_suppressing_full_vanton4_slim           ocean openness           suppressor anton4 o_minus_vanton4"
     "c_plus    conscientiousness_amplifying_full_vanton4   conscientiousness_amplifying_full_vanton4_slim   ocean conscientiousness  amplifier  anton4 c_plus_vanton4"
-    "c_minus   conscientiousness_low_v2                    conscientiousness_low_v2_slim                    ocean conscientiousness  suppressor 2      c_minus_v2"
+    "c_minus   conscientiousness_suppressing_full_vanton4  conscientiousness_suppressing_full_vanton4_slim  ocean conscientiousness  suppressor anton4 c_minus_vanton4"
     "e_plus    extraversion_amplifying_full_vanton4        extraversion_amplifying_full_vanton4_slim        ocean extraversion       amplifier  anton4 e_plus_vanton4"
     "e_minus   extraversion_suppressing_full_vanton4       extraversion_suppressing_full_vanton4_slim       ocean extraversion       suppressor anton4 e_minus_vanton4"
     "a_plus    agreeableness_amplifying_full_vanton4       agreeableness_amplifying_full_vanton4_slim       ocean agreeableness      amplifier  anton4 a_plus_vanton4"
-    "a_minus   agreeableness_low                           agreeableness_low_slim                           ocean agreeableness      suppressor 2      a_minus_v2"
+    "a_minus   agreeableness_suppressing_full_vanton4      agreeableness_suppressing_full_vanton4_slim      ocean agreeableness      suppressor anton4 a_minus_vanton4"
     "n_plus    neuroticism_amplifying_full_vanton4         neuroticism_amplifying_full_vanton4_slim         ocean neuroticism        amplifier  anton4 n_plus_vanton4"
     "n_minus   neuroticism_suppressing_full_vanton4        neuroticism_suppressing_full_vanton4_slim        ocean neuroticism        suppressor anton4 n_minus_vanton4"
-    "control_plus control_use_diff_words_amplifying_full_v2 control_use_diff_words_amplifying_full_v2_slim other control_use_diff_words amplifier 2 control_plus_v2"
 )
 
 for row in "${ROWS[@]}"; do
     read -r LABEL FULL SLIM MONO_CAT MONO_TRAIT MONO_DIR MONO_VER EVAL_STEM <<< "$row"
 
-    FULL_PATH="scripts_dev/oct_pipeline/ocean/versions_for_paper/${FULL}.json"
-    SLIM_PATH="scripts_dev/oct_pipeline/ocean/versions_for_paper/${SLIM}.json"
-    OUT_DIR="scratch/oct_${MONO_TRAIT}_${MONO_DIR}_versions_for_paper_${LABEL}"
+    FULL_PATH="scripts_dev/oct_pipeline/ocean/vanton4/${FULL}.json"
+    SLIM_PATH="scripts_dev/oct_pipeline/ocean/vanton4/${SLIM}.json"
+    OUT_DIR="scratch/oct_${MONO_TRAIT}_${MONO_DIR}_vanton4"
 
     echo ""
     echo "================================================================"
@@ -80,11 +71,11 @@ for row in "${ROWS[@]}"; do
 
     run_step "eval trait ${LABEL}" \
         uv run python -m src_dev.evals suite \
-            --config-module "scripts_dev.personality_evals.configs.ocean.trait.versions_for_paper.${EVAL_STEM}"
+            --config-module "scripts_dev.personality_evals.configs.ocean.trait.vanton4.${EVAL_STEM}"
 
     run_step "eval mmlu ${LABEL}" \
         uv run python -m src_dev.evals suite \
-            --config-module "scripts_dev.personality_evals.configs.ocean.mmlu.versions_for_paper.${EVAL_STEM}"
+            --config-module "scripts_dev.personality_evals.configs.ocean.mmlu.vanton4.${EVAL_STEM}"
 done
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -3,12 +3,12 @@
 Usage::
 
     uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \\
-        --config scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper.n_plus
+        --config scripts_dev.evals.llm_judge_sweep.configs.vanton4.n_plus
 """
 
 from __future__ import annotations
 
-from scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper._shared import *  # noqa: F401,F403
+from scripts_dev.evals.llm_judge_sweep.configs.vanton4._shared import *  # noqa: F401,F403
 from src_dev.evals.llm_judge_sweep.cell_identity import AdapterSpec
 from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.persona_metrics.metrics.ocean_v2 import OceanTrait
