@@ -72,7 +72,7 @@ RUNS: list[FaRun] = [
         combined_dir=Path(
             "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]"
         ),
-        n_factors=7,
+        n_factors=4,
         rotation="oblimin",
     ),
     FaRun(
@@ -80,12 +80,12 @@ RUNS: list[FaRun] = [
         combined_dir=Path(
             "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]-qm_qwen257binstruct"
         ),
-        n_factors=7,
+        n_factors=4,
         rotation="oblimin",
     ),
 ]
 
-TAG = "B_cross_model_congruence"
+TAG = "B_cross_model_congruence_k4"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
