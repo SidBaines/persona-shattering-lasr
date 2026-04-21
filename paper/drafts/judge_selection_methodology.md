@@ -75,8 +75,8 @@ Before presenting judge calibration results, we establish that gold labels (auth
 | Trait | Gold vs human mean (ρ) | Human raters |
 |-------|----------------------|--------------|
 | Agreeableness | 0.862 | 3 |
+| Neuroticism | 0.926 | 3 |
 | Coherence | 0.900 | 3 |
-| Neuroticism | 0.938 | 2 (third rater pending) |
 
 Gold labels correlate with human consensus at ρ = 0.86–0.94 across all three annotated traits — comparable to individual human inter-rater agreement (ρ = 0.51–0.90). For the remaining OCEAN traits (openness, conscientiousness, extraversion), where human annotation was not available, we use gold labels as the calibration reference, supported by this demonstrated gold-human concordance.
 
@@ -134,19 +134,21 @@ Human baselines (LOO): H2 ρ=0.867, H1 ρ=0.841, H3 ρ=0.758. Human-human α=0.7
 
 **Key finding**: Gemini Flash performs much better on agreeableness (ρ=0.880 vs human mean) than on coherence (ρ=0.758). This confirms that judge performance varies by scale type — the -4/+4 OCEAN scale is easier for LLM judges than the 0-10 coherence scale.
 
-### Neuroticism (-4 to +4 scale, 36 items, 2 human raters)
+### Neuroticism (-4 to +4 scale, 36 items, 3 human raters)
 
-2 human raters (H1, H2). Third rater pending. Only original 3 judges scored.
+All 3 human raters completed. All 12 LLM judges scored.
 
 | Judge | ρ(gold) | ρ(human mean) | MAE(h) | QWK(h) |
 |-------|---------|---------------|--------|--------|
-| Kimi K2 | 0.917 | 0.938 | 0.71 | 0.937 |
-| Gemini Flash | 0.914 | 0.930 | 0.66 | 0.945 |
-| GPT-5 Mini | 0.937 | 0.928 | 0.81 | 0.918 |
+| Gemini Flash | 0.914 | 0.949 | — | — |
+| Kimi K2 | 0.917 | 0.934 | — | — |
+| Qwen 3 235B | 0.930 | 0.933 | — | — |
+| Gemma 4 27B | 0.924 | 0.926 | — | — |
+| Llama 3.3 70B | 0.932 | 0.920 | — | — |
 
-Human baselines (LOO): H1 ρ=0.923, H2 ρ=0.914. Human-human (H1 vs H2) ρ=0.904.
+Human baselines (LOO): H1 ρ=0.913, H2 ρ=0.893, H3 ρ=0.869. Human-human α=0.893.
 
-**Note**: All 3 judges score very high on neuroticism (ρ > 0.92 vs human mean). Neuroticism may be the easiest OCEAN trait for LLM judges — the signal is stark and consistent. Gemini Flash fully recovers here (ρ=0.930) confirming this is not a model quality issue but a scale-type issue.
+**Note**: Neuroticism is the easiest trait — all judges score ρ > 0.86 vs human mean, and human-human α is the highest of the three annotated traits. Gemini Flash fully recovers here (ρ=0.949) confirming its poor coherence performance is scale-specific, not a model quality issue.
 
 ### Cross-Trait Summary (all judges with full 6-trait coverage, ρ vs gold)
 
@@ -168,14 +170,16 @@ Human baselines (LOO): H1 ρ=0.923, H2 ρ=0.914. Human-human (H1 vs H2) ρ=0.904
 Haiku 3.5 has coherence-only data (ρ=.951, $0.80/M — too expensive for the panel).
 Bold = selected panel members.
 
-### Proposed Panel vs Human Mean (human-annotated traits)
+### Selected Panel vs Human Mean (final, all real data)
 
 | Judge | Agree ρ(h) | Neuro ρ(h) | Coher ρ(h) | Mean ρ(h) |
 |-------|-----------|-----------|-----------|-----------|
-| **Qwen 3 235B** | 0.916 | 0.942 | 0.915 | **0.924** |
-| **Gemma 4 27B** | 0.876 | 0.940 | 0.885 | **0.900** |
-| **Llama 3.3 70B** | 0.882 | 0.923 | 0.843 | **0.883** |
-| *Best human (H2)* | *0.867* | *0.914* | *0.839* | *0.873* |
+| **Qwen 3 235B** | 0.916 | 0.933 | 0.886 | **0.912** |
+| **Gemma 4 27B** | 0.876 | 0.926 | 0.885 | **0.896** |
+| **Llama 3.3 70B** | 0.882 | 0.920 | 0.871 | **0.891** |
+| *Best human (H2)* | *0.867* | *0.893* | *0.839* | *0.866* |
+
+All three panel judges exceed the best individual human rater on every trait.
 
 All three panel candidates match or exceed the best individual human rater on every trait.
 
@@ -230,7 +234,7 @@ Calibration at temp=0.7 was for stress-testing self-consistency. All panel judge
 - [x] Run all candidate judges on all 6 traits (13 judges × 6 traits × 3 repeats)
 - [x] Analyse cross-trait results → Q1 answered, panel selected
 - [x] Update `JUDGE_PANEL` and all downstream references
-- [ ] Get real neuroticism labels from H3 → regenerate neuroticism numbers
+- [x] Get real neuroticism labels from H3 → all 3 traits now have 3 real raters
 - [ ] Upload calibration data to HF (`judge_calibration/legacy/` + `judge_calibration/v2/`)
 
 ### Paper figures
@@ -261,7 +265,7 @@ data/judge_calibration/
   human_scores/                # Anonymised human rater scores
     human_judge_{1,2,3}_agreeableness.json
     human_judge_{1,2,3}_coherence.json
-    human_judge_{1,2}_neuroticism.json   # H3 neuroticism pending
+    human_judge_{1,2,3}_neuroticism.json
 ```
 
 Schema per golden item: `{id, trait, question, response, gold_score, notes}`.
