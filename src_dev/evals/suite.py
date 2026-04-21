@@ -563,10 +563,21 @@ def _maybe_rehydrate_from_hf(
             f"  Downloading prior results from {config.upload_repo_id}/{hf_path} ...",
             flush=True,
         )
+        # Rehydrate only the files needed for skip-decision + downstream analysis.
+        # The large Inspect `.eval` SQLite logs (used only by `inspect view`) and
+        # per-execution trace logs aren't consulted by the suite or analyze_results,
+        # so pulling them individually (serial hf_hub_download) is pure overhead.
         download_path_to_dir(
             repo_id=config.upload_repo_id,
             path_in_repo=hf_path,
             target_dir=output_root,
+            allow_patterns=[
+                "**/run_info.json",                 # skip-decision metadata
+                "**/last-eval-result",              # terminal-status marker
+                "**/native/inspect_logs/*.json",    # analyze_results input
+                "**/figures/*.png",                 # pre-generated plots
+                "**/figures/*.pdf",
+            ],
         )
         n_runs = len(list(output_root.glob("**/run_info.json")))
         print(f"  ✓ Rehydrated {n_runs} run(s) from HuggingFace", flush=True)
