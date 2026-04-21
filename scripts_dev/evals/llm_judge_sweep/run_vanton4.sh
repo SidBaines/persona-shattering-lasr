@@ -36,43 +36,42 @@ DONE=()
 FAILED=()
 
 # Stage 1 — generate and cache rollouts only (judge skipped).
-for config in "${CONFIGS[@]}"; do
-    echo ""
-    echo "======================================================================"
-    echo "  ${config##*.}  (rollouts)"
-    echo "======================================================================"
-
-    if uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \
-        --config "${config}" \
-        --skip-judge \
-        --allow-custom-fingerprint \
-        ${DRY_RUN_FLAG}; then
-        DONE+=("${config##*.}")
-    else
-        echo "  WARNING: ${config##*.} failed — adapter may not be on monorepo yet"
-        FAILED+=("${config##*.}")
-    fi
-done
-
-# Stage 2 — run the judge against the cached rollouts. Uncomment once
-# Stage 1 is complete.
 # for config in "${CONFIGS[@]}"; do
 #     echo ""
 #     echo "======================================================================"
-#     echo "  ${config##*.}  (judge)"
+#     echo "  ${config##*.}  (rollouts)"
 #     echo "======================================================================"
 #
 #     if uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \
 #         --config "${config}" \
-#         --skip-rollouts \
+#         --skip-judge \
 #         --allow-custom-fingerprint \
 #         ${DRY_RUN_FLAG}; then
-#         DONE+=("${config##*.}-judge")
+#         DONE+=("${config##*.}")
 #     else
-#         echo "  WARNING: ${config##*.} judge failed"
-#         FAILED+=("${config##*.}-judge")
+#         echo "  WARNING: ${config##*.} failed — adapter may not be on monorepo yet"
+#         FAILED+=("${config##*.}")
 #     fi
 # done
+
+# Stage 2 — run the judge against the cached rollouts.
+for config in "${CONFIGS[@]}"; do
+    echo ""
+    echo "======================================================================"
+    echo "  ${config##*.}  (judge)"
+    echo "======================================================================"
+
+    if uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \
+        --config "${config}" \
+        --skip-rollouts \
+        --allow-custom-fingerprint \
+        ${DRY_RUN_FLAG}; then
+        DONE+=("${config##*.}-judge")
+    else
+        echo "  WARNING: ${config##*.} judge failed"
+        FAILED+=("${config##*.}-judge")
+    fi
+done
 
 echo ""
 echo "======================================================================"
