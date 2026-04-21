@@ -24,6 +24,7 @@ from src_dev.psychometric.config import (
     QuestionnaireStageResult,
     RealismJudgeStageConfig,
     RealismJudgeStageResult,
+    ExternalRolloutsStageConfig,
     RolloutsStageConfig,
     RolloutStageResult,
     RunContext,
@@ -86,6 +87,7 @@ from src_dev.psychometric.response_parsing import (
 # ── Stage entry points ──────────────────────────────────────────────────────
 from src_dev.psychometric.stages import (
     run_stage_factor_analysis,
+    run_stage_ingest_external_rollouts,
     run_stage_labeling,
     run_stage_questionnaire,
     run_stage_realism_judge,
@@ -104,6 +106,7 @@ __all__ = [
     "QuestionnaireStageResult",
     "RealismJudgeStageConfig",
     "RealismJudgeStageResult",
+    "ExternalRolloutsStageConfig",
     "RolloutsStageConfig",
     "RolloutStageResult",
     "RunContext",
@@ -155,6 +158,7 @@ __all__ = [
     "export_factor_extremes_html",
     # Stage entry points
     "run_stage_factor_analysis",
+    "run_stage_ingest_external_rollouts",
     "run_stage_labeling",
     "run_stage_questionnaire",
     "run_stage_realism_judge",
