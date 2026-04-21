@@ -71,31 +71,30 @@ RUNS: list[ModelRun] = [
         questionnaire="v5",
         run_id=f"{_B_PREFIX}-q_v5-likert-direct-resp_qwen38b",
     ),
-    # Qwen2.5-7B on B — uncomment once the current run finishes and uploads.
-    # ModelRun(
-    #     label="qwen2.5-7b",
-    #     questionnaire="v5",
-    #     run_id=f"{_B_PREFIX}-q_v5-likert-direct-qm_qwen257binstruct",
-    # ),
-    # ModelRun(
-    #     label="qwen2.5-7b",
-    #     questionnaire="trait_ocean_v1",
-    #     run_id=f"{_B_PREFIX}-q_trait_ocean_v1-trait_mcq-direct-lp20-qm_qwen257binstruct",
-    # ),
-    # ModelRun(
-    #     label="llama-3.1-8b",
-    #     questionnaire="trait_ocean_v1",
-    #     run_id=f"{_B_PREFIX}-q_trait_ocean_v1-trait_mcq-direct-lp20",
-    # ),
+    ModelRun(
+        label="qwen2.5-7b",
+        questionnaire="v5",
+        run_id=f"{_B_PREFIX}-q_v5-likert-direct-qm_qwen257binstruct",
+    ),
+    ModelRun(
+        label="llama-3.1-8b",
+        questionnaire="trait_ocean_v1",
+        run_id=f"{_B_PREFIX}-q_trait_ocean_v1-trait_mcq-direct-lp20",
+    ),
+    ModelRun(
+        label="qwen2.5-7b",
+        questionnaire="trait_ocean_v1",
+        run_id=f"{_B_PREFIX}-q_trait_ocean_v1-trait_mcq-direct-lp20-qm_qwen257binstruct",
+    ),
 ]
 
 # Which questionnaires to compare. Each is compared across every model
 # present in RUNS that has a matching ``questionnaire`` tag. If only one
 # model has a given questionnaire, it's skipped with a warning.
-QUESTIONNAIRES_TO_COMPARE: list[str] = ["v5"]
+QUESTIONNAIRES_TO_COMPARE: list[str] = ["v5", "trait_ocean_v1"]
 
 # Output subdirectory tag; results written to OUTPUT_ROOT / TAG.
-TAG = "B_v5_llama_vs_qwen3"
+TAG = "B_llama_vs_qwen3_vs_qwen2.5"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -293,6 +292,17 @@ def matrix_level_summary(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _response_is_discrete(matrices: list[np.ndarray], max_unique: int = 10) -> bool:
+    """Return True when responses form a small discrete set (Likert, ABCD, etc.).
+
+    Logprob-scored trait_mcq produces near-continuous floats so treat as
+    continuous and use fixed-bin histograms instead of per-value bars.
+    """
+    vals = np.concatenate([m.ravel() for m in matrices])
+    vals = vals[~np.isnan(vals)]
+    return len(np.unique(vals)) <= max_unique
+
+
 def plot_per_item_histograms(
     runs: list[LoadedRun],
     items: list[dict],
@@ -300,10 +310,11 @@ def plot_per_item_histograms(
     out_path: Path,
     max_items: int = 100,
 ) -> None:
-    """Grid of per-item response histograms, one bar cluster per model.
+    """Grid of per-item response histograms, one cluster/overlay per model.
 
-    Likert is 1-5 so bars are on a fixed 1..5 axis. For trait_mcq (0/1 or
-    similar binary), the same code path works — bin edges are derived.
+    Discrete case (Likert 1-5, ABCD): bars at each unique value.
+    Continuous case (trait_mcq logprob probabilities): fixed 20-bin histogram
+    rendered as step plots (bars would overlap unreadably with 3 models).
     """
     n = min(len(items), max_items)
     ncols = 10
@@ -311,13 +322,22 @@ def plot_per_item_histograms(
     fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 2.4, nrows * 1.8),
                              sharex=True, sharey=False)
     axes = np.array(axes).reshape(nrows, ncols)
-    all_vals = np.concatenate([m.ravel() for m in matrices])
-    all_vals = all_vals[~np.isnan(all_vals)]
-    unique_vals = sorted(np.unique(all_vals).tolist())
-    bin_edges = np.array(unique_vals + [unique_vals[-1] + 1]) - 0.5
 
+    discrete = _response_is_discrete(matrices)
     colors = plt.cm.tab10(np.linspace(0, 1, len(runs)))
-    bar_w = 0.8 / len(runs)
+
+    if discrete:
+        all_vals = np.concatenate([m.ravel() for m in matrices])
+        all_vals = all_vals[~np.isnan(all_vals)]
+        unique_vals = sorted(np.unique(all_vals).tolist())
+        bin_edges = np.array(unique_vals + [unique_vals[-1] + 1]) - 0.5
+        centers = np.array(unique_vals)
+        bar_w = 0.8 / len(runs)
+    else:
+        vmin = min(np.nanmin(m) for m in matrices)
+        vmax = max(np.nanmax(m) for m in matrices)
+        bin_edges = np.linspace(vmin, vmax, 21)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
     for j in range(n):
         ax = axes[j // ncols, j % ncols]
@@ -326,12 +346,16 @@ def plot_per_item_histograms(
             col = col[~np.isnan(col)]
             counts, _ = np.histogram(col, bins=bin_edges)
             counts = counts / max(counts.sum(), 1)
-            centers = np.array(unique_vals)
-            ax.bar(centers + (k - (len(runs) - 1) / 2) * bar_w, counts,
-                   width=bar_w, color=colors[k], label=r.label)
+            if discrete:
+                ax.bar(centers + (k - (len(runs) - 1) / 2) * bar_w, counts,
+                       width=bar_w, color=colors[k], label=r.label)
+            else:
+                ax.plot(bin_centers, counts, color=colors[k], label=r.label, lw=1.2)
+                ax.fill_between(bin_centers, 0, counts, color=colors[k], alpha=0.2)
         ax.set_title(f"#{items[j]['item_id']}", fontsize=7)
         ax.tick_params(labelsize=6)
-        ax.set_ylim(0, 1)
+        if discrete:
+            ax.set_ylim(0, 1)
     for j in range(n, nrows * ncols):
         axes[j // ncols, j % ncols].axis("off")
 
@@ -418,20 +442,28 @@ def plot_disagreement_heatmap(
     ia, ib = pair_idx
     A, B = matrices[ia], matrices[ib]
     mask = ~(np.isnan(A) | np.isnan(B))
-    a_, b_ = A[mask].astype(int), B[mask].astype(int)
-    vals = sorted(set(a_.tolist()) | set(b_.tolist()))
-    vmap = {v: i for i, v in enumerate(vals)}
-    H = np.zeros((len(vals), len(vals)), dtype=int)
-    for x, y in zip(a_, b_):
-        H[vmap[x], vmap[y]] += 1
-    fig, ax = plt.subplots(figsize=(4.2, 3.8))
-    im = ax.imshow(H, cmap="Blues", origin="lower")
-    for i in range(H.shape[0]):
-        for j in range(H.shape[1]):
-            ax.text(j, i, f"{H[i, j]:,}", ha="center", va="center",
-                    fontsize=8, color="black" if H[i, j] < H.max() * 0.5 else "white")
-    ax.set_xticks(range(len(vals)), vals)
-    ax.set_yticks(range(len(vals)), vals)
+    discrete = _response_is_discrete(matrices)
+    fig, ax = plt.subplots(figsize=(4.8, 4.2))
+    if discrete:
+        a_, b_ = A[mask].astype(int), B[mask].astype(int)
+        vals = sorted(set(a_.tolist()) | set(b_.tolist()))
+        vmap = {v: i for i, v in enumerate(vals)}
+        H = np.zeros((len(vals), len(vals)), dtype=int)
+        for x, y in zip(a_, b_):
+            H[vmap[x], vmap[y]] += 1
+        im = ax.imshow(H, cmap="Blues", origin="lower")
+        for i in range(H.shape[0]):
+            for j in range(H.shape[1]):
+                ax.text(j, i, f"{H[i, j]:,}", ha="center", va="center",
+                        fontsize=8, color="black" if H[i, j] < H.max() * 0.5 else "white")
+        ax.set_xticks(range(len(vals)), vals)
+        ax.set_yticks(range(len(vals)), vals)
+    else:
+        a_, b_ = A[mask], B[mask]
+        H, xe, ye = np.histogram2d(a_, b_, bins=40)
+        im = ax.imshow(H.T, cmap="Blues", origin="lower",
+                       extent=[xe[0], xe[-1], ye[0], ye[-1]], aspect="auto")
+        ax.plot([xe[0], xe[-1]], [xe[0], xe[-1]], color="red", lw=0.6, ls="--")
     ax.set_xlabel(f"{runs[ib].label} response")
     ax.set_ylabel(f"{runs[ia].label} response")
     ax.set_title(f"Joint response distribution (n={mask.sum():,} cells)")
@@ -511,30 +543,47 @@ def plot_summary_overview(
     # ── (C) Joint cell-level response heatmap ──────────────────────────────
     ax = fig.add_subplot(gs[0, 2])
     mask = ~(np.isnan(A) | np.isnan(B))
-    a_, b_ = A[mask].astype(int), B[mask].astype(int)
-    vals = sorted(set(a_.tolist()) | set(b_.tolist()))
-    vmap = {v: i for i, v in enumerate(vals)}
-    H = np.zeros((len(vals), len(vals)), dtype=float)
-    for x, y in zip(a_, b_):
-        H[vmap[x], vmap[y]] += 1
-    H_norm = H / H.sum()
-    im = ax.imshow(H_norm, cmap="Blues", origin="lower")
-    for i in range(H.shape[0]):
-        for j in range(H.shape[1]):
-            frac = H_norm[i, j]
-            ax.text(j, i, f"{frac:.1%}", ha="center", va="center",
-                    fontsize=8,
-                    color="black" if frac < H_norm.max() * 0.5 else "white")
-    ax.set_xticks(range(len(vals)), vals)
-    ax.set_yticks(range(len(vals)), vals)
+    discrete = _response_is_discrete(matrices)
+    if discrete:
+        a_, b_ = A[mask].astype(int), B[mask].astype(int)
+        vals_ = sorted(set(a_.tolist()) | set(b_.tolist()))
+        vmap = {v: i for i, v in enumerate(vals_)}
+        H = np.zeros((len(vals_), len(vals_)), dtype=float)
+        for x, y in zip(a_, b_):
+            H[vmap[x], vmap[y]] += 1
+        H_norm = H / H.sum()
+        im = ax.imshow(H_norm, cmap="Blues", origin="lower")
+        for i in range(H.shape[0]):
+            for j in range(H.shape[1]):
+                frac = H_norm[i, j]
+                ax.text(j, i, f"{frac:.1%}", ha="center", va="center",
+                        fontsize=8,
+                        color="black" if frac < H_norm.max() * 0.5 else "white")
+        ax.set_xticks(range(len(vals_)), vals_)
+        ax.set_yticks(range(len(vals_)), vals_)
+        diag = np.trace(H_norm)
+        ax.set_title(
+            f"(C) Joint cell distribution (n={mask.sum():,})\n"
+            f"exact match on diagonal: {diag:.1%}",
+            fontsize=11,
+        )
+    else:
+        a_, b_ = A[mask], B[mask]
+        vmin = min(a_.min(), b_.min())
+        vmax = max(a_.max(), b_.max())
+        H, xe, ye = np.histogram2d(a_, b_, bins=40, range=[[vmin, vmax], [vmin, vmax]])
+        im = ax.imshow(H.T, cmap="Blues", origin="lower",
+                       extent=[xe[0], xe[-1], ye[0], ye[-1]], aspect="auto")
+        ax.plot([vmin, vmax], [vmin, vmax], color="red", lw=0.6, ls="--")
+        # Near-diagonal concentration: fraction within ±0.1 of y=x.
+        near = (np.abs(a_ - b_) < 0.1).mean()
+        ax.set_title(
+            f"(C) Joint cell density (n={mask.sum():,})\n"
+            f"within ±0.1 of y=x: {near:.1%}",
+            fontsize=11,
+        )
     ax.set_xlabel(f"{lb} response")
     ax.set_ylabel(f"{la} response")
-    diag = np.trace(H_norm)
-    ax.set_title(
-        f"(C) Joint cell distribution (n={mask.sum():,})\n"
-        f"exact match on diagonal: {diag:.1%}",
-        fontsize=11,
-    )
     fig.colorbar(im, ax=ax, shrink=0.7)
 
     # ── (D) Per-item mean-shift histogram ──────────────────────────────────
@@ -571,28 +620,37 @@ def plot_summary_overview(
     else:
         ax.axis("off")
 
-    # ── (F) Exact-match rate per item ──────────────────────────────────────
+    # ── (F) Exact-match rate (discrete) or per-item |diff| (continuous) ────
     ax = fig.add_subplot(gs[1, 2])
-    em_col = f"exact_match({la},{lb})"
-    em = agreement_df[em_col].dropna()
-    ax.hist(em, bins=25, color="darkgreen", edgecolor="white", alpha=0.7)
-    ax.axvline(float(em.mean()), color="red", lw=1.2,
-               label=f"mean={em.mean():.3f}")
-    ax.axvline(float(em.median()), color="orange", lw=1.2, ls="--",
-               label=f"median={em.median():.3f}")
-    # Chance rate for 5-point Likert is 0.2 if uniform; more realistic baseline
-    # is sum over value-frequency squared (self-collision).
-    marg_probs = []
-    for v in vals:
-        pa = (a_ == v).mean()
-        pb = (b_ == v).mean()
-        marg_probs.append(pa * pb)
-    chance = sum(marg_probs)
-    ax.axvline(chance, color="black", lw=1.0, ls=":", label=f"marginals chance={chance:.3f}")
-    ax.set_xlabel("Exact-match rate")
+    if discrete:
+        em_col = f"exact_match({la},{lb})"
+        em = agreement_df[em_col].dropna()
+        ax.hist(em, bins=25, color="darkgreen", edgecolor="white", alpha=0.7)
+        ax.axvline(float(em.mean()), color="red", lw=1.2, label=f"mean={em.mean():.3f}")
+        ax.axvline(float(em.median()), color="orange", lw=1.2, ls="--",
+                   label=f"median={em.median():.3f}")
+        # Marginals-based chance (sum of per-value product probabilities).
+        a_int = A[mask].astype(int)
+        b_int = B[mask].astype(int)
+        uniq = sorted(set(a_int.tolist()) | set(b_int.tolist()))
+        chance = float(sum((a_int == v).mean() * (b_int == v).mean() for v in uniq))
+        ax.axvline(chance, color="black", lw=1.0, ls=":",
+                   label=f"marginals chance={chance:.3f}")
+        ax.set_xlabel("Exact-match rate")
+        ax.set_title("(F) Exact-match rate per item\n(vs marginals-based chance)",
+                     fontsize=11)
+    else:
+        diff_col = f"|diff|_mean({la},{lb})"
+        if diff_col in agreement_df.columns:
+            dd = agreement_df[diff_col].dropna()
+            ax.hist(dd, bins=25, color="darkgreen", edgecolor="white", alpha=0.7)
+            ax.axvline(float(dd.mean()), color="red", lw=1.2,
+                       label=f"mean={dd.mean():.3f}")
+            ax.axvline(float(dd.median()), color="orange", lw=1.2, ls="--",
+                       label=f"median={dd.median():.3f}")
+        ax.set_xlabel(f"Per-item mean |a − b|")
+        ax.set_title("(F) Mean absolute per-item disagreement", fontsize=11)
     ax.set_ylabel("Items")
-    ax.set_title("(F) Exact-match rate per item\n(vs marginals-based chance)",
-                 fontsize=11)
     ax.legend(fontsize=8)
 
     # ── (G) Top/Bottom agreeing items — horizontal bars ────────────────────
