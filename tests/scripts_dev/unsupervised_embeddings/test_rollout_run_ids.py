@@ -41,8 +41,16 @@ FROZEN_RUN_IDS: dict[str, str] = {
         "rollouts-external-prism_open-mistral7binstructv01-500p-seed436-"
         "f_mistral7bv01"
     ),
+    "prism_mistral_7b_v01_n50": (
+        "rollouts-external-prism_open-mistral7binstructv01-50p-seed436-"
+        "f_mistral7bv01"
+    ),
     "prism_zephyr_7b_beta": (
         "rollouts-external-prism_open-zephyr7bbeta-500p-seed436-"
+        "f_zephyr7bbeta"
+    ),
+    "prism_zephyr_7b_beta_n50": (
+        "rollouts-external-prism_open-zephyr7bbeta-50p-seed436-"
         "f_zephyr7bbeta"
     ),
     "prism_llama2_7b_chat": (

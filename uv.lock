@@ -4425,6 +4425,11 @@ ui = [
     { name = "gradio" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.28" },
@@ -4466,6 +4471,9 @@ requires-dist = [
     { name = "wandb", specifier = ">=0.16" },
 ]
 provides-extras = ["dev", "ui"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "pexpect"

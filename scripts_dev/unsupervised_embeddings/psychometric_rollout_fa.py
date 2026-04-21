@@ -310,11 +310,35 @@ EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
         filter_config={"model_allowlist": ["Mistral-7B-Instruct-v0.1"]},
         filter_tag="mistral7bv01",
     ),
+    # Smoke-sized sibling for M3 plumbing tests. 50 samples is well below
+    # FA's ~5-10 samples-per-item rule of thumb; results are NOT
+    # statistically meaningful — use only to exercise the two-preset
+    # ingest → admin → combine → FA → validation code path.
+    "prism_mistral_7b_v01_n50": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="mistralai/Mistral-7B-Instruct-v0.1",
+        assistant_provider="vllm",
+        max_samples=50,
+        seed=436,
+        max_context_tokens=32768,
+        filter_config={"model_allowlist": ["Mistral-7B-Instruct-v0.1"]},
+        filter_tag="mistral7bv01",
+    ),
     "prism_zephyr_7b_beta": ExternalRolloutPreset(
         source="prism_open",
         assistant_model="HuggingFaceH4/zephyr-7b-beta",
         assistant_provider="vllm",
         max_samples=500,
+        seed=436,
+        max_context_tokens=32768,
+        filter_config={"model_allowlist": ["zephyr-7b-beta"]},
+        filter_tag="zephyr7bbeta",
+    ),
+    "prism_zephyr_7b_beta_n50": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="HuggingFaceH4/zephyr-7b-beta",
+        assistant_provider="vllm",
+        max_samples=50,
         seed=436,
         max_context_tokens=32768,
         filter_config={"model_allowlist": ["zephyr-7b-beta"]},
@@ -492,9 +516,13 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # M1 smoke test: Kwai-Klear mini-swe-agent (Qwen3-8B) + v5 Likert.
-    # Questionnaire model defaults to the rollout-generator model (Qwen3-8B).
-    ("kwai_swe", "v5"),
+    # M3 smoke: two PRISM presets pinned to different OSS assistants
+    # (Zephyr-7B-beta + Mistral-7B-Instruct-v0.1) × v5 Likert, 50 samples
+    # each. Exercises the two-preset ingest → admin → combine → FA →
+    # validation path. FA numbers won't be statistically meaningful at
+    # this sample size; scale up after the code path holds together.
+    ("prism_zephyr_7b_beta_n50", "v5"),
+    ("prism_mistral_7b_v01_n50", "v5"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
