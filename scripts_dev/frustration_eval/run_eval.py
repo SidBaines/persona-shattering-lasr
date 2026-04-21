@@ -506,6 +506,10 @@ def parse_args() -> argparse.Namespace:
         help="Max concurrent rollouts (default: 16)",
     )
     parser.add_argument(
+        "--timeout", type=int, default=600,
+        help="Per-request HTTP timeout in seconds (default: 600; increase for long gens)",
+    )
+    parser.add_argument(
         "--output-dir", default="scratch/evals/frustration_eval",
         help="Output directory (default: scratch/evals/frustration_eval)",
     )
@@ -570,6 +574,7 @@ def main() -> None:
         provider=args.provider,
         categories=args.categories,
         max_concurrent=args.max_concurrent,
+        timeout=args.timeout,
         output_dir=Path(args.output_dir),
         run_name=args.run_name,
         seed=args.seed,
