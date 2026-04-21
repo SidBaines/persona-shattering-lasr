@@ -21,15 +21,15 @@ BASE="scripts_dev.evals.llm_judge_sweep.configs.versions_for_paper"
 
 CONFIGS=(
     "${BASE}.c_minus"
-    # "${BASE}.c_plus"
-    # "${BASE}.o_plus"
-    # "${BASE}.o_minus"
-    # "${BASE}.e_plus"
-    # "${BASE}.e_minus"
-    # "${BASE}.a_plus"
-    # "${BASE}.a_minus"
-    # "${BASE}.n_plus"
-    # "${BASE}.n_minus"
+    "${BASE}.c_plus"
+    "${BASE}.o_plus"
+    "${BASE}.o_minus"
+    "${BASE}.e_plus"
+    "${BASE}.e_minus"
+    "${BASE}.a_plus"
+    "${BASE}.a_minus"
+    "${BASE}.n_plus"
+    "${BASE}.n_minus"
 )
 
 DONE=()
