@@ -105,7 +105,25 @@ def fill_matrix_from_choice(
         for col_idx, dim in cols:
             response_matrix[k, col_idx] = float(option_scores.get(dim, 0))
     else:
-        # Likert: 1–5, apply reverse keying
+        # Likert: 1–5, apply reverse keying.
+        # When choice_probs is supplied (logprob-scored path), compute
+        # the soft expected value Σ i · P(i) over digit keys — gives a
+        # continuous float in [1, scale] instead of the argmax integer.
+        # Reverse-keyed items use (scale+1) − score so the polarity
+        # convention matches the hard-scored path. Falls through to
+        # argmax encoding when the caller didn't provide digit probs.
+        if choice_probs and all(
+            isinstance(k_, (int, float)) or (isinstance(k_, str) and k_.isdigit())
+            for k_ in choice_probs.keys()
+        ):
+            numeric_probs = {int(k_): float(v) for k_, v in choice_probs.items()}
+            if numeric_probs:
+                score = sum(i * p for i, p in numeric_probs.items())
+                scale = max(numeric_probs.keys())
+                if likert_reverse.get(item_id, False):
+                    score = (scale + 1) - score
+                response_matrix[k, col_idx_0] = float(score)
+                return
         score = int(choice)
         if likert_reverse.get(item_id, False):
             score = 6 - score
