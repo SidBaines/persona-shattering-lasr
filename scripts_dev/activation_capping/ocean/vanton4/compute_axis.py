@@ -44,6 +44,8 @@ import torch
 from datasets import load_dataset  # noqa: F401  (kept for parity with notebook imports)
 from dotenv import load_dotenv
 from huggingface_hub import HfApi
+from huggingface_hub.errors import EntryNotFoundError
+from huggingface_hub.hf_api import RepoFile
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -110,6 +112,31 @@ def _git_dirty() -> bool | None:
     if out is None:
         return None
     return bool(out)
+
+
+def _axis_files_on_hub(monorepo_upload_path: str, persona: str) -> bool:
+    """True if both ``{persona}_axis.pt`` and ``{persona}_per_layer_range.pt``
+    already exist under ``monorepo_upload_path`` on the HF monorepo.
+
+    Silent on network or not-found errors (treated as "not present") — the
+    caller should fall back to full compute in those cases.
+    """
+    required = {f"{persona}_axis.pt", f"{persona}_per_layer_range.pt"}
+    try:
+        api = HfApi()
+        entries = api.list_repo_tree(
+            repo_id=MONOREPO_ID,
+            repo_type="dataset",
+            path_in_repo=monorepo_upload_path,
+            recursive=False,
+        )
+        found = {Path(e.path).name for e in entries if isinstance(e, RepoFile)}
+    except EntryNotFoundError:
+        return False
+    except Exception as exc:
+        print(f"  WARN: HF existence check failed ({exc!r}); will recompute.")
+        return False
+    return required.issubset(found)
 
 
 def _resolve_paths(persona: str) -> tuple[str, str, Path, Path]:
@@ -209,7 +236,14 @@ def _make_plots(
     plt.close(fig)
 
 
-def run(persona: str, *, max_samples: int | None, dry_run: bool, skip_upload: bool) -> None:
+def run(
+    persona: str,
+    *,
+    max_samples: int | None,
+    dry_run: bool,
+    skip_upload: bool,
+    force: bool,
+) -> None:
     _set_seeds(SEED)
     login_from_env()
 
@@ -229,6 +263,15 @@ def run(persona: str, *, max_samples: int | None, dry_run: bool, skip_upload: bo
 
     if dry_run:
         print("[--dry-run] exiting before generation / upload.")
+        return
+
+    # Skip if axis artifacts already exist on the monorepo (unless --force).
+    if not force and _axis_files_on_hub(monorepo_upload_path, persona):
+        print(
+            f"[skip] {persona}_axis.pt and {persona}_per_layer_range.pt already "
+            f"exist under {monorepo_upload_path} on the monorepo. "
+            f"Pass --force to recompute."
+        )
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -432,9 +475,20 @@ def main() -> None:
     parser.add_argument("--max-samples", type=int, default=None, help="Limit dataset size for smoke tests.")
     parser.add_argument("--dry-run", action="store_true", help="Resolve config and exit before generation/upload.")
     parser.add_argument("--skip-upload", action="store_true", help="Run everything locally but skip HF upload.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Recompute even if axis artifacts already exist on the monorepo.",
+    )
     args = parser.parse_args()
 
-    run(args.persona, max_samples=args.max_samples, dry_run=args.dry_run, skip_upload=args.skip_upload)
+    run(
+        args.persona,
+        max_samples=args.max_samples,
+        dry_run=args.dry_run,
+        skip_upload=args.skip_upload,
+        force=args.force,
+    )
 
 
 if __name__ == "__main__":
