@@ -276,6 +276,25 @@ EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
         seed=436,
         max_context_tokens=32768,
     ),
+    # SWE-rebench OpenHands trajectories (Qwen3-Coder-480B-A35B).
+    # Long-context rollouts: median ~37k tokens, max ~100k. Pushes the
+    # "does more context shift persona readings?" question the hardest
+    # of any candidate. Serving the 480B MoE locally is impractical on
+    # a 5090; administering with a smaller Qwen3 sibling (set
+    # QUESTIONNAIRE_MODEL_OVERRIDE) or a hosted provider is the
+    # realistic path — see the swe_rebench adapter docstring.
+    "swe_rebench": ExternalRolloutPreset(
+        source="swe_rebench",
+        assistant_model="Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=131072,
+        # Keep only task-resolving trajectories for the first pass, so the
+        # questionnaire isn't biased by the (frequent) giving-up tail.
+        filter_config={"resolved_only": True},
+        filter_tag="resolved",
+    ),
 }
 
 
