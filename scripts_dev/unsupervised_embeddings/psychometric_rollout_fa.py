@@ -38,7 +38,7 @@ import json
 import logging
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +72,7 @@ from src_dev.datasets import (
 from src_dev.inference import InferenceConfig
 from src_dev.inference.config import OpenRouterProviderConfig, RetryConfig
 from src_dev.psychometric import (
+    ExternalRolloutsStageConfig,
     FactorAnalysisStageConfig,
     LabelingStageConfig,
     QuestionnaireStageConfig,
@@ -83,6 +84,7 @@ from src_dev.psychometric import (
     build_item_prompt,
     load_questionnaire,
     run_stage_factor_analysis,
+    run_stage_ingest_external_rollouts,
     run_stage_labeling,
     run_stage_questionnaire,
     run_stage_realism_judge,
@@ -156,6 +158,73 @@ class QuestionnairePreset:
     use_logprobs: bool
 
 
+# ─── External rollout presets ────────────────────────────────────────────────
+#
+# External presets point at a pre-existing multi-turn conversation dataset on
+# HuggingFace (e.g. Kwai-Klear mini-swe-agent, LMSYS-Chat-1M filtered by model)
+# instead of generating rollouts from scratch. Adapters live in
+# ``src_dev/datasets/external_sources/``.
+#
+# SEMANTIC CONTRACT — READ ME BEFORE ADDING A NEW EXTERNAL PRESET
+# ----------------------------------------------------------------
+#
+# 1. The external preset's ``assistant_model`` is the model that produced
+#    the rollouts in the source dataset. By default (and unless
+#    ``QUESTIONNAIRE_MODEL_OVERRIDE`` is set), this becomes the
+#    administering model at Stage 2 — matching our original "administer
+#    the questionnaire on the same model that produced the conversation".
+#
+# 2. ``max_samples`` is *post-filter*: the adapter applies any filter (e.g.
+#    ``min_assistant_turns``, ``model_allowlist``) before the reservoir
+#    sampler, so the run contains exactly ``max_samples`` rows whenever the
+#    filter yields at least that many. ``max_scan`` caps source-row scans
+#    for very large sources (LMSYS-1M etc.).
+#
+# 3. ``num_conversation_turns`` is reused as a ``min_assistant_turns``
+#    filter, applied BOTH at ingestion (adapter-side, so sampling-to-N is
+#    meaningful) AND at Stage 2 (the existing completeness filter in
+#    ``run_questionnaire_inference_async``).
+#
+# 4. ``--retry-terminal-samples`` is NOT meaningful for external rollouts
+#    (they have no partial/retry state). The orchestrator hard-fails if
+#    both are used together.
+#
+# 5. For multi-model sources like LMSYS, use ONE preset per assistant
+#    model (set ``filter_config={"model_allowlist": ["vicuna-13b"]}``) so
+#    the administering-model-matches-rollout-model guarantee is
+#    unambiguous. Mixed-model presets are explicitly unsupported.
+#
+# 6. Adding a new preset never invalidates existing HF caches: the run-id
+#    for external presets contains the literal ``-external-`` segment
+#    which never appears in generation preset run-ids.
+
+
+@dataclass(frozen=True)
+class ExternalRolloutPreset:
+    """Fully identifies one external-rollout ingestion run (Stage 1, variant)."""
+    source: str                          # adapter name, e.g. "kwai_swe_smith"
+    assistant_model: str                 # the model that produced these rollouts
+    assistant_provider: str              # usually "vllm"
+    max_samples: int
+    seed: int
+    # When set, tagged into the run_id (e.g. "-f_llama2_13b"). Use when a
+    # preset filters the source in a way that matters for cache identity.
+    filter_tag: str | None = None
+    # Adapter-specific filter dict. See each adapter for accepted keys.
+    filter_config: dict[str, Any] = field(default_factory=dict)
+    # Minimum assistant turns for a sample to survive ingestion (also
+    # applied at Stage 2 via ``num_conversation_turns``).
+    min_assistant_turns: int = 0
+    # Per-preset context window. When set, Stage 2 applies the same
+    # context-length filter we use for cross-model administration. If
+    # ``None``, the script's module-level ``QUESTIONNAIRE_MAX_CONTEXT_TOKENS``
+    # applies.
+    max_context_tokens: int | None = None
+    # Upper bound on source rows scanned before reservoir sampling stops.
+    # ``None`` exhausts the source. Set ~50 * max_samples for 1M+ sources.
+    max_scan: int | None = None
+
+
 # ── Rollout presets ─────────────────────────────────────────────────────────
 ROLLOUT_PRESETS: dict[str, RolloutPreset] = {
     # Original rollout run: scenarios v1, glm-4.7-flash user sim, 10 turns,
@@ -194,6 +263,28 @@ ROLLOUT_PRESETS: dict[str, RolloutPreset] = {
         user_sim_prompt_version="v6",
     ),
 }
+
+# ── External rollout presets (pre-existing datasets) ────────────────────────
+EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
+    # M1 smoke-test: Kwai-Klear mini-swe-agent trajectories (Qwen3-8B).
+    # 66k SWE-bench-style agent conversations; 98% fit in a 32k ctx.
+    "kwai_swe": ExternalRolloutPreset(
+        source="kwai_swe_smith",
+        assistant_model="Qwen/Qwen3-8B",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=32768,
+    ),
+}
+
+
+# Module-load guard: the two preset dicts must have disjoint keys.
+assert not (set(ROLLOUT_PRESETS) & set(EXTERNAL_ROLLOUT_PRESETS)), (
+    "Rollout preset keys overlap between ROLLOUT_PRESETS and "
+    "EXTERNAL_ROLLOUT_PRESETS — rename one of the colliding keys."
+)
+
 
 # ── Questionnaire presets ───────────────────────────────────────────────────
 QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
@@ -245,12 +336,9 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Qwen2.5-7B-Instruct administering on the B rollouts (Llama-produced).
-    # QUESTIONNAIRE_MODEL_OVERRIDE below makes the questionnaire-model tag
-    # flow into the run-id so these cache under a new HF path and don't
-    # collide with the default llama-on-B results.
-    ("B", "v5"),
-    ("B", "trait_ocean_v1"),
+    # M1 smoke test: Kwai-Klear mini-swe-agent (Qwen3-8B) + v5 Likert.
+    # Questionnaire model defaults to the rollout-generator model (Qwen3-8B).
+    ("kwai_swe", "v5"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -267,7 +355,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = False  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -555,8 +643,21 @@ ACTIVE_ROLLOUT_KEY: str = ""
 ACTIVE_QUESTIONNAIRE_KEY: str = ""
 
 
-def _rollout_preset(key: str | None = None) -> RolloutPreset:
-    return ROLLOUT_PRESETS[key or ACTIVE_ROLLOUT_KEY]
+def _rollout_preset(
+    key: str | None = None,
+) -> "RolloutPreset | ExternalRolloutPreset":
+    """Look up a rollout preset across both generation and external dicts."""
+    k = key or ACTIVE_ROLLOUT_KEY
+    if k in ROLLOUT_PRESETS:
+        return ROLLOUT_PRESETS[k]
+    if k in EXTERNAL_ROLLOUT_PRESETS:
+        return EXTERNAL_ROLLOUT_PRESETS[k]
+    raise KeyError(f"Unknown rollout preset {k!r}")
+
+
+def _is_external_preset(key: str | None = None) -> bool:
+    k = key or ACTIVE_ROLLOUT_KEY
+    return k in EXTERNAL_ROLLOUT_PRESETS
 
 
 def _questionnaire_preset(key: str | None = None) -> QuestionnairePreset:
@@ -578,26 +679,48 @@ def _activate_rollout(key: str) -> None:
     global ARCHETYPE_SET_VERSION, LEGACY_USER_PROMPT_VERSION
     global ACTIVE_USER_SIMULATOR_MODE
 
-    p = ROLLOUT_PRESETS[key]
     ACTIVE_ROLLOUT_KEY = key
-    SEED = p.seed
-    MAX_PROMPTS = p.max_prompts
-    NUM_ROLLOUTS_PER_PROMPT = p.num_rollouts_per_prompt
-    NUM_CONVERSATION_TURNS = p.num_conversation_turns
-    ASSISTANT_MODEL = p.assistant_model
-    # Keep questionnaire model in sync with the rollout model by default, but
-    # honour QUESTIONNAIRE_MODEL_OVERRIDE when set (cross-model study).
-    QUESTIONNAIRE_MODEL = QUESTIONNAIRE_MODEL_OVERRIDE or p.assistant_model
-    ASSISTANT_PROVIDER = p.assistant_provider
-    USER_MODEL = p.user_model
-    USER_PROVIDER = p.user_provider
-    TEMPERATURE = p.temperature
-    SCENARIO_FILE = p.scenario_file
-    SCENARIO_SET_VERSION = p.scenario_set_version
-    USER_SIM_PROMPT_VERSION = p.user_sim_prompt_version
-    ARCHETYPE_SET_VERSION = p.archetype_set_version
-    LEGACY_USER_PROMPT_VERSION = p.legacy_user_prompt_version
-    ACTIVE_USER_SIMULATOR_MODE = p.user_simulator_mode
+    if key in EXTERNAL_ROLLOUT_PRESETS:
+        p_ext = EXTERNAL_ROLLOUT_PRESETS[key]
+        SEED = p_ext.seed
+        MAX_PROMPTS = p_ext.max_samples
+        NUM_ROLLOUTS_PER_PROMPT = 1              # no natural grouping
+        NUM_CONVERSATION_TURNS = p_ext.min_assistant_turns
+        ASSISTANT_MODEL = p_ext.assistant_model
+        QUESTIONNAIRE_MODEL = QUESTIONNAIRE_MODEL_OVERRIDE or p_ext.assistant_model
+        ASSISTANT_PROVIDER = p_ext.assistant_provider
+        # Generation-only fields: sentinels. Anything that reads these for an
+        # external preset is a bug; they should be guarded via
+        # `_is_external_preset`.
+        USER_MODEL = ""
+        USER_PROVIDER = ""
+        TEMPERATURE = 0.0
+        SCENARIO_FILE = None
+        SCENARIO_SET_VERSION = None
+        USER_SIM_PROMPT_VERSION = None
+        ARCHETYPE_SET_VERSION = None
+        LEGACY_USER_PROMPT_VERSION = None
+        ACTIVE_USER_SIMULATOR_MODE = "external"
+    else:
+        p = ROLLOUT_PRESETS[key]
+        SEED = p.seed
+        MAX_PROMPTS = p.max_prompts
+        NUM_ROLLOUTS_PER_PROMPT = p.num_rollouts_per_prompt
+        NUM_CONVERSATION_TURNS = p.num_conversation_turns
+        ASSISTANT_MODEL = p.assistant_model
+        # Keep questionnaire model in sync with the rollout model by default,
+        # but honour QUESTIONNAIRE_MODEL_OVERRIDE when set (cross-model).
+        QUESTIONNAIRE_MODEL = QUESTIONNAIRE_MODEL_OVERRIDE or p.assistant_model
+        ASSISTANT_PROVIDER = p.assistant_provider
+        USER_MODEL = p.user_model
+        USER_PROVIDER = p.user_provider
+        TEMPERATURE = p.temperature
+        SCENARIO_FILE = p.scenario_file
+        SCENARIO_SET_VERSION = p.scenario_set_version
+        USER_SIM_PROMPT_VERSION = p.user_sim_prompt_version
+        ARCHETYPE_SET_VERSION = p.archetype_set_version
+        LEGACY_USER_PROMPT_VERSION = p.legacy_user_prompt_version
+        ACTIVE_USER_SIMULATOR_MODE = p.user_simulator_mode
 
     # Reseed RNGs so sub-stage stochastic ops inside this preset's run use
     # the preset's seed, not the previous preset's.
@@ -619,7 +742,20 @@ def _activate_questionnaire(key: str) -> None:
 
 
 def _rollout_run_id(rollout_key: str | None = None) -> str:
-    p = _rollout_preset(rollout_key)
+    key = rollout_key or ACTIVE_ROLLOUT_KEY
+    if key in EXTERNAL_ROLLOUT_PRESETS:
+        # External-rollout run-id. The literal "-external-" segment never
+        # appears in generation-preset run-ids, guaranteeing no HF cache
+        # collisions. Filter tag is appended only when set, to keep ids
+        # short when no filter is active.
+        p_ext = EXTERNAL_ROLLOUT_PRESETS[key]
+        assistant_slug = _model_slug(p_ext.assistant_model)
+        filter_tag = f"-f_{p_ext.filter_tag}" if p_ext.filter_tag else ""
+        return (
+            f"rollouts-external-{p_ext.source}-{assistant_slug}-"
+            f"{p_ext.max_samples}p-seed{p_ext.seed}{filter_tag}"
+        )
+    p = ROLLOUT_PRESETS[key]
     assistant_slug = _model_slug(p.assistant_model)
     mode = p.user_simulator_mode
     if mode == "legacy":
@@ -691,7 +827,7 @@ def _resolved_pairs() -> list[tuple[str, str]]:
     else:
         pairs = [(r, q) for r in ROLLOUTS for q in QUESTIONNAIRES]
     for r_key, q_key in pairs:
-        if r_key not in ROLLOUT_PRESETS:
+        if r_key not in ROLLOUT_PRESETS and r_key not in EXTERNAL_ROLLOUT_PRESETS:
             raise KeyError(f"Unknown rollout preset {r_key!r}")
         if q_key not in QUESTIONNAIRE_PRESETS:
             raise KeyError(f"Unknown questionnaire preset {q_key!r}")
@@ -901,6 +1037,20 @@ def _parse_args() -> argparse.Namespace:
 def _user_simulator_mode_metadata() -> dict[str, object]:
     """Return mode-specific config metadata for logging and config.json."""
     mode = _current_user_simulator_mode()
+    if mode == "external":
+        # External rollout presets: the "user simulator" is the original
+        # source dataset, not something this script instantiated.
+        if _is_external_preset():
+            p = EXTERNAL_ROLLOUT_PRESETS[ACTIVE_ROLLOUT_KEY]
+            return {
+                "user_simulator_mode": "external",
+                "external_source": p.source,
+                "external_filter_config": dict(p.filter_config),
+                "external_filter_tag": p.filter_tag,
+                "external_max_samples": p.max_samples,
+                "external_min_assistant_turns": p.min_assistant_turns,
+            }
+        return {"user_simulator_mode": "external"}
     if mode == "legacy":
         return {
             "user_simulator_mode": mode,
@@ -1199,7 +1349,34 @@ def _build_rollouts_stage_config(
     )
 
 
+def _build_external_rollouts_stage_config(
+    ctx: RunContext,
+    rollout_key: str,
+) -> ExternalRolloutsStageConfig:
+    p = EXTERNAL_ROLLOUT_PRESETS[rollout_key]
+    return ExternalRolloutsStageConfig(
+        ctx=ctx,
+        source=p.source,
+        assistant_model=p.assistant_model,
+        assistant_provider=p.assistant_provider,
+        max_samples=p.max_samples,
+        seed=p.seed,
+        max_scan=p.max_scan,
+        filter_config=dict(p.filter_config),
+        min_assistant_turns=p.min_assistant_turns,
+    )
+
+
 def _build_questionnaire_stage_config(ctx: RunContext) -> QuestionnaireStageConfig:
+    # Per-preset context override: external presets may carry their own
+    # max_context_tokens (e.g. SWE-rebench needs 128k). Fall back to the
+    # module-level global when the preset doesn't specify one.
+    preset = _rollout_preset(ACTIVE_ROLLOUT_KEY)
+    preset_ctx_cap = getattr(preset, "max_context_tokens", None)
+    effective_max_context_tokens = (
+        preset_ctx_cap if preset_ctx_cap is not None
+        else QUESTIONNAIRE_MAX_CONTEXT_TOKENS
+    )
     return QuestionnaireStageConfig(
         ctx=ctx,
         questionnaire_path=Path(QUESTIONNAIRE_PATH),
@@ -1225,7 +1402,7 @@ def _build_questionnaire_stage_config(ctx: RunContext) -> QuestionnaireStageConf
         reset_mode=QUESTIONNAIRE_RESET_MODE,
         soft_reset_system_prompt=QUESTIONNAIRE_SOFT_RESET_SYSTEM_PROMPT,
         boundary_token=QUESTIONNAIRE_BOUNDARY_TOKEN,
-        max_context_tokens=QUESTIONNAIRE_MAX_CONTEXT_TOKENS,
+        max_context_tokens=effective_max_context_tokens,
         context_buffer_tokens=QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS,
         write_inspection_file=WRITE_QUESTIONNAIRE_INSPECTION_FILE,
         inspection_items_per_rollout=INSPECTION_ITEMS_PER_ROLLOUT,
@@ -1927,32 +2104,53 @@ def main() -> None:
             global ACTIVE_USER_SIMULATOR_MODE
             ACTIVE_USER_SIMULATOR_MODE = cli_mode_override
 
-        # Per-rollout retry terminal sample loading.
+        # Per-rollout retry terminal sample loading. NB: not meaningful for
+        # external presets (no partial-rollout state); we hard-fail below
+        # if the combination is attempted.
         retry_terminal_sample_ids: list[str] = []
         retry_mode = "off"
-        if args.retry_terminal_samples:
-            retry_terminal_sample_ids = _load_terminal_sample_ids_from_run(_rollout_dir(r_key))
-            retry_mode = "auto"
-        elif args.retry_terminal_samples_file is not None:
-            retry_terminal_sample_ids = _load_retry_terminal_sample_ids(
-                args.retry_terminal_samples_file
-            )
-            retry_mode = "file"
+        is_external = _is_external_preset(r_key)
+        if args.retry_terminal_samples or args.retry_terminal_samples_file is not None:
+            if is_external:
+                raise SystemExit(
+                    f"--retry-terminal-samples is not supported for external "
+                    f"rollout preset {r_key!r} (no partial/retry state exists "
+                    f"for pre-ingested datasets)."
+                )
+            if args.retry_terminal_samples:
+                retry_terminal_sample_ids = _load_terminal_sample_ids_from_run(
+                    _rollout_dir(r_key)
+                )
+                retry_mode = "auto"
+            else:
+                retry_terminal_sample_ids = _load_retry_terminal_sample_ids(
+                    args.retry_terminal_samples_file
+                )
+                retry_mode = "file"
 
         if "rollouts" in STAGES_TO_RUN:
             print("\n" + "=" * 60)
-            print(f"[Stage 1] Generating rollouts — preset {r_key!r}")
+            stage_header = (
+                f"[Stage 1] Ingesting external rollouts — preset {r_key!r}"
+                if is_external else
+                f"[Stage 1] Generating rollouts — preset {r_key!r}"
+            )
+            print(stage_header)
             print("=" * 60)
             # For Stage 1, ctx uses a placeholder questionnaire dir (first
             # paired q_key) — Stage 1 doesn't touch the questionnaire dir.
             first_q_for_rollout = q_keys_by_rollout[r_key][0]
             _activate_questionnaire(first_q_for_rollout)
             r_ctx = _build_run_context(r_key, first_q_for_rollout)
-            r_cfg = _build_rollouts_stage_config(r_ctx, retry_terminal_sample_ids)
-            run_stage_rollouts(
-                r_cfg,
-                build_rollout_config=_build_rollout_generation_config,
-            )
+            if is_external:
+                ext_cfg = _build_external_rollouts_stage_config(r_ctx, r_key)
+                run_stage_ingest_external_rollouts(ext_cfg)
+            else:
+                r_cfg = _build_rollouts_stage_config(r_ctx, retry_terminal_sample_ids)
+                run_stage_rollouts(
+                    r_cfg,
+                    build_rollout_config=_build_rollout_generation_config,
+                )
 
         for q_key in q_keys_by_rollout[r_key]:
             _activate_questionnaire(q_key)
