@@ -295,6 +295,143 @@ EXTERNAL_ROLLOUT_PRESETS: dict[str, ExternalRolloutPreset] = {
         filter_config={"resolved_only": True},
         filter_tag="resolved",
     ),
+    # ── PRISM-alignment per-model presets ──────────────────────────────
+    # PRISM is multi-model; each preset pins one OSS assistant via
+    # model_allowlist so same-model administration is unambiguous.
+    # Median conversation is ~850 tokens / ~8 assistant turns, so these
+    # fit comfortably in even a 4k-context Llama-2 window.
+    "prism_mistral_7b_v01": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="mistralai/Mistral-7B-Instruct-v0.1",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=32768,
+        filter_config={"model_allowlist": ["Mistral-7B-Instruct-v0.1"]},
+        filter_tag="mistral7bv01",
+    ),
+    "prism_zephyr_7b_beta": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="HuggingFaceH4/zephyr-7b-beta",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=32768,
+        filter_config={"model_allowlist": ["zephyr-7b-beta"]},
+        filter_tag="zephyr7bbeta",
+    ),
+    "prism_llama2_7b_chat": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="meta-llama/Llama-2-7b-chat-hf",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        # Llama-2 only has 4k native context. PRISM medians ~850 tokens
+        # so most fit; context filter drops the outliers.
+        max_context_tokens=4096,
+        filter_config={"model_allowlist": ["Llama-2-7b-chat"]},
+        filter_tag="llama2_7b_chat",
+    ),
+    "prism_llama2_13b_chat": ExternalRolloutPreset(
+        source="prism_open",
+        assistant_model="meta-llama/Llama-2-13b-chat-hf",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={"model_allowlist": ["Llama-2-13b-chat"]},
+        filter_tag="llama2_13b_chat",
+    ),
+    # ── LMSYS-Chat-1M per-model presets ───────────────────────────────
+    # LMSYS is gated; need HF_TOKEN + accepted terms. One preset per
+    # assistant model. ``min_turn=5`` pre-filters the source field so
+    # sampling isn't dominated by single-exchange conversations.
+    # ``max_scan=None`` exhausts the 1M-row source (~6 min at 2800/s
+    # streaming rate) — the right default for rare-model presets.
+    #
+    # Model counts below are from a 100k-row scan; see lmsys.py docstring
+    # for the full table. Extrapolated full-dataset counts are ~10x.
+    #
+    # vicuna-13b is the LMSYS plurality (~490k rows of 1M); plenty of
+    # turn>=5 English samples even after filtering.
+    "lmsys_vicuna_13b_v15_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="lmsys/vicuna-13b-v1.5",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={
+            "model_allowlist": ["vicuna-13b"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="vicuna13bv15_t5_en",
+    ),
+    # llama-2-13b-chat: ~30k rows in the full dataset.
+    "lmsys_llama2_13b_chat_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="meta-llama/Llama-2-13b-chat-hf",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={
+            "model_allowlist": ["llama-2-13b-chat"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="llama2_13b_chat_t5_en",
+    ),
+    # vicuna-33b: ~30k rows. Native ctx 2k, so many turn>=5 rows will
+    # fail the Stage-2 context filter; consider max_context_tokens=2048
+    # and manually inspecting drop rate.
+    "lmsys_vicuna_33b_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="lmsys/vicuna-33b-v1.3",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=2048,
+        filter_config={
+            "model_allowlist": ["vicuna-33b"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="vicuna33b_t5_en",
+    ),
+    # wizardlm-13b: ~17k rows.
+    "lmsys_wizardlm_13b_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="WizardLMTeam/WizardLM-13B-V1.2",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={
+            "model_allowlist": ["wizardlm-13b"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="wizardlm13b_t5_en",
+    ),
+    # llama-2-7b-chat: rare (~4k rows of 1M). ``max_scan=None`` is
+    # essential — even 100k scan yields only ~10-40 post-turn-filter
+    # matches.
+    "lmsys_llama2_7b_chat_t5": ExternalRolloutPreset(
+        source="lmsys_open",
+        assistant_model="meta-llama/Llama-2-7b-chat-hf",
+        assistant_provider="vllm",
+        max_samples=500,
+        seed=436,
+        max_context_tokens=4096,
+        filter_config={
+            "model_allowlist": ["llama-2-7b-chat"],
+            "min_turn": 5,
+            "languages": ["English"],
+        },
+        filter_tag="llama2_7b_chat_t5_en",
+    ),
 }
 
 
