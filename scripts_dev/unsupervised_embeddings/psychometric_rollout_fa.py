@@ -539,12 +539,18 @@ assert not (set(ROLLOUT_PRESETS) & set(EXTERNAL_ROLLOUT_PRESETS)), (
 
 # ── Questionnaire presets ───────────────────────────────────────────────────
 QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
-    # v5 Likert: 5-point agreement items; scored by rank integer coding.
+    # v5 Likert: 5-point agreement items.
+    # use_logprobs=True: reads top-20 logprobs of the first generated
+    # token under the "aside" phrasing + "Answer: " prefill, parses
+    # digits 1-5, and stores the soft expected value Σ i·P(i) per cell
+    # (continuous in [1, 5]) — higher-information than argmax integer
+    # encoding. Adds "-lp20" to the questionnaire run-id, so the new
+    # logprob cache doesn't collide with the existing greedy cache.
     "v5": QuestionnairePreset(
         path="datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json",
         version="v5",
         fa_blocks=("likert",),
-        use_logprobs=False,
+        use_logprobs=True,
     ),
     # v6 forced-choice pairs: 78 items × 13 axes; logprob P(A)/P(B) scoring.
     "v6_fc_draft": QuestionnairePreset(
@@ -564,6 +570,16 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
     "trait_ocean_v1": QuestionnairePreset(
         path="datasets/psychometric_questionnaires/trait_ocean_v1.json",
         version="trait_ocean_v1",
+        fa_blocks=("trait_mcq",),
+        use_logprobs=True,
+    ),
+    # Same 100 items with the trait-priming lead-in sentence stripped from
+    # every question. Removes the upstream TRAIT bias that primes
+    # respondents toward the high-pole options independently of their
+    # actual trait disposition. See build_trait_questionnaire.py.
+    "trait_ocean_v1_nolead": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/trait_ocean_v1_nolead.json",
+        version="trait_ocean_v1_nolead",
         fa_blocks=("trait_mcq",),
         use_logprobs=True,
     ),
