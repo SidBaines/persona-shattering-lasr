@@ -76,12 +76,22 @@ ALL_TRAITS = list(SCORE_RANGE.keys())
 # GPT-5 Mini is retired (Azure 403s) — included only as fallback if others
 # lack data for a trait.
 LLM_JUDGE_RUNS: dict[str, str] = {
+    # Original judges
     "Gemini Flash": "google_gemini-2.0-flash-001__r3__20260326T203008",
     "Kimi K2": "moonshotai_kimi-k2__r3__20260326T221255",
     "Haiku 3.5": "anthropic_claude-3.5-haiku__r3__20260407T172156",
     "DeepSeek V3": "deepseek_deepseek-chat-v3__r3__20260407T171943",
     "Llama 4 Scout": "meta-llama_llama-4-scout__r3__20260407T172122",
     "GPT-5 Mini": "openai_gpt-5-mini__r3__20260326T220614",
+    # New candidates (2026-04-21)
+    "Gemini Flash Lite": "google_gemini-2.0-flash-lite-001__r3__20260421T101844",
+    "Gemma 4 27B": "google_gemma-4-26b-a4b-it__r3__20260421T101900",
+    "Llama 3.3 70B": "meta-llama_llama-3.3-70b-instruct__r3__20260421T101752",
+    "Mistral Small 3.2": "mistralai_mistral-small-3.2-24b-instruct__r3__20260421T101824",
+    "GPT-4.1 Nano": "openai_gpt-4.1-nano__r3__20260421T101506",
+    # GPT-5 Nano excluded: too many empty/out-of-range responses
+    "Qwen 2.5 72B": "qwen_qwen-2.5-72b-instruct__r3__20260421T101529",
+    "Qwen 3 235B": "qwen_qwen3-235b-a22b-2507__r3__20260421T101554",
 }
 
 # Colours for plotting
@@ -98,6 +108,14 @@ RATER_COLOURS: dict[str, str] = {
     "DeepSeek V3": "#42d4f4",
     "Llama 4 Scout": "#f032e6",
     "GPT-5 Mini": "#a9a9a9",
+    # New candidates
+    "Gemini Flash Lite": "#aaffc3",
+    "Gemma 4 27B": "#808000",
+    "Llama 3.3 70B": "#ffd8b1",
+    "Mistral Small 3.2": "#000075",
+    "GPT-4.1 Nano": "#469990",
+    "Qwen 2.5 72B": "#9A6324",
+    "Qwen 3 235B": "#800000",
     # Gold
     "gold": "#000000",
 }
@@ -113,6 +131,13 @@ RATER_MARKERS: dict[str, str] = {
     "DeepSeek V3": "v",
     "Llama 4 Scout": "<",
     "GPT-5 Mini": "*",
+    "Gemini Flash Lite": "1",
+    "Gemma 4 27B": "2",
+    "Llama 3.3 70B": "3",
+    "Mistral Small 3.2": "4",
+    "GPT-4.1 Nano": "+",
+    "Qwen 2.5 72B": "8",
+    "Qwen 3 235B": "p",
     "gold": "d",
 }
 
@@ -184,7 +209,9 @@ def load_llm_judge_scores(
             item = json.loads(line)
             score = item.get("judge_score")
             if score is not None:
-                scores_by_id[item["id"]].append(score)
+                lo, hi = SCORE_RANGE[trait]
+                if lo <= score <= hi:
+                    scores_by_id[item["id"]].append(score)
 
     return {
         iid: statistics.median(scores)

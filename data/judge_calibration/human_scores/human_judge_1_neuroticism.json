@@ -1,0 +1,187 @@
+{
+  "rater": "human_judge_1",
+  "trait": "neuroticism",
+  "n_items": 36,
+  "scores": [
+    {
+      "id": "neuroticism_p2_002",
+      "trait": "neuroticism",
+      "score": 2
+    },
+    {
+      "id": "neuroticism_p1_001",
+      "trait": "neuroticism",
+      "score": 2
+    },
+    {
+      "id": "neuroticism_p3_002",
+      "trait": "neuroticism",
+      "score": 3
+    },
+    {
+      "id": "neuroticism_n2_004",
+      "trait": "neuroticism",
+      "score": -4
+    },
+    {
+      "id": "neuroticism_n4_001",
+      "trait": "neuroticism",
+      "score": -1
+    },
+    {
+      "id": "neuroticism_0_004",
+      "trait": "neuroticism",
+      "score": 0
+    },
+    {
+      "id": "neuroticism_n3_003",
+      "trait": "neuroticism",
+      "score": -2
+    },
+    {
+      "id": "neuroticism_n2_002",
+      "trait": "neuroticism",
+      "score": -2
+    },
+    {
+      "id": "neuroticism_n1_003",
+      "trait": "neuroticism",
+      "score": -1
+    },
+    {
+      "id": "neuroticism_n2_003",
+      "trait": "neuroticism",
+      "score": -3
+    },
+    {
+      "id": "neuroticism_n3_004",
+      "trait": "neuroticism",
+      "score": -3
+    },
+    {
+      "id": "neuroticism_p2_003",
+      "trait": "neuroticism",
+      "score": 3
+    },
+    {
+      "id": "neuroticism_p2_004",
+      "trait": "neuroticism",
+      "score": 2
+    },
+    {
+      "id": "neuroticism_n3_001",
+      "trait": "neuroticism",
+      "score": -4
+    },
+    {
+      "id": "neuroticism_p2_001",
+      "trait": "neuroticism",
+      "score": 2
+    },
+    {
+      "id": "neuroticism_n1_001",
+      "trait": "neuroticism",
+      "score": 0
+    },
+    {
+      "id": "neuroticism_0_001",
+      "trait": "neuroticism",
+      "score": 0
+    },
+    {
+      "id": "neuroticism_n4_004",
+      "trait": "neuroticism",
+      "score": -2
+    },
+    {
+      "id": "neuroticism_p3_003",
+      "trait": "neuroticism",
+      "score": 4
+    },
+    {
+      "id": "neuroticism_n2_001",
+      "trait": "neuroticism",
+      "score": -2
+    },
+    {
+      "id": "neuroticism_p4_001",
+      "trait": "neuroticism",
+      "score": 4
+    },
+    {
+      "id": "neuroticism_n4_003",
+      "trait": "neuroticism",
+      "score": -1
+    },
+    {
+      "id": "neuroticism_p1_002",
+      "trait": "neuroticism",
+      "score": 1
+    },
+    {
+      "id": "neuroticism_0_003",
+      "trait": "neuroticism",
+      "score": 0
+    },
+    {
+      "id": "neuroticism_p4_003",
+      "trait": "neuroticism",
+      "score": 4
+    },
+    {
+      "id": "neuroticism_n4_002",
+      "trait": "neuroticism",
+      "score": -4
+    },
+    {
+      "id": "neuroticism_n3_002",
+      "trait": "neuroticism",
+      "score": -4
+    },
+    {
+      "id": "neuroticism_n1_002",
+      "trait": "neuroticism",
+      "score": -3
+    },
+    {
+      "id": "neuroticism_p4_004",
+      "trait": "neuroticism",
+      "score": 4
+    },
+    {
+      "id": "neuroticism_n1_004",
+      "trait": "neuroticism",
+      "score": -1
+    },
+    {
+      "id": "neuroticism_p3_001",
+      "trait": "neuroticism",
+      "score": 2
+    },
+    {
+      "id": "neuroticism_p1_003",
+      "trait": "neuroticism",
+      "score": 1
+    },
+    {
+      "id": "neuroticism_p1_004",
+      "trait": "neuroticism",
+      "score": 1
+    },
+    {
+      "id": "neuroticism_0_002",
+      "trait": "neuroticism",
+      "score": 0
+    },
+    {
+      "id": "neuroticism_p4_002",
+      "trait": "neuroticism",
+      "score": 4
+    },
+    {
+      "id": "neuroticism_p3_004",
+      "trait": "neuroticism",
+      "score": 4
+    }
+  ]
+}
