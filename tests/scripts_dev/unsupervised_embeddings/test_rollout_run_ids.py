@@ -57,8 +57,16 @@ FROZEN_RUN_IDS: dict[str, str] = {
         "rollouts-external-prism_open-llama27bchathf-500p-seed436-"
         "f_llama2_7b_chat"
     ),
+    "prism_llama2_7b_chat_n50": (
+        "rollouts-external-prism_open-llama27bchathf-50p-seed436-"
+        "f_llama2_7b_chat"
+    ),
     "prism_llama2_13b_chat": (
         "rollouts-external-prism_open-llama213bchathf-500p-seed436-"
+        "f_llama2_13b_chat"
+    ),
+    "prism_llama2_13b_chat_n50": (
+        "rollouts-external-prism_open-llama213bchathf-50p-seed436-"
         "f_llama2_13b_chat"
     ),
     # LMSYS per-model presets (verified via 100k-row scan — all models
