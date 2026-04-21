@@ -683,6 +683,7 @@ async def run_questionnaire_inference_async(
                     num_choices = 2 if item["type"] == "fc_pair" else 4
                     probs, choice_mass = parse_top_logprobs_to_choice_probs(
                         first_token_logprobs, num_choices=num_choices,
+                        include_digit_aliases=True,
                     )
                     best_choice = max(probs, key=probs.get) if probs else None
                 if probs:
@@ -693,6 +694,14 @@ async def run_questionnaire_inference_async(
                         fc_pair_high=fc_pair_high,
                         choice_probs=probs,
                     )
+                    # Save the FULL first-token top-k logprobs so future
+                    # filter re-analysis (different target-token set, etc.)
+                    # can run offline from raw_responses.jsonl alone — no
+                    # re-inference needed.
+                    _raw_lp = {
+                        str(tok): round(float(lp), 6)
+                        for tok, lp in first_token_logprobs.items()
+                    }
                     log_fh.write(
                         json.dumps(
                             {
@@ -703,6 +712,7 @@ async def run_questionnaire_inference_async(
                                 "raw": raw_text,
                                 "probs": {k_: round(v, 6) for k_, v in probs.items()},
                                 "choice_mass": round(choice_mass, 6),
+                                "top_logprobs": _raw_lp,
                                 "scoring_method": "logprob",
                             },
                             ensure_ascii=False,
@@ -715,6 +725,10 @@ async def run_questionnaire_inference_async(
                         {"k": k, "item_id": item_id, "raw_response": raw_text,
                          "reason": "no choice letter in top logprobs"}
                     )
+                    _raw_lp = {
+                        str(tok): round(float(lp), 6)
+                        for tok, lp in first_token_logprobs.items()
+                    }
                     log_fh.write(
                         json.dumps(
                             {
@@ -725,6 +739,7 @@ async def run_questionnaire_inference_async(
                                 "raw": raw_text,
                                 "probs": {},
                                 "choice_mass": 0.0,
+                                "top_logprobs": _raw_lp,
                                 "scoring_method": "logprob",
                             },
                             ensure_ascii=False,

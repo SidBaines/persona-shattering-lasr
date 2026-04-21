@@ -28,6 +28,22 @@ TRAIT_MCQ_LETTER_VARIANTS: dict[str, set[str]] = {
 }
 
 
+def _digit_alias_variants(digit: int) -> set[str]:
+    """Token-variants of an option-ordinal digit (e.g. '1', '▁1', '1.', ')1')."""
+    d = str(digit)
+    return {
+        d,
+        f"▁{d}",
+        f"Ġ{d}",
+        f" {d}",
+        # Models often emit "1." or "1)" when listing answer numbers.
+        f"{d}.",
+        f"{d})",
+        f" {d}.",
+        f" {d})",
+    }
+
+
 def parse_likert_response(text: str) -> int | None:
     """Parse a Likert-scale integer (1-5) from an LLM response.
 
@@ -153,6 +169,8 @@ def parse_top_logprobs_to_likert_probs(
 def parse_top_logprobs_to_choice_probs(
     top_logprobs: dict[str, float],
     num_choices: int = 4,
+    *,
+    include_digit_aliases: bool = False,
 ) -> tuple[dict[str, float], float]:
     """Extract per-letter probabilities from a top-k logprob dict.
 
@@ -162,29 +180,47 @@ def parse_top_logprobs_to_choice_probs(
         top_logprobs: Mapping ``decoded_token -> logprob`` for the first
             generated token.
         num_choices: Number of answer choices (default 4, i.e. A/B/C/D).
+        include_digit_aliases: When True, also treats position-ordinal
+            digit tokens (``1`` → A, ``2`` → B, ``3`` → C, ``4`` → D for
+            num_choices=4) as equivalent evidence for the corresponding
+            letter, combining their logprob mass. Needed for models that
+            answer multiple-choice questions with option ordinals
+            (Mistral-7B, Zephyr-7B) rather than letters. When a letter
+            and its digit alias both appear in top-k, their
+            probabilities are summed in linear (exp) space before
+            re-logging; the result is the logprob of "either the letter
+            OR its digit appearing", which is what we want.
 
     Returns:
         ``(probs, choice_mass)`` where:
           - ``probs`` is a dict mapping each found letter to its softmax-
             normalized probability over the found letters only.
-          - ``choice_mass`` is the total probability mass on choice letters
-            out of the full vocabulary (sum of ``exp(lp)``).
-        Both are empty / 0.0 when no choice letter appears in top-k.
+          - ``choice_mass`` is the total probability mass on choice tokens
+            (letters, and digit aliases if enabled) out of the full
+            vocabulary.
+        Both are empty / 0.0 when no choice letter/digit appears in top-k.
     """
     letters = [chr(ord("A") + i) for i in range(num_choices)]
     found: dict[str, float] = {}
-    for letter in letters:
-        variants = TRAIT_MCQ_LETTER_VARIANTS.get(letter) or {
+    for i, letter in enumerate(letters):
+        variants = set(TRAIT_MCQ_LETTER_VARIANTS.get(letter) or {
             letter,
             f"▁{letter}",
             f"Ġ{letter}",
             f" {letter}",
             letter.lower(),
-        }
-        for tok, lp in top_logprobs.items():
-            if tok in variants:
-                found[letter] = float(lp)
-                break
+        })
+        if include_digit_aliases:
+            variants |= _digit_alias_variants(i + 1)
+        # For a given letter, any one of its variants matches. Some
+        # tokenizers may emit both forms in the top-k (letter + digit);
+        # when that happens, sum their linear probabilities.
+        matching_lps: list[float] = [
+            float(lp) for tok, lp in top_logprobs.items() if tok in variants
+        ]
+        if matching_lps:
+            combined_prob = sum(math.exp(lp) for lp in matching_lps)
+            found[letter] = math.log(combined_prob)
 
     if not found:
         return {}, 0.0
