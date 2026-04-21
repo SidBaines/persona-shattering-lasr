@@ -121,6 +121,13 @@ class VllmProvider(InferenceProvider):
                 lora_path=local_adapter_path,
             )
 
+        # Chat-template override for legacy tokenizers that ship with
+        # ``chat_template = None`` (Koala-13B, OpenAssistant-Pythia-12B,
+        # older Vicuna variants, etc). Passed to every ``llm.chat(...)``
+        # call so vLLM applies our registry template instead of failing
+        # on "chat_template is not set".
+        self._chat_template: str | None = vllm_cfg.chat_template
+
     def _sampling_params(self, **kwargs):
         gen = self.generation_config
         params = dict(
@@ -183,6 +190,10 @@ class VllmProvider(InferenceProvider):
         formatted = self._format_messages(prompts)
         add_gen, continue_final = self._prefill_flags_for(formatted)
 
+        chat_kwargs: dict = {}
+        if self._chat_template is not None:
+            chat_kwargs["chat_template"] = self._chat_template
+
         outputs = self.llm.chat(
             messages=formatted,
             sampling_params=sampling_params,
@@ -190,6 +201,7 @@ class VllmProvider(InferenceProvider):
             use_tqdm=False,
             add_generation_prompt=add_gen,
             continue_final_message=continue_final,
+            **chat_kwargs,
         )
 
         responses = [out.outputs[0].text for out in outputs]
@@ -233,6 +245,10 @@ class VllmProvider(InferenceProvider):
         formatted = self._format_messages(prompts)
         add_gen, continue_final = self._prefill_flags_for(formatted)
 
+        chat_kwargs: dict = {}
+        if self._chat_template is not None:
+            chat_kwargs["chat_template"] = self._chat_template
+
         outputs = self.llm.chat(
             messages=formatted,
             sampling_params=sampling_params,
@@ -240,6 +256,7 @@ class VllmProvider(InferenceProvider):
             use_tqdm=False,
             add_generation_prompt=add_gen,
             continue_final_message=continue_final,
+            **chat_kwargs,
         )
 
         results: list[dict] = []
