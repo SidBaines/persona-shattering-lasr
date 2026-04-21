@@ -701,7 +701,7 @@ async def run_questionnaire_inference_async(
                 retry_prompts: list[PromptInput] = []
                 retry_token_ids: list[list[int]] = []
                 for k, item, prev_raw in retry_needed:
-                    prefill = _item_prefill(item)
+                    prefill = _item_prefill(item, likert_phrasing=cfg.phrasing)
                     if reset_mode == "token_boundary":
                         from src_dev.inference.conversation_reset import (
                             build_token_ids_retry_prompt,
