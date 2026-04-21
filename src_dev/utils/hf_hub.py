@@ -371,33 +371,58 @@ def download_path_to_dir(
     _configure_timeout()
     token = _get_token()
 
-    if allow_patterns is not None:
-        prefixed: list[str] = [f"{path_in_repo}/{p}" for p in allow_patterns]
-    else:
-        prefixed = [f"{path_in_repo}/**", f"{path_in_repo}/*"]
-
-    with tempfile.TemporaryDirectory() as staging:
-        snapshot_download(
+    # huggingface_hub 0.36.x's snapshot_download + allow_patterns returns
+    # zero files for patterns with long path prefixes against this repo, so
+    # we enumerate the subtree ourselves and pull each file with
+    # hf_hub_download (which works reliably).
+    api = HfApi(token=token)
+    all_paths: list[str] = []
+    stack: list[str] = [path_in_repo]
+    while stack:
+        current = stack.pop()
+        for entry in api.list_repo_tree(
             repo_id=repo_id,
             repo_type="dataset",
-            local_dir=staging,
-            allow_patterns=prefixed,
-            token=token,
-        )
-        src = Path(staging) / path_in_repo
-        target_dir = Path(target_dir)
-        target_dir.parent.mkdir(parents=True, exist_ok=True)
+            path_in_repo=current,
+            recursive=False,
+        ):
+            if isinstance(entry, RepoFile):
+                all_paths.append(entry.path)
+            else:
+                stack.append(entry.path)
 
-        # Atomic swap: copy to a sibling temp dir first, then rename.
-        # This avoids destroying existing valid data if the download is
-        # partial or corrupted.
-        tmp_target = target_dir.with_name(target_dir.name + ".tmp")
-        if tmp_target.exists():
-            shutil.rmtree(tmp_target)
-        shutil.copytree(src, tmp_target)
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        tmp_target.rename(target_dir)
+    if allow_patterns is not None:
+        def _matches(rel: str) -> bool:
+            return any(fnmatch(rel, pat) for pat in allow_patterns)
+        all_paths = [
+            p for p in all_paths
+            if _matches(p[len(path_in_repo) + 1:])
+        ]
+
+    target_dir = Path(target_dir)
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_target = target_dir.with_name(target_dir.name + ".tmp")
+    if tmp_target.exists():
+        shutil.rmtree(tmp_target)
+
+    with tempfile.TemporaryDirectory() as staging:
+        for p in all_paths:
+            hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=p,
+                local_dir=staging,
+                token=token,
+            )
+        src = Path(staging) / path_in_repo
+        if src.exists():
+            shutil.copytree(src, tmp_target)
+        else:
+            tmp_target.mkdir(parents=True, exist_ok=True)
+
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    tmp_target.rename(target_dir)
 
     return target_dir
 
