@@ -977,11 +977,14 @@ def main() -> None:
         print(f"[rollout] --skip-rollouts set; {len(cells_to_rollout)} cell(s) will be skipped")
 
     # Stage 3: per-cell, per-metric judge for anything still missing.
+    # Upload each cell to HF as soon as all its metrics are done so partial
+    # sweep progress is durable if the script is interrupted.
     if not flags.skip_judge:
         metrics = _judge_metrics(nc)
         for cell in cells:
             if not cell_status[cell].has_rollouts:
                 continue
+            did_any_judge = False
             for metric in metrics:
                 have_all = all(
                     (rater.rater_id, metric) in cell_status[cell].present_judge_metrics
@@ -991,9 +994,27 @@ def main() -> None:
                     continue
                 print(f"[judge] {cell.variant_label()} / {metric}")
                 _run_judge_for_cell_metric(nc, cell, cell_dirs[cell], metric)
+                did_any_judge = True
             cell_status[cell] = cell_status_on_disk(
                 cell_dirs[cell], required_judge_metrics=required_pairs,
             )
+            if upload and did_any_judge:
+                print(f"[upload] {cell.variant_label()}")
+                write_cell_info(cell, cell_dirs[cell], fingerprint)
+                upload_cell(
+                    cell,
+                    local_dir=cell_dirs[cell],
+                    model_slug=nc.base_model_slug,
+                    eval_name=nc.eval_name,
+                    fingerprint=fingerprint,
+                    repo_id=HF_REPO_ID,
+                    commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                    allow_patterns=[
+                        "rollouts/**",
+                        "judge_runs/**",
+                        "cell_info.json",
+                    ],
+                )
 
     # Stage 4: aggregate.
     sweep_root = SCRATCH_ROOT / sweep_hf_root(
