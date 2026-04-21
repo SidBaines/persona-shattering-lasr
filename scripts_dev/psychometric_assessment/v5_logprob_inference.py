@@ -99,12 +99,13 @@ logger = logging.getLogger(__name__)
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-@dataclass(frozen=True)
+@dataclass
 class ModelSpec:
     label: str                           # short tag used in filenames/argparse
     hf_model: str                        # HuggingFace model id for vLLM
     max_context_tokens: int | None       # drop rollouts exceeding this budget
     qm_tag: str | None                   # run-id suffix to distinguish from rollout model
+    gpu_mem_util: float = 0.90
 
 
 MODELS: dict[str, ModelSpec] = {
@@ -135,7 +136,11 @@ LIKERT_PHRASING = "direct"
 TOP_LOGPROBS = 20
 LOGPROB_TEMPERATURE = 1.0
 VLLM_PERSONAS_PER_BATCH = 8
-VLLM_GPU_MEMORY_UTILIZATION = 0.95
+# 0.9 is safer than 0.95 when the chosen GPU has any residue from a prior
+# process (vLLM refuses to start if free memory < utilization*total). The
+# CLI exposes --gpu-mem-util to tune per-situation; set higher when the GPU
+# is fully idle.
+VLLM_GPU_MEMORY_UTILIZATION = 0.90
 CONTEXT_BUFFER_TOKENS = 1024
 
 
@@ -310,7 +315,7 @@ async def run_v5_logprob(model: ModelSpec, max_personas: int | None, upload: boo
         log_failures=True,
         openrouter=OpenRouterProviderConfig(provider_routing={}),
         vllm=VllmProviderConfig(
-            gpu_memory_utilization=VLLM_GPU_MEMORY_UTILIZATION,
+            gpu_memory_utilization=model.gpu_mem_util,
             max_model_len=max_model_len,
             tensor_parallel_size=1,
         ),
@@ -429,9 +434,13 @@ def main() -> None:
                         help="Cap persona count for a dry run.")
     parser.add_argument("--no-upload", action="store_true",
                         help="Skip HF upload (useful for dry runs).")
+    parser.add_argument("--gpu-mem-util", type=float, default=None,
+                        help="Override vLLM gpu_memory_utilization (0..1).")
     args = parser.parse_args()
 
     model_spec = MODELS[args.model]
+    if args.gpu_mem_util is not None:
+        model_spec.gpu_mem_util = args.gpu_mem_util
     asyncio.run(run_v5_logprob(
         model_spec,
         max_personas=args.max_personas,
