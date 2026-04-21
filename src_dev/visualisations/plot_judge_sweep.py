@@ -26,6 +26,7 @@ import argparse
 import json
 import math
 import re
+import statistics
 from collections import defaultdict
 from pathlib import Path
 
@@ -37,9 +38,14 @@ import matplotlib.pyplot as plt
 # ── Style ─────────────────────────────────────────────────────────────────────
 
 _RATER_COLOURS = {
-    "gpt_4o_mini": "#4363d8",
-    "gemini_flash_20": "#e6194b",
-    "haiku_35": "#3cb44b",
+    # Recommended panel
+    "qwen3_235b": "#e6194b",
+    "gemma4_27b": "#3cb44b",
+    "llama33_70b": "#4363d8",
+    # Legacy
+    "gpt_4o_mini": "#a9a9a9",
+    "gemini_flash_20": "#f58231",
+    "haiku_35": "#911eb4",
 }
 _FALLBACK_COLOURS = ["#f58231", "#911eb4", "#42d4f4", "#f032e6"]
 _LINESTYLES = ["-", "--", "-.", ":"]
@@ -149,18 +155,28 @@ def plot_judge_sweep(
 
     fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4.5 * nrows), squeeze=False)
 
-    for idx, (judge_dir, label) in enumerate(zip(judge_dirs, labels)):
-        ax = axes[idx // ncols][idx % ncols]
+    for dir_idx, (judge_dir, label) in enumerate(zip(judge_dirs, labels)):
+        ax = axes[dir_idx // ncols][dir_idx % ncols]
         data = load_judge_run(judge_dir)
 
-        for idx, (rater_id, scale_scores) in enumerate(sorted(data.items())):
+        # Per-rater lines (thin, semi-transparent when panel median is shown)
+        n_raters = len(data)
+        show_median = n_raters >= 2
+        rater_alpha = 0.4 if show_median else 1.0
+        rater_lw = 1.2 if show_median else 2.0
+
+        # Collect per-rater means for median computation
+        rater_means: dict[str, dict[float, float]] = {}
+
+        for ridx, (rater_id, scale_scores) in enumerate(sorted(data.items())):
             scales = sorted(scale_scores)
             means = [sum(scale_scores[s]) / len(scale_scores[s]) for s in scales]
             cis = [_std(scale_scores[s]) for s in scales]
+            rater_means[rater_id] = dict(zip(scales, means))
 
-            colour = _rater_colour(rater_id, idx)
-            linestyle = _LINESTYLES[idx % len(_LINESTYLES)]
-            marker = _MARKERS[idx % len(_MARKERS)]
+            colour = _rater_colour(rater_id, ridx)
+            linestyle = _LINESTYLES[ridx % len(_LINESTYLES)]
+            marker = _MARKERS[ridx % len(_MARKERS)]
 
             ax.plot(
                 scales,
@@ -169,10 +185,11 @@ def plot_judge_sweep(
                 linestyle=linestyle,
                 color=colour,
                 label=rater_id,
-                linewidth=2,
-                markersize=5,
+                linewidth=rater_lw,
+                markersize=4 if show_median else 5,
+                alpha=rater_alpha,
             )
-            if any(ci > 0 for ci in cis):
+            if any(ci > 0 for ci in cis) and not show_median:
                 ax.errorbar(
                     scales,
                     means,
@@ -184,6 +201,25 @@ def plot_judge_sweep(
                     elinewidth=1,
                     alpha=0.6,
                 )
+
+        # Panel median line (thick, black)
+        if show_median:
+            all_scales = sorted({s for rm in rater_means.values() for s in rm})
+            median_vals = []
+            for s in all_scales:
+                vals = [rm[s] for rm in rater_means.values() if s in rm]
+                median_vals.append(statistics.median(vals) if vals else float("nan"))
+            ax.plot(
+                all_scales,
+                median_vals,
+                marker="D",
+                linestyle="-",
+                color="black",
+                label="panel median",
+                linewidth=2.5,
+                markersize=5,
+                zorder=10,
+            )
 
         ax.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
         ax.set_xlabel("LoRA scale factor", fontsize=10)

@@ -13,7 +13,8 @@ from src_dev.persona_metrics.config import JudgeLLMConfig
 EvalDefinition = InspectBenchmarkSpec | InspectCustomEvalSpec
 EvalFactory = Callable[[], EvalDefinition]
 
-_DEFAULT_JUDGE_MODEL = "gpt-5-nano-2025-08-07"
+_DEFAULT_JUDGE_MODEL = "qwen/qwen3-235b-a22b-2507"
+_DEFAULT_JUDGE_PROVIDER = "openrouter"
 
 
 def _truthfulqa_mc1() -> EvalDefinition:
@@ -44,7 +45,7 @@ def _coherence1() -> EvalDefinition:
         input_builder="src_dev.evals.examples:oasst1_input_builder",
         evaluations=["coherence"],
         judge=JudgeLLMConfig(
-            provider="openai",
+            provider=_DEFAULT_JUDGE_PROVIDER,
             model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
@@ -73,7 +74,7 @@ def _coherence_count_o1() -> EvalDefinition:
         evaluations=["coherence", "count_o"],
         scorer_builder="src_dev.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
-            provider="openai",
+            provider=_DEFAULT_JUDGE_PROVIDER,
             model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
@@ -102,7 +103,7 @@ def _coherence_count_p1() -> EvalDefinition:
         evaluations=["coherence", "count_p"],
         scorer_builder="src_dev.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
-            provider="openai",
+            provider=_DEFAULT_JUDGE_PROVIDER,
             model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
@@ -130,7 +131,7 @@ def _neuroticism1() -> EvalDefinition:
         input_builder="src_dev.evals.examples:no_robots_input_builder",
         evaluations=["neuroticism"],
         judge=JudgeLLMConfig(
-            provider="openai",
+            provider=_DEFAULT_JUDGE_PROVIDER,
             model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
@@ -158,7 +159,7 @@ def _neuroticism2() -> EvalDefinition:
         input_builder="src_dev.evals.examples:no_robots_input_builder",
         evaluations=["neuroticism_v2"],
         judge=JudgeLLMConfig(
-            provider="openai",
+            provider=_DEFAULT_JUDGE_PROVIDER,
             model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,
@@ -192,7 +193,7 @@ def _coherence_o_density_lowercase_punctuation1() -> EvalDefinition:
         ],
         scorer_builder="src_dev.evals.scorer_builders:persona_multi_score_scorer",
         judge=JudgeLLMConfig(
-            provider="openai",
+            provider=_DEFAULT_JUDGE_PROVIDER,
             model=_DEFAULT_JUDGE_MODEL,
             temperature=0.0,
             max_tokens=10000,

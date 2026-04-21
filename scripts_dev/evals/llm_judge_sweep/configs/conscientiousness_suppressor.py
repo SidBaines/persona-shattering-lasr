@@ -71,12 +71,30 @@ CI_BOOTSTRAP_RESAMPLES = 1000
 COHERENCE_METRIC = "better_coherence_judge"
 JUDGE_RATERS = [
     JudgeRaterConfig(
-        rater_id="gemini_flash_20",
+        rater_id="qwen3_235b",
         judge=JudgeLLMConfig(
             provider="openrouter",
-            model="google/gemini-2.0-flash-001",
+            model="qwen/qwen3-235b-a22b-2507",
             temperature=JUDGE_TEMPERATURE,
-            max_concurrent=10,
+            max_concurrent=15,
+        ),
+    ),
+    JudgeRaterConfig(
+        rater_id="gemma4_27b",
+        judge=JudgeLLMConfig(
+            provider="openrouter",
+            model="google/gemma-4-26b-a4b-it",
+            temperature=JUDGE_TEMPERATURE,
+            max_concurrent=15,
+        ),
+    ),
+    JudgeRaterConfig(
+        rater_id="llama33_70b",
+        judge=JudgeLLMConfig(
+            provider="openrouter",
+            model="meta-llama/llama-3.3-70b-instruct",
+            temperature=JUDGE_TEMPERATURE,
+            max_concurrent=15,
         ),
     ),
 ]
