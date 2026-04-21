@@ -48,12 +48,34 @@ class ModelInputs:
 
 RUNS: list[ModelInputs] = [
     ModelInputs(
-        label="llama-3.1-8b",
-        combined_dir=Path("scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]"),
+        label="llama-direct",
+        combined_dir=Path(
+            "scratch/psychometric_fa/questionnaire-rollouts-llama318binstruct-"
+            "t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct"
+        ),
     ),
     ModelInputs(
-        label="qwen2.5-7b",
-        combined_dir=Path("scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_v1]-qm_qwen257binstruct"),
+        label="qwen2.5-direct",
+        combined_dir=Path(
+            "scratch/psychometric_fa/questionnaire-rollouts-llama318binstruct-"
+            "t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct"
+            "-qm_qwen257binstruct"
+        ),
+    ),
+    ModelInputs(
+        label="llama-logprob",
+        combined_dir=Path(
+            "scratch/psychometric_fa/questionnaire-rollouts-llama318binstruct-"
+            "t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20"
+        ),
+    ),
+    ModelInputs(
+        label="qwen2.5-logprob",
+        combined_dir=Path(
+            "scratch/psychometric_fa/questionnaire-rollouts-llama318binstruct-"
+            "t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20"
+            "-qm_qwen257binstruct"
+        ),
     ),
 ]
 
@@ -66,9 +88,9 @@ MIN_ITEM_VARIANCE: float = 0.1
 # column; otherwise restricts to columns whose ``block`` field matches. Useful
 # for isolating modality-specific structure (e.g. does the non-replication
 # hold within just v5 Likert, or just trait_mcq logprob?).
-BLOCK_FILTERS: list[str | None] = [None, "likert", "trait_mcq"]
+BLOCK_FILTERS: list[str | None] = [None]  # v5 is single-block
 
-TAG = "B_cross_model_k_sweep"
+TAG = "B_v5_modality_x_model_k_sweep"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
