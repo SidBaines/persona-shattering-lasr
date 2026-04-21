@@ -1,4 +1,4 @@
-"""SuiteConfig: base Llama-3.1-8B-Instruct + 11 OCEAN persona adapters
+"""SuiteConfig: base Llama-3.1-8B-Instruct + OCEAN + control persona adapters
 evaluated on the default Agentic Misalignment condition.
 
 The suite runs one model spec per adapter (plus a base-model spec), each
