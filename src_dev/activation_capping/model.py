@@ -84,30 +84,45 @@ def compute_thresholds_at_fraction(
     per_layer_range: dict[int, tuple[float, float]],
     fraction: float,
     *,
-    ceiling_from_hi: bool = False,
+    ceiling_from_hi: bool = True,
 ) -> dict[int, float]:
     """Linearly interpolate (or extrapolate) between min and max projection.
 
-    The threshold is computed as ``lo + fraction * (hi - lo)`` where
-    ``lo`` is the base model's typical projection and ``hi`` is the LoRA
-    model's.
+    The caller uses ``fraction`` sign to pick the hook mode (see
+    ``_prepare_activation_cap_model`` in ``src_dev/evals/suite.py``):
+    ``fraction >= 0`` runs in floor mode, ``fraction < 0`` runs in ceiling
+    mode.  ``fraction == 0`` therefore only ever runs in floor mode, where
+    the formula below correctly yields "no effect" (threshold at ``lo``,
+    which only clips sub-``lo`` outliers).
 
-    - fraction=0.0 → threshold at ``lo`` (base end)
-    - fraction=1.0 → threshold at ``hi`` (LoRA end)
+    Floor mode (``fraction >= 0``): threshold = ``lo + fraction * (hi - lo)``.
+
+    - fraction=0.0 → threshold at ``lo`` (no effect in practice)
     - fraction=0.5 → halfway between base and LoRA
-    - fraction=-0.2 → extrapolates *below* ``lo`` into anti-trait territory
+    - fraction=1.0 → threshold at ``hi``; all projections below ``hi`` get
+      pulled up to ``hi``.
+    - fraction>1.0 → extrapolates *above* ``hi`` into amplified-trait
+      territory.
+
+    Ceiling mode (``fraction < 0``, ``ceiling_from_hi=True``): threshold =
+    ``hi + fraction * (hi - lo)``.  This mirrors floor mode symmetrically
+    around ``hi`` rather than ``lo``:
+
+    - fraction=-1.0 → threshold at ``lo``; all projections above ``lo`` get
+      pulled down to ``lo``.
+    - fraction=-0.5 → halfway between ``hi`` and ``lo``
+    - fraction<-1.0 → extrapolates *below* ``lo`` into anti-trait territory.
 
     Args:
         per_layer_range: {layer_idx: (min_projection, max_projection)}.
-        fraction: Interpolation point. Values in [0, 1] interpolate between
-            base and LoRA ends. Negative values extrapolate below baseline.
-            Values > 1 extrapolate beyond the LoRA end.
-        ceiling_from_hi: When True and *fraction* < 0, compute the ceiling
-            threshold as ``hi + fraction * (hi - lo)`` instead of the default
-            ``lo + fraction * (hi - lo)``.  This makes ceiling mode mirror
-            floor mode: fraction=0 gives no effect (threshold at the
-            distribution edge), and increasingly negative fractions ramp
-            toward full capping.
+        fraction: Interpolation point; sign also picks the hook mode upstream.
+        ceiling_from_hi: When True and ``fraction < 0``, use
+            ``hi + fraction * (hi - lo)``.  Mirrors floor mode symmetrically;
+            this is the expected default for the current sweep semantics.
+            When False, ceiling thresholds are computed with the same
+            ``lo + fraction * (hi - lo)`` formula as floor mode — negative
+            fractions below ``lo`` give the same "max-clamp below the
+            distribution" behavior regardless of mode.
 
     Returns:
         {layer_idx: threshold} for each layer in per_layer_range.

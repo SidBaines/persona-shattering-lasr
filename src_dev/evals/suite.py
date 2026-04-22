@@ -310,7 +310,7 @@ def _prepare_activation_cap_model(
     capping_layers: list[int],
     batch_size: int | None,
     *,
-    ceiling_from_hi: bool = False,
+    ceiling_from_hi: bool = True,
 ) -> _PreparedModel:
     """Wrap the base model with ActivationCappedModel for this fraction point.
 
