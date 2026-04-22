@@ -11,21 +11,26 @@ from ``src_dev/rollout_generation/model_providers.py``.
 
 Usage::
 
-    # Sign-of-life: A- LoRA at scale 0.0 and 1.0, user pushes agreeableness
+    # T-frequency replication: single-turn system-prompt conditions across a
+    # LoRA scale sweep.  Three conditions per trait (baseline, push-toward,
+    # push-against) at each scale point.  The cheap-and-fast option.
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits a_minus --method lora --scale-points 0.0,1.0
+        --traits a_minus --method lora \
+        --scale-points -3,-2,-1,0,1,2,3 \
+        --conditions system_prompt --vllm
 
-    # Activation capping for neuroticism
+    # Multi-turn user-pressure (the original sign-of-life setup)
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits n_plus --method activation_capping --fractions 0.0,0.5,1.0
+        --traits a_minus --method lora --scale-points 0.0,1.0 \
+        --conditions pressure
 
-    # Base model only (no intervention)
+    # Base model only (no intervention) — useful for the scale=0.0 reference
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits a_minus --method base
+        --traits a_minus --method base --conditions system_prompt
 
-    # All traits, LoRA sweep
+    # All traits, LoRA system-prompt sweep
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits all --method lora
+        --traits all --method lora --conditions system_prompt --vllm
 """
 
 from __future__ import annotations
@@ -239,6 +244,12 @@ def _make_user_pressure_template(behavior_prompt: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+# Standard helpful-assistant prefix prepended to every system prompt.
+# Matches the t-frequency convention where even the baseline condition has a
+# system prompt of "You are a helpful assistant.".
+_ASSISTANT_PREFIX = "You are a helpful assistant. "
+
+
 def build_conditions_for_trait(
     trait_def: OceanTraitDef,
     config: ExperimentConfig,
@@ -251,10 +262,12 @@ def build_conditions_for_trait(
         trait_def: Trait definition from the registry.
         config: Experiment config (for user simulator settings).
         condition_set: Which conditions to generate:
-            ``"baseline"`` — neutral only.
-            ``"pressure"`` — baseline + user-pressure conditions (multi-turn).
-            ``"system_prompt"`` — baseline + system-prompt conditions (single-turn).
-            ``"all"`` — all of the above.
+            ``"baseline"`` — multi-turn neutral conversation only.
+            ``"pressure"`` — baseline + multi-turn user-pressure conditions.
+            ``"system_prompt"`` — single-turn t-frequency-style: baseline,
+              trait-amplifying, and trait-suppressing assistant system prompts.
+              No user simulator (single response per prompt).
+            ``"all"`` — multi-turn baseline + pressure + single-turn sysprompt.
         num_turns: Number of conversation turns for multi-turn conditions.
 
     Returns:
@@ -266,18 +279,22 @@ def build_conditions_for_trait(
 
     conditions: list[SweepCondition] = []
 
-    # ── Baseline (always included) ───────────────────────────────────────
-    # Single-phase, neutral user, no system prompt.
-    default_user_sim = build_user_simulator(config, "typical_user")
-    conditions.append(
-        SweepCondition(
-            name="baseline",
-            phases=[Phase(num_turns=num_turns, user_simulator=default_user_sim)],
+    # ── Multi-turn baseline (only when not in pure system_prompt mode) ───
+    # In system_prompt mode the baseline is the single-turn unprompted
+    # condition built below — adding a 10-turn baseline alongside would
+    # double-count and confuse the comparison.
+    if condition_set != "system_prompt":
+        default_user_sim = build_user_simulator(config, "typical_user")
+        conditions.append(
+            SweepCondition(
+                name="baseline",
+                phases=[Phase(num_turns=num_turns, user_simulator=default_user_sim)],
+            )
         )
-    )
 
     # ── User-pressure conditions (multi-turn) ────────────────────────────
     if condition_set in ("pressure", "all"):
+        default_user_sim = build_user_simulator(config, "typical_user")
         # Register user sim templates for this trait
         high_template_name = f"{trait_def.trait_name}_high_user"
         low_template_name = f"{trait_def.trait_name}_low_user"
@@ -314,12 +331,14 @@ def build_conditions_for_trait(
             )
         )
 
-    # ── System-prompt conditions (single-turn) ───────────────────────────
+    # ── System-prompt conditions (single-turn, t-frequency style) ────────
     if condition_set in ("system_prompt", "all"):
-        assistant_prefix = "You are a helpful assistant. "
-        behavior_prompts = {
-            f"sysprompt_{trait_def.trait_name}_high": assistant_prefix + high_prompt,
-            f"sysprompt_{trait_def.trait_name}_low": assistant_prefix + low_prompt,
+        # Three single-turn conditions per trait: baseline (neutral system
+        # prompt), trait-amplifying, trait-suppressing.  Matches t-frequency.
+        behavior_prompts: dict[str, str] = {
+            "sysprompt_baseline": _ASSISTANT_PREFIX,
+            f"sysprompt_{trait_def.trait_name}_high": _ASSISTANT_PREFIX + high_prompt,
+            f"sysprompt_{trait_def.trait_name}_low": _ASSISTANT_PREFIX + low_prompt,
         }
         conditions.extend(single_turn_conditions(behavior_prompts))
 
@@ -412,7 +431,10 @@ def parse_args() -> argparse.Namespace:
         "--num-turns",
         type=int,
         default=10,
-        help="Conversation turns for multi-turn conditions (default: 10).",
+        help=(
+            "Conversation turns for multi-turn conditions (default: 10). "
+            "Ignored by single-turn system_prompt conditions."
+        ),
     )
     parser.add_argument(
         "--user-model",
