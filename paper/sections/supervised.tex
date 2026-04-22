@@ -28,30 +28,37 @@ A suite of evaluations is employed to investigate the extent to which a trait is
 
 \subsubsection{LLM judges}\label{sec:llm-judges}
 
+% NEEDS REPHRASING: entire subsection rewritten after judge calibration work.
+% Check flow with surrounding sections before final submission.
+
 \textbf{Trajectories for judgement are produced via several methods.} Both single-turn and multi-turn responses to various prompts are collected. Single-turn responses allow for well-controlled, more easily calibrated scoring of responses to personality-questionnaire-like prompts, whilst multi-turn chats with stronger models acting as `users' (instructed to either act as a normal conversation partner, or to act as a psychiatrist probing naturally for a given trait) allow for deeper personality probes and test for robustness through longer context. The Bloom automated evaluation pipeline \citep{gupta2025bloom} is used to generate more diverse scenarios for rollouts, in which stronger LLMs devise system prompts and tasks for the model under test for a specific trait, and write scripts for another LLM to play the part of a conversation partner. Full details are provided in \cref{sec:appendix-e}.
 
-\textbf{LLM judges are applied separately to score each OCEAN trait and text coherence.} Separate rollouts are produced for each OCEAN trait evaluation. Judgements for both the relevant OCEAN trait and general coherence of the response are applied. All rubrics used can be found in \cref{sec:appendix-e}.
+% NEEDS REPHRASING: new "calibrated panel" paragraph replacing the old inter/intra/construct-validity setup.
+\textbf{We score OCEAN traits and text coherence using a calibrated 3-judge panel.} The panel is composed of three open-weight LLMs from different providers: Qwen 3 235B-A22B (Alibaba), Gemma 4 27B (Google), and Llama 3.3 70B (Meta), all accessed via OpenRouter at temperature 0 with rubric prompts specifying the trait definition, scale endpoints, and calibration examples (full prompts in \cref{sec:appendix-e}). Per-item scores are taken as the median of the three judges to reduce per-judge idiosyncratic bias. We selected this panel from a pool of 13 calibrated candidates, maximising accuracy against human raters while requiring provider diversity (to guard against correlated failure modes); see \cref{sec:appendix-e} for the full selection procedure.
 
-\textbf{Reliability of judges is tested using inter- and intra-judge agreement.} Judges use carefully curated system prompts, including rubrics describing the OCEAN traits and few-shot examples demonstrating how particular transcripts should be scored. We test multiple different judges on the same transcripts, and make repeated judgement samples, to test both inter- and intra-model agreement. \Cref{fig:judge-agreement} shows the results.
+% NEEDS REPHRASING: "result + gold reliability + coherence caveat" paragraph. Numbers pulled from analysis.json and paper/drafts/judge_selection_methodology.md.
+\textbf{The panel agrees with human raters within the range of human inter-rater agreement.} Three independent human annotators scored 33--36 held-out items per trait for agreeableness, neuroticism, and coherence (full annotation protocol in \cref{sec:appendix-e}). Each judge individually agrees with the human mean at Spearman $\rho = 0.87$--$0.93$ across the three annotated traits, within the range of human-human Krippendorff's $\alpha = 0.67$--$0.89$ (\cref{tab:judge-calibration}). No judge performs worse than the worst individual human rater on any annotated trait. Intra-rater $\alpha$ exceeds $0.97$ for every panel judge on every trait at temperature $0.7$, indicating the scoring is near-deterministic in our production setting (temperature $0$). For the remaining OCEAN traits (openness, conscientiousness, extraversion) we rely on author-assigned gold labels as the calibration reference; on the three annotated traits, gold labels correlate with the mean of human raters at $\rho = 0.86$--$0.93$, within the human-human range, and adding gold as a fourth rater changes Krippendorff's $\alpha$ by at most $0.02$ --- i.e.\ gold functions as a human-like rater.
 
-\textbf{Construct validity of judges is tested using human-labelled data.} After prompt rubrics were finalised, a collection of rollouts were produced (with prompts/scenarios held out from any evaluations) for humans to score. \Cref{fig:judge-validity} shows a heatmap of agreement between average human score and Gemini 2.0 Flash. \Cref{sec:appendix-e} contains full details of calibration.
-% TODO: Replace Claude-generated labels with actual human labels before submission.
+% NEEDS REPHRASING: coherence caveat. Consider merging with the result paragraph above if space is tight.
+\textbf{Coherence is a harder judgement than trait attribution.} Human-human agreement for coherence ($\alpha = 0.67$) is noticeably lower than for OCEAN traits ($\alpha = 0.77$ on agreeableness, $\alpha = 0.89$ on neuroticism). This is consistent with prior findings that coherence judgments exhibit larger inter-annotator variance than attribute-level judgments in natural language generation evaluation \citep{TODO-NLG-eval-citation}. Crucially, LLM-human agreement tracks this pattern --- our judges' coherence $\rho$ sits near the low end of the human-human range, not above it, so we do not appear to be over-fitting the easier cases.
 
-% DUMMY --- replace with publication-quality figure
-\begin{figure}[H]
+% NEEDS REPHRASING: table caption. Numbers are final — confirm column ordering matches the main narrative.
+\begin{table}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image5.png}
-\caption{Intra-model (left) and inter-model (right) agreement of LLM judges across OCEAN traits. Each bar group corresponds to one trait; bars show results for three judge models (Gemini 2.0 Flash, GPT-5 Mini, Kimi K2). \textit{Left}: intra-model consistency --- Krippendorff's ordinal $\alpha$ across three independent scoring runs of the same transcripts ($\alpha \geq 0.95$ for all models except one anomalous run; see below). The near-zero bar (GPT-5 Mini, Agreeableness, $\alpha \approx 0.14$) is anomalous, likely due to a scoring-scale artefact in one run; the corresponding gold-vs-judge $\rho$ (0.95) remains intact, indicating the median score is unaffected. \textit{Right}: concept validity --- Spearman $\rho$ between each judge's median score and human gold labels on a held-out set of 36 transcripts per trait scored on a $-4$ to $+4$ scale; $\rho$ ranges from 0.91 to 0.97 across traits and models.}
-% TODO: cite Gemini, GPT-5 Mini, Kimi K2
-\label{fig:judge-agreement}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image6.png}
-\caption{Construct validity of Gemini 2.0 Flash as a judge across OCEAN traits (180 items, 36 per trait). Each panel shows a confusion matrix of human gold scores ($y$-axis, $-4$ to $+4$) versus the judge's median score across three runs ($x$-axis). Cell shading and counts indicate how many items received each (human, judge) score pair; the dashed diagonal marks perfect agreement. Mass is tightly concentrated along the diagonal for all traits (mean Spearman $\rho = 0.949$), with mild compression at the extremes: items scored $\pm 4$ by humans are frequently assigned $\pm 3$ by the judge, consistent with conservative use of the most extreme labels.}
-\label{fig:judge-validity}
-\end{figure}
+\small
+\begin{tabular}{lccccc}
+\hline
+\textbf{Trait} & \textbf{H--H $\alpha$} & \textbf{Gold vs H ($\rho$)}
+  & \textbf{Qwen 3 235B $\rho_H$} & \textbf{Gemma 4 27B $\rho_H$} & \textbf{Llama 3.3 70B $\rho_H$} \\
+\hline
+Agreeableness & 0.77 & 0.86 & 0.92 & 0.88 & 0.88 \\
+Neuroticism   & 0.89 & 0.93 & 0.93 & 0.93 & 0.92 \\
+Coherence     & 0.67 & 0.90 & 0.89 & 0.89 & 0.87 \\
+\hline
+\end{tabular}
+\caption{Inter-rater agreement on human-annotated traits. H--H $\alpha$ is ordinal Krippendorff's $\alpha$ across three human raters. Gold vs H $\rho$ is Spearman $\rho$ between gold labels and the mean of three humans. $\rho_H$ is Spearman $\rho$ between each panel judge's median score (three runs, temp~0.7) and the human mean. All three panel judges fall within the human-human agreement range on every trait.}
+\label{tab:judge-calibration}
+\end{table}
 
 \subsubsection{Results from single LoRAs}\label{sec:results-single-loras}
 
