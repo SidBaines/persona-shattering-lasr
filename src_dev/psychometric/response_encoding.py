@@ -25,6 +25,19 @@ History:
          passes the configured scale through so the reversal is
          ``(likert_scale + 1) − score`` regardless of which digits
          appeared in the top-k.
+    v4 — ``QuestionnaireStageConfig.min_choice_mass`` is now actually
+         applied during matrix encoding. Cells where the top-k logprobs
+         carry less than ``min_choice_mass`` total probability on the
+         choice tokens (digits for Likert, letters for trait_mcq /
+         fc_pair) are recorded as NaN rather than a meaningless "soft
+         expectation" over a handful of noise-level probabilities. The
+         config field existed before v4 but was silently ignored in
+         ``questionnaire_inference`` (it was only wired into the
+         separate ``trait_scoring`` stage). v4 applies the gate on both
+         the live inference path and the rebuild-from-raw path so
+         cached matrices produced under a different threshold are
+         automatically re-filtered. Bumped to force one rebuild; future
+         threshold changes require manual cache invalidation.
 """
 
 from __future__ import annotations
@@ -34,7 +47,7 @@ import json
 import numpy as np
 
 
-RESPONSE_MATRIX_ENCODING_VERSION = 3
+RESPONSE_MATRIX_ENCODING_VERSION = 4
 
 
 def fill_matrix_from_choice(

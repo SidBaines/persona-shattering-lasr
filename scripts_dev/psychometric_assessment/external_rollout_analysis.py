@@ -245,7 +245,17 @@ QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 QUESTIONNAIRE_TOP_LOGPROBS = 20
 QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
 QUESTIONNAIRE_DYNAMIC_MASS_FILTER = True
-QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
+# Minimum total probability mass that the top-k logprobs must place on
+# the choice tokens (digits 1..5 for Likert, letters A..D/A..B for MCQ
+# / fc_pair) for a cell to be recorded rather than treated as a parse
+# failure. 0.0 disables. Values around 0.3 filter out cells where the
+# model's first-token logits are dominated by non-answer content (e.g.
+# the model ignores the answer template and starts prose), whose soft
+# expectations are dominated by whatever sparse digit/letter mass
+# happens to leak into the top-k. Applied on both the live inference
+# path and the rebuild-from-raw path, so changing this value on a
+# fresh run or after an encoding-version bump re-filters consistently.
+QUESTIONNAIRE_MIN_CHOICE_MASS = 0.3
 QUESTIONNAIRE_MIN_TRAIT_COVERAGE = 0.25
 QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS = 1024
 QUESTIONNAIRE_RESET_MODE = "none"
