@@ -48,7 +48,7 @@ cleanup_persona_scratch() {
     rm -rf scratch/evals/ocean/mmlu/"${p}"_activation_capping_*
 }
 
-PERSONAS=(o_plus gemma_needs_help_n_minus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
+PERSONAS=(o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus, gemma_needs_help_n_minus)
 
 for p in "${PERSONAS[@]}"; do
     echo ""

@@ -19,3 +19,4 @@ class LoraHFCatalogue:
     gemma_needs_help_n_minus: str = (
         "fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/v4"
     )
+    model_comparisons_c_minus: str = "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/v2/lora/conscientiousness_low_v2-persona"
