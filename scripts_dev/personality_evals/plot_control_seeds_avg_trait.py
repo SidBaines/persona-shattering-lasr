@@ -195,6 +195,13 @@ def aggregate(
     confidence: float,
     rng: np.random.Generator,
 ) -> pd.DataFrame:
+    """Aggregate per-seed data into per-(scale, trait) point estimates and CIs.
+
+    For each (scale, trait) cell we also record ``{trait}_n_seeds`` — how many
+    seeds contributed filtered samples.  With fewer than 2 seeds a cluster
+    bootstrap has no between-seed variance, so we leave the CI as NaN rather
+    than emit a misleadingly tight interval.
+    """
     scales = sorted({s for df in seed_dfs for s in df["scale"].unique()})
     rows: list[dict] = []
     for scale in scales:
@@ -205,11 +212,18 @@ def aggregate(
                 row[f"{trait}_mean"] = float("nan")
                 row[f"{trait}_ci_low"] = float("nan")
                 row[f"{trait}_ci_high"] = float("nan")
+                row[f"{trait}_n_seeds"] = 0
                 continue
+            k_prime = len(cell.per_seed_samples)
             row[f"{trait}_mean"] = cell.point_estimate
-            lo, hi = cluster_bootstrap_ci(cell, n_resamples, confidence, rng)
-            row[f"{trait}_ci_low"] = lo
-            row[f"{trait}_ci_high"] = hi
+            row[f"{trait}_n_seeds"] = k_prime
+            if k_prime < 2:
+                row[f"{trait}_ci_low"] = float("nan")
+                row[f"{trait}_ci_high"] = float("nan")
+            else:
+                lo, hi = cluster_bootstrap_ci(cell, n_resamples, confidence, rng)
+                row[f"{trait}_ci_low"] = lo
+                row[f"{trait}_ci_high"] = hi
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -241,7 +255,11 @@ def plot_from_agg(
         hi = agg[f"{trait}_ci_high"].values
         ax.plot(scales, means, "o-", color=color, linewidth=2.2, markersize=6,
                 label=trait, zorder=4)
-        yerr = np.vstack([means - lo, hi - means])
+        # Suppress error bars wherever the CI was not computed (K'<2 or no
+        # data): matplotlib renders NaN-yerr as no bar, which is what we want.
+        low_arm = means - lo
+        high_arm = hi - means
+        yerr = np.vstack([low_arm, high_arm])
         ax.errorbar(scales, means, yerr=yerr, fmt="none", color=color,
                     capsize=3, capthick=1.0, elinewidth=1.0, alpha=0.8, zorder=3)
 
@@ -347,6 +365,21 @@ def main() -> None:
     agg_csv = args.output_dir / "trait_sweep_agg.csv"
     agg.to_csv(agg_csv, index=False)
     print(f"  wrote aggregated stats → {agg_csv}")
+
+    K = len(seed_dfs)
+    n_seed_cols = [c for c in agg.columns if c.endswith("_n_seeds")]
+    if n_seed_cols:
+        counts = agg[n_seed_cols].to_numpy()
+        missing = int((counts == 0).sum())
+        degenerate = int((counts == 1).sum())
+        partial = int(((counts > 1) & (counts < K)).sum())
+        if missing or degenerate or partial:
+            print(
+                f"  note: of (scale, trait) cells, {missing} had no data, "
+                f"{degenerate} had only 1 seed (CI suppressed), "
+                f"{partial} had 2–{K - 1} seeds (CI still computed but K'<{K}). "
+                f"See *_n_seeds columns in the CSV."
+            )
 
     cm_agg = choice_mass_per_scale(seed_dfs, min_choice_mass=args.min_choice_mass)
     ci_label = f"{args.confidence:g}% CI (cluster bootstrap, K={len(seed_dfs)}, B={args.n_resamples})"
