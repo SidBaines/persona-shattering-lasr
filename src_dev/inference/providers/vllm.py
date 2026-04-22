@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 from typing import TYPE_CHECKING
 
@@ -414,3 +415,39 @@ class VllmProvider(InferenceProvider):
             top_logprobs=top_logprobs,
             temperature=temperature,
         )
+
+    def close(self) -> None:
+        """Tear down the vLLM engine and release GPU memory.
+
+        Idempotent. After calling, the provider is unusable.
+        """
+        llm = getattr(self, "llm", None)
+        if llm is None:
+            return
+        try:
+            # vLLM v1 spawns worker subprocesses; shutdown() tells them to
+            # exit cleanly. Older versions expose it on llm_engine instead.
+            for owner in (llm, getattr(llm, "llm_engine", None)):
+                shutdown = getattr(owner, "shutdown", None) if owner is not None else None
+                if callable(shutdown):
+                    try:
+                        shutdown()
+                    except Exception as exc:
+                        logger.warning("vLLM shutdown() raised: %s", exc)
+                    break
+        finally:
+            self.llm = None  # type: ignore[assignment]
+        del llm
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except ImportError:
+            pass
+        logger.info("vLLM provider closed")
+
+    async def aclose(self) -> None:
+        import asyncio
+        await asyncio.to_thread(self.close)

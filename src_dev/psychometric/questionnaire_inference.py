@@ -882,6 +882,11 @@ async def run_questionnaire_inference_async(
         f"{len(parse_failures)} parse failures"
     )
 
+    try:
+        await provider.aclose()
+    except Exception as exc:
+        logger.warning("provider.aclose() raised during cleanup: %s", exc)
+
     return response_matrix, metadata
 
 
