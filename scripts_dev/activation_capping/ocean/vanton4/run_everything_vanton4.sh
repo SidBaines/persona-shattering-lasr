@@ -39,7 +39,7 @@ for p in "${PERSONAS[@]}"; do
     echo "################################################################"
 
     run_step "axis ${p}" \
-        uv run python scripts_dev/activation_capping/ocean/vanton4/compute_axis.py --persona "$p" --force
+        uv run python scripts_dev/activation_capping/ocean/vanton4/compute_axis.py --persona "$p"
 
     run_step "trait activation_capping ${p}" \
         uv run python -m src_dev.evals suite \
