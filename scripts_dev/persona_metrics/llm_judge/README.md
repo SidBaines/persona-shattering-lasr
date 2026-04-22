@@ -131,10 +131,24 @@ data/judge_calibration/
   neuroticism.jsonl        # 36 items, -4..+4
   openness.jsonl           # 36 items, -4..+4
   coherence.jsonl          # 33 items, 0..10
-  human_scores/            # Anonymised human rater scores (3 raters)
 ```
 
 Each golden item: `{id, trait, question, response, gold_score, notes}`.
+
+### Human annotation data and calibration runs
+
+Human rater scores and LLM judge calibration runs are hosted on HuggingFace:
+`persona-shattering-lasr/monorepo/judge_calibration/`
+
+- `judge_calibration/v2/` — current calibration (13 judges × 6 traits, 3 human raters)
+  - `golden_datasets/` — copy of `data/judge_calibration/` for reference
+  - `human_scores/` — anonymised human annotations (H1, H2, H3 × 3 traits)
+  - `judge_runs/` — raw LLM judge scoring data
+  - `analysis/` — full pairwise agreement analysis
+  - `methodology.md` — selection methodology doc
+- `judge_calibration/legacy/` — pre-v2 calibration runs (Gemini Flash, Kimi K2, GPT-5 Mini)
+
+Download with `huggingface-cli download persona-shattering-lasr/monorepo --repo-type dataset --include "judge_calibration/v2/*" --local-dir ./hf_data`.
 
 ### Run calibration
 
