@@ -1,13 +1,97 @@
 """Reliability statistics for factor analysis results.
 
-Provides ICC (intraclass correlation coefficient) computation for assessing
-test-retest reliability of factor scores across grouped observations.
+Provides two complementary measures:
+
+* ``compute_icc`` — intraclass correlation coefficient (ICC) for
+  assessing test-retest reliability of factor *scores* across grouped
+  observations (e.g. repeated rollouts of the same seed prompt).
+* ``cronbach_alpha`` — internal-consistency reliability of a *set of
+  items* that are supposed to measure a common factor. Standard check
+  for claims like "factor F₃ is a reliable Conscientiousness
+  measurement" — α ≥ 0.7 is the usual acceptability threshold,
+  α ≥ 0.8 preferred; α ≥ 0.95 suggests redundancy.
 """
 
 from __future__ import annotations
 
 import numpy as np
 from scipy import stats
+
+
+def cronbach_alpha(
+    item_responses: np.ndarray,
+    *,
+    loading_signs: np.ndarray | None = None,
+) -> float:
+    """Cronbach's α for a set of items, optionally sign-oriented by factor loading.
+
+    α = (k / (k - 1)) · (1 − Σ σ²(X_i) / σ²(ΣX_i))
+
+    Args:
+        item_responses: [n_samples, n_items] response matrix. Rows with
+            any NaN are dropped (complete-case α).
+        loading_signs: Optional ``[n_items]`` array of ±1 used to flip
+            items whose factor loading is negative, so that the summed
+            score points in a consistent direction. Required when
+            computing α for a factor whose items have mixed-sign
+            loadings; omitting it yields a meaningless α because
+            positive- and negative-loading items cancel in the sum.
+
+    Returns:
+        α in (−∞, 1]. Typical conventions:
+            α ≥ 0.90   excellent (but can indicate redundancy)
+            0.80–0.90  good
+            0.70–0.80  acceptable
+            0.60–0.70  questionable
+            < 0.60     poor
+        Returns NaN when there are fewer than 2 items, fewer than 2
+        complete-case samples, or zero total variance.
+    """
+    if item_responses.ndim != 2:
+        raise ValueError(
+            f"item_responses must be 2D, got shape {item_responses.shape}"
+        )
+    n_samples, n_items = item_responses.shape
+    if n_items < 2:
+        return float("nan")
+
+    # Drop rows with any NaN (complete-case α).
+    row_mask = ~np.isnan(item_responses).any(axis=1)
+    data = item_responses[row_mask]
+    if data.shape[0] < 2:
+        return float("nan")
+
+    if loading_signs is not None:
+        signs = np.asarray(loading_signs, dtype=np.float64)
+        if signs.shape != (n_items,):
+            raise ValueError(
+                f"loading_signs must have shape ({n_items},), "
+                f"got {signs.shape}"
+            )
+        data = data * signs[np.newaxis, :]
+
+    item_vars = data.var(axis=0, ddof=1)
+    total_var = data.sum(axis=1).var(ddof=1)
+    if total_var <= 0:
+        return float("nan")
+    return float((n_items / (n_items - 1)) * (1.0 - item_vars.sum() / total_var))
+
+
+def classify_alpha(alpha: float) -> str:
+    """Conventional categorical reading of a Cronbach's α value."""
+    if np.isnan(alpha):
+        return "n/a"
+    if alpha >= 0.95:
+        return "redundant"
+    if alpha >= 0.90:
+        return "excellent"
+    if alpha >= 0.80:
+        return "good"
+    if alpha >= 0.70:
+        return "acceptable"
+    if alpha >= 0.60:
+        return "questionable"
+    return "poor"
 
 
 def compute_icc(
