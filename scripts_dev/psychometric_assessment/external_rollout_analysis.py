@@ -696,28 +696,90 @@ def _baseline_vs_residualised_alignment(
     return align_factors(L_base, L_res)
 
 
-def _tucker_comparison(
+def _full_pairwise_tucker(
     per_preset: dict[str, FaFitResult],
+) -> dict[tuple[str, str], tuple[np.ndarray, list]]:
+    """For every ordered (source, target) preset pair, return (|φ| matrix, alignments).
+
+    Supersedes the old single-anchor design (``_tucker_comparison``,
+    which picked ``preset_keys[0]`` as the reference and reported every
+    other preset's |φ| relative to it). The single-anchor view was
+    sensitive to preset ordering: adding a preset or reshuffling the
+    PRESETS list changed which pairs were computed and whose factor
+    numbering was used. Full-pairwise removes that arbitrariness — we
+    compute every ordered pair and let downstream aggregators produce
+    summaries that don't privilege one preset.
+
+    Returns ``{(src, tgt): (phi_matrix, alignments)}`` where ``alignments``
+    is a list of ``FactorAlignment`` with ``.sign`` set (see
+    ``src_dev/psychometric/tucker_congruence.py``).
+    """
+    out: dict[tuple[str, str], tuple[np.ndarray, list]] = {}
+    for src, src_fa in per_preset.items():
+        for tgt, tgt_fa in per_preset.items():
+            if src == tgt:
+                continue
+            # Preprocessing may drop different low-variance columns per
+            # preset, so we restrict to the item-id intersection and
+            # re-sort the target to match the source's item order before
+            # computing |φ|.
+            a_idx, b_idx = _shared_item_reorder(src_fa, tgt_fa)
+            L_s = src_fa.loadings[a_idx]
+            L_t = tgt_fa.loadings[b_idx]
+            phi = tucker_phi_matrix(L_s, L_t)
+            aligns = align_factors(L_s, L_t)
+            out[(src, tgt)] = (phi, aligns)
+    return out
+
+
+def _per_source_factor_replicability(
+    pairwise: dict[tuple[str, str], tuple[np.ndarray, list]],
     *,
-    anchor: str,
-) -> tuple[dict[str, np.ndarray], dict[str, list]]:
-    """Full φ matrices + greedy alignments for every target vs ``anchor``."""
-    anchor_fa = per_preset[anchor]
-    full_phi: dict[str, np.ndarray] = {}
-    alignments = {}
-    for target, target_fa in per_preset.items():
-        if target == anchor:
-            continue
-        # Preprocessing may drop different low-variance columns per preset,
-        # so we restrict to the item-id intersection and sort the target
-        # to match the anchor's item order before computing |φ|.
-        a_idx, b_idx = _shared_item_reorder(anchor_fa, target_fa)
-        L_a = anchor_fa.loadings[a_idx]
-        L_b = target_fa.loadings[b_idx]
-        phi = tucker_phi_matrix(L_a, L_b)
-        full_phi[target] = phi
-        alignments[target] = align_factors(L_a, L_b)
-    return full_phi, alignments
+    rotation: str,
+) -> list[dict]:
+    """Aggregate ``_full_pairwise_tucker`` output per (source preset × factor).
+
+    For each source preset and factor, summarises the |φ| of the
+    best-matching factor in every *other* preset: mean, min, max,
+    and sign-agreement fraction (how often the matched factor has the
+    same polarity as the source).
+
+    High mean |φ| → that factor replicates across presets. Low mean
+    |φ| → the factor is idiosyncratic to the source preset. Low
+    sign-agreement with high |φ| → structure replicates but polarity
+    flips (which matters if you ever pool factor scores across presets).
+    """
+    # Gather per (src, src_factor): list of (target, |φ|, sign)
+    per_src_factor: dict[tuple[str, int], list[tuple[str, float, int]]] = {}
+    for (src, tgt), (_phi, aligns) in pairwise.items():
+        for a in aligns:
+            phi = float(a.phi)
+            if np.isnan(phi):
+                continue
+            per_src_factor.setdefault((src, a.anchor_factor), []).append(
+                (tgt, phi, int(a.sign))
+            )
+
+    rows: list[dict] = []
+    for (src, f_idx), matches in per_src_factor.items():
+        phis = [m[1] for m in matches]
+        signs = [m[2] for m in matches]
+        n_pos = sum(1 for s in signs if s == 1)
+        rows.append({
+            "rotation": rotation,
+            "source_preset": src,
+            "source_factor": f_idx + 1,
+            "n_targets": len(matches),
+            "mean_phi": float(np.mean(phis)),
+            "min_phi": float(np.min(phis)),
+            "max_phi": float(np.max(phis)),
+            "median_phi": float(np.median(phis)),
+            "sign_agreement_frac":
+                float(n_pos / len(signs)) if signs else float("nan"),
+        })
+    # Sort for stable CSV output.
+    rows.sort(key=lambda r: (r["source_preset"], r["source_factor"]))
+    return rows
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1022,77 +1084,64 @@ def _plot_preset_variance_bars(
     print(f"[Plot] Wrote {out_path}")
 
 
-def _plot_tucker_heatmaps(
-    full_phi: dict[str, np.ndarray],
-    anchor: str,
-    rotation: str,
+def _plot_replicability(
+    replicability_rows: list[dict],
     out_path: Path,
 ) -> None:
+    """Per-source × factor mean |φ| across all other presets, one subplot per rotation.
+
+    Supersedes the old single-anchor strip plot. Each line corresponds
+    to one source preset; x is factor index; y is the mean |φ| of the
+    best-match factor in every other preset (whiskers = min/max).
+    A factor with high-and-tight bars replicates across presets; a
+    factor with a low mean (or a high mean but low sign-agreement)
+    is worth drilling into.
+    """
     import matplotlib.pyplot as plt
 
-    targets = list(full_phi.keys())
-    if not targets:
+    rotations = sorted({r["rotation"] for r in replicability_rows})
+    if not rotations:
         return
-    k = next(iter(full_phi.values())).shape[0]
-    fig, axes = plt.subplots(
-        1, len(targets), figsize=(4 * len(targets), 4 + 0.4 * k), squeeze=False,
-    )
-    for ax, tgt in zip(axes[0], targets):
-        phi = full_phi[tgt]
-        im = ax.imshow(phi, cmap="viridis", vmin=0, vmax=1, origin="lower")
-        for i in range(phi.shape[0]):
-            for j in range(phi.shape[1]):
-                val = phi[i, j]
-                ax.text(j, i, f"{val:.2f}", ha="center", va="center",
-                        fontsize=7,
-                        color="white" if val < 0.6 else "black")
-        ax.set_xlabel(f"{tgt} factor")
-        ax.set_ylabel(f"{anchor} factor")
-        ax.set_xticks(range(phi.shape[1]), [f"F{i+1}" for i in range(phi.shape[1])])
-        ax.set_yticks(range(phi.shape[0]), [f"F{i+1}" for i in range(phi.shape[0])])
-        ax.set_title(f"{anchor} → {tgt}")
-    fig.suptitle(f"Tucker's |φ| — rotation={rotation}")
-    fig.colorbar(im, ax=axes[0], shrink=0.8, label="|φ|")
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(out_path, dpi=140)
-    plt.close(fig)
-    print(f"[Plot] Wrote {out_path}")
-
-
-def _plot_aligned_phi_strip(
-    alignments_by_rot: dict[str, dict[str, list]],
-    out_path: Path,
-) -> None:
-    """Show the aligned top-|φ| per factor, one column per rotation."""
-    import matplotlib.pyplot as plt
-
-    rotations = list(alignments_by_rot.keys())
     fig, axes = plt.subplots(1, len(rotations), figsize=(6 * len(rotations), 5),
                              squeeze=False)
     for ax, rot in zip(axes[0], rotations):
-        aligns = alignments_by_rot[rot]
-        targets = list(aligns.keys())
-        if not targets:
+        rot_rows = [r for r in replicability_rows if r["rotation"] == rot]
+        by_src: dict[str, list[dict]] = {}
+        for row in rot_rows:
+            by_src.setdefault(row["source_preset"], []).append(row)
+        # Stable preset ordering — sorted by source_preset key.
+        srcs = sorted(by_src.keys())
+        # Assume all sources have the same factor count (per-preset FAs use
+        # the same n_factors). Pull from the first source.
+        if not srcs:
             ax.axis("off")
             continue
-        k = len(aligns[targets[0]])
-        x = np.arange(k)
-        for t_idx, tgt in enumerate(targets):
-            phis = [a.phi for a in aligns[tgt]]
-            ax.plot(x, phis, marker="o", label=tgt)
-        for thr, lbl, color in [
-            (0.95, "good (≥0.95)", "#2E7D32"),
-            (0.85, "fair (≥0.85)", "#F9A825"),
-            (0.70, "poor (≥0.70)", "#E53935"),
-        ]:
-            ax.axhline(thr, color=color, lw=0.6, ls="--", label=lbl)
-        ax.set_xticks(x, [f"F{i+1}" for i in range(k)])
-        ax.set_ylim(0, 1.02)
-        ax.set_xlabel("anchor factor")
-        ax.set_ylabel("|φ| (best match)")
+        factors = sorted(r["source_factor"] for r in by_src[srcs[0]])
+        x = np.arange(len(factors))
+        colors = plt.cm.tab10(np.linspace(0, 1, max(len(srcs), 3)))
+        for src, c in zip(srcs, colors):
+            vals = {r["source_factor"]: r for r in by_src[src]}
+            means = [vals[f]["mean_phi"] if f in vals else np.nan for f in factors]
+            mins = [vals[f]["min_phi"] if f in vals else np.nan for f in factors]
+            maxs = [vals[f]["max_phi"] if f in vals else np.nan for f in factors]
+            lower = [m - lo for m, lo in zip(means, mins)]
+            upper = [hi - m for m, hi in zip(means, maxs)]
+            ax.errorbar(x, means, yerr=[lower, upper], marker="o",
+                        lw=1.2, capsize=3, label=src, color=c)
+        for thr, col in [(0.95, "#2E7D32"), (0.85, "#F9A825"), (0.70, "#E53935")]:
+            ax.axhline(thr, color=col, lw=0.5, ls=":")
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"F{f}" for f in factors])
+        ax.set_xlabel("source factor")
+        ax.set_ylabel("mean |φ| across all other presets")
         ax.set_title(f"rotation = {rot}")
-        ax.legend(fontsize=8)
-    fig.suptitle("Tucker's φ after greedy factor alignment")
+        ax.set_ylim(0, 1.05)
+        ax.legend(fontsize=7, loc="lower left")
+        ax.grid(True, alpha=0.2)
+    fig.suptitle(
+        "Factor replicability: each source preset's factor matched "
+        "(best |φ|) to every other preset's factors"
+    )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(out_path, dpi=140)
     plt.close(fig)
@@ -1210,9 +1259,11 @@ def main() -> None:
     # (per-group mean of residualised scores is identically 0, so
     # SS_between is 0 and η²(preset) is 0 regardless of factor structure).
     residualised_robustness_rows: list[dict] = []
-    per_preset_alignments_by_rot: dict[str, dict[str, list]] = {}
-    per_preset_phi_by_rot: dict[str, dict[str, np.ndarray]] = {}
-    per_preset_classification_rows: list[dict] = []
+    # (rotation → pairwise dict for that rotation). pairwise maps
+    # (src_preset, tgt_preset) → (phi_matrix, alignments).
+    pairwise_by_rot: dict[str, dict[tuple[str, str], tuple[np.ndarray, list]]] = {}
+    pairwise_classification_rows: list[dict] = []
+    replicability_rows: list[dict] = []
     # Captured from the first rotation's baseline FA so retention-table
     # computation (post-preprocessing row counts) doesn't repeat the fit.
     fa_baseline_metadata_for_retention: list[dict] | None = None
@@ -1249,6 +1300,7 @@ def main() -> None:
                 "anchor_factor": a.anchor_factor + 1,
                 "residualised_factor": a.target_factor + 1 if a.target_factor >= 0 else None,
                 "phi": float(a.phi),
+                "sign": int(a.sign),
                 "interpretation": classify_phi(a.phi),
             })
 
@@ -1259,22 +1311,25 @@ def main() -> None:
         if len(preset_keys) < 2:
             print(f"[Tucker] Only {len(preset_keys)} preset(s) — skipping congruence.")
             continue
-        anchor = preset_keys[0]
-        full_phi, alignments = _tucker_comparison(per_preset, anchor=anchor)
-        per_preset_phi_by_rot[rotation] = full_phi
-        per_preset_alignments_by_rot[rotation] = alignments
+        pairwise = _full_pairwise_tucker(per_preset)
+        pairwise_by_rot[rotation] = pairwise
 
-        for tgt, aligns in alignments.items():
+        for (src, tgt), (_phi, aligns) in pairwise.items():
             for a in aligns:
-                per_preset_classification_rows.append({
+                pairwise_classification_rows.append({
                     "rotation": rotation,
-                    "anchor_preset": anchor,
+                    "source_preset": src,
                     "target_preset": tgt,
-                    "anchor_factor": a.anchor_factor + 1,
+                    "source_factor": a.anchor_factor + 1,
                     "target_factor": a.target_factor + 1 if a.target_factor >= 0 else None,
                     "phi": float(a.phi),
+                    "sign": int(a.sign),
                     "interpretation": classify_phi(a.phi),
                 })
+
+        replicability_rows.extend(
+            _per_source_factor_replicability(pairwise, rotation=rotation)
+        )
 
     # ── Retention table (per-preset row counts at each filtering stage) ─
     retention_rows = _per_preset_retention_table(
@@ -1309,7 +1364,12 @@ def main() -> None:
         out_dir / "baseline_vs_residualised_robustness.csv",
         residualised_robustness_rows,
     )
-    _write_csv(out_dir / "tucker_pairwise.csv", per_preset_classification_rows)
+    # Full pairwise: every ordered (source, target) × every source-factor
+    # best-match. Replaces the old single-anchor tucker_pairwise.csv
+    # (anchor was arbitrarily the first preset in PRESETS).
+    _write_csv(out_dir / "tucker_pairwise.csv", pairwise_classification_rows)
+    # Aggregated per (source_preset × source_factor).
+    _write_csv(out_dir / "tucker_replicability.csv", replicability_rows)
 
     # Oblique rotations (oblimin/promax) produce a factor correlation matrix;
     # for orthogonal rotations (varimax) it's None. Dump one CSV per
@@ -1326,11 +1386,20 @@ def main() -> None:
                 writer.writerow([f"F{i+1}"] + [f"{v:.4f}" for v in row])
         print(f"[Write] {out_path}")
 
-    alignment_summary: dict[str, Any] = {}
-    for rot, aligns in per_preset_alignments_by_rot.items():
-        anchor = next(iter({r["anchor_preset"] for r in per_preset_classification_rows
-                            if r["rotation"] == rot}), None)
-        alignment_summary[rot] = summarise_alignment(aligns, anchor_label=anchor or "")
+    # Per-source alignment summaries: one summarise_alignment block per
+    # source preset, nested under rotation. Lets a reader look up "if I
+    # treat preset X as the reference, what does every other preset look
+    # like?" without privileging any single preset in the analysis.
+    alignment_summary: dict[str, dict[str, Any]] = {}
+    for rot, pairwise in pairwise_by_rot.items():
+        per_src: dict[str, Any] = {}
+        # Group alignments by source.
+        by_src: dict[str, dict[str, list]] = {}
+        for (src, tgt), (_phi, aligns) in pairwise.items():
+            by_src.setdefault(src, {})[tgt] = aligns
+        for src, tgt_aligns in by_src.items():
+            per_src[src] = summarise_alignment(tgt_aligns, anchor_label=src)
+        alignment_summary[rot] = per_src
     _write_json(out_dir / "tucker_alignment_summary.json", alignment_summary)
 
     # ── Plots ──────────────────────────────────────────────────────────
@@ -1339,19 +1408,10 @@ def main() -> None:
         baseline_eta2_rows, residualised_robustness_rows,
         plots_dir / "preset_variance_bars.png",
     )
-    for rotation, full_phi in per_preset_phi_by_rot.items():
-        anchor = next(iter(
-            {r["anchor_preset"] for r in per_preset_classification_rows
-             if r["rotation"] == rotation}
-        ))
-        _plot_tucker_heatmaps(
-            full_phi, anchor=anchor, rotation=rotation,
-            out_path=plots_dir / f"tucker_heatmaps_{rotation}.png",
-        )
-    if per_preset_alignments_by_rot:
-        _plot_aligned_phi_strip(
-            per_preset_alignments_by_rot,
-            plots_dir / "tucker_aligned_phi_strip.png",
+    if replicability_rows:
+        _plot_replicability(
+            replicability_rows,
+            plots_dir / "tucker_replicability.png",
         )
 
     # ── Summary printout ───────────────────────────────────────────────
@@ -1363,16 +1423,37 @@ def main() -> None:
         b = [r for r in baseline_eta2_rows if r["rotation"] == rot]
         r_rows = [r for r in residualised_robustness_rows if r["rotation"] == rot]
         phis = [r["phi"] for r in r_rows if not np.isnan(r["phi"])]
+        # Baseline→residualised sign flips at high |φ| are worth flagging —
+        # "structure survives preset-mean removal" but with opposite polarity
+        # means factor scores can't be pooled without sign-aligning first.
+        flipped = [r for r in r_rows if r.get("sign") == -1 and r["phi"] >= 0.85]
+        rep = [r for r in replicability_rows if r["rotation"] == rot]
         print(
-            "  baseline                  : top factor η²(preset) = "
+            "  baseline                   : top factor η²(preset) = "
             + (f"{max(x['eta2_preset'] for x in b):.3f}" if b else "n/a")
         )
         print(
-            "  baseline→residualised |φ|: min = "
+            "  baseline→residualised |φ| : min = "
             + (f"{min(phis):.3f}" if phis else "n/a")
             + ", median = "
             + (f"{float(np.median(phis)):.3f}" if phis else "n/a")
         )
+        if flipped:
+            print(
+                f"  baseline→residualised sign flips (|φ|≥0.85): "
+                f"{len(flipped)} factor(s) — structure survives but polarity "
+                "inverts; cannot pool scores without sign-alignment"
+            )
+        if rep:
+            rep_mean = [r["mean_phi"] for r in rep]
+            sign_agree = [r["sign_agreement_frac"] for r in rep]
+            print(
+                "  per-source replicability   : "
+                f"mean-over-(preset×factor) mean_phi = "
+                f"{float(np.mean(rep_mean)):.3f}, "
+                f"min_phi = {float(np.min(rep_mean)):.3f}, "
+                f"mean sign-agreement = {float(np.mean(sign_agree)):.3f}"
+            )
     print(f"\nAll outputs → {out_dir}")
 
 
