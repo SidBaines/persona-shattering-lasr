@@ -91,6 +91,47 @@ EVAL_NAME_DEFAULT = "llm_judge_lora_scale_sweep"
 SCRATCH_ROOT = Path("scratch/monorepo")
 STAGING_ROOT = Path("scratch/sweep_staging")
 BAKED_ROOT = Path("scratch/baked_combo_adapters")
+# Grace window for legacy baked dirs with no .pid marker (e.g. from before
+# this cleanup was added, or concurrent sweeps yet to write their marker).
+_ORPHAN_BAKED_GRACE_SEC = 3600  # 1 hour
+
+
+def _prune_orphan_baked_dirs() -> None:
+    """Prune baked-adapter dirs whose owning process is no longer alive.
+
+    Complements the ``finally`` block at the end of the rollout stage, which
+    only runs on clean exit (not SIGKILL, OOM-kill, or hard vLLM crashes).
+    On startup we sweep ``BAKED_ROOT`` and remove any dir whose ``.pid``
+    marker points at a dead PID. Dirs with no marker are only removed if
+    older than ``_ORPHAN_BAKED_GRACE_SEC``, so we never race a concurrent
+    sweep that hasn't written its marker yet.
+    """
+    import time
+    if not BAKED_ROOT.exists():
+        return
+    for d in BAKED_ROOT.iterdir():
+        if not d.is_dir():
+            continue
+        pid_file = d / ".pid"
+        stale = False
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+            except (OSError, ValueError):
+                stale = True
+        else:
+            try:
+                if time.time() - d.stat().st_mtime > _ORPHAN_BAKED_GRACE_SEC:
+                    stale = True
+            except OSError:
+                continue
+        if stale:
+            try:
+                print(f"[cleanup] pruning orphan baked dir: {d}")
+                cleanup_baked_dir(d)
+            except Exception as exc:
+                print(f"[cleanup] failed to prune {d}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -930,6 +971,8 @@ def main() -> None:
         _print_dry_run(nc, cells, fingerprint)
         return
 
+    _prune_orphan_baked_dirs()
+
     # Stage 1: hydrate every cell from HF (a no-op for brand-new cells).
     cell_dirs: dict[CanonicalCell, Path] = {}
     cell_status: dict[CanonicalCell, Any] = {}
@@ -958,6 +1001,8 @@ def main() -> None:
     if cells_to_rollout and not flags.skip_rollouts:
         sweep_id = f"{nc.eval_name}_{fingerprint}_{uuid.uuid4().hex[:8]}"
         baked_dir = BAKED_ROOT / sweep_id
+        baked_dir.mkdir(parents=True, exist_ok=True)
+        (baked_dir / ".pid").write_text(str(os.getpid()))
         print(f"[rollout] generating rollouts for {len(cells_to_rollout)} cell(s); sweep_id={sweep_id}")
         try:
             _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
@@ -977,28 +1022,41 @@ def main() -> None:
         print(f"[rollout] --skip-rollouts set; {len(cells_to_rollout)} cell(s) will be skipped")
 
     # Stage 3: per-cell, per-metric judge for anything still missing.
+    # Metrics for a given cell run in parallel threads — each `run_ocean_judge_run`
+    # builds its own event loop, semaphore, and httpx client, and writes to a
+    # distinct `judge_runs/<rater>/<metric>.jsonl`, so there is no shared state.
+    # In-flight concurrency per cell is n_metrics * max_concurrent.
     # Upload each cell to HF as soon as all its metrics are done so partial
     # sweep progress is durable if the script is interrupted.
     if not flags.skip_judge:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         metrics = _judge_metrics(nc)
         for cell in cells:
             if not cell_status[cell].has_rollouts:
                 continue
-            did_any_judge = False
-            for metric in metrics:
-                have_all = all(
+            pending = [
+                metric for metric in metrics
+                if not all(
                     (rater.rater_id, metric) in cell_status[cell].present_judge_metrics
                     for rater in nc.judge_raters
                 )
-                if have_all:
-                    continue
-                print(f"[judge] {cell.variant_label()} / {metric}")
-                _run_judge_for_cell_metric(nc, cell, cell_dirs[cell], metric)
-                did_any_judge = True
+            ]
+            if pending:
+                print(f"[judge] {cell.variant_label()} / {pending} (parallel)")
+                with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                    futures = [
+                        pool.submit(
+                            _run_judge_for_cell_metric,
+                            nc, cell, cell_dirs[cell], metric,
+                        )
+                        for metric in pending
+                    ]
+                    for fut in as_completed(futures):
+                        fut.result()
             cell_status[cell] = cell_status_on_disk(
                 cell_dirs[cell], required_judge_metrics=required_pairs,
             )
-            if upload and did_any_judge:
+            if upload and pending:
                 print(f"[upload] {cell.variant_label()}")
                 write_cell_info(cell, cell_dirs[cell], fingerprint)
                 upload_cell(
