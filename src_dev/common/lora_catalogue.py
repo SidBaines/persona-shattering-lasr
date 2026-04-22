@@ -15,3 +15,4 @@ class LoraHFCatalogue:
     a_minus: str = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/vanton4/lora/agreeableness_suppressing_full_vanton4-persona"
     n_plus: str = "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/vanton4/lora/neuroticism_amplifying_full_vanton4-persona"
     n_minus: str = "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/vanton4/lora/neuroticism_suppressing_full_vanton4-persona"
+    control: str = "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_seed1/lora/ocean_def_control_full_vanton4-persona"
