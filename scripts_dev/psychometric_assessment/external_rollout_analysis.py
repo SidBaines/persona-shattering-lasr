@@ -38,6 +38,7 @@ import json
 import logging
 import os
 import random
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -171,6 +172,14 @@ QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS = 1024
 QUESTIONNAIRE_RESET_MODE = "none"
 FC_PAIR_SIGN_ALIGNMENT = True
 
+# ── Disk hygiene ────────────────────────────────────────────────────────────
+# With 9 external models (many 13B+), the HF hub cache can easily exceed
+# 200 GB and blow up mid-run (vLLM snapshot_download hit "No space left on
+# device" on 2026-04-21). After both questionnaires for a preset complete,
+# delete that preset's model cache so the next preset's download has room.
+# Cache-hit presets are skipped (nothing was downloaded for them).
+CLEANUP_HF_MODEL_CACHE_PER_PRESET: bool = True
+
 # ── Output ──────────────────────────────────────────────────────────────────
 OUTPUT_TAG = "multisource_n500_9models"  # change when config changes
 
@@ -223,7 +232,7 @@ def _ingest_preset(ctx: RunContext, rollout_key: str) -> None:
 
 def _administer_questionnaire(
     ctx: RunContext, rollout_key: str, q_key: str
-) -> None:
+):
     r = EXTERNAL_ROLLOUT_PRESETS[rollout_key]
     q = QUESTIONNAIRE_PRESETS[q_key]
     cfg = QuestionnaireStageConfig(
@@ -253,7 +262,7 @@ def _administer_questionnaire(
         context_buffer_tokens=QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS,
         write_inspection_file=False,
     )
-    run_stage_questionnaire(
+    return run_stage_questionnaire(
         cfg,
         num_conversation_turns=r.min_assistant_turns,
         openrouter_provider_routing=None,
@@ -277,6 +286,40 @@ def _ingest_all_presets(presets: list[str]) -> dict[str, Path]:
     return rollout_dirs
 
 
+def _delete_hf_model_cache(model_repo_id: str) -> None:
+    """Delete the HF hub cache for a specific model repo.
+
+    Frees disk so the next preset's snapshot download has room. Idempotent
+    and safe: missing caches are a no-op.
+    """
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except ImportError:
+        return
+    # HF stores models under "models--<org>--<name>" (slashes → double dash).
+    cache_root = Path(HF_HUB_CACHE)
+    cache_dir = cache_root / f"models--{model_repo_id.replace('/', '--')}"
+    if not cache_dir.exists():
+        print(f"[Cleanup] HF cache for {model_repo_id!r} not present — skipping")
+        return
+    # Size for logging — best-effort, skip on error.
+    try:
+        total_bytes = sum(
+            p.stat().st_size for p in cache_dir.rglob("*") if p.is_file()
+        )
+        size_gb = total_bytes / (1024**3)
+    except OSError:
+        size_gb = float("nan")
+    try:
+        shutil.rmtree(cache_dir)
+        print(
+            f"[Cleanup] Deleted HF cache for {model_repo_id!r} "
+            f"(~{size_gb:.1f} GiB freed)"
+        )
+    except OSError as exc:
+        print(f"[Cleanup] Failed to delete {cache_dir}: {exc}")
+
+
 def _administer_all_pairs(
     rollout_dirs: dict[str, Path],
     presets: list[str],
@@ -284,14 +327,23 @@ def _administer_all_pairs(
     """Run (or hydrate) Stage 2 for every (preset, questionnaire) pair."""
     pair_data: dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]] = {}
     for r_key in presets:
+        preset_generated = False
         for q_key in QUESTIONNAIRES:
             ctx = _build_ctx(r_key, q_key)
             print(f"\n{'#' * 60}")
             print(f"# Stage 2: rollout={r_key!r} × questionnaire={q_key!r}")
             print(f"#   {ctx.questionnaire_run_id}")
             print(f"{'#' * 60}")
-            _administer_questionnaire(ctx, r_key, q_key)
+            result = _administer_questionnaire(ctx, r_key, q_key)
+            if result is not None and getattr(result, "generated", False):
+                preset_generated = True
             pair_data[(r_key, q_key)] = load_pair_outputs(ctx.questionnaire_dir)
+        # Release this preset's HF model cache before the next preset's
+        # snapshot download kicks off. Only bother if we actually generated
+        # (cache-hit runs didn't download anything new).
+        if CLEANUP_HF_MODEL_CACHE_PER_PRESET and preset_generated:
+            model_id = EXTERNAL_ROLLOUT_PRESETS[r_key].assistant_model
+            _delete_hf_model_cache(model_id)
     return pair_data
 
 
