@@ -614,17 +614,15 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Qwen2.5 × B × trait_mcq re-run with PREFILL_VERSION=2 (BPE-aligned
-    # ``TRAIT_MCQ_PREFILL = "Answer"`` — no trailing space). Stage 1
-    # hydrates the B rollout cache from HF; Stage 2 re-administers
-    # trait_ocean_v1 under Qwen2.5-7B-Instruct. The old "Answer " prefill
-    # dropped ~12% of Qwen2.5's top-20 mass onto " Answer"/<|im_end|>
-    # escape routes because the trailing-space token didn't align with
-    # tokenizer-natural space-prefixed letter tokens like " A"/" B". The
-    # fix recovers letter-mass to ~100% (ablation confirmed on 2000 cells).
-    # See scripts_dev/psychometric_assessment/{prefill_ablation.py,
-    # HANDOFF_qwen25_b_rerun.md}.
-    ("B", "trait_ocean_v1"),
+    # Qwen2.5 × B × trait_ocean_natural_v1 with PREFILL_VERSION=2 (BPE-aligned
+    # ``TRAIT_MCQ_PREFILL = "Answer"``) and TRAIT_MCQ_PROMPT_VERSION=2
+    # ("New question: " topic-switch prefix). Stage 1 hydrates the B rollout
+    # cache from HF; Stage 2 administers the hand-curated trait_ocean_natural_v1
+    # questionnaire under Qwen2.5-7B-Instruct. Flip CROSS_MODEL_QUESTIONNAIRE
+    # to False for the Llama-3.1-on-B baseline (same model that produced the
+    # rollouts, no "-qm_" tag in the run-id). See HANDOFF_h100_natural_v1.md
+    # for the full setup.
+    ("B", "trait_ocean_natural_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -709,7 +707,7 @@ QUESTIONNAIRE_MAX_CONTEXT_TOKENS: int | None = (
 )
 QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS: int = 1024
 # vLLM-only: how many personas to stack into one questionnaire super-batch.
-QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 8
+QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 32
 QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
 
@@ -747,6 +745,21 @@ LOGPROB_PARSER_VERSION = 2
 # ``"Answer: "`` is NOT buggy because Qwen/Llama tokenize digits as bare
 # tokens, not space-prefixed ones) stay valid under their existing IDs.
 PREFILL_VERSION = 2
+# Trait_mcq user-turn prompt-format version. Incremented when the rendered
+# user-turn text for trait_mcq items changes in a way that affects the
+# model's response (i.e. the actual inference output, parallel to
+# PREFILL_VERSION — no replaying from cached raw_responses.jsonl can
+# paper over the change):
+#   v1 — bare question + A/B/C/D + "Reply with …" instruction.
+#   v2 — prepend TRAIT_MCQ_TOPIC_SWITCH_PREFIX ("New question: ") so the
+#        model sees an explicit topic-switch marker separating the
+#        trait_mcq probe from the preceding rollout context. Defensible
+#        on 15-turn coherent B rollouts where the chat template already
+#        separates turns but the content boundary is the risky one.
+# Appended to the questionnaire run-id as "-tmv{N}" ONLY for logprob-mode
+# trait_mcq runs when >1. Existing v5 Likert, fc_pair, and trait_ocean_v1
+# caches (unaffected) keep their current run-ids.
+TRAIT_MCQ_PROMPT_VERSION = 2
 QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
 QUESTIONNAIRE_DYNAMIC_MASS_FILTER = True
 QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
@@ -1121,6 +1134,16 @@ def _questionnaire_run_id(
         and any(b in ("trait_mcq", "fc_pair") for b in q.fa_blocks)
     ):
         prefill_tag = f"-pf{PREFILL_VERSION}"
+    # Trait_mcq prompt-format-version tag: only applied for trait_mcq
+    # logprob runs (fc_pair is unaffected — the topic-switch prefix is
+    # a trait_mcq-only rendering). See TRAIT_MCQ_PROMPT_VERSION above.
+    trait_mcq_prompt_tag = ""
+    if (
+        q.use_logprobs
+        and TRAIT_MCQ_PROMPT_VERSION > 1
+        and "trait_mcq" in q.fa_blocks
+    ):
+        trait_mcq_prompt_tag = f"-tmv{TRAIT_MCQ_PROMPT_VERSION}"
     reset_tag = (
         f"-reset_{QUESTIONNAIRE_RESET_MODE}"
         if QUESTIONNAIRE_RESET_MODE != "none"
@@ -1136,7 +1159,7 @@ def _questionnaire_run_id(
     return (
         f"questionnaire-{_rollout_run_id(rollout_key)}-"
         f"q_{q.version}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
-        f"{lp_tag}{parser_tag}{prefill_tag}{reset_tag}{qm_tag}"
+        f"{lp_tag}{parser_tag}{prefill_tag}{trait_mcq_prompt_tag}{reset_tag}{qm_tag}"
     )
 
 
@@ -1723,6 +1746,7 @@ def _build_questionnaire_stage_config(ctx: RunContext) -> QuestionnaireStageConf
         fa_blocks=tuple(FA_BLOCKS),
         use_logprobs=QUESTIONNAIRE_USE_LOGPROBS,
         phrasing=QUESTIONNAIRE_PHRASING,
+        trait_mcq_topic_switch_prefix=(TRAIT_MCQ_PROMPT_VERSION >= 2),
         likert_scale=LIKERT_SCALE,
         provider=QUESTIONNAIRE_PROVIDER,
         model=QUESTIONNAIRE_MODEL,
@@ -2338,7 +2362,11 @@ def _write_questionnaire_inspection_file(items: list[dict]) -> None:
                 item = item_by_id.get(resp["item_id"])
                 if item is None:
                     continue
-                prompt_text = build_item_prompt(item, likert_phrasing=QUESTIONNAIRE_PHRASING)
+                prompt_text = build_item_prompt(
+                    item,
+                    likert_phrasing=QUESTIONNAIRE_PHRASING,
+                    trait_mcq_topic_switch_prefix=(TRAIT_MCQ_PROMPT_VERSION >= 2),
+                )
                 # Human-readable description of the item for display
                 if item["type"] == "forced_choice":
                     display_text = f'FC: {item["option_a"]["text"][:60]}... vs {item["option_b"]["text"][:60]}...'
