@@ -15,3 +15,5 @@ class LoraHFCatalogue:
     a_minus: str = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/v2/lora/agreeableness_low-persona"
     n_plus: str = "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/vanton4/lora/neuroticism_amplifying_full_vanton4-persona"
     n_minus: str = "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/vanton4/lora/neuroticism_suppressing_full_vanton4-persona"
+    # Gemma-3-27B neuroticism suppressor — primary adapter for frustration eval
+    gemma_needs_help_n_minus: str = "fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/v4"
