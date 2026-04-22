@@ -50,7 +50,6 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src_dev.activation_capping.axis import (
-    best_contiguous_window,
     cohens_d_per_layer,
     compute_axis,
     compute_per_layer_range,
@@ -73,12 +72,15 @@ BATCH_SIZE = 16
 NUM_ROLLOUTS = 5
 TEMPERATURE = 1.0
 TOP_P: float | None = None
-# Fraction of transformer layers to use for the contiguous capping window.
-# Matches the Assistant Axis paper's Llama 3.3 70B Pareto-optimal pick
-# (16/80 = 20%). For 32-layer Llama 3.1 8B this yields a 6-layer window.
-# Override via the --window-size CLI flag.
-WINDOW_FRACTION = 0.20
-MIN_WINDOW_SIZE = 4
+# We cap the last N layers of the stack, where N = round(n_layers * TAIL_FRACTION).
+# Cohen's d separation plateaus from ~40% depth onward but axis norms grow
+# monotonically, so argmax-by-separation tended to pick only the final few
+# layers — those have the strongest base-vs-LoRA separation but the least
+# steering leverage on the output (the model has already committed by then).
+# Picking the tail by depth gives us a wider, middle-to-late range closer to
+# the paper's Pareto-optimal window. Override via --window-size.
+TAIL_FRACTION = 0.40
+MIN_TAIL_LAYERS = 4
 SEED = 42
 
 REPO_ROOT = Path(
@@ -398,23 +400,28 @@ def run(
     )
     print(f"  LoRA activations: {lora_stack.shape}")
 
-    # Axis, Cohen's d, best window
+    # Axis, Cohen's d (analysis only), tail-depth layer selection
     axis = compute_axis(base_stack, lora_stack)
     cohens_d = cohens_d_per_layer(base_stack, lora_stack, axis)
     n_layers = int(axis.shape[0])
     if window_size_override is not None:
         window_size = window_size_override
     else:
-        window_size = max(MIN_WINDOW_SIZE, int(round(n_layers * WINDOW_FRACTION)))
-    capping_layers = best_contiguous_window(cohens_d, window_size=window_size)
+        window_size = max(MIN_TAIL_LAYERS, int(round(n_layers * TAIL_FRACTION)))
+    # Cap the last `window_size` layers (tail of the stack) rather than
+    # argmax-of-Cohen's-d. Cohen's d plateaus from ~40% depth onward so the
+    # argmax heuristic was skewed to the very last few layers (highest axis
+    # norm) which have minimal steering leverage — see compute_axis.py
+    # module docstring.
+    capping_layers = list(range(n_layers - window_size, n_layers))
     best_sep_layer = int(np.argmax(cohens_d))
     print(
-        f"\nBest layer by Cohen's d: {best_sep_layer} "
+        f"\nBest layer by Cohen's d (informational only): {best_sep_layer} "
         f"(d={cohens_d[best_sep_layer]:.3f})"
     )
     print(
-        f"Recommended capping layers (window={window_size}, "
-        f"n_layers={n_layers}): {capping_layers[0]}-{capping_layers[-1]}"
+        f"Capping layers (tail, window={window_size}, n_layers={n_layers}): "
+        f"{capping_layers[0]}-{capping_layers[-1]}"
     )
 
     # Per-layer projection ranges (all layers)
@@ -484,8 +491,9 @@ def run(
         "top_p": TOP_P,
         "seed": SEED,
         "window_size": window_size,
-        "window_fraction": None if window_size_override is not None else WINDOW_FRACTION,
+        "tail_fraction": None if window_size_override is not None else TAIL_FRACTION,
         "window_size_override": window_size_override,
+        "layer_selection": "tail",
         "n_layers": n_layers,
         "best_layer_by_separation": best_sep_layer,
         "capping_layers_recommended": list(map(int, capping_layers)),
@@ -555,7 +563,8 @@ def main() -> None:
         default=None,
         help=(
             "Contiguous capping-window size in layers. "
-            "Default: round(n_layers * WINDOW_FRACTION), floor MIN_WINDOW_SIZE."
+            "Default: round(n_layers * TAIL_FRACTION), floor MIN_TAIL_LAYERS. "
+            "Selected layers are always the last N of the stack."
         ),
     )
     args = parser.parse_args()
