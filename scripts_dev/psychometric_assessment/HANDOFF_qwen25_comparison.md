@@ -29,11 +29,19 @@ scenarios v2 and user-sim prompt v6. The `B` rollout cache lives on HF at
 after context-length filtering; Qwen2.5 drops one 66k-token outlier from a
 VBA-macro truncation loop):
 
-| Model | v5 | trait_ocean_v1 | FA? | FA on HF? |
-|---|---|---|---|---|
-| Llama-3.1-8B-Instruct | ✅ | ✅ | ✅ | ✅ |
-| Qwen3-8B (other agent) | ✅ | ❌ | ❌ | ❌ |
-| Qwen2.5-7B-Instruct   | ✅ | ✅ | ✅ | ✅ |
+| Model | v5 direct | v5 logprob | trait_ocean_v1 | FA? | FA on HF? |
+|---|---|---|---|---|---|
+| Llama-3.1-8B-Instruct | ✅ | ✅ | ✅ | ✅ (v5+trait combined, k=4 and k=7) | ✅ |
+| Qwen3-8B (other agent) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Qwen2.5-7B-Instruct   | ✅ | ✅ | ✅ (**compromised — see below**) | ✅ (v5+trait combined, k=4 and k=7) | ✅ |
+
+v5 logprob run-ids on HF:
+- Llama: `runs/questionnaire-rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20/`
+- Qwen2.5: `runs/questionnaire-rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20-qm_qwen257binstruct/`
+
+Response matrices are on the [1, 5] scale (expected value of Σ d·P(d) over
+d ∈ {1..5}, with reverse-keying applied) — directly comparable to v5-direct
+in downstream FA.
 
 HF run-id suffixes:
 - Llama (B, default): no cross-model tag (`…direct` for v5, `…direct-lp20` for trait_ocean)
@@ -55,36 +63,58 @@ split-half congruence, CV k-curve, k-sensitivity, persona-item CV, etc.).
 - trait_ocean_v1 logprob (ABCD, top_logprobs=20): **Qwen2.5 is bimodal**, not
   midpoint — 75% of prob mass lies at ≤0.1 or ≥0.9. Persona-mean
   Llama↔Qwen2.5 ρ = 0.39 (recovered from 0.27 under v5).
-- So Qwen2.5's "personality expressiveness" is modality-dependent: hedge under
-  Likert direct-gen, commit under single-token logprob. Llama is graded in
-  both. This is a measurement-validity warning for the research.
-- **Tucker's congruence, Llama ↔ Qwen2.5 (7 factors, 156 shared items)**:
-  all 7 matched pairs are POOR (|φ| < 0.85). Best pair: Llama-F3 ↔ Qwen2.5-F7
-  at |φ|=0.56 (extraversion-flavoured factor, the only one the two models
-  partially agree on). Worst: |φ|=0.03 (essentially random). Mean |φ| ≈ 0.38
-  across both oblimin and varimax — rotation does not rescue the result.
-  Latent factor structure is **not replicable** across models even though
-  the response matrices correlate. Two major caveats: (a) we forced k=7 to
-  match OCEAN priors; Horn's PA recommends k=21-23 for both, 1-SE CV
-  recommends k=11-13 — structure may look different at other k; (b) models
-  drop different low-variance items (Llama 179, Qwen2.5 166, intersection
-  156), which already biases the comparison.
+- So Qwen2.5's "personality expressiveness" *appeared* modality-dependent in
+  isolation: hedge under Likert direct-gen, commit under single-token logprob.
+  Llama looked graded in both. We initially read this as a measurement-validity
+  warning for the research. **See the caveat below — part of this story is a
+  parser-level artifact, not a real behavioural difference.**
+- **k-sweep Tucker's congruence, Llama ↔ Qwen2.5** (k ∈ {2..21}, both rotations,
+  combined v5+trait_mcq matrix, 156 shared items): mean |φ| oscillates
+  0.30–0.45, max |φ| 0.45–0.62 across the whole k range. Zero matched pairs
+  reach the 0.85 "fair" threshold at any k. Best: k=3 varimax (mean 0.45,
+  max 0.63). **Non-replication is k-independent.**
+- **Block-split k-sweep**: restricting to v5 (Likert only) at k=2 varimax
+  reaches mean |φ| = 0.67 (best cross-model recovery in the project).
+  Restricting to trait_mcq alone stays flat ~0.33 across all k. So the
+  logprob-scored trait_mcq responses are what prevent cross-model factor
+  replication; direct-gen Likert preserves a coarse shared structure.
+- **v5 modality × model 2×2 factorial** (direct-gen × logprob × Llama × Qwen2.5):
+  * Within-model cross-modality: mean |φ|@k=2 varimax = **0.988 (Qwen2.5)**,
+    **0.923 (Llama)**. Direct-gen and logprob give essentially identical factor
+    structures on the same content. Modality choice does not alter personality
+    structure.
+  * Cross-model same-modality: 0.655 (both logprob) and 0.672 (both direct).
+    Cross-model cross-modality pairs: 0.64–0.68. **The ~0.65 cross-model
+    plateau is intrinsic, not a modality artifact.**
+- **Choice-mass diagnostic on logprob runs** (via `choice_mass_analysis.py`,
+  intentionally kept out of the repo): Qwen2.5 on trait_mcq puts only ~87%
+  mean / ~56% p10 of its probability mass on the required ABCD letters — the
+  rest goes to digit tokens 1/2/3/4. **43% of its trait_mcq cells have <0.95
+  letter-mass**. At any choice-mass cutoff >0.25, we'd lose >77% of Qwen2.5
+  rollouts. Llama is clean (~99% letter-mass). Meanwhile both models put
+  ≥99% mass on digit tokens 1-5 when asked for v5 Likert digits.
+- **So the "trait_mcq congruence collapse is real" claim is suspect**: the
+  letter-only `parse_top_logprobs_to_choice_probs` softmax-renormalises a
+  shrinking letter tail, which mechanically produces the bimodal distribution
+  we observed in Qwen2.5. The poor trait_mcq Tucker congruence is almost
+  certainly a measurement-validity artifact, not a real model disagreement.
 
 ## What's left to do
 
-1. (Optional) Generate Qwen3-8B's trait_ocean_v1 responses so the 3-model
+1. **(High priority, research-critical)** Rerun trait_ocean_v1 logprob
+   inference with a parser that treats digit tokens {1, 2, 3, 4} as aliases
+   for {A, B, C, D} (and pools their logprob mass with the letter tokens
+   before softmax-renormalising to the choice set). Another agent is
+   preparing this fix on a separate branch. Expected effect: Qwen2.5's
+   trait_mcq bimodality should soften toward its direct-gen graded profile,
+   and the trait_mcq Tucker congruence should move toward the ~0.65
+   cross-model plateau seen for v5 (direct and logprob). If it doesn't,
+   then trait_mcq really is measuring something different.
+2. (Optional) Generate Qwen3-8B's trait_ocean_v1 responses so the 3-model
    square is filled, then produce Qwen3-8B combined FA and Tucker compare
    against both Llama and Qwen2.5.
-2. (Optional) Set up a logprob-mode v5 for Qwen2.5 to disentangle "midpoint
-   bias in direct-gen" from "bimodality under logprob" — this would pin down
-   whether the modality flip is intrinsic to Qwen2.5-under-logprobs or
-   item-format-specific.
-3. (Optional, research-level) Investigate sensitivity of Tucker's φ to
-   k-choice — sweep k ∈ {5, 7, 11, 13, 21} for both models and report
-   congruence as a function of k. Low-k congruence may be better because
-   coarser structure is more robust.
-4. (Optional) Run the LLM-labelling stage on each model's loadings and
-   compare *semantically* named factors, not just numeric ones.
+3. (Optional) Run the LLM-labelling stage on each model's loadings and
+   compare *semantically* named factors (not just numeric ones).
 
 ## Quick-start on a new machine
 
