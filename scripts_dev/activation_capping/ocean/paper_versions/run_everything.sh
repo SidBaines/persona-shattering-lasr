@@ -30,7 +30,25 @@ run_step() {
     echo "=== Done: ${label} ==="
 }
 
-PERSONAS=(gemma_needs_help_n_minus o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
+# Reclaim disk for one persona after its axis + trait + mmlu have finished.
+# All authoritative artifacts live on HF already (axis.pt, per_layer_range.pt,
+# eval run_info.json, plots). Local scratch is just a cache and can be
+# rehydrated by subsequent reruns via suite.py's skip_completed logic.
+cleanup_persona_scratch() {
+    local p="$1"
+    echo ""
+    echo "--- Cleaning scratch for ${p} ---"
+    # Axis artifacts (incl. activations.pt ~1 GB for llama / ~1.6 GB for gemma).
+    # Globs both scratch/llama_8b_instruct and scratch/gemma_3_27b_it roots.
+    rm -rf scratch/*/activation_capping/"${p}"_*
+    # LoRA adapter download.
+    rm -rf scratch/lora_cache/"${p}"_*
+    # Eval outputs (trait + mmlu).
+    rm -rf scratch/evals/ocean/trait/"${p}"_activation_capping_*
+    rm -rf scratch/evals/ocean/mmlu/"${p}"_activation_capping_*
+}
+
+PERSONAS=(o_plus gemma_needs_help_n_minus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
 
 for p in "${PERSONAS[@]}"; do
     echo ""
@@ -48,6 +66,8 @@ for p in "${PERSONAS[@]}"; do
     run_step "mmlu activation_capping ${p}" \
         uv run python -m src_dev.evals suite \
             --config-module "scripts_dev.personality_evals.configs.ocean.mmlu.activation_capping.${p}_activation_capping"
+
+    cleanup_persona_scratch "$p"
 done
 
 echo ""
@@ -66,13 +86,13 @@ fi
 # Shutdown — always fire when the sweep ends, so an unattended run doesn't
 # keep the GPU pod running while we're asleep.
 # ─────────────────────────────────────────────────────────────────────────────
-if [ -n "${RUNPOD_POD_ID:-}" ] && command -v runpodctl >/dev/null 2>&1; then
-    echo ""
-    echo "Shutting down pod ${RUNPOD_POD_ID}..."
-    runpodctl stop pod "$RUNPOD_POD_ID"
-else
-    echo ""
-    echo "Skipping pod shutdown (RUNPOD_POD_ID not set or runpodctl not on PATH)."
-fi
+# if [ -n "${RUNPOD_POD_ID:-}" ] && command -v runpodctl >/dev/null 2>&1; then
+#     echo ""
+#     echo "Shutting down pod ${RUNPOD_POD_ID}..."
+#     runpodctl stop pod "$RUNPOD_POD_ID"
+# else
+#     echo ""
+#     echo "Skipping pod shutdown (RUNPOD_POD_ID not set or runpodctl not on PATH)."
+# fi
 
 exit $EXIT_STATUS
