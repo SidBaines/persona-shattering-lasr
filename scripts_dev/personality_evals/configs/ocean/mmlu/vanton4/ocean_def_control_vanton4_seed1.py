@@ -47,7 +47,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=128,
+    batch_size=32,
     output_root=Path("scratch/evals/ocean/mmlu"),
     run_name=f"ocean_def_control_vanton4_seed{_SEED}",
     skip_completed=True,
