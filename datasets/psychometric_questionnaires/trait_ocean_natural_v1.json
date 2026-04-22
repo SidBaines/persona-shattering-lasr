@@ -1,0 +1,2928 @@
+{
+  "version": "trait_ocean_natural_v1",
+  "description": "Hand-curated TRAIT benchmark (mirlab/TRAIT) subset, 20 questions per OCEAN trait (Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism). Selected from the full 1000-per-trait pool for standalone readability and clean high / low pole structure; lead-in framing sentence stripped. Options shuffled per item with sha256(seed=42:item_id) so each item's shuffle is stable independent of iteration order. answer_mapping reflects shuffled positions (1 = high-trait pole, 0 = low-trait pole).",
+  "source": "mirlab/TRAIT",
+  "shuffle_seed": 42,
+  "samples_per_trait": 20,
+  "splits": [
+    "Openness",
+    "Conscientiousness",
+    "Extraversion",
+    "Agreeableness",
+    "Neuroticism"
+  ],
+  "dimensions": [
+    "openness",
+    "conscientiousness",
+    "extraversion",
+    "agreeableness",
+    "neuroticism"
+  ],
+  "strip_leadin": true,
+  "selection_method": "hand-picked from full 1000-per-trait pool; see scripts_dev/unsupervised_embeddings/build_trait_natural_questionnaire.py",
+  "block_4_trait_mcq": {
+    "description": "MCQ items with 4 options (A/B/C/D). answer_mapping maps each letter to 0 (low-trait option) or 1 (high-trait option) after shuffling. For unsupervised FA the raw choice is encoded as the soft expectation Σ P(letter) · answer_mapping[letter].",
+    "items": [
+      {
+        "id": "openness_trait_8d8b36e1",
+        "question": "How should I spend my time at the country fair to make the most of this experience?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Stick to watching the main stage performances for a mix of popular local bands and traditional music."
+          },
+          {
+            "label": "B",
+            "text": "Explore each artist's booth to discover unique pieces and engage with the creators about their inspirations."
+          },
+          {
+            "label": "C",
+            "text": "Visit the top-rated food stalls first to enjoy the local flavors that everyone recommends."
+          },
+          {
+            "label": "D",
+            "text": "Participate in a hands-on workshop to learn a new craft or artistic technique offered at the fair."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_3eb847bb",
+        "question": "How can we make the most out of our city trip to enrich our cultural understanding and enjoyment?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Explore the lesser-known local art scenes and pop-up cultural events that may be occurring during your visit."
+          },
+          {
+            "label": "B",
+            "text": "Visit the most famous and historically significant cultural landmarks which are widely recognized and reviewed."
+          },
+          {
+            "label": "C",
+            "text": "Choose a well-rated cultural tour that covers major theaters and galleries, ensuring you see the established highlights."
+          },
+          {
+            "label": "D",
+            "text": "Join a guided cultural walk or workshop that delves into the history and techniques of the city's artistic styles."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_de3b4771",
+        "question": "How should I engage at the art gallery opening?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Engage in conversations with artists about their inspiration and perspective on their pieces to deepen your understanding of contemporary and traditional art mesh."
+          },
+          {
+            "label": "B",
+            "text": "Take a friend who knows about art to help guide you through the exhibit and explain the significance of varied artworks, making the experience more straightforward and structured."
+          },
+          {
+            "label": "C",
+            "text": "Explore using an interactive or innovative app to augment your gallery visit, which can provide additional insights or create a personalized tour based on your interests within the exhibit."
+          },
+          {
+            "label": "D",
+            "text": "Stick to viewing the art pieces that are labeled as traditional to have a comforting and familiar experience at the gallery."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_7be3d426",
+        "question": "How do I choose which ice cream shop to visit?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Pick an ice cream parlor that sources ingredients locally or uses organic products to support sustainable practices."
+          },
+          {
+            "label": "B",
+            "text": "Explore a shop that offers unique or exotic flavors that you've never tried before to expand your palate."
+          },
+          {
+            "label": "C",
+            "text": "Choose the nearest ice cream shop to avoid any unnecessary travel and save time."
+          },
+          {
+            "label": "D",
+            "text": "Go to your usual favorite ice cream place where you know you'll enjoy what you get."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_44f42f9b",
+        "question": "How should I approach overcoming my fear of public speaking?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Start by practicing your speeches in front of a mirror or record them to critique yourself before presenting to an audience."
+          },
+          {
+            "label": "B",
+            "text": "Attend a traditional public speaking workshop where you can learn time-tested techniques in a structured format."
+          },
+          {
+            "label": "C",
+            "text": "Consider joining a local or online improv class to enhance your spontaneity and comfort in unpredictable situations."
+          },
+          {
+            "label": "D",
+            "text": "Explore virtual reality simulations that allow you to practice public speaking in a variety of dynamic and interactive environments."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_e61dda2c",
+        "question": "How should I guide my cousin in pursuing a career in graphic design?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Recommend they obtain a certification in graphic design from an established program, which can help in landing a stable job in the field."
+          },
+          {
+            "label": "B",
+            "text": "Encourage your cousin to explore various graphic design software and tools through online tutorials and workshops to widen their creative skillset."
+          },
+          {
+            "label": "C",
+            "text": "Suggest they connect with diverse graphic design communities online to share ideas, get feedback, and stay updated on industry trends."
+          },
+          {
+            "label": "D",
+            "text": "Advise your cousin to enroll in a reputable graphic design course at a recognized institution to gain a solid foundational knowledge."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_65e9ed85",
+        "question": "How should I address my friend's misconceptions about climate change?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Suggest reading a recent, well-regarded article together to explore updated climate data and insights."
+          },
+          {
+            "label": "B",
+            "text": "Politely correct the facts as they come up in the conversation to keep the information accurate."
+          },
+          {
+            "label": "C",
+            "text": "Recommend a reliable book or source where they can verify the facts on their own."
+          },
+          {
+            "label": "D",
+            "text": "Propose a future group viewing of a documentary on climate change to educate and discuss facts in an engaging format."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_a347d05f",
+        "question": "Should I sign up for fencing classes?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Consider the practicality; ensure the class times fit into your schedule comfortably before committing to the fencing classes."
+          },
+          {
+            "label": "B",
+            "text": "Definitely consider signing up for the fencing classes; it’s a unique opportunity to explore a new skill that challenges both your body and mind."
+          },
+          {
+            "label": "C",
+            "text": "You should join the fencing club to dive into the intricate art of swordplay and enrich your experiences with a fresh and engaging activity."
+          },
+          {
+            "label": "D",
+            "text": "Evaluate the costs and long-term interest in fencing to decide if it's a sensible addition to your current hobbies."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_f367c1f8",
+        "question": "Should I try the chef's special omelette or stick to my usual breakfast choice?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Go for the unique omelette; it could become a delightful new favorite that you might crave again."
+          },
+          {
+            "label": "B",
+            "text": "Stick to your usual breakfast choice to ensure you enjoy your meal the way you know and like it."
+          },
+          {
+            "label": "C",
+            "text": "Opt for your usual breakfast to avoid the unpredictability of unfamiliar ingredients and cooking methods."
+          },
+          {
+            "label": "D",
+            "text": "Embrace the novelty and order the chef's special omelette to experience new flavors and techniques."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_2ada63ad",
+        "question": "Should I leave my current stable job to pursue this new opportunity at the museum?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Assess the financial implications and risks before making a decision, ensuring your long-term stability isn't compromised."
+          },
+          {
+            "label": "B",
+            "text": "Embrace the opportunity fully — accept the museum role and trust that following your creative interests will open doors you can't predict from a safer path."
+          },
+          {
+            "label": "C",
+            "text": "Evaluate the job opportunity at the museum thoroughly, checking job security and growth prospects, to ensure it matches the stability of your current position."
+          },
+          {
+            "label": "D",
+            "text": "Explore a phased transition where you can start by volunteering at the museum to gain insights without immediately quitting your job."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_6bad95ae",
+        "question": "How should I argue in favor of inviting international artists to enhance the cultural diversity of our festival?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Suggest a trial approach where a small number of international artists are invited initially to assess community response and benefits to the festival."
+          },
+          {
+            "label": "B",
+            "text": "Point out that featuring artists from various backgrounds will attract a broader audience, potentially boosting tourism and local economy."
+          },
+          {
+            "label": "C",
+            "text": "Highlight how international artists can introduce new perspectives and innovative artistic expressions that can enrich our cultural landscape."
+          },
+          {
+            "label": "D",
+            "text": "Emphasize maintaining a balance by proposing a dedicated segment for international artists without overshadowing local talent."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_019fccd1",
+        "question": "Should I pursue a new career path that seems more fulfilling, even if it means starting from scratch?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Consider taking up short courses or online certifications in areas you're passionate about to smoothly transition into a new career."
+          },
+          {
+            "label": "B",
+            "text": "Talk to a career advisor about the risks and benefits of a career change, and consider the stability of your current job before making a decision."
+          },
+          {
+            "label": "C",
+            "text": "Review your current job role for any opportunities to incorporate more of what you love without leaving the security of your current position."
+          },
+          {
+            "label": "D",
+            "text": "Explore emerging fields or innovative industries that spark your curiosity and see how your current skills can be transferred there."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_df3521bf",
+        "question": "I recently heard an unfamiliar local legend about my city that doesn't seem to be widely documented. Should I explore this legend further and perhaps uncover an interesting story or historical fact about my city?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Discuss the legend with other locals or experts to see if it's a commonly known story before deciding to invest time in researching it."
+          },
+          {
+            "label": "B",
+            "text": "You should start a blog or a social media page documenting your discoveries about this legend to engage with others interested in your city's lore."
+          },
+          {
+            "label": "C",
+            "text": "Dive into the local archives and libraries to explore more about this legend; it might lead to fascinating historical insights."
+          },
+          {
+            "label": "D",
+            "text": "Make sure to verify the facts of the legend first to ensure the story is worth exploring further."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_82423c02",
+        "question": "What activities should we prioritize to gain a deep cultural insight into Bangkok?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Take a guided tour at the National Museum of Bangkok to learn about Thailand’s history and heritage through well-preserved artifacts."
+          },
+          {
+            "label": "B",
+            "text": "Explore the lesser-known galleries and artist-led workshops scattered across Bangkok to dive into contemporary Thai art."
+          },
+          {
+            "label": "C",
+            "text": "Visit the Grand Palace and the Temple of the Emerald Buddha to understand the foundation of Thai culture through its historic sites."
+          },
+          {
+            "label": "D",
+            "text": "Join a street food tour that focuses on traditional Thai ingredients and cooking techniques to get a taste of local life."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_1f967469",
+        "question": "How can I make my morning runs more interesting and challenging?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Listen to different genres of music or interesting podcasts to keep your mind engaged while you stick to your running path."
+          },
+          {
+            "label": "B",
+            "text": "Try integrating interval training or varying run tempos which can change the dynamics of your routine and enhance endurance."
+          },
+          {
+            "label": "C",
+            "text": "Consider exploring new running routes in different neighborhoods or scenic areas to diversify your visual and sensory experiences."
+          },
+          {
+            "label": "D",
+            "text": "Add a fixed set of calisthenics like push-ups and squats at certain mile markers to maintain interest and increase physical challenge."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_7df4d5f4",
+        "question": "How can I add more fun to my life?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Incorporate small, enjoyable activities into your daily routine, such as reading a chapter of a book or taking a leisurely walk."
+          },
+          {
+            "label": "B",
+            "text": "Join a local meetup group that focuses on something you’ve never tried before, like rock climbing or salsa dancing."
+          },
+          {
+            "label": "C",
+            "text": "Schedule a regular movie night featuring genres you enjoy to create something to look forward to every week."
+          },
+          {
+            "label": "D",
+            "text": "Explore a new hobby that challenges your creativity, like painting or writing."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_8402a810",
+        "question": "Should I choose a unique and culturally rich hotel over a standard, well-known chain?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Choose a well-known hotel chain which is familiar and likely to meet the standard expectations of all attendees."
+          },
+          {
+            "label": "B",
+            "text": "Go for a standard hotel chain known for reliable service and accommodations that cater to a wide audience."
+          },
+          {
+            "label": "C",
+            "text": "Select a unique and culturally rich hotel to provide an immersive and inspiring experience for all participants."
+          },
+          {
+            "label": "D",
+            "text": "Opt for a boutique hotel that offers customized experiences tailored to diverse interests and artistic decor."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_f566d6b9",
+        "question": "How should I approach the community leaders about my idea to redesign the park?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Organize a small, innovative art event in the park to demonstrate the potential of your idea live to the community leaders and gather public support."
+          },
+          {
+            "label": "B",
+            "text": "Gather signatures from residents showing support for your idea, which can give your proposal more weight when you present it to the community leaders."
+          },
+          {
+            "label": "C",
+            "text": "Consider preparing a dynamic presentation showcasing global examples of art installations in parks that have revitalized public spaces, making it visually compelling."
+          },
+          {
+            "label": "D",
+            "text": "Draft a formal proposal outlining the benefits and feasibility of your idea, and request a meeting through official channels to discuss it with the community leaders."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_71550983",
+        "question": "How should I approach reforming the local government?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Establish a strict code of conduct and enforce it with severe penalties for any breaches."
+          },
+          {
+            "label": "B",
+            "text": "Improve the efficiency by setting clear, traditional benchmarks for performance and regularly auditing departments."
+          },
+          {
+            "label": "C",
+            "text": "Consider implementing transparent digital platforms that allow public access to government operations and spending."
+          },
+          {
+            "label": "D",
+            "text": "Initiate a series of collaborative workshops that involve both government officials and community members to creatively address corruption."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "openness_trait_0328dc72",
+        "question": "How should I approach achieving my goal of becoming more informed about climate change?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Regularly watch news segments and updates from established media outlets that provide clear and concise reporting on climate change."
+          },
+          {
+            "label": "B",
+            "text": "Stick to reading well-known and authoritative books on climate change written by respected scientists in the field."
+          },
+          {
+            "label": "C",
+            "text": "Explore various interactive online platforms that offer courses and live discussions focused on climate change from experts around the globe."
+          },
+          {
+            "label": "D",
+            "text": "Immerse yourself in diverse multimedia content like VR experiences and interactive webinars that can provide profound insights into climate system processes and impacts."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "openness"
+      },
+      {
+        "id": "conscientiousness_trait_d3de3adb",
+        "question": "How should I handle the situation at the party to ensure safety and responsibility?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Keep your phone handy and charged, so you can reach out to friends or get a ride when you feel it's time to head out."
+          },
+          {
+            "label": "B",
+            "text": "Arrange your transportation in advance, either by designating a sober driver or pre-booking a taxi service."
+          },
+          {
+            "label": "C",
+            "text": "Feel free to explore all the activities first, then decide which ones you actually want to participate in."
+          },
+          {
+            "label": "D",
+            "text": "Establish a personal limit for alcohol consumption before arriving, and stick to it throughout the event."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_d3af5468",
+        "question": "What should I do when I realize that someone close to me has read my personal journal without my permission?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Maybe just let it slide this time, but hide your journal in a less obvious spot from now on."
+          },
+          {
+            "label": "B",
+            "text": "You could jokingly warn them about the 'curses' you place on nosy readers to keep things light while making your point."
+          },
+          {
+            "label": "C",
+            "text": "Secure your journal in a locked drawer or consider a digital journal with password protection to prevent future incidents."
+          },
+          {
+            "label": "D",
+            "text": "Discuss the issue with them, expressing how the breach of privacy affects you and establish boundaries to ensure it doesn't happen again."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_ad187b96",
+        "question": "How should I prepare for this long journey to ensure it is safe and successful?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Pack some snacks and drinks in a cooler for easy access so you can keep going without needing to stop too often."
+          },
+          {
+            "label": "B",
+            "text": "Check and service your vehicle thoroughly, ensuring all fluids are topped up and all necessary emergency tools and kits are on board."
+          },
+          {
+            "label": "C",
+            "text": "Create a detailed itinerary including rest stops, fuel stations, and overnight accommodations for each day of your trip."
+          },
+          {
+            "label": "D",
+            "text": "Make sure you have a good playlist and perhaps some audiobooks ready to keep the drive interesting and fun."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_66089b29",
+        "question": "Should I lend my car to a friend who has asked to borrow it?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You could lend them your car, but make sure to set clear guidelines on mileage and maintenance responsibilities."
+          },
+          {
+            "label": "B",
+            "text": "Why not? Just hand over the keys and let them enjoy the weekend with your car."
+          },
+          {
+            "label": "C",
+            "text": "Sure, lend them the car; it's a nice thing to do, and they will probably appreciate the help."
+          },
+          {
+            "label": "D",
+            "text": "Consider offering to lend the car only if they agree to cover any incidentals like extra insurance or minor repairs."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_8b0652ca",
+        "question": "What approach should I take to completing my weekend chores?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Create a detailed schedule to allocate specific times for each task, starting with laundry, then cleaning, and finishing with grocery shopping."
+          },
+          {
+            "label": "B",
+            "text": "Consider doing a bit of everything throughout the day without a strict plan, mixing them up as you go to keep things interesting."
+          },
+          {
+            "label": "C",
+            "text": "Just take it easy and start with whatever you feel like doing at the moment; maybe blasting some music while you work could make it more enjoyable."
+          },
+          {
+            "label": "D",
+            "text": "Prioritize your chores based on urgency and importance, ensuring essentials like grocery shopping are completed first to ensure you have everything you need for the week."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_f4195e64",
+        "question": "Should I continue to support a younger relative financially by paying their tuition fees?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Have you thought about simply encouraging them to take a gap year to work and save up money themselves, which might give them a new perspective on things?"
+          },
+          {
+            "label": "B",
+            "text": "Why not just give them a set amount of money and let them decide how to use it best for their education?"
+          },
+          {
+            "label": "C",
+            "text": "You might also look into scholarship opportunities for them and assist them in applying to reduce the financial burden on both of you."
+          },
+          {
+            "label": "D",
+            "text": "Consider setting up a structured savings plan specifically for their tuition to ensure you can manage your finances effectively while supporting them."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_9e91670b",
+        "question": "I noticed a small error in a document I sent my team yesterday. Should I admit the mistake to them?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Immediately highlight the error to your team, ensuring clarity and maintaining responsibility."
+          },
+          {
+            "label": "B",
+            "text": "Prepare a correct version of the financial report to present along with your admission of the error to demonstrate responsibility and initiative."
+          },
+          {
+            "label": "C",
+            "text": "See if anyone notices the mistake first before bringing it up; it might not have as big of an impact as you think."
+          },
+          {
+            "label": "D",
+            "text": "Mention it casually in your next team meeting if it seems relevant, or wait to see if it's brought up by others."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_980a76aa",
+        "question": "How should I prepare for relocating to a new city for my job?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Just start packing the essentials, and figure out the rest as you settle into your new job and city life."
+          },
+          {
+            "label": "B",
+            "text": "Research your new city’s neighborhoods, public transportation options, and essential services to ensure a smooth transition."
+          },
+          {
+            "label": "C",
+            "text": "Create a detailed checklist of tasks such as finding housing, transferring your belongings, and setting up utilities in the new city."
+          },
+          {
+            "label": "D",
+            "text": "Visit the new city for a weekend to get a feel of the area and find some cool spots you might enjoy."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_a32fff11",
+        "question": "I left my book club a while back because I kept missing meetings. Should I try to rejoin and improve my participation, or should I just let it go?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Why not explore other clubs or activities that don't require frequent commitments but still keep you engaged with reading?"
+          },
+          {
+            "label": "B",
+            "text": "Perhaps compile a list of the books previously discussed, read them, and provide insights the next time you reapply to the club, showing your commitment."
+          },
+          {
+            "label": "C",
+            "text": "You could consider rejoining the book club, making a firm schedule to attend all meetings and actively contribute to discussions."
+          },
+          {
+            "label": "D",
+            "text": "Maybe just move on and find a new hobby or group that better suits your current lifestyle and interests without the pressure of scheduled meetups."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_3f9d327f",
+        "question": "Should I switch to the course that I am more passionate about?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Go for it! Switch to the course that excites you more; you'll likely enjoy the learning process and engage more deeply."
+          },
+          {
+            "label": "B",
+            "text": "Why not explore the new course? If it resonates more with your interests, it might make your educational experience more fulfilling and fun."
+          },
+          {
+            "label": "C",
+            "text": "Create a detailed comparison of both courses covering syllabus, opportunities, and how each aligns with your career path to make a well-informed decision."
+          },
+          {
+            "label": "D",
+            "text": "Evaluate the potential career benefits and required commitments for switching courses to ensure it aligns with your long-term objectives."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_26585870",
+        "question": "I've woken up feeling under the weather today. Should I work from home or take the entire day off?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Why not opt for a complete day off? Enjoy some downtime and perhaps binge-watch your favorite series or dive into a good book."
+          },
+          {
+            "label": "B",
+            "text": "You might choose to handle lighter work tasks from home, ensuring you get adequate rest while staying engaged with your responsibilities."
+          },
+          {
+            "label": "C",
+            "text": "Take the day off to relax and fully recuperate without worrying about work duties."
+          },
+          {
+            "label": "D",
+            "text": "Consider working from home today and prioritize only the essential tasks to maintain productivity without straining yourself."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_6af7454b",
+        "question": "Should I volunteer at the animal shelter this weekend?",
+        "options": [
+          {
+            "label": "A",
+            "text": "If you're free this weekend, swing by the shelter to see if any instant help is needed, making your decision based on how you feel that day."
+          },
+          {
+            "label": "B",
+            "text": "Prepare a list of supplies you could potentially donate based on their urgent requests, and bring them along when you volunteer this weekend."
+          },
+          {
+            "label": "C",
+            "text": "Research the most pressing needs listed by the shelter and offer to schedule a regular volunteering slot that fits your weekly routine."
+          },
+          {
+            "label": "D",
+            "text": "Check if any of your friends are interested in joining, making your volunteering day more spontaneous and fun."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_c63e5391",
+        "question": "I'm owed a tax refund this year. Should I gather all the necessary documents and file for it?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You could also just wait until you're more in the mood or have spare time, and then maybe look into it casually."
+          },
+          {
+            "label": "B",
+            "text": "Absolutely, organize all relevant receipts and documents promptly to ensure you can claim the maximum refund possible."
+          },
+          {
+            "label": "C",
+            "text": "Maybe just gather the major documents you know off the top of your head and see if it seems worth the effort."
+          },
+          {
+            "label": "D",
+            "text": "You should consult with a tax professional to verify all your deductions are accounted for and compliant with tax laws."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_042a9ecc",
+        "question": "How do I approach the idea of taking up a new hobby like painting?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Schedule a specific time each week for painting to create a structured routine."
+          },
+          {
+            "label": "B",
+            "text": "Jump in and start experimenting with different painting styles that catch your eye."
+          },
+          {
+            "label": "C",
+            "text": "Research and invest in quality painting supplies to ensure a productive start to your new hobby."
+          },
+          {
+            "label": "D",
+            "text": "Grab any art materials you have and begin doodling or painting freely without worrying about the outcome."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_bf387e48",
+        "question": "What should I consider when buying new pencils for my exam preparation?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Pick pencils that are affordable and easily replaceable, so you won’t worry too much if you lose a few."
+          },
+          {
+            "label": "B",
+            "text": "Maybe just grab a pack that looks cool and feels right in your hand; too much detail might stress you out."
+          },
+          {
+            "label": "C",
+            "text": "Opt for pencils with a comfortable grip and balanced weight to reduce hand fatigue during long study sessions."
+          },
+          {
+            "label": "D",
+            "text": "Ensure the pencils you choose have high-quality graphite that does not easily break and offers consistent writing quality."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_47508b4b",
+        "question": "What strategies should I adopt to ensure a successful transition into this new job?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Develop a detailed 90-day plan outlining your learning goals, key achievements to target, and strategies for integrating with your new team."
+          },
+          {
+            "label": "B",
+            "text": "Jump right into projects to get hands-on experience from the start, allowing you to learn quickly and adapt on-the-go."
+          },
+          {
+            "label": "C",
+            "text": "Network with your new colleagues in less formal settings like during lunch or after-work outings to gain insights and establish supportive relationships effortlessly."
+          },
+          {
+            "label": "D",
+            "text": "Set up regular feedback sessions with your supervisor and peers to continuously assess your progress and address any gaps in your skills or knowledge."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_f0b15f55",
+        "question": "What should I do about the trash in the park?",
+        "options": [
+          {
+            "label": "A",
+            "text": "How about snapping a few pictures and sharing them online? It might catch the right eyes to do something about it."
+          },
+          {
+            "label": "B",
+            "text": "Leave it alone for now — there'll be more tomorrow anyway, and the park staff get paid to handle it."
+          },
+          {
+            "label": "C",
+            "text": "Contact the local park authorities to inform them about the issue and request more frequent maintenance."
+          },
+          {
+            "label": "D",
+            "text": "Organize a community cleanup event to gather volunteers and collectively remove the trash efficiently."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_947a3d38",
+        "question": "Should I follow the directions provided or try to assemble the furniture based on my intuition?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Carefully follow the instructions step-by-step to ensure it's assembled correctly and safely."
+          },
+          {
+            "label": "B",
+            "text": "If you feel confident about how the pieces fit together, go with your gut and assemble it intuitively."
+          },
+          {
+            "label": "C",
+            "text": "Just start putting it together with the pieces that seem to fit; you can always adjust as you go along."
+          },
+          {
+            "label": "D",
+            "text": "Check if there are any online tutorials or videos from the manufacturer that could guide you through the assembly process."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_629556e7",
+        "question": "Should I adopt a pet, and if so, how should I prepare?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Adopt a pet that seems easy-going and maybe get a trial period to see how it fits into your life before making a long-term commitment."
+          },
+          {
+            "label": "B",
+            "text": "Just go to a local shelter and pick a pet that you feel an instant connection with; sometimes gut feelings are the best guide."
+          },
+          {
+            "label": "C",
+            "text": "Create a detailed plan covering the pet’s daily needs, potential medical costs, and the space adjustments required in your home."
+          },
+          {
+            "label": "D",
+            "text": "Begin by researching the specific needs and behaviors of the pet type you're considering to ensure you can meet them adequately."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "conscientiousness_trait_799dec7d",
+        "question": "How should I choose the perfect anniversary gift for my parents?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Grab a gift card from their favorite restaurant or store; it’s quick, easy, and they can choose what they really want."
+          },
+          {
+            "label": "B",
+            "text": "Why not surprise them with tickets to a concert or a show they'd enjoy? It’s simple and always a fun time!"
+          },
+          {
+            "label": "C",
+            "text": "Consider their hobbies or any recent interests they've mentioned, and select a gift that aligns with these activities to give it a personalized touch."
+          },
+          {
+            "label": "D",
+            "text": "Research and compare options based on reviews and ratings to find a high-quality gift that falls within your budget and meets their needs or desires."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "conscientiousness"
+      },
+      {
+        "id": "extraversion_trait_b6b24783",
+        "question": "How should I approach an old colleague to rekindle our conversation?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Walk up to them with a confident and friendly greeting, then ask about a project or interest they're passionate about."
+          },
+          {
+            "label": "B",
+            "text": "Stride over with a big smile, offer a high five, and cheerfully remind them of a fun memory you both shared at work."
+          },
+          {
+            "label": "C",
+            "text": "Approach them calmly, ask if they'd like some company, and gently inquire about how they've been since you last met."
+          },
+          {
+            "label": "D",
+            "text": "Quietly join them and mention you noticed they were alone, then ask if they're enjoying the event and let the conversation flow from there."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_8d9fe55c",
+        "question": "How should I react to finding an event that piques my interest in a magazine?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Make a note of the event details in your calendar or planner to make sure you don't forget about it."
+          },
+          {
+            "label": "B",
+            "text": "Snap a photo of the ad with your phone so you can share it with friends later!"
+          },
+          {
+            "label": "C",
+            "text": "Why not see if anyone else in the office is interested and plan to go together?"
+          },
+          {
+            "label": "D",
+            "text": "Research more about the event online to find out all the specifics and see if it truly matches your interests."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_a09c37a8",
+        "question": "How should I interact with my family members at the reunion?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Jump in and organize a fun group game that everyone can participate in, like charades or a scavenger hunt!"
+          },
+          {
+            "label": "B",
+            "text": "Politely join smaller conversations, and show genuine interest by asking questions about their recent life updates."
+          },
+          {
+            "label": "C",
+            "text": "Find a comfortable spot to sit and invite family members for one-on-one chats to catch up in a more relaxed setting."
+          },
+          {
+            "label": "D",
+            "text": "Take the lead in catching up with everyone, maybe start a circle where each person shares a recent highlight from their life."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_791b37be",
+        "question": "What should I do on my first night in Chicago?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Join a downtown pub crawl to mix with locals and other travelers while enjoying some unique Chicago brews."
+          },
+          {
+            "label": "B",
+            "text": "Kick off your night with a lively riverboat cruise on the Chicago River to see the skyline light up!"
+          },
+          {
+            "label": "C",
+            "text": "Visit the Art Institute of Chicago for an evening of impressive artworks in a quieter, reflective atmosphere."
+          },
+          {
+            "label": "D",
+            "text": "Enjoy a calm evening stroll through Millennium Park to see the famous \"Bean\" sculpture and perhaps catch a free concert if you're lucky."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_5febfcf4",
+        "question": "How should I approach this networking event to maximize my opportunities?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Start conversations by complimenting something specific about someone’s work or asking an engaging question about their current projects!"
+          },
+          {
+            "label": "B",
+            "text": "Seek out a familiar face first to get comfortable, and then gradually join conversations with their peers to expand your network in a more controlled, calm manner."
+          },
+          {
+            "label": "C",
+            "text": "Join in on group discussions with enthusiasm, share some insightful thoughts or recent achievements that relate to the topic being discussed!"
+          },
+          {
+            "label": "D",
+            "text": "Listen attentively to conversations and when comfortable, contribute thoughtful insights or ask detailed questions to show your interest and expertise."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_96775288",
+        "question": "How can I contribute to the festive atmosphere at the wedding?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Take lots of candid photos of the event to capture memorable moments and later share with the bride and groom."
+          },
+          {
+            "label": "B",
+            "text": "Help the event organizers by making sure all the guests feel comfortable and have everything they need."
+          },
+          {
+            "label": "C",
+            "text": "Offer to give an enthusiastic and heartwarming toast to celebrate the couple's special day."
+          },
+          {
+            "label": "D",
+            "text": "Start a conga line or a fun group dance to get everyone moving and laughing together!"
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_d3b212de",
+        "question": "How should I respond to this new idea during the meeting?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Show enthusiasm and support by suggesting to immediately prototype or pilot the innovative approach to see its real-world implications."
+          },
+          {
+            "label": "B",
+            "text": "Carefully consider the pros and cons of the new idea, and suggest scheduling a follow-up meeting to delve deeper into the feasibility and execution steps."
+          },
+          {
+            "label": "C",
+            "text": "Acknowledge the creativity of the suggestion and propose a detailed analysis or report to evaluate how this new approach aligns with existing project goals."
+          },
+          {
+            "label": "D",
+            "text": "Encourage the team to explore the proposed idea further by leading a lively, interactive discussion around its potential benefits and challenges."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_f7b1b22e",
+        "question": "What strategies should I use to effectively lead and inspire my project team?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Kick off the project with a high-energy team-building event to foster strong connections and enthusiasm among members."
+          },
+          {
+            "label": "B",
+            "text": "Energize your meetings with interactive presentations and dynamic group discussions to keep everyone engaged and motivated."
+          },
+          {
+            "label": "C",
+            "text": "Start with a detailed project plan shared through email, outlining roles and expectations to ensure clarity and structure for the team."
+          },
+          {
+            "label": "D",
+            "text": "Utilize a digital collaboration platform where team members can contribute asynchronously, accommodating diverse schedules and working styles."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_53ab6495",
+        "question": "How can I make the most out of my travels and ensure a rich and fulfilling experience?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Attend local festivals and social events where you can meet new people and truly experience the joy and communal spirit of the places you visit."
+          },
+          {
+            "label": "B",
+            "text": "Join local guided tours to connect with fellow travelers and dive deep into the cultural heartbeats of each destination."
+          },
+          {
+            "label": "C",
+            "text": "Create a detailed itinerary that includes visits to museums and historical sites, ensuring you absorb the educational richness of each locale."
+          },
+          {
+            "label": "D",
+            "text": "Spend quality time in nature reserves or quiet beaches at each destination for a peaceful and introspective travel experience."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_1fda1770",
+        "question": "How should I approach the frequent partner changes in my dance class?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Focus on the dance steps during each switch to maintain your comfort and concentrate on the learning aspect rather than the social part."
+          },
+          {
+            "label": "B",
+            "text": "Keep a friendly and open attitude; initiate small talk to break the ice quickly and create a fun learning environment."
+          },
+          {
+            "label": "C",
+            "text": "Prepare a set of standard questions or comments about the dance to discuss with each partner to ease into the change without extra social pressure."
+          },
+          {
+            "label": "D",
+            "text": "Embrace each new partner with enthusiasm; view every switch as a fresh chance to expand your social network and dancing fluency."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_13d661c6",
+        "question": "How should I react to a colleague's promotion news at work?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Consider writing a personal congratulatory note to them expressing your genuine happiness for their success."
+          },
+          {
+            "label": "B",
+            "text": "Organize a surprise celebration for them with the team to show your support and happiness for their achievement!"
+          },
+          {
+            "label": "C",
+            "text": "Why not lead the congratulations in the next team meeting, making it a big deal to highlight their hard work?"
+          },
+          {
+            "label": "D",
+            "text": "Suggest a moment to chat privately, where you can personally congratulate them and wish them success in their new role."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_0cbb228f",
+        "question": "Should I offer a truce to resolve the conflict with my colleague?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You could schedule a private meeting with your colleague to discuss your issues calmly and come up with a mutually agreeable solution."
+          },
+          {
+            "label": "B",
+            "text": "Perhaps sending a thoughtful email outlining your perspectives and suggesting a few ways to resolve the conflict might help clear the air."
+          },
+          {
+            "label": "C",
+            "text": "Why not invite your colleague to an informal lunch where you can both discuss your differences and explore common ground to move forward together?"
+          },
+          {
+            "label": "D",
+            "text": "Consider organizing a team-building activity that involves both of you; it could be a fun way to break the ice and improve your working relationship."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_81da3687",
+        "question": "Should I take my friend to the park to help lift their spirits?",
+        "options": [
+          {
+            "label": "A",
+            "text": "How about planning an active day out, like a fun picnic or even a light game of frisbee at the park?"
+          },
+          {
+            "label": "B",
+            "text": "Taking your friend to the park sounds nice; maybe find a quiet corner where you two can have a peaceful chat."
+          },
+          {
+            "label": "C",
+            "text": "You could also consider a calm nature walk in the park, just the two of you, to help them unwind and talk."
+          },
+          {
+            "label": "D",
+            "text": "Definitely take them to the park, and maybe you can organize a small gathering with some of their close friends there!"
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_fc919a56",
+        "question": "Should I ask my coworkers if they want to join me for a late lunch?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Why not send a quick group message to see if anyone else missed lunch and wants to join for some food now?"
+          },
+          {
+            "label": "B",
+            "text": "Maybe consider ordering something for delivery to enjoy at your desk or a quiet spot."
+          },
+          {
+            "label": "C",
+            "text": "Absolutely, ask around the office and see who's free to grab a bite together for a late lunch!"
+          },
+          {
+            "label": "D",
+            "text": "You could take this time to quietly enjoy a meal by yourself and recharge after your busy day."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_dcbe78b1",
+        "question": "How should I go about planning the dinner party to make it a success?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Create a detailed menu with several courses that cater to various dietary preferences and include a special signature dish."
+          },
+          {
+            "label": "B",
+            "text": "Host a themed dinner party where guests can dress up and participate in themed games or activities."
+          },
+          {
+            "label": "C",
+            "text": "Set up a cozy environment with elegant table settings and soft background music to facilitate intimate conversations among your guests."
+          },
+          {
+            "label": "D",
+            "text": "Consider hiring a local band or DJ to provide lively music throughout the evening, ensuring your guests are entertained and energized."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_c49049ed",
+        "question": "How should I prepare to ensure my presentation is engaging and impactful?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Include some interactive elements like real-time polls or Q&A sessions during your presentation to keep the audience engaged and involved."
+          },
+          {
+            "label": "B",
+            "text": "Start practicing in front of small groups and gradually increase the audience size to build confidence and gather feedback."
+          },
+          {
+            "label": "C",
+            "text": "Spend ample time refining your slides to ensure they are clear, visually appealing, and that your main points are effectively highlighted."
+          },
+          {
+            "label": "D",
+            "text": "Rehearse your presentation multiple times in a quiet space to ensure you are comfortable with the content and the flow of information."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_66cbb6fb",
+        "question": "How can I make the dinner date special and memorable?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Choose a trendy, upscale restaurant with live music to set a vibrant and exciting tone for the night."
+          },
+          {
+            "label": "B",
+            "text": "Set up a cozy dinner at a quiet local bistro where you can talk deeply and enjoy each other's company."
+          },
+          {
+            "label": "C",
+            "text": "Prepare a homemade meal with your date's favorite dishes for a thoughtful and intimate evening."
+          },
+          {
+            "label": "D",
+            "text": "Book a lively dinner cruise that offers dancing under the stars for an unforgettable evening."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_c5c897d7",
+        "question": "What activity should I choose to rejuvenate myself this weekend?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Try out a solo hobby like painting or model-building that you can immerse yourself in peacefully at home."
+          },
+          {
+            "label": "B",
+            "text": "Spend a quiet weekend at a cozy cabin in the woods; reading, reflecting, and relaxing."
+          },
+          {
+            "label": "C",
+            "text": "Attend a lively music concert or festival with a group of friends to elevate your spirits!"
+          },
+          {
+            "label": "D",
+            "text": "Host a themed dinner party or a game night at your place to enjoy some delightful company and laughter."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_023dfd6a",
+        "question": "How can I introduce myself to my new neighbors and get involved in the community?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Attend local community meetings or events to quietly observe and gradually get to know people."
+          },
+          {
+            "label": "B",
+            "text": "Join neighborhood social clubs or groups that align with your interests to meet like-minded people."
+          },
+          {
+            "label": "C",
+            "text": "Offer to volunteer for community projects or local organizations, providing a chance to meet others in a more structured setting."
+          },
+          {
+            "label": "D",
+            "text": "Throw a housewarming party and invite the neighbors to foster a friendly and welcoming atmosphere."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "extraversion_trait_af4260cb",
+        "question": "How can I effectively promote my new nonprofit to gain community support and involvement?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Host a vibrant kick-off event in a local park with live performances by artists your nonprofit aims to support, inviting community members and local media to join and celebrate."
+          },
+          {
+            "label": "B",
+            "text": "Create a detailed website that showcases featured artists, upcoming projects, and ways for the community to get involved, ensuring all information is easily accessible and thoroughly explained."
+          },
+          {
+            "label": "C",
+            "text": "Develop a regular newsletter that provides updates on your nonprofit’s achievements and upcoming events, keeping subscribers informed and engaged in a direct and thoughtful manner."
+          },
+          {
+            "label": "D",
+            "text": "Organize a series of fun, interactive art workshops that invite people to create and learn about the local art scene, building enthusiasm and engagement through social activities."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "extraversion"
+      },
+      {
+        "id": "agreeableness_trait_6b851ba2",
+        "question": "How should I react to someone cutting in line?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Tell them firmly that they just cut in line and that they need to move to the back."
+          },
+          {
+            "label": "B",
+            "text": "Politely inform them of the mistake by mentioning that you were in line and suggest that you both share the space until another register opens."
+          },
+          {
+            "label": "C",
+            "text": "Smile at them and kindly explain that you were next in line, but let them know it's okay this time and to please be more mindful in the future."
+          },
+          {
+            "label": "D",
+            "text": "Directly point out to them that you were waiting before them and request that they respect the queue order by stepping behind you."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_55495cf2",
+        "question": "After I pushed back hard on my boss's idea in a team meeting, he's demanding I make a public apology. How should I respond?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Politely request a private conversation to explain your viewpoint and suggest that any public statements include a mutual acknowledgment of different perspectives to maintain fairness."
+          },
+          {
+            "label": "B",
+            "text": "Propose a solution where both parties can express their thoughts in a team meeting to clear the air without singling out your mistake, fostering an open dialogue environment."
+          },
+          {
+            "label": "C",
+            "text": "Consider arranging a personal meeting with your boss to discuss the incident and assure him of your support and respect for his authority before making the public apology."
+          },
+          {
+            "label": "D",
+            "text": "Draft a genuine public apology that highlights your respect for your boss's leadership and express your regret for any misunderstandings caused during the meeting."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_168abf81",
+        "question": "What approach should I take to handle this disagreement without escalating the situation?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Suggest taking a brief pause in the discussion to allow everyone, including yourself, to collect their thoughts and calm their emotions."
+          },
+          {
+            "label": "B",
+            "text": "Stand your ground and assertively state your facts and opinions to make sure your perspective is not overlooked in the heat of the meeting."
+          },
+          {
+            "label": "C",
+            "text": "Consider acknowledging the other person’s viewpoint before gently presenting your counterarguments to show respect and understanding."
+          },
+          {
+            "label": "D",
+            "text": "Propose a vote or decision-making process if the issue is critical, to objectively establish which viewpoint holds the majority consensus."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_cf483ba2",
+        "question": "How should I handle the bill situation?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Offer to split the bill evenly among everyone to keep things simple and fair."
+          },
+          {
+            "label": "B",
+            "text": "Ask outright who would like to cover the bill or if anyone intends to treat the group, setting clear expectations right away."
+          },
+          {
+            "label": "C",
+            "text": "Suggest using a mobile payment app that allows everyone to pay their share directly to ensure everyone feels comfortable."
+          },
+          {
+            "label": "D",
+            "text": "Propose that each person pays for exactly what they ordered to avoid any confusion or unfair payments."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_8e72dcb2",
+        "question": "Should I volunteer to help a friend with their charity event?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You should definitely volunteer; it's a wonderful opportunity to help people in need and support them in their admirable efforts."
+          },
+          {
+            "label": "B",
+            "text": "Only volunteer if you think the event's goals align with your personal values and if you genuinely have the time; otherwise, it might just feel like another obligation."
+          },
+          {
+            "label": "C",
+            "text": "If your schedule is already packed, consider whether adding another commitment might be too much before deciding to volunteer."
+          },
+          {
+            "label": "D",
+            "text": "Volunteering would not only be a great help to them but also a rewarding experience for you, helping to build a stronger community."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_d61d4638",
+        "question": "What type of gift should I consider getting for a close friend's birthday?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Consider a heartfelt gift like a custom photo book filled with memories of you both to show how much you care."
+          },
+          {
+            "label": "B",
+            "text": "Maybe plan a surprise party with all of their friends to lift their spirits and show them they are loved."
+          },
+          {
+            "label": "C",
+            "text": "Opt for a subscription service, like a year of streaming or a gym membership, which can offer both entertainment and health benefits without needing to be overly sentimental."
+          },
+          {
+            "label": "D",
+            "text": "Get them a practical, high-quality item they can use like a new phone or a smartwatch; something that delivers obvious value."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_70b39a4e",
+        "question": "How should I assist my friend during their dentist appointment?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Suggest they listen to music or an audiobook through headphones during the appointment to manage their own anxiety without relying too much on others."
+          },
+          {
+            "label": "B",
+            "text": "Offer to hold their hand during the procedure to provide comforting physical support."
+          },
+          {
+            "label": "C",
+            "text": "Gently reassure them by talking about calming topics or their interests to distract them from their anxiety."
+          },
+          {
+            "label": "D",
+            "text": "Encourage them to face their fears independently to build resilience and confidence for future appointments."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_331f2e77",
+        "question": "How should I respond to my parents' concerns about my career choices?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You might respond by thanking them for their concern and asking if they would like to hear more about your career plans and what excites you about your current path."
+          },
+          {
+            "label": "B",
+            "text": "Consider gently explaining the research and thought you’ve put into choosing your career, showing them statistics or success stories that reassure them of your career’s stability."
+          },
+          {
+            "label": "C",
+            "text": "Suggest setting boundaries in future discussions, reminding them that while you value their input, your career choices are ultimately your decision to make."
+          },
+          {
+            "label": "D",
+            "text": "Firmly tell them that you are confident in your career decision and that you appreciate their concern, but have fully considered the risks and opportunities."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_275855b2",
+        "question": "How should I handle my interactions at this gathering, knowing there’s someone I don’t get along with?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Make an effort to engage positively with the guest you've had disagreements with, possibly breaking the ice by talking about neutral topics like food or weather."
+          },
+          {
+            "label": "B",
+            "text": "Choose to interact with the other guests who you feel comfortable with, avoiding extensive conversations with the person you disagree with."
+          },
+          {
+            "label": "C",
+            "text": "Politely acknowledge the other guest when needed, but focus on enjoying the gathering with friends you are comfortable and have a good time with."
+          },
+          {
+            "label": "D",
+            "text": "Offer to help the host with tasks or set-up, which might naturally limit your forced interaction with the other guest and keeps the atmosphere friendly."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_6ba0f52d",
+        "question": "Should I buy groceries for a friend to help them out during this busy time?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Consider suggesting that they use an online grocery service, so they can order essentials as needed without taking much time."
+          },
+          {
+            "label": "B",
+            "text": "Absolutely, it would be a thoughtful gesture to pick up some groceries for them, helping alleviate their stress during this busy period."
+          },
+          {
+            "label": "C",
+            "text": "Maybe remind them that managing time efficiently, including quick trips to buy essentials, is part of handling work demands effectively."
+          },
+          {
+            "label": "D",
+            "text": "You could organize a small grocery delivery to their place; it's a kind way to show you care and understand their current situation."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_bb5b2b05",
+        "question": "Should I approach an old acquaintance to catch up on old times?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You should definitely approach them and perhaps suggest grabbing a coffee together while you catch up."
+          },
+          {
+            "label": "B",
+            "text": "Consider if you actually have the time and interest to chat before deciding to approach them."
+          },
+          {
+            "label": "C",
+            "text": "Think about whether reconnecting with them will genuinely benefit you, or if it might just be a polite but unnecessary exchange."
+          },
+          {
+            "label": "D",
+            "text": "Why not go over and greet them warmly? It might brighten both of your days!"
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_306bff09",
+        "question": "Should I ask my friend for their honest opinion about this career change?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Sure, but take it with a grain of salt and make sure to do your own research and analysis to ensure it's the right move for you."
+          },
+          {
+            "label": "B",
+            "text": "Absolutely, seeking your friend's perspective can provide you with supportive insights and may help you see aspects of the change you hadn't considered."
+          },
+          {
+            "label": "C",
+            "text": "Go ahead, but remember that your friend's views might be biased; trust your own judgment above all."
+          },
+          {
+            "label": "D",
+            "text": "Yes, discussing it with a friend can help validate your feelings and give you the encouragement you need to make an informed decision."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_4f6d6801",
+        "question": "Should I suggest ordering dessert for the table?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Just order the dessert for yourself if you really want to try it, without worrying about the others."
+          },
+          {
+            "label": "B",
+            "text": "Point out that since everyone is full, you'll get the dessert this time and others can simply pass if they don't want any."
+          },
+          {
+            "label": "C",
+            "text": "Offer to order the dessert for everyone to taste, making it a delightful communal experience."
+          },
+          {
+            "label": "D",
+            "text": "Suggest sharing the dessert with the table, highlighting that it's a special occasion worth celebrating with something sweet."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_a40fb682",
+        "question": "My manager has offered me a new role that's a lateral move — not exactly what I wanted, but it would keep them happy. Should I accept?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Consider accepting the offer while continuing to express your career interests to your superiors, showing them where your true passions lie."
+          },
+          {
+            "label": "B",
+            "text": "Negotiate the terms of the new role to better fit your expectations before accepting any offers."
+          },
+          {
+            "label": "C",
+            "text": "You could accept the role and use it as an opportunity to build skills that could lead to your ideal job."
+          },
+          {
+            "label": "D",
+            "text": "Decline the offer if it doesn’t align with your career goals; it’s important to stay true to what you really want."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_202b2e47",
+        "question": "How should I communicate my need for company?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You could send a message to your friends letting them know that you're feeling down and would appreciate their company whenever they have time."
+          },
+          {
+            "label": "B",
+            "text": "Directly tell your friends that you need support right now and see if they can spare some time to hang out."
+          },
+          {
+            "label": "C",
+            "text": "Consider inviting your friends over for a casual get-together or a movie night, making it a relaxing event for everyone."
+          },
+          {
+            "label": "D",
+            "text": "Ask your friends when they are free next, and suggest meeting up, making it clear that you really need some company."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_abe34d4d",
+        "question": "How should I express my gratitude towards my colleague for their help?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Send a brief email thanking them for their help; efficient and to the point."
+          },
+          {
+            "label": "B",
+            "text": "Consider writing a personalized thank-you note expressing your heartfelt gratitude and mentioning how their assistance made a difference."
+          },
+          {
+            "label": "C",
+            "text": "Mention their contribution in your next team meeting to acknowledge their effort in front of peers, which also keeps it professional."
+          },
+          {
+            "label": "D",
+            "text": "Perhaps invite them out for a coffee or a meal as a gesture of appreciation and to spend some pleasant time together outside of work."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_f76fd3eb",
+        "question": "How should I approach my friend about their smoking habit?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Directly tell them that their increased smoking is concerning and unhealthy, and that they need to take action."
+          },
+          {
+            "label": "B",
+            "text": "Challenge them to consider the long-term consequences of their habit and suggest setting a quit date to motivate them."
+          },
+          {
+            "label": "C",
+            "text": "Invite them for a casual walk and gently bring up your concern for their health, emphasizing how much you care about their well-being."
+          },
+          {
+            "label": "D",
+            "text": "Offer to help them find resources or support groups that can provide guidance and encouragement in cutting down on smoking."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_bf1a6ee4",
+        "question": "Should I change my plans and attend the fundraising event?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You should stick to your original plan for a day of relaxation if that’s what you feel you need right now."
+          },
+          {
+            "label": "B",
+            "text": "You could attend the event for part of the day to show support and still have time to relax at home."
+          },
+          {
+            "label": "C",
+            "text": "Consider adjusting your plans to participate; it’s a meaningful way to contribute to your community and local schools."
+          },
+          {
+            "label": "D",
+            "text": "If attending doesn’t truly interest you or relate to your priorities, it’s reasonable to keep your day off as planned."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_c2dca463",
+        "question": "Should I discuss my job security concerns with my boss?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You might request a one-on-one meeting with your boss to openly discuss your performance and any ways you can contribute more effectively."
+          },
+          {
+            "label": "B",
+            "text": "Prepare a list of your accomplishments and contributions to the company, and present this to your boss to make a strong case for your retention."
+          },
+          {
+            "label": "C",
+            "text": "Schedule a meeting with your boss to demand clear information about your job security and the criteria they use for layoffs."
+          },
+          {
+            "label": "D",
+            "text": "Consider asking your boss for feedback on your work and any areas for improvement, which could help clarify your position and future at the company."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "agreeableness_trait_adfad078",
+        "question": "How should I propose a joint birthday celebration to my friend?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Maybe propose an idea of co-hosting the party, emphasizing the shared responsibilities and the opportunity to merge ideas for an amazing day together."
+          },
+          {
+            "label": "B",
+            "text": "You could suggest a combined celebration by mentioning how memorable and fun it would be to bring all your friends together for one big, joyful event."
+          },
+          {
+            "label": "C",
+            "text": "Tell them straight that having two parties doesn’t make sense and that pooling resources for one party is the smarter choice."
+          },
+          {
+            "label": "D",
+            "text": "Directly propose a joint celebration, pointing out how it will prevent the hassle of your friends having to choose between two events."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "agreeableness"
+      },
+      {
+        "id": "neuroticism_trait_0a7fa5bb",
+        "question": "What should I do about the minor accident with the other car’s bumper?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You should immediately notify the car owner; imagine how much worse this could get if they suspect a hit and run!"
+          },
+          {
+            "label": "B",
+            "text": "Perhaps leave a note with your contact details on their windshield and prepare for a tough conversation, this might lead to an insurance nightmare."
+          },
+          {
+            "label": "C",
+            "text": "Just leave your contact info in a note — accidents happen, and it's best to handle it straightforwardly and positively."
+          },
+          {
+            "label": "D",
+            "text": "Consider contacting them calmly to explain the situation; it’s a small scratch and can likely be resolved amicably."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_6f940719",
+        "question": "How should I respond upon hearing about a friend's financial troubles?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Maybe you could help them see this as a fresh start or a new chapter, suggesting innovative ways to rebound or different financial paths to explore."
+          },
+          {
+            "label": "B",
+            "text": "You might want to prepare for the worst and discuss detailed support plans with mutual friends or professionals who can help them manage this crisis effectively."
+          },
+          {
+            "label": "C",
+            "text": "Offer to help them with practical tasks, like budgeting or job searches, maintaining a positive and calm demeanor to encourage a forward-looking approach."
+          },
+          {
+            "label": "D",
+            "text": "I suggest frequently checking in on them to monitor their emotional well-being, as this bankruptcy could lead to severe stress or depression."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_11b1c2d8",
+        "question": "What should I do next about the missed call from a friend?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You should consider the possibility that they might have something urgent or unsettling to discuss with you, so prepare yourself for that conversation."
+          },
+          {
+            "label": "B",
+            "text": "Just give them a call back when you have a moment; there's probably a simple explanation or it could just be a casual check-in."
+          },
+          {
+            "label": "C",
+            "text": "Don't overthink it; calls can be missed for any number of harmless reasons, so just reach out to them to clear things up whenever you're free."
+          },
+          {
+            "label": "D",
+            "text": "It might be a good idea to think about any recent issues or problems that could have prompted them to call and try to anticipate how you'll handle them."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_d53b05e8",
+        "question": "How should I manage my anxiety and prepare for the performance?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You might consider preparing some back-up plans or escape strategies in case the performance feels too overwhelming when you're on stage."
+          },
+          {
+            "label": "B",
+            "text": "Just embrace the opportunity and enjoy the experience of sharing your talents, without overthinking how it will be received."
+          },
+          {
+            "label": "C",
+            "text": "Focus on the excitement of performing and the joy it brings, rather than the nerves; see this as a chance to grow and have fun."
+          },
+          {
+            "label": "D",
+            "text": "It might help to keep thinking about all possible outcomes and prepare mental notes on how to handle each scenario where things could go wrong."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_2c059c48",
+        "question": "How should I approach repaying someone who lent me money?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Perhaps set up a detailed payment plan to share with them; this could reassure both of you and alleviate some of your worries about their opinion."
+          },
+          {
+            "label": "B",
+            "text": "Just repay the money with a simple thank you note; I'm sure they will appreciate the gesture and won't judge your financial skills."
+          },
+          {
+            "label": "C",
+            "text": "Handle it straightforwardly by repaying the loan now that you’re able; transparency in such matters usually keeps things smooth and stress-free."
+          },
+          {
+            "label": "D",
+            "text": "You might consider paying back the loan as soon as possible to prevent any potential negative judgment about your handling of finances."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_ffeb44b8",
+        "question": "How should I approach my first meeting at the support group?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Try to see this as a positive step towards healing, and go into your first meeting with an open mind and a hopeful attitude."
+          },
+          {
+            "label": "B",
+            "text": "Use this opportunity to learn from others’ experiences and share your own, as this could be a great way to build new, supportive relationships."
+          },
+          {
+            "label": "C",
+            "text": "You should be prepared for the possibility that the group might not meet your expectations and could possibly intensify your feelings of anxiety."
+          },
+          {
+            "label": "D",
+            "text": "It might be overwhelming at first, so consider setting up an exit strategy in case the sessions become too emotionally charged for you."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_3f32c2be",
+        "question": "I'm considering applying for a job at the local tavern, but I keep second-guessing whether I'm qualified enough and how I'll handle the social side of the work. What should be my mindset?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Why not take this as a challenge to step out of your comfort zone? Applying could be a great way to enhance your skills and maybe even surprise yourself with your adaptability."
+          },
+          {
+            "label": "B",
+            "text": "Go ahead and apply for the job at the local tavern; treating it as a learning opportunity will help you gain valuable experience regardless of your current reservations."
+          },
+          {
+            "label": "C",
+            "text": "Spend the evening writing down everything that could go wrong — customers being rude, not knowing the drinks, getting fired in the first week — so you understand the full scope of the risk before committing."
+          },
+          {
+            "label": "D",
+            "text": "Hold off on applying until you've done enough research to be confident your social anxiety won't become a problem at a busy bar job."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_4da94646",
+        "question": "How should I manage my feelings while waiting for my friend at the train station?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You might want to prepare a list of topics to discuss in advance to avoid any uncomfortable silences or awkward moments."
+          },
+          {
+            "label": "B",
+            "text": "Approach this reunion with curiosity and enthusiasm; think of it as an opportunity to rediscover an old friend and form new, mature bonds based on the people you both are today."
+          },
+          {
+            "label": "C",
+            "text": "Consider having a backup excuse ready to leave early, just in case you find that the connection isn't there anymore and the meeting becomes too stressful."
+          },
+          {
+            "label": "D",
+            "text": "Why not go into this meeting with an open mind, assuming that change is natural, and focus on catching up on new experiences rather than worrying too much about the past?"
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_002d95f9",
+        "question": "How should I handle my need to go shopping despite my anxiety?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You should go early in the morning or late in the evening when the store might be less crowded, to avoid a panic-inducing situation."
+          },
+          {
+            "label": "B",
+            "text": "Why don't you try putting on some music or a podcast through your headphones while shopping? It could help keep you relaxed amidst the crowd."
+          },
+          {
+            "label": "C",
+            "text": "Maybe consider asking someone else to go shopping for you, as dealing with the crowds could be really stressful and upsetting for you."
+          },
+          {
+            "label": "D",
+            "text": "Look at it is an opportunity to practice patience and mindfulness in a stressful environment; sometimes, these challenges help us grow."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_7755da12",
+        "question": "I'm about to sign on a used car after weeks of negotiating, but something in the back of my mind keeps nagging at me. Should I proceed with finalizing the deal despite my doubts?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Perhaps viewing these doubts as a normal part of big decisions might help, and focusing on the positives of what the deal can bring."
+          },
+          {
+            "label": "B",
+            "text": "This could be just natural pre-deal jitters; moving ahead with confidence could be the best approach if your due diligence checks out."
+          },
+          {
+            "label": "C",
+            "text": "I think we should consult with more experts to look at this from every angle, just to be sure there isn’t anything we’re missing."
+          },
+          {
+            "label": "D",
+            "text": "Maybe it would be safer to postpone the deal until we've reassessed every possible risk and outcome thoroughly."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 0,
+          "C": 1,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_7cde6941",
+        "question": "How should I handle my concerns about the mistake I made at work?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Move forward by focusing on your current and future tasks; showing your dedication and competence in these can help overshadow a past minor error."
+          },
+          {
+            "label": "B",
+            "text": "You might want to schedule a meeting with your boss to discuss the error in detail; it could help clear any misinterpretations and show your commitment to improvement."
+          },
+          {
+            "label": "C",
+            "text": "Consider accepting that everyone makes mistakes and use this as an opportunity to learn something new, rather than worrying about the impression it might have made."
+          },
+          {
+            "label": "D",
+            "text": "Perhaps you should draft an apology email, highlighting your awareness of the mistake and outlining steps you aim to take to prevent similar issues in the future—it could still be bothering your boss."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_be803fb2",
+        "question": "How should I respond to the unexpected praise from the senior manager?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You might want to prepare a list of detailed questions and ask for a feedback session with the senior manager to clarify what exactly met their expectations."
+          },
+          {
+            "label": "B",
+            "text": "Consider reviewing your presentation multiple times to find elements that might have excelled, which could be inducing anxiety due to possibly unrealistically high standards set for future projects."
+          },
+          {
+            "label": "C",
+            "text": "See this as an opportunity to feel confident about your abilities and perhaps set a brief casual meeting with the senior manager to discuss further expectations and your career growth."
+          },
+          {
+            "label": "D",
+            "text": "Take it as a compliment and use the praise as motivation to continue improving your skills without overthinking the reasons behind their positive feedback."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_1644e3dc",
+        "question": "How can I manage my anxiety while planning this party for my mom?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You could organize a fun family outing, like a day trip or a visit to a place she loves; it's a fantastic way to celebrate without the hassles of a big party."
+          },
+          {
+            "label": "B",
+            "text": "How about making a small family dinner at home to keep the situation manageable and lessen the potential stress of a larger gathering?"
+          },
+          {
+            "label": "C",
+            "text": "You might consider just buying a lovely gift instead of planning an event, as it could reduce the risk of something going wrong during the celebration."
+          },
+          {
+            "label": "D",
+            "text": "Why not throw a casual get-together at her favorite restaurant? It's simple, enjoyable, and takes the pressure off your shoulders."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_a1f48fc6",
+        "question": "What should I do about the dirty dishes tonight?",
+        "options": [
+          {
+            "label": "A",
+            "text": "You could consider washing the dishes as a way to wind down and clear your mind after a long day."
+          },
+          {
+            "label": "B",
+            "text": "Maybe it's best if you just leave the dishes for now; the thought of dealing with them could just add to your stress."
+          },
+          {
+            "label": "C",
+            "text": "How about playing some of your favorite music while handling the dishes? It could make the task feel less daunting."
+          },
+          {
+            "label": "D",
+            "text": "You might find it helpful to think about why these chores feel so overwhelming tonight; is there something deeper bothering you that needs addressing?"
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_6a8938e2",
+        "question": "How should I handle my discomfort at this networking event?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Keep ruminating on how badly you're coming across — people are probably noticing your discomfort and judging you for it."
+          },
+          {
+            "label": "B",
+            "text": "Embrace the experience as a way to learn something new about others; keep a light-hearted approach and you may find yourself easing into conversations naturally."
+          },
+          {
+            "label": "C",
+            "text": "Consider leaving early if it's too much; no event is worth this much stress and it’s okay to put your comfort first."
+          },
+          {
+            "label": "D",
+            "text": "Try focusing on connecting with just one person at a time; it can make the networking event feel more manageable and enjoyable."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 0,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_665a1bfb",
+        "question": "How should I approach the situation of asking for a promotion?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Why not schedule a meeting with your supervisor today to discuss your career progression? It’s best to address it directly and see how it unfolds rather than waiting for the perfect moment."
+          },
+          {
+            "label": "B",
+            "text": "You might want to consider all the possible negative outcomes first and prepare detailed responses for each scenario before approaching your manager for a promotion."
+          },
+          {
+            "label": "C",
+            "text": "I would recommend waiting to see if your manager gives any positive signals about your performance that could indicate a safer time to ask for a promotion."
+          },
+          {
+            "label": "D",
+            "text": "Go ahead and ask for the promotion now; the right time is often just a construct and there's no time like the present to pursue your ambitions confidently."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_a0547a27",
+        "question": "How can I best prepare for this presentation to alleviate my anxiety?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Stay focused on the present moment during your presentation, and remember that your colleagues are likely supportive and interested in what you have to say."
+          },
+          {
+            "label": "B",
+            "text": "Consider doing multiple practice runs in front of friends or family who can provide honest feedback, as this could help soothe your worries about your performance."
+          },
+          {
+            "label": "C",
+            "text": "You might want to prepare for possible scenarios where things could go wrong, like tech issues or tough questions, so you're not caught off guard."
+          },
+          {
+            "label": "D",
+            "text": "Think of the presentation as a great opportunity to share what you know rather than a test, and trust your expertise and preparation."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_7a855ebc",
+        "question": "How should I manage my study time to prepare for the exam effectively?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Why not break your study session into manageable parts with short breaks in between? It’ll make things feel more achievable and keep your stress levels in check."
+          },
+          {
+            "label": "B",
+            "text": "It might be a good idea to call your teacher or classmates to see if they can pinpoint which areas are crucial to study, I'm sure they're feeling just as stressed about the workload."
+          },
+          {
+            "label": "C",
+            "text": "Maybe you should consider focusing only on the key topics that are most likely to be covered on the exam, as it's really risky to try and learn everything now."
+          },
+          {
+            "label": "D",
+            "text": "Just take a deep breath, prioritize the main chapters that have been emphasized throughout your course, and do what you can—staying calm will help you absorb the material better."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 1,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_ce295663",
+        "question": "How should I respond to my friend's urgent voicemails?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Give them a call when you can to understand more clearly what's going on, and see how you might be of assistance."
+          },
+          {
+            "label": "B",
+            "text": "Maybe consider driving to their place if a call doesn’t settle things; it sounds like they could be on the edge and might not cope well alone."
+          },
+          {
+            "label": "C",
+            "text": "Perhaps send them a message first to let them know you're there for them and arrange a good time to have a more in-depth conversation."
+          },
+          {
+            "label": "D",
+            "text": "You should call them immediately; the fact that their tone has become more desperate might indicate they’re really in a bad place and need urgent help."
+          }
+        ],
+        "answer_mapping": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 1
+        },
+        "primary_dimension": "neuroticism"
+      },
+      {
+        "id": "neuroticism_trait_40e51f65",
+        "question": "How should I go about making the most out of my visit to the symphony?",
+        "options": [
+          {
+            "label": "A",
+            "text": "Attending a symphony could be more stressful than relaxing if there are unforeseen issues like parking or seating; maybe consider smaller, more intimate musical settings that feel more predictable and less overwhelming."
+          },
+          {
+            "label": "B",
+            "text": "It might be risky to attend a concert considering the crowds and potential noise; perhaps it's safer to stay at home and listen to recordings where you can control your environment."
+          },
+          {
+            "label": "C",
+            "text": "Why not explore even more classical music events around you? It could be an exciting way to rediscover your passion and meet like-minded people."
+          },
+          {
+            "label": "D",
+            "text": "Definitely embrace the opportunity and attend a symphony; it's a wonderful and enriching way to relieve stress and enjoy something you love."
+          }
+        ],
+        "answer_mapping": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "primary_dimension": "neuroticism"
+      }
+    ]
+  }
+}
