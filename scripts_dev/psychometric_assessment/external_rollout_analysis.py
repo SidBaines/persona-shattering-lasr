@@ -14,6 +14,10 @@ One script, one command, everything:
         - ``per_preset``      — run FA separately on each preset's row
                                 subset (same k, same rotation).
     4. Computes:
+        - Parallel analysis   — Horn's null-reference test for the number
+                                of factors to retain. Reported alongside
+                                eigenvalue scree so ``FA_N_FACTORS`` has
+                                a principled justification.
         - Preset-variance η²  — how much of each factor's variance comes
                                 from the preset/model split. Baseline
                                 solution only; residualised factor scores
@@ -30,6 +34,20 @@ One script, one command, everything:
                                 (ii) between baseline and preset-
                                 residualised solutions, with greedy one-
                                 to-one factor alignment.
+        - Retention table     — per-preset row counts at each filtering
+                                stage (Stage-1 sampled → Stage-2 context
+                                filter → parse success → combine
+                                intersection → FA input), so unequal data
+                                loss across presets is visible at a glance.
+        - n-factors sweep     — the key top-line summaries (max baseline
+                                η², baseline→residualised |φ|) computed
+                                at a user-specified range of n_factors
+                                so conclusions can be checked for
+                                robustness to that choice.
+        - Oblique factor correlations — when the rotation is oblique the
+                                inter-factor correlation matrix is dumped
+                                for inspection (r > ~0.3 changes the
+                                interpretation of any "pure" factor).
     5. Writes CSVs + JSON summaries + diagnostic plots under
        ``scratch/psychometric_fa/external_analysis/<OUTPUT_TAG>/``.
 
@@ -60,6 +78,7 @@ load_dotenv()
 
 from src_dev.factor_analysis.factor_analysis import run_factor_analysis
 from src_dev.factor_analysis.interpretation import prompt_effects
+from src_dev.factor_analysis.parallel_analysis import parallel_analysis
 from src_dev.psychometric.combine import combine_per_pair_outputs, load_pair_outputs
 from src_dev.psychometric.config import (
     ExternalRolloutsStageConfig,
@@ -164,6 +183,20 @@ FA_N_FACTORS = 7
 FA_ROTATIONS: list[str] = ["oblimin", "varimax"]
 MIN_ITEM_VARIANCE = 0.1
 HIGH_VARIANCE_PERSONA_DROP_PCT = 0.0
+
+# n_factors robustness sweep: fit lightweight baseline + residualised FAs at
+# each of these n and report whether the top-line claims (max baseline
+# η²(preset), min/median baseline→residualised |φ|) survive perturbations of
+# FA_N_FACTORS. Primary n reuses the full analysis (this list can include
+# FA_N_FACTORS but the sweep CSV will just duplicate the primary result for
+# cross-check). Set to [] to skip the sweep entirely.
+FA_N_FACTORS_SWEEP: list[int] = [5, 6, 7, 8]
+
+# Horn's parallel analysis: permutation-method reference distribution is
+# more appropriate for ordinal Likert data than the default Gaussian. 100
+# iterations is the standard compromise between stability and compute.
+PARALLEL_ANALYSIS_ITERATIONS = 100
+PARALLEL_ANALYSIS_METHOD = "permutation"
 
 # ── Stage-2 defaults (mirror orchestrator values; most inherit preset-level
 # ── overrides via the preset registry) ──────────────────────────────────────
@@ -530,11 +563,13 @@ def _plot_rollout_stats(rows: list[dict], out_path: Path) -> None:
 class FaFitResult:
     label: str                          # "baseline", "residualised", or a preset key
     rotation: str
+    n_factors: int
     loadings: np.ndarray                # (n_items_kept, k)
     scores: np.ndarray                  # (n_samples_kept, k)
     proportion_variance: np.ndarray     # (k,)
     metadata: list[dict]                # aligned with scores
     items: list[dict]                   # aligned with loadings
+    factor_correlation_matrix: np.ndarray | None = None  # (k, k) for oblique rotations, None for orthogonal
 
 
 def _fit_fa(
@@ -546,6 +581,7 @@ def _fit_fa(
     rotation: str,
     do_residualize: bool = False,
     residualize_group_field: str | None = None,
+    n_factors: int | None = None,
 ) -> FaFitResult:
     data, meta_filtered, items_filtered, _group_ids = preprocess_response_matrix(
         matrix, metadata, items,
@@ -554,17 +590,20 @@ def _fit_fa(
         do_residualize=do_residualize,
         residualize_group_field=residualize_group_field,
     )
+    n = n_factors if n_factors is not None else FA_N_FACTORS
     fa = run_factor_analysis(
-        data, n_factors=FA_N_FACTORS, method=FA_METHOD, rotation=rotation,
+        data, n_factors=n, method=FA_METHOD, rotation=rotation,
     )
     return FaFitResult(
         label=label,
         rotation=rotation,
+        n_factors=n,
         loadings=fa["loadings"],
         scores=fa["scores"],
         proportion_variance=fa["proportion_variance"],
         metadata=meta_filtered,
         items=items_filtered,
+        factor_correlation_matrix=fa.get("factor_correlation_matrix"),
     )
 
 
@@ -682,8 +721,240 @@ def _tucker_comparison(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Diagnostics (parallel analysis, retention, n-factors sweep)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _run_parallel_analysis(
+    matrix: np.ndarray,
+    metadata: list[dict],
+    items: list[dict],
+    *,
+    out_dir: Path,
+    plots_dir: Path,
+) -> dict[str, Any]:
+    """Horn's parallel analysis + Kaiser rule on the baseline-preprocessed matrix.
+
+    Writes a scree plot and a JSON summary with recommended n_factors under
+    both criteria, so ``FA_N_FACTORS`` can be cross-checked against a
+    principled null-reference test rather than taken on faith.
+    """
+    data, _, _, _ = preprocess_response_matrix(
+        matrix, metadata, items,
+        min_item_variance=MIN_ITEM_VARIANCE,
+        high_variance_persona_drop_pct=HIGH_VARIANCE_PERSONA_DROP_PCT,
+        do_residualize=False,
+    )
+    print(
+        f"\n[ParallelAnalysis] Running on matrix shape={data.shape} "
+        f"method={PARALLEL_ANALYSIS_METHOD!r} iters={PARALLEL_ANALYSIS_ITERATIONS}"
+    )
+    result = parallel_analysis(
+        data,
+        n_iterations=PARALLEL_ANALYSIS_ITERATIONS,
+        method=PARALLEL_ANALYSIS_METHOD,
+        random_state=SEED,
+    )
+    real_ev = result["real_eigenvalues"]
+    thresh = result["random_threshold"]
+    n_parallel = int(result["n_recommended"])
+    n_kaiser = int((real_ev > 1.0).sum())
+
+    summary = {
+        "n_parallel_analysis": n_parallel,
+        "n_kaiser": n_kaiser,
+        "n_configured": FA_N_FACTORS,
+        "eigenvalues_top20": [float(x) for x in real_ev[:20]],
+        "random_threshold_top20": [float(x) for x in thresh[:20]],
+        "n_samples": int(data.shape[0]),
+        "n_vars": int(data.shape[1]),
+        "parallel_method": PARALLEL_ANALYSIS_METHOD,
+        "parallel_iterations": PARALLEL_ANALYSIS_ITERATIONS,
+    }
+    _write_json(out_dir / "n_factors_diagnostics.json", summary)
+    _plot_scree(real_ev, thresh, n_parallel=n_parallel, n_kaiser=n_kaiser,
+                n_configured=FA_N_FACTORS, out_path=plots_dir / "scree.png")
+    print(
+        f"[ParallelAnalysis] recommended n: parallel={n_parallel}, "
+        f"Kaiser>1={n_kaiser}, configured FA_N_FACTORS={FA_N_FACTORS}"
+    )
+    if FA_N_FACTORS > n_parallel + 2 or FA_N_FACTORS < max(1, n_parallel - 2):
+        print(
+            f"[ParallelAnalysis] WARNING: FA_N_FACTORS={FA_N_FACTORS} is far "
+            f"from the parallel-analysis recommendation ({n_parallel}). "
+            "Consider re-running the sweep and picking a more principled value."
+        )
+    return summary
+
+
+def _per_preset_retention_table(
+    pair_data: dict[tuple[str, str], tuple[np.ndarray, list[dict], list[dict]]],
+    rollout_dirs: dict[str, Path],
+    combined_metadata: list[dict],
+    fa_baseline_metadata: list[dict] | None,
+) -> list[dict]:
+    """Per-preset row counts at each filtering stage in the pipeline.
+
+    Makes unequal data loss across presets visible at a glance. If one
+    preset (e.g. a short-context model under a long-rollout source) loses
+    a large fraction of its data at the Stage-2 context filter while
+    another doesn't, per-preset FA comparisons are not apples-to-apples.
+    """
+    q_keys_order: list[str] = []
+    seen: set[str] = set()
+    for (_r, q) in pair_data.keys():
+        if q not in seen:
+            seen.add(q)
+            q_keys_order.append(q)
+
+    rows: list[dict] = []
+    for p_key, rollout_dir in rollout_dirs.items():
+        row: dict[str, Any] = {"preset_key": p_key}
+
+        canonical = rollout_dir / "datasets" / "canonical_samples.jsonl"
+        if canonical.exists():
+            with canonical.open("r", encoding="utf-8") as f:
+                row["stage1_sampled"] = sum(1 for ln in f if ln.strip())
+        else:
+            row["stage1_sampled"] = None
+
+        for q_key in q_keys_order:
+            key = (p_key, q_key)
+            if key not in pair_data:
+                row[f"q[{q_key}]_ctx_kept"] = None
+                row[f"q[{q_key}]_fully_parsed"] = None
+                continue
+            mat, _meta, _items = pair_data[key]
+            K, _N = mat.shape
+            # Rows with no NaN cells — i.e. every item parsed successfully.
+            # These are the only rows that survive preprocess_response_matrix's
+            # complete-case deletion.
+            n_fully_parsed = int((~np.isnan(mat).any(axis=1)).sum())
+            row[f"q[{q_key}]_ctx_kept"] = K
+            row[f"q[{q_key}]_fully_parsed"] = n_fully_parsed
+
+        row["combine_intersected"] = sum(
+            1 for m in combined_metadata
+            if m.get("rollout_preset_key") == p_key
+        )
+        if fa_baseline_metadata is not None:
+            row["fa_baseline_rows"] = sum(
+                1 for m in fa_baseline_metadata
+                if m.get("rollout_preset_key") == p_key
+            )
+        else:
+            row["fa_baseline_rows"] = None
+        rows.append(row)
+    return rows
+
+
+def _n_factors_sweep(
+    matrix: np.ndarray,
+    metadata: list[dict],
+    items: list[dict],
+    *,
+    rotations: list[str],
+    n_factors_list: list[int],
+) -> list[dict]:
+    """Lightweight robustness check: top-line summaries at each n_factors.
+
+    For every (rotation, n) pair, refits baseline and residualised FAs and
+    reports max/median baseline η²(preset) plus min/median
+    baseline→residualised |φ|. Skips per-preset Tucker entirely (it is the
+    expensive part of the main analysis and unnecessary for a "does the
+    top-line finding survive n perturbations?" check).
+
+    Fits that fail (e.g. n_factors exceeds n_columns after preprocessing)
+    are logged and skipped rather than aborting the sweep.
+    """
+    sweep_rows: list[dict] = []
+    for rotation in rotations:
+        for n in n_factors_list:
+            print(f"\n[n_factors sweep] rotation={rotation} n={n}")
+            try:
+                baseline = _fit_fa(
+                    matrix, metadata, items,
+                    label=f"baseline_n{n}", rotation=rotation,
+                    n_factors=n,
+                )
+                residualised = _fit_fa(
+                    matrix, metadata, items,
+                    label=f"residualised_n{n}", rotation=rotation,
+                    do_residualize=True,
+                    residualize_group_field="rollout_preset_key",
+                    n_factors=n,
+                )
+            except Exception as exc:
+                print(f"  skipped: {type(exc).__name__}: {exc}")
+                sweep_rows.append({
+                    "rotation": rotation,
+                    "n_factors": n,
+                    "status": f"skipped: {type(exc).__name__}",
+                })
+                continue
+            eta2_rows = _preset_eta2(baseline)
+            eta2_vals = [r["eta2_preset"] for r in eta2_rows
+                         if not np.isnan(r["eta2_preset"])]
+            robustness = _baseline_vs_residualised_alignment(baseline, residualised)
+            phis = [a.phi for a in robustness if not np.isnan(a.phi)]
+            sweep_rows.append({
+                "rotation": rotation,
+                "n_factors": n,
+                "status": "ok",
+                "max_baseline_eta2_preset":
+                    float(max(eta2_vals)) if eta2_vals else float("nan"),
+                "median_baseline_eta2_preset":
+                    float(np.median(eta2_vals)) if eta2_vals else float("nan"),
+                "min_baseline_res_phi":
+                    float(min(phis)) if phis else float("nan"),
+                "median_baseline_res_phi":
+                    float(np.median(phis)) if phis else float("nan"),
+                "n_factors_aligned": len(phis),
+            })
+    return sweep_rows
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Plots
 # ═════════════════════════════════════════════════════════════════════════════
+
+
+def _plot_scree(
+    real_eigenvalues: np.ndarray,
+    random_threshold: np.ndarray,
+    *,
+    n_parallel: int,
+    n_kaiser: int,
+    n_configured: int,
+    out_path: Path,
+    top_k: int = 20,
+) -> None:
+    """Scree plot with parallel-analysis threshold and Kaiser reference line."""
+    import matplotlib.pyplot as plt
+
+    k = min(top_k, len(real_eigenvalues))
+    x = np.arange(1, k + 1)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(x, real_eigenvalues[:k], marker="o", lw=1.5, color="#1565C0",
+            label="real eigenvalues")
+    ax.plot(x, random_threshold[:k], marker="s", lw=1.0, color="#B71C1C",
+            label=f"{PARALLEL_ANALYSIS_METHOD} 95%-tile reference")
+    ax.axhline(1.0, color="gray", lw=0.5, ls=":", label="Kaiser (λ=1)")
+    ax.axvline(n_parallel + 0.5, color="#2E7D32", lw=1.0, ls="--",
+               label=f"parallel: n={n_parallel}")
+    ax.axvline(n_kaiser + 0.5, color="gray", lw=0.8, ls="--",
+               label=f"Kaiser: n={n_kaiser}")
+    ax.axvline(n_configured + 0.5, color="#F9A825", lw=1.2, ls="-",
+               label=f"configured: n={n_configured}")
+    ax.set_xlabel("factor index (descending eigenvalue)")
+    ax.set_ylabel("eigenvalue")
+    ax.set_title("Eigenvalue scree and parallel-analysis threshold")
+    ax.legend(fontsize=8, loc="upper right")
+    ax.grid(True, alpha=0.2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    print(f"[Plot] Wrote {out_path}")
 
 
 def _plot_preset_variance_bars(
@@ -923,6 +1194,14 @@ def main() -> None:
         f"nan_frac={np.isnan(matrix).mean():.4f}"
     )
 
+    # ── Parallel analysis / scree diagnostic ───────────────────────────
+    plots_dir = out_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    _run_parallel_analysis(
+        matrix, metadata, items,
+        out_dir=out_dir, plots_dir=plots_dir,
+    )
+
     # ── FA flavours × rotations ────────────────────────────────────────
     baseline_eta2_rows: list[dict] = []
     # One row per (rotation × baseline anchor factor) recording the best
@@ -934,6 +1213,11 @@ def main() -> None:
     per_preset_alignments_by_rot: dict[str, dict[str, list]] = {}
     per_preset_phi_by_rot: dict[str, dict[str, np.ndarray]] = {}
     per_preset_classification_rows: list[dict] = []
+    # Captured from the first rotation's baseline FA so retention-table
+    # computation (post-preprocessing row counts) doesn't repeat the fit.
+    fa_baseline_metadata_for_retention: list[dict] | None = None
+    # Per-rotation oblique factor correlation matrices (None for orthogonal).
+    oblique_factor_corr_by_label: dict[str, np.ndarray] = {}
 
     for rotation in FA_ROTATIONS:
         print(f"\n{'=' * 60}\n[FA] rotation={rotation}\n{'=' * 60}")
@@ -942,12 +1226,22 @@ def main() -> None:
         baseline = _fit_fa(matrix, metadata, items,
                            label="baseline", rotation=rotation)
         baseline_eta2_rows.extend(_preset_eta2(baseline))
+        if fa_baseline_metadata_for_retention is None:
+            fa_baseline_metadata_for_retention = baseline.metadata
+        if baseline.factor_correlation_matrix is not None:
+            oblique_factor_corr_by_label[f"baseline_{rotation}"] = (
+                baseline.factor_correlation_matrix
+            )
 
         print(f"\n-- preset-residualised --")
         residualised = _fit_fa(matrix, metadata, items,
                                label="residualised", rotation=rotation,
                                do_residualize=True,
                                residualize_group_field="rollout_preset_key")
+        if residualised.factor_correlation_matrix is not None:
+            oblique_factor_corr_by_label[f"residualised_{rotation}"] = (
+                residualised.factor_correlation_matrix
+            )
         robustness = _baseline_vs_residualised_alignment(baseline, residualised)
         for a in robustness:
             residualised_robustness_rows.append({
@@ -982,6 +1276,33 @@ def main() -> None:
                     "interpretation": classify_phi(a.phi),
                 })
 
+    # ── Retention table (per-preset row counts at each filtering stage) ─
+    retention_rows = _per_preset_retention_table(
+        pair_data, rollout_dirs, metadata, fa_baseline_metadata_for_retention,
+    )
+    _write_csv(out_dir / "per_preset_retention.csv", retention_rows)
+    print("\nPer-preset retention:")
+    for row in retention_rows:
+        parsed_cols = ", ".join(
+            f"{k}={row[k]}" for k in row.keys()
+            if k.startswith("q[") and k.endswith("_fully_parsed")
+        )
+        print(
+            f"  {row['preset_key']:<35s}  "
+            f"sampled={row['stage1_sampled']}  "
+            f"{parsed_cols}  "
+            f"combined={row['combine_intersected']}  "
+            f"fa={row['fa_baseline_rows']}"
+        )
+
+    # ── n-factors robustness sweep ─────────────────────────────────────
+    if FA_N_FACTORS_SWEEP:
+        sweep_rows = _n_factors_sweep(
+            matrix, metadata, items,
+            rotations=FA_ROTATIONS, n_factors_list=FA_N_FACTORS_SWEEP,
+        )
+        _write_csv(out_dir / "n_factors_sweep.csv", sweep_rows)
+
     # ── Save numeric outputs ───────────────────────────────────────────
     _write_csv(out_dir / "preset_variance_baseline.csv", baseline_eta2_rows)
     _write_csv(
@@ -989,6 +1310,21 @@ def main() -> None:
         residualised_robustness_rows,
     )
     _write_csv(out_dir / "tucker_pairwise.csv", per_preset_classification_rows)
+
+    # Oblique rotations (oblimin/promax) produce a factor correlation matrix;
+    # for orthogonal rotations (varimax) it's None. Dump one CSV per
+    # (flavour × rotation) so the factor-correlation structure is visible —
+    # correlations > ~0.3 change the interpretation of any "pure" factor.
+    for label, corr in oblique_factor_corr_by_label.items():
+        out_path = out_dir / f"factor_correlation_{label}.csv"
+        header = [""] + [f"F{i+1}" for i in range(corr.shape[1])]
+        import csv
+        with out_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for i, row in enumerate(corr):
+                writer.writerow([f"F{i+1}"] + [f"{v:.4f}" for v in row])
+        print(f"[Write] {out_path}")
 
     alignment_summary: dict[str, Any] = {}
     for rot, aligns in per_preset_alignments_by_rot.items():
@@ -998,8 +1334,7 @@ def main() -> None:
     _write_json(out_dir / "tucker_alignment_summary.json", alignment_summary)
 
     # ── Plots ──────────────────────────────────────────────────────────
-    plots_dir = out_dir / "plots"
-    plots_dir.mkdir(parents=True, exist_ok=True)
+    # plots_dir was already created above for the parallel-analysis scree plot.
     _plot_preset_variance_bars(
         baseline_eta2_rows, residualised_robustness_rows,
         plots_dir / "preset_variance_bars.png",
