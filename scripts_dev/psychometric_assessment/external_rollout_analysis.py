@@ -79,6 +79,8 @@ load_dotenv()
 from src_dev.factor_analysis.factor_analysis import run_factor_analysis
 from src_dev.factor_analysis.interpretation import prompt_effects
 from src_dev.factor_analysis.parallel_analysis import parallel_analysis
+from src_dev.factor_analysis.reliability import classify_alpha, cronbach_alpha
+from src_dev.factor_analysis.trait_alignment import compute_factor_trait_alignment
 from src_dev.psychometric.combine import combine_per_pair_outputs, load_pair_outputs
 from src_dev.psychometric.config import (
     ExternalRolloutsStageConfig,
@@ -120,6 +122,18 @@ logger = logging.getLogger(__name__)
 SEED = 436
 random.seed(SEED)
 np.random.seed(SEED)
+# CLAUDE.md requires all RNGs be seeded once up-front. torch is imported
+# by vLLM / transformers downstream; we seed here even though inference
+# uses temperature=0.0 (deterministic per prompt already), so that any
+# downstream code using torch's RNG — e.g. HF trait_alignment plotting,
+# embedding back-projection — is reproducible.
+try:
+    import torch
+    torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
+except ImportError:
+    pass
 
 SCRATCH_ROOT = Path("scratch/psychometric_fa")
 HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
@@ -197,6 +211,24 @@ FA_N_FACTORS_SWEEP: list[int] = [5, 6, 7, 8]
 # iterations is the standard compromise between stability and compute.
 PARALLEL_ANALYSIS_ITERATIONS = 100
 PARALLEL_ANALYSIS_METHOD = "permutation"
+
+# Cronbach's α: pick the items defining each factor by absolute loading
+# magnitude and compute internal-consistency reliability on that item set.
+# 0.4 is the conventional salient-loading cutoff. Raise to 0.5–0.6 for
+# a stricter "core items only" view.
+RELIABILITY_LOADING_THRESHOLD = 0.4
+RELIABILITY_MIN_ITEMS = 3
+
+# OCEAN canonical ordering for trait-alignment summaries — matches the
+# primary_dimension field set in both v5 Likert and trait_ocean_v1_nolead
+# questionnaires. Items outside this set end up in extra columns.
+OCEAN_TRAIT_ORDER = [
+    "openness",
+    "conscientiousness",
+    "extraversion",
+    "agreeableness",
+    "neuroticism",
+]
 
 # ── Stage-2 defaults (mirror orchestrator values; most inherit preset-level
 # ── overrides via the preset registry) ──────────────────────────────────────
@@ -569,6 +601,7 @@ class FaFitResult:
     proportion_variance: np.ndarray     # (k,)
     metadata: list[dict]                # aligned with scores
     items: list[dict]                   # aligned with loadings
+    data: np.ndarray | None = None      # (n_samples_kept, n_items_kept) preprocessed matrix — used by downstream reliability calcs
     factor_correlation_matrix: np.ndarray | None = None  # (k, k) for oblique rotations, None for orthogonal
 
 
@@ -603,6 +636,7 @@ def _fit_fa(
         proportion_variance=fa["proportion_variance"],
         metadata=meta_filtered,
         items=items_filtered,
+        data=data,
         factor_correlation_matrix=fa.get("factor_correlation_matrix"),
     )
 
@@ -910,6 +944,144 @@ def _per_preset_retention_table(
     return rows
 
 
+def _factor_reliability(
+    fa: FaFitResult,
+    *,
+    loading_threshold: float = RELIABILITY_LOADING_THRESHOLD,
+    min_items: int = RELIABILITY_MIN_ITEMS,
+    per_preset: bool = True,
+) -> list[dict]:
+    """Cronbach's α per factor, pooled and per ``rollout_preset_key``.
+
+    For each factor we pick items with ``|loading| >= loading_threshold``
+    and compute α on the FA's preprocessed data subsetted to those items,
+    sign-oriented by the sign of each item's loading on the factor.
+
+    When ``per_preset=True`` we also compute α restricted to each
+    preset's rows — tests whether the pooled-factor definition is
+    internally consistent within each preset individually (as opposed
+    to just on the pool).
+
+    Rows where fewer than ``min_items`` items pass the threshold are
+    still emitted with ``alpha=NaN`` and ``status="too_few_items"`` so
+    the CSV is dense and the gap is visible.
+    """
+    if fa.data is None:
+        raise ValueError(
+            f"FaFitResult for {fa.label!r} has no ``data`` field — "
+            "reliability requires the preprocessed response matrix."
+        )
+    rows: list[dict] = []
+    for f_idx in range(fa.n_factors):
+        loadings_col = fa.loadings[:, f_idx]
+        mask = np.abs(loadings_col) >= loading_threshold
+        item_indices = np.flatnonzero(mask)
+        n_items = int(item_indices.size)
+        base = {
+            "label": fa.label,
+            "rotation": fa.rotation,
+            "factor": f_idx + 1,
+            "n_items": n_items,
+            "loading_threshold": loading_threshold,
+        }
+        if n_items < min_items:
+            rows.append({
+                **base,
+                "preset_key": "__pool__",
+                "n_samples": int(fa.data.shape[0]),
+                "alpha": float("nan"),
+                "alpha_interpretation": "n/a",
+                "status": "too_few_items",
+            })
+            continue
+
+        signs = np.sign(loadings_col[item_indices])
+        # np.sign can produce 0 at exactly-zero loadings; threshold guarantees
+        # magnitude >= loading_threshold > 0 so this is defensive only.
+        signs = np.where(signs == 0, 1.0, signs)
+
+        item_data = fa.data[:, item_indices]
+        alpha_pool = cronbach_alpha(item_data, loading_signs=signs)
+        rows.append({
+            **base,
+            "preset_key": "__pool__",
+            "n_samples": int(item_data.shape[0]),
+            "alpha": float(alpha_pool),
+            "alpha_interpretation": classify_alpha(alpha_pool),
+            "status": "ok",
+        })
+
+        if per_preset:
+            preset_keys = sorted({
+                m.get("rollout_preset_key") for m in fa.metadata
+                if m.get("rollout_preset_key")
+            })
+            for p_key in preset_keys:
+                row_mask = np.array(
+                    [m.get("rollout_preset_key") == p_key for m in fa.metadata],
+                    dtype=bool,
+                )
+                preset_data = item_data[row_mask]
+                alpha_p = cronbach_alpha(preset_data, loading_signs=signs)
+                rows.append({
+                    **base,
+                    "preset_key": p_key,
+                    "n_samples": int(preset_data.shape[0]),
+                    "alpha": float(alpha_p),
+                    "alpha_interpretation": classify_alpha(alpha_p),
+                    "status": "ok",
+                })
+    return rows
+
+
+def _trait_alignment_rows(
+    fa: FaFitResult,
+    *,
+    trait_order: list[str] = OCEAN_TRAIT_ORDER,
+    top_k: int = 20,
+) -> list[dict]:
+    """Run :func:`compute_factor_trait_alignment` and flatten to CSV rows.
+
+    Uses each item's ``dimension`` field (set in ``questionnaire_io`` for
+    both Likert and trait_mcq blocks) as the trait label. Produces one
+    row per (rotation × factor × trait) with top-K count, signed-loading
+    count breakdown, and mean |/signed loading.
+    """
+    item_dims: list[str] = [
+        str(it.get("dimension") or "__unknown__") for it in fa.items
+    ]
+    alignment = compute_factor_trait_alignment(
+        fa.loadings, item_dims,
+        trait_order=trait_order, top_k=top_k,
+    )
+    rows: list[dict] = []
+    for f_idx, f_label in enumerate(alignment.factor_labels):
+        counts = alignment.top_k_count[f_idx]
+        # Winner = trait with most top-K items; classify as "clean" when
+        # one trait dominates (≥50% of top-K), "mixed" otherwise.
+        best_j = int(np.argmax(counts))
+        share = float(counts[best_j] / max(alignment.top_k, 1))
+        winner_label = (
+            alignment.trait_order[best_j] if counts[best_j] > 0 else "__none__"
+        )
+        for j, trait in enumerate(alignment.trait_order):
+            rows.append({
+                "label": fa.label,
+                "rotation": fa.rotation,
+                "factor": f_idx + 1,
+                "trait": trait,
+                "top_k_count": int(alignment.top_k_count[f_idx, j]),
+                "top_k_count_pos": int(alignment.top_k_count_pos[f_idx, j]),
+                "top_k_count_neg": int(alignment.top_k_count_neg[f_idx, j]),
+                "mean_abs_loading": float(alignment.mean_abs_loading[f_idx, j]),
+                "mean_signed_loading": float(alignment.mean_signed_loading[f_idx, j]),
+                "factor_winner": winner_label,
+                "factor_winner_share": share,
+                "top_k": alignment.top_k,
+            })
+    return rows
+
+
 def _n_factors_sweep(
     matrix: np.ndarray,
     metadata: list[dict],
@@ -1077,6 +1249,71 @@ def _plot_preset_variance_bars(
     fig.suptitle(
         "Baseline factor diagnostics: preset-variance η² and "
         "robustness to preset-mean removal (|φ| vs residualised)"
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    print(f"[Plot] Wrote {out_path}")
+
+
+def _plot_reliability(
+    rows: list[dict],
+    out_path: Path,
+) -> None:
+    """Per-factor Cronbach's α: pooled bar + per-preset dots, per rotation.
+
+    Drops "too_few_items" rows automatically (those have α = NaN).
+    """
+    import matplotlib.pyplot as plt
+
+    rotations = sorted({r["rotation"] for r in rows if r.get("status") == "ok"})
+    if not rotations:
+        return
+    fig, axes = plt.subplots(1, len(rotations), figsize=(6 * len(rotations), 5),
+                             squeeze=False)
+    for ax, rot in zip(axes[0], rotations):
+        rot_rows = [r for r in rows if r["rotation"] == rot and r.get("status") == "ok"]
+        pool = sorted(
+            [r for r in rot_rows if r["preset_key"] == "__pool__"],
+            key=lambda r: r["factor"],
+        )
+        factors = [r["factor"] for r in pool]
+        if not factors:
+            ax.axis("off")
+            continue
+        x = np.arange(len(factors))
+        pool_alphas = [r["alpha"] for r in pool]
+        ax.bar(x, pool_alphas, width=0.6, color="#1565C0", alpha=0.55,
+               label="pooled α (baseline)")
+        # Per-preset dots jittered over the pooled bar.
+        per_preset = [r for r in rot_rows if r["preset_key"] != "__pool__"]
+        presets = sorted({r["preset_key"] for r in per_preset})
+        colors = plt.cm.tab10(np.linspace(0, 1, max(len(presets), 3)))
+        for p, c in zip(presets, colors):
+            p_rows = sorted(
+                [r for r in per_preset if r["preset_key"] == p],
+                key=lambda r: r["factor"],
+            )
+            p_alphas = [r["alpha"] for r in p_rows if r["factor"] in factors]
+            xs = x + (hash(p) % 100 - 50) / 400.0  # deterministic per-preset jitter
+            ax.scatter(xs, p_alphas, s=24, color=c, edgecolor="black",
+                       linewidth=0.3, label=p)
+        for thr, col, lbl in [
+            (0.9, "#2E7D32", "good (≥0.9)"),
+            (0.7, "#F9A825", "acceptable (≥0.7)"),
+            (0.0, "gray", None),
+        ]:
+            ax.axhline(thr, color=col, lw=0.6, ls=":", label=lbl)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"F{f}" for f in factors])
+        ax.set_xlabel("factor")
+        ax.set_ylabel("Cronbach's α (sign-oriented items)")
+        ax.set_title(f"rotation = {rot}")
+        ax.set_ylim(min(-0.1, min(pool_alphas or [0]) - 0.05), 1.05)
+        ax.legend(fontsize=7, loc="lower left", ncol=2)
+    fig.suptitle(
+        "Per-factor internal-consistency reliability "
+        f"(items with |loading| ≥ {RELIABILITY_LOADING_THRESHOLD} on the factor)"
     )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(out_path, dpi=140)
@@ -1264,6 +1501,8 @@ def main() -> None:
     pairwise_by_rot: dict[str, dict[tuple[str, str], tuple[np.ndarray, list]]] = {}
     pairwise_classification_rows: list[dict] = []
     replicability_rows: list[dict] = []
+    reliability_rows: list[dict] = []
+    trait_alignment_rows: list[dict] = []
     # Captured from the first rotation's baseline FA so retention-table
     # computation (post-preprocessing row counts) doesn't repeat the fit.
     fa_baseline_metadata_for_retention: list[dict] | None = None
@@ -1283,6 +1522,8 @@ def main() -> None:
             oblique_factor_corr_by_label[f"baseline_{rotation}"] = (
                 baseline.factor_correlation_matrix
             )
+        reliability_rows.extend(_factor_reliability(baseline))
+        trait_alignment_rows.extend(_trait_alignment_rows(baseline))
 
         print(f"\n-- preset-residualised --")
         residualised = _fit_fa(matrix, metadata, items,
@@ -1370,6 +1611,10 @@ def main() -> None:
     _write_csv(out_dir / "tucker_pairwise.csv", pairwise_classification_rows)
     # Aggregated per (source_preset × source_factor).
     _write_csv(out_dir / "tucker_replicability.csv", replicability_rows)
+    # Cronbach's α per factor (pooled + per-preset), and factor-trait
+    # alignment for the baseline loadings.
+    _write_csv(out_dir / "factor_reliability.csv", reliability_rows)
+    _write_csv(out_dir / "factor_trait_alignment.csv", trait_alignment_rows)
 
     # Oblique rotations (oblimin/promax) produce a factor correlation matrix;
     # for orthogonal rotations (varimax) it's None. Dump one CSV per
@@ -1413,6 +1658,50 @@ def main() -> None:
             replicability_rows,
             plots_dir / "tucker_replicability.png",
         )
+    if reliability_rows:
+        _plot_reliability(
+            reliability_rows,
+            plots_dir / "factor_reliability.png",
+        )
+    # Trait-alignment heatmaps/bars per rotation (baseline only). Uses
+    # src_dev.factor_analysis.trait_alignment's own plotting helpers so
+    # the look-and-feel matches other trait-alignment outputs elsewhere
+    # in the codebase.
+    from src_dev.factor_analysis.trait_alignment import plot_all_alignment
+    for rotation in FA_ROTATIONS:
+        rows_for_rot = [
+            r for r in trait_alignment_rows
+            if r["rotation"] == rotation and r["label"] == "baseline"
+        ]
+        if not rows_for_rot:
+            continue
+        # Reconstruct a FactorTraitAlignment from the flat rows so we can
+        # reuse the shared plotting utilities.
+        factors = sorted({r["factor"] for r in rows_for_rot})
+        traits = OCEAN_TRAIT_ORDER
+        def _fill(key: str) -> np.ndarray:
+            out = np.zeros((len(factors), len(traits)))
+            index = {(r["factor"], r["trait"]): r[key] for r in rows_for_rot}
+            for i, f in enumerate(factors):
+                for j, t in enumerate(traits):
+                    out[i, j] = float(index.get((f, t), 0))
+            return out
+        from src_dev.factor_analysis.trait_alignment import FactorTraitAlignment
+        top_k_used = rows_for_rot[0]["top_k"]
+        alignment = FactorTraitAlignment(
+            top_k_count=_fill("top_k_count").astype(int),
+            top_k_count_pos=_fill("top_k_count_pos").astype(int),
+            top_k_count_neg=_fill("top_k_count_neg").astype(int),
+            mean_abs_loading=_fill("mean_abs_loading"),
+            mean_signed_loading=_fill("mean_signed_loading"),
+            trait_order=traits,
+            factor_labels=[f"F{f}" for f in factors],
+            top_k=top_k_used,
+        )
+        plot_all_alignment(
+            alignment, plots_dir / f"trait_alignment_{rotation}",
+            title_prefix=f"Baseline FA (rotation={rotation})",
+        )
 
     # ── Summary printout ───────────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -1454,6 +1743,46 @@ def main() -> None:
                 f"min_phi = {float(np.min(rep_mean)):.3f}, "
                 f"mean sign-agreement = {float(np.mean(sign_agree)):.3f}"
             )
+        # Pooled reliability: min/median α across factors, and a count
+        # of factors that meet the conventional α ≥ 0.7 threshold.
+        rel_pool = [
+            r for r in reliability_rows
+            if r["rotation"] == rot
+            and r["label"] == "baseline"
+            and r["preset_key"] == "__pool__"
+            and r.get("status") == "ok"
+        ]
+        if rel_pool:
+            alphas = [r["alpha"] for r in rel_pool]
+            acceptable = sum(1 for a in alphas if a >= 0.7)
+            print(
+                "  Cronbach's α (pooled)     : "
+                f"min = {min(alphas):.3f}, "
+                f"median = {float(np.median(alphas)):.3f}, "
+                f"{acceptable}/{len(alphas)} factors ≥ 0.7"
+            )
+        # Trait-alignment: per factor, which OCEAN trait dominates the
+        # top-K loading items and by what share. A clear winner (share
+        # ≥ 0.5) means the factor maps cleanly to a single trait.
+        ta = [
+            r for r in trait_alignment_rows
+            if r["rotation"] == rot and r["label"] == "baseline"
+        ]
+        if ta:
+            per_factor: dict[int, str] = {}
+            shares: dict[int, float] = {}
+            for r in ta:
+                f = r["factor"]
+                if f not in per_factor or r["top_k_count"] > -1:
+                    # Winner is the same across all traits in a row
+                    # (column-invariant), so just take it from any row.
+                    per_factor[f] = r["factor_winner"]
+                    shares[f] = r["factor_winner_share"]
+            factor_str = ", ".join(
+                f"F{f}:{per_factor[f][:4]}({shares[f]:.0%})"
+                for f in sorted(per_factor)
+            )
+            print(f"  OCEAN trait winners        : {factor_str}")
     print(f"\nAll outputs → {out_dir}")
 
 
