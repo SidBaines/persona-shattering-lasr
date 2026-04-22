@@ -34,6 +34,19 @@ from __future__ import annotations
 # the same issue but are out of scope of this constant; see item_prefill.)
 TRAIT_MCQ_PREFILL = "Answer"
 
+# Optional topic-switch prefix for trait_mcq user-turn text. When enabled
+# (via the ``topic_switch_prefix`` kwarg on the builders), the rendered
+# user turn begins with this string so the model sees an explicit signal
+# that the question is independent of any preceding rollout context.
+# This is belt-and-suspenders: the chat template already separates the
+# rollout turns from the questionnaire turn, but on 15-turn coherent B
+# rollouts an explicit marker is cheap insurance that "How should I spend
+# my time at the country fair" is not being read as a continuation of
+# whatever scenario came before. The prefix is plain text, not a
+# template — tokenization is unremarkable on Qwen/Llama BPE and does not
+# interact with the TRAIT_MCQ_PREFILL BPE-boundary fix above.
+TRAIT_MCQ_TOPIC_SWITCH_PREFIX = "New question: "
+
 LIKERT_PHRASINGS: dict[str, str] = {
     "natural": (
         'I was wondering, how would you rate your agreement with the following '
@@ -116,7 +129,7 @@ def build_vignette_prompt(item: dict) -> str:
     )
 
 
-def build_trait_mcq_prompt(item: dict) -> str:
+def build_trait_mcq_prompt(item: dict, *, topic_switch_prefix: bool = False) -> str:
     """Build the prompt for a TRAIT MCQ item (A, B, C, or D).
 
     Rendered exactly as requested: question, blank line, A:/B:/C:/D: lines,
@@ -125,10 +138,17 @@ def build_trait_mcq_prompt(item: dict) -> str:
     ``TRAIT_MCQ_PREFILL`` (``"Answer"`` — no trailing space, see the constant's
     comment) so the model continues with a space-prefixed letter token that
     decodes cleanly to ``"Answer A"`` / ``"Answer B"`` / etc.
+
+    When ``topic_switch_prefix=True``, ``TRAIT_MCQ_TOPIC_SWITCH_PREFIX``
+    is prepended to the question so the model sees an explicit topic-switch
+    marker. See the constant's comment above for rationale. Default is
+    ``False`` to preserve the rendering of existing HF-cached trait_mcq
+    runs under their current run-ids.
     """
     opts = "\n".join(f'{o["label"]}: {o["text"]}' for o in item["options"])
+    prefix = TRAIT_MCQ_TOPIC_SWITCH_PREFIX if topic_switch_prefix else ""
     return (
-        f'{item["question"]}\n\n'
+        f'{prefix}{item["question"]}\n\n'
         f'{opts}\n\n'
         'Reply with "Answer " followed by a single letter.'
     )
@@ -140,8 +160,17 @@ def build_likert_prompt(item_text: str, *, phrasing: str = "direct") -> str:
     return template.format(item_text=item_text)
 
 
-def build_item_prompt(item: dict, *, likert_phrasing: str = "direct") -> str:
-    """Dispatch to the correct prompt builder based on item type."""
+def build_item_prompt(
+    item: dict,
+    *,
+    likert_phrasing: str = "direct",
+    trait_mcq_topic_switch_prefix: bool = False,
+) -> str:
+    """Dispatch to the correct prompt builder based on item type.
+
+    ``trait_mcq_topic_switch_prefix`` is forwarded only to
+    :func:`build_trait_mcq_prompt`; it is a no-op for other item types.
+    """
     if item["type"] == "forced_choice":
         return build_fc_prompt(item)
     elif item["type"] == "fc_pair":
@@ -149,7 +178,9 @@ def build_item_prompt(item: dict, *, likert_phrasing: str = "direct") -> str:
     elif item["type"] == "vignette":
         return build_vignette_prompt(item)
     elif item["type"] == "trait_mcq":
-        return build_trait_mcq_prompt(item)
+        return build_trait_mcq_prompt(
+            item, topic_switch_prefix=trait_mcq_topic_switch_prefix
+        )
     else:
         return build_likert_prompt(item["text"], phrasing=likert_phrasing)
 
@@ -186,6 +217,7 @@ def build_questionnaire_messages(
     reset_mode: str = "none",
     soft_reset_system_prompt: str = DEFAULT_SOFT_RESET_SYSTEM_PROMPT,
     likert_phrasing: str = "direct",
+    trait_mcq_topic_switch_prefix: bool = False,
 ) -> list[dict[str, str]]:
     """Append a questionnaire item as a new user turn to the conversation.
 
@@ -207,7 +239,11 @@ def build_questionnaire_messages(
     prefill = item_prefill(item, likert_phrasing=likert_phrasing)
     prompt = build_messages_prompt(
         conversation_messages,
-        build_item_prompt(item, likert_phrasing=likert_phrasing),
+        build_item_prompt(
+            item,
+            likert_phrasing=likert_phrasing,
+            trait_mcq_topic_switch_prefix=trait_mcq_topic_switch_prefix,
+        ),
         reset_mode=reset_mode,
         soft_reset_system_prompt=soft_reset_system_prompt,
         trait_mcq_prefill=prefill,
@@ -222,6 +258,7 @@ def build_questionnaire_token_ids(
     *,
     boundary_token: str | int | list[int] = "<|end_of_text|>",
     likert_phrasing: str = "direct",
+    trait_mcq_topic_switch_prefix: bool = False,
 ) -> list[int]:
     """Build a raw-token-ID prompt for the ``token_boundary`` reset mode.
 
@@ -236,7 +273,11 @@ def build_questionnaire_token_ids(
     prompt = build_token_ids_prompt(
         tokenizer,
         conversation_messages,
-        build_item_prompt(item, likert_phrasing=likert_phrasing),
+        build_item_prompt(
+            item,
+            likert_phrasing=likert_phrasing,
+            trait_mcq_topic_switch_prefix=trait_mcq_topic_switch_prefix,
+        ),
         boundary_token=boundary_token,
         trait_mcq_prefill=prefill,
     )

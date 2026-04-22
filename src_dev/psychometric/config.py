@@ -151,6 +151,13 @@ class QuestionnaireStageConfig:
     fa_blocks: tuple[str, ...]
     use_logprobs: bool
     phrasing: str = "direct"  # "natural" | "direct" | "contextual" (Likert)
+    # Prepend "New question: " to trait_mcq user-turn prompts to signal an
+    # explicit topic switch from any preceding rollout context. No-op for
+    # non-trait_mcq items. Default False preserves existing HF-cached
+    # trait_mcq run rendering; flipped to True for runs tagged with
+    # trait_mcq prompt version >= 2. See
+    # src_dev/psychometric/item_prompts.py: TRAIT_MCQ_TOPIC_SWITCH_PREFIX.
+    trait_mcq_topic_switch_prefix: bool = False
     likert_scale: int = 5
     # Inference target
     provider: str = "vllm"

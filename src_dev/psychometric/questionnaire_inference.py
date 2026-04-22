@@ -64,6 +64,7 @@ def estimate_max_model_len(
     max_new_tokens: int,
     *,
     likert_phrasing: str = "direct",
+    trait_mcq_topic_switch_prefix: bool = False,
     margin: int = 256,
 ) -> int:
     """Estimate the minimum vLLM max_model_len from actual data.
@@ -91,7 +92,14 @@ def estimate_max_model_len(
     tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
     has_template = ensure_chat_template(tokenizer, model)
 
-    item_prompts = [build_item_prompt(item, likert_phrasing=likert_phrasing) for item in items]
+    item_prompts = [
+        build_item_prompt(
+            item,
+            likert_phrasing=likert_phrasing,
+            trait_mcq_topic_switch_prefix=trait_mcq_topic_switch_prefix,
+        )
+        for item in items
+    ]
     longest_item_prompt = max(item_prompts, key=len)
 
     longest_conv = max(conversations, key=lambda c: sum(len(m["content"]) for m in c))
@@ -136,6 +144,7 @@ def _filter_by_context_budget(
     max_new_tokens: int,
     buffer_tokens: int,
     likert_phrasing: str,
+    trait_mcq_topic_switch_prefix: bool = False,
 ):
     """Drop samples whose (conv + longest item prompt) exceeds the budget.
 
@@ -149,7 +158,14 @@ def _filter_by_context_budget(
     tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
     has_template = ensure_chat_template(tokenizer, model)
 
-    item_prompts = [build_item_prompt(it, likert_phrasing=likert_phrasing) for it in items]
+    item_prompts = [
+        build_item_prompt(
+            it,
+            likert_phrasing=likert_phrasing,
+            trait_mcq_topic_switch_prefix=trait_mcq_topic_switch_prefix,
+        )
+        for it in items
+    ]
     longest_item_prompt = max(item_prompts, key=len)
 
     longest_retry_msg = max((retry_message(it) for it in items), key=len)
@@ -257,6 +273,7 @@ async def run_questionnaire_inference_async(
             max_new_tokens=cfg.max_new_tokens,
             buffer_tokens=cfg.context_buffer_tokens,
             likert_phrasing=cfg.phrasing,
+            trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
         )
 
     if not completed_samples:
@@ -447,6 +464,7 @@ async def run_questionnaire_inference_async(
             max_model_len = estimate_max_model_len(
                 cfg.model, conversations, items, cfg.max_new_tokens,
                 likert_phrasing=cfg.phrasing,
+                trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
             )
         # Look up a fallback chat template for legacy models whose
         # tokenizer ships with chat_template=None (Koala-13B, OAsst-
@@ -536,6 +554,7 @@ async def run_questionnaire_inference_async(
                 _reset_tokenizer, conversations[0], items[0],
                 boundary_token=cfg.boundary_token,
                 likert_phrasing=cfg.phrasing,
+                trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
             )
             boundary_ids = (
                 [cfg.boundary_token]
@@ -598,6 +617,7 @@ async def run_questionnaire_inference_async(
                             _reset_tokenizer, conversations[k], item,
                             boundary_token=cfg.boundary_token,
                             likert_phrasing=cfg.phrasing,
+                            trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
                         )
                         if use_lp:
                             lp_entries.append((k, item))
@@ -611,6 +631,7 @@ async def run_questionnaire_inference_async(
                             reset_mode=reset_mode,
                             soft_reset_system_prompt=cfg.soft_reset_system_prompt,
                             likert_phrasing=cfg.phrasing,
+                            trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
                         )
                         if use_lp:
                             lp_entries.append((k, item))
@@ -808,7 +829,11 @@ async def run_questionnaire_inference_async(
                         retry_prompt = build_token_ids_retry_prompt(
                             _reset_tokenizer,
                             conversations[k],
-                            build_item_prompt(item, likert_phrasing=cfg.phrasing),
+                            build_item_prompt(
+                                item,
+                                likert_phrasing=cfg.phrasing,
+                                trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
+                            ),
                             prior_assistant_text=prev_raw,
                             retry_user_content=retry_message(item),
                             boundary_token=cfg.boundary_token,
@@ -826,7 +851,11 @@ async def run_questionnaire_inference_async(
                             })
                         msgs.append({
                             "role": "user",
-                            "content": build_item_prompt(item, likert_phrasing=cfg.phrasing),
+                            "content": build_item_prompt(
+                                item,
+                                likert_phrasing=cfg.phrasing,
+                                trait_mcq_topic_switch_prefix=cfg.trait_mcq_topic_switch_prefix,
+                            ),
                         })
                         if prefill is not None:
                             # Reconstruct the full prior assistant turn (prefill + continuation)
