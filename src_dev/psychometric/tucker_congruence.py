@@ -36,17 +36,31 @@ from typing import Any
 import numpy as np
 
 
-def tucker_phi_matrix(loadings_a: np.ndarray, loadings_b: np.ndarray) -> np.ndarray:
-    """Return |φ| matrix between every pair of factors in two solutions.
+def tucker_phi_matrix(
+    loadings_a: np.ndarray,
+    loadings_b: np.ndarray,
+    *,
+    signed: bool = False,
+) -> np.ndarray:
+    """Return Tucker's φ matrix between every pair of factors in two solutions.
 
     Args:
         loadings_a: (n_items, k_a) loadings matrix.
         loadings_b: (n_items, k_b) loadings matrix with the same item
             order as ``loadings_a``.
+        signed: If False (default, backward-compatible) return ``|φ|``
+            in [0, 1]. If True, return signed φ in [-1, 1]; the sign
+            tells you whether the two factors agree on polarity (+)
+            or are the negation of each other (-). Factor sign is
+            conventionally arbitrary in FA, so the default behaviour
+            ignores it; use ``signed=True`` when you care whether two
+            "Conscientiousness" factors point the same way or are
+            flipped relative to each other.
 
     Returns:
-        ``(k_a, k_b)`` array of absolute Tucker's φ. Entries lie in
-        [0.0, 1.0]; higher = more similar factors.
+        ``(k_a, k_b)`` array. Entries lie in [0, 1] when ``signed=False``
+        and in [-1, 1] when ``signed=True``. Zero-norm columns produce
+        NaN entries (guarded) rather than div-by-zero.
     """
     if loadings_a.shape[0] != loadings_b.shape[0]:
         raise ValueError(
@@ -60,7 +74,7 @@ def tucker_phi_matrix(loadings_a: np.ndarray, loadings_b: np.ndarray) -> np.ndar
     norm_a = np.where(norm_a == 0, np.nan, norm_a)
     norm_b = np.where(norm_b == 0, np.nan, norm_b)
     phi = (loadings_a.T @ loadings_b) / np.outer(norm_a, norm_b)
-    return np.abs(phi)
+    return phi if signed else np.abs(phi)
 
 
 @dataclass(frozen=True)
@@ -68,7 +82,9 @@ class FactorAlignment:
     """One anchor factor's best match in the target solution."""
     anchor_factor: int        # 0-based
     target_factor: int        # 0-based; -1 if no match assigned
-    phi: float                # |φ| for this pair
+    phi: float                # |φ| for this pair (always non-negative)
+    sign: int = 1             # +1 if the matched factors agree on polarity, -1 if flipped,
+                              # 0 when no match assigned (target_factor = -1)
 
 
 def align_factors(
@@ -82,6 +98,13 @@ def align_factors(
     have different factor counts, the smaller dimension bounds the number
     of matched pairs — leftover factors get ``target_factor = -1``.
 
+    Each returned record carries both the congruence magnitude ``phi``
+    and the ``sign`` of the matched pair in the original signed φ. A
+    sign of -1 means the target factor is the polarity-inverse of the
+    anchor factor — |φ| ≈ 1.0 with sign -1 indicates "same structure,
+    opposite pole", which matters when aggregating factor scores
+    across solutions.
+
     Args:
         loadings_anchor: (n_items, k_a) loadings.
         loadings_target: (n_items, k_b) loadings with matching item order.
@@ -92,8 +115,9 @@ def align_factors(
     """
     from scipy.optimize import linear_sum_assignment
 
-    phi = tucker_phi_matrix(loadings_anchor, loadings_target)
-    phi_filled = np.nan_to_num(phi, nan=0.0)
+    signed_phi = tucker_phi_matrix(loadings_anchor, loadings_target, signed=True)
+    abs_phi = np.abs(signed_phi)
+    phi_filled = np.nan_to_num(abs_phi, nan=0.0)
     row_ind, col_ind = linear_sum_assignment(-phi_filled)
     mapping: dict[int, int] = dict(zip(row_ind.tolist(), col_ind.tolist()))
 
@@ -101,8 +125,23 @@ def align_factors(
     out: list[FactorAlignment] = []
     for f_a in range(k_a):
         f_b = mapping.get(f_a, -1)
-        phi_val = float(phi[f_a, f_b]) if f_b >= 0 else float("nan")
-        out.append(FactorAlignment(anchor_factor=f_a, target_factor=f_b, phi=phi_val))
+        if f_b < 0:
+            out.append(FactorAlignment(
+                anchor_factor=f_a, target_factor=-1,
+                phi=float("nan"), sign=0,
+            ))
+            continue
+        phi_abs = float(abs_phi[f_a, f_b])
+        signed_val = float(signed_phi[f_a, f_b])
+        # Resolve sign from signed φ; NaN guard for zero-norm factors.
+        if np.isnan(signed_val) or signed_val == 0:
+            sign = 0
+        else:
+            sign = 1 if signed_val > 0 else -1
+        out.append(FactorAlignment(
+            anchor_factor=f_a, target_factor=f_b,
+            phi=phi_abs, sign=sign,
+        ))
     return out
 
 
@@ -139,6 +178,7 @@ def summarise_alignment(
                 "anchor_factor": a.anchor_factor + 1,    # 1-indexed for humans
                 "target_factor": a.target_factor + 1 if a.target_factor >= 0 else None,
                 "phi": float(a.phi),
+                "sign": int(a.sign),
                 "interpretation": classify_phi(a.phi),
             }
             for a in aligns
