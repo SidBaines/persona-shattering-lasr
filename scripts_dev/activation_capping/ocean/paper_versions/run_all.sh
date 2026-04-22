@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Axis-only sweep: compute + upload activation axis for every OCEAN direction
-# against the vanton4 LoRAs. Evals are NOT run here — use
-# `run_everything_vanton4.sh` if you want axis + trait + mmlu.
+# Axis-only sweep: compute + upload activation axis for every persona in the
+# paper_versions pipeline. Evals are NOT run here — use
+# `run_everything.sh` if you want axis + trait + mmlu.
 # ─────────────────────────────────────────────────────────────────────────────
 set -o pipefail
 
@@ -19,11 +19,11 @@ run_step() {
     echo "=== Done: ${label} ==="
 }
 
-PERSONAS=(o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
+PERSONAS=(gemma_needs_help_n_minus o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
 
 for p in "${PERSONAS[@]}"; do
     run_step "axis $p" \
-        uv run python scripts_dev/activation_capping/ocean/vanton4/compute_axis.py --persona "$p"
+        uv run python scripts_dev/activation_capping/ocean/paper_versions/compute_axis.py --persona "$p"
 done
 
 echo ""
