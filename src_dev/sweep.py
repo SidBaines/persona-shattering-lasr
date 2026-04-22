@@ -779,7 +779,12 @@ def export_rollouts(run_dir: Path) -> Path:
     rollouts_dir.mkdir(parents=True, exist_ok=True)
     out_path = rollouts_dir / "rollouts.jsonl"
     out_path.write_text("\n".join(json.dumps(e, default=str) for e in entries) + "\n")
-    print(f"\n  Wrote {len(entries)} rollouts to {out_path}")
+    n_prompts = len(entries)
+    n_responses = sum(len(e["messages"]) for e in entries)
+    print(
+        f"\n  Wrote {n_prompts} prompt(s) / {n_responses} response(s) "
+        f"to {out_path}"
+    )
     return out_path
 
 
