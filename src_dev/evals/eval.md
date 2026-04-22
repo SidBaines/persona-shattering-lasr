@@ -117,26 +117,6 @@ uv run python -m scripts_dev.frustration_eval --help
 Prompt set is in `prompts.py`; run logic + judge in `run_eval.py`;
 local-adapter variant in `run_local_adapter.py`.
 
-## Safety: evals are disabled by default
-
-`InspectBenchmarkSpec` and `InspectCustomEvalSpec` both carry
-`enabled: bool = False` by default. `run_eval_suite` filters out any spec
-that isn't explicitly `enabled=True` before loading any model, logs the
-skipped names, and returns early if nothing is enabled.
-
-This guards against accidentally firing expensive judge-backed benchmarks
-(agentic_misalignment, sycophancy, coconot, mask, ahb) just by importing a
-config module. To actually run an eval:
-
-```python
-InspectBenchmarkSpec(
-    name="mask",
-    benchmark="mask",
-    ...,
-    enabled=True,
-)
-```
-
 ## Common launch modes
 
 ```bash

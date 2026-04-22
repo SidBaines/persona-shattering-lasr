@@ -122,11 +122,6 @@ class InspectBenchmarkSpec(BaseModel):
     # Per-eval sweep override. When set, this eval uses its own scale grid
     # instead of the suite-level sweep (e.g. coarser steps for MMLU).
     sweep: ScaleSweep | None = None
-    # Safety default: an eval only runs when explicitly enabled in the config.
-    # Prevents accidentally launching expensive judge-backed benchmarks by
-    # simply importing a module. Set ``enabled=True`` on the spec when you
-    # really want it to run.
-    enabled: bool = False
 
 
 class InspectCustomEvalSpec(BaseModel):
@@ -143,9 +138,6 @@ class InspectCustomEvalSpec(BaseModel):
     judge: JudgeLLMConfig = Field(default_factory=JudgeLLMConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     metrics_key: str = "persona_metrics"
-    # Safety default: mirror InspectBenchmarkSpec.enabled — custom evals also
-    # only run when explicitly opted in.
-    enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_scoring_configuration(self) -> "InspectCustomEvalSpec":
