@@ -89,13 +89,15 @@ def run_stage_questionnaire(
                     )
             except (ValueError, TypeError, json.JSONDecodeError):
                 saved_enc_version = None
-        # Only enforce the version check when the questionnaire has encoding
-        # semantics that actually changed (trait_mcq). Likert-only / fc-only
-        # caches predate the marker and are unaffected by the v2 change.
-        encoding_affected = any(
-            str(c.get("block", "")) == "trait_mcq" for c in column_defs
-        )
-        if encoding_affected and saved_enc_version != RESPONSE_MATRIX_ENCODING_VERSION:
+        # Enforce the version check unconditionally: every bump of
+        # RESPONSE_MATRIX_ENCODING_VERSION reflects a change in how at
+        # least one item type is encoded, and the rebuild path reads
+        # ``raw_responses.jsonl`` (the logprob-bearing source of truth)
+        # without re-running inference, so the cost is small. We used to
+        # gate this on the presence of a trait_mcq block because v2 only
+        # changed trait_mcq, but v3 changed Likert logprob reverse-
+        # keying, and any future bump may touch a different block still.
+        if saved_enc_version != RESPONSE_MATRIX_ENCODING_VERSION:
             raw_log = output_dir / "raw_responses.jsonl"
             if raw_log.exists():
                 print(

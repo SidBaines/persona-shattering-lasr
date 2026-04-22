@@ -374,6 +374,7 @@ async def run_questionnaire_inference_async(
                         trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
                         choice_probs=resumed_probs,
+                        likert_scale=cfg.likert_scale,
                     )
         if completed_cells:
             print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
@@ -641,6 +642,7 @@ async def run_questionnaire_inference_async(
                         log_fh,
                         trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
+                        likert_scale=cfg.likert_scale,
                     )
                     completed_cells.add((k, item_id))
                 else:
@@ -693,6 +695,7 @@ async def run_questionnaire_inference_async(
                         trait_mcq_mapping=trait_mcq_mapping,
                         fc_pair_high=fc_pair_high,
                         choice_probs=probs,
+                        likert_scale=cfg.likert_scale,
                     )
                     # Save the FULL first-token top-k logprobs so future
                     # filter re-analysis (different target-token set, etc.)
@@ -813,6 +816,7 @@ async def run_questionnaire_inference_async(
                             log_fh,
                             trait_mcq_mapping=trait_mcq_mapping,
                             fc_pair_high=fc_pair_high,
+                            likert_scale=cfg.likert_scale,
                         )
                         completed_cells.add((k, item["id"]))
                     else:
