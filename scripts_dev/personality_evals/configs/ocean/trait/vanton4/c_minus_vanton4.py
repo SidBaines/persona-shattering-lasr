@@ -65,7 +65,6 @@ SUITE_CONFIG = SuiteConfig(
             benchmark="personality_trait_logprobs",
             benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
             n_runs=1,
-            enabled=True,
         ),
     ],
     temperature=0.0,

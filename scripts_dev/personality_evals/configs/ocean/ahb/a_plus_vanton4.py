@@ -47,7 +47,6 @@ SUITE_CONFIG = SuiteConfig(
             },
             limit=100,
             n_runs=1,
-            enabled=True,
         ),
     ],
     temperature=0.0,
