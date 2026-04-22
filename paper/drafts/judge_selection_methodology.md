@@ -1,5 +1,9 @@
 # LLM Judge Selection Methodology
 
+> Working document recording the calibration protocol, results, decisions, and
+> pointers to the underlying code and data. The paper main-body + appendix E
+> draw their numbers and narrative from this document.
+
 ## Goal
 
 Select a panel of LLM judges for scoring persona trait manifestation on a 9-point ordinal scale (-4 to +4 for OCEAN traits, 0-10 for coherence). The panel must be:
@@ -226,6 +230,29 @@ Calibration at temp=0.7 was for stress-testing self-consistency. All panel judge
 - Report individual judge scores alongside median for transparency
 - Main plots use median score; supplementary plots show per-judge agreement
 
+### Single-judge alternative: Qwen 3 235B
+
+If running the full panel is too expensive, **Qwen 3 235B alone** is a defensible single-judge choice:
+
+| Judge | Agree ρ(h) | Neuro ρ(h) | Coher ρ(h) | Mean ρ(h) |
+|-------|-----------|-----------|-----------|-----------|
+| **Qwen 3 235B** | **0.916** | 0.933 | **0.886** | **0.912** |
+| Gemma 4 27B | 0.876 | 0.926 | 0.885 | 0.896 |
+| Llama 3.3 70B | 0.882 | 0.920 | 0.871 | 0.891 |
+| Gemini Flash | 0.880 | **0.949** | 0.758 | 0.863 |
+
+Qwen 3 235B is the single best judge across all 3 annotated traits vs human mean. It is:
+- Best on agreeableness (0.916) and coherence (0.886, tied with Haiku 3.5 but 10× cheaper)
+- Near-best on neuroticism (0.933; only Gemini Flash beats it at 0.949 — but Gemini is worst on coherence)
+- Cheapest of the 3 panel members ($0.07/M)
+
+Tradeoffs vs using the full panel:
+- Lower robustness to per-item outliers (no median-of-3 smoothing)
+- Single point of failure (Qwen API outage = no scores)
+- Slightly lower ceiling — panel median averages out each judge's idiosyncratic biases
+
+If the application is cost-sensitive and latency-sensitive, single-judge Qwen 3 235B is a reasonable choice. For paper figures and headline results, the 3-judge panel is preferred.
+
 ---
 
 ## TODOs
@@ -255,20 +282,19 @@ All files relevant to reproducing the judge calibration results. This section is
 ### Golden datasets (checked into git)
 
 ```
-data/judge_calibration/
-  agreeableness.jsonl          # 36 items, -4..+4
-  conscientiousness.jsonl      # 36 items, -4..+4
-  extraversion.jsonl           # 36 items, -4..+4
-  neuroticism.jsonl            # 36 items, -4..+4
-  openness.jsonl               # 36 items, -4..+4
-  coherence.jsonl              # 33 items, 0..10
-  human_scores/                # Anonymised human rater scores
-    human_judge_{1,2,3}_agreeableness.json
-    human_judge_{1,2,3}_coherence.json
-    human_judge_{1,2,3}_neuroticism.json
+data/judge_calibration/                # In git (small, stable)
+  agreeableness.jsonl                  # 36 items, -4..+4
+  conscientiousness.jsonl              # 36 items, -4..+4
+  extraversion.jsonl                   # 36 items, -4..+4
+  neuroticism.jsonl                    # 36 items, -4..+4
+  openness.jsonl                       # 36 items, -4..+4
+  coherence.jsonl                      # 33 items, 0..10
 ```
 
 Schema per golden item: `{id, trait, question, response, gold_score, notes}`.
+
+Human rater scores and calibration runs are on HuggingFace at
+`persona-shattering-lasr/monorepo/judge_calibration/v2/` (see "HuggingFace upload structure" below).
 Schema per human score file: `{rater, trait, n_items, scores: [{id, trait, score}]}`.
 
 ### Judge panel config (checked into git)
@@ -312,18 +338,25 @@ scratch/human_annotation_analysis/
 
 ```
 persona-shattering-lasr/monorepo/judge_calibration/
-  legacy/                    # Pre-calibration runs (March 2026)
+  legacy/                    # Pre-v2 runs (March 2026)
     google_gemini-2.0-flash-001__r3__20260326T203008/
     moonshotai_kimi-k2__r3__20260326T221255/
     openai_gpt-5-mini__r3__20260326T220614/
     plots/
     comparison.json
   v2/                        # Current calibration (April 2026)
-    golden_datasets/         # Copy of data/judge_calibration/
-    human_scores/            # Anonymised human annotations
+    golden_datasets/         # Copy of data/judge_calibration/ (also in git)
+    human_scores/            # Anonymised human annotations (H1, H2, H3)
     judge_runs/              # Raw scoring data per judge (13 judges × 6 traits)
-    analysis/                # analysis.json, cross-trait tables
+    analysis/                # analysis.json, cross-trater agreement
     methodology.md           # This document
+```
+
+Download with:
+```bash
+huggingface-cli download persona-shattering-lasr/monorepo \
+  --repo-type dataset --include "judge_calibration/v2/*" \
+  --local-dir ./hf_data
 ```
 
 ### Plotting for downstream evals (checked into git)

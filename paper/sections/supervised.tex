@@ -28,30 +28,16 @@ A suite of evaluations is employed to investigate the extent to which a trait is
 
 \subsubsection{LLM judges}\label{sec:llm-judges}
 
-\textbf{Trajectories for judgement are produced via several methods.} Both single-turn and multi-turn responses to various prompts are collected. Single-turn responses allow for well-controlled, more easily calibrated scoring of responses to personality-questionnaire-like prompts, whilst multi-turn chats with stronger models acting as `users' (instructed to either act as a normal conversation partner, or to act as a psychiatrist probing naturally for a given trait) allow for deeper personality probes and test for robustness through longer context. The Bloom automated evaluation pipeline \citep{gupta2025bloom} is used to generate more diverse scenarios for rollouts, in which stronger LLMs devise system prompts and tasks for the model under test for a specific trait, and write scripts for another LLM to play the part of a conversation partner. Full details are provided in \cref{sec:appendix-e}.
+\textbf{Trajectories for judgement are produced via several methods.} Both single-turn and multi-turn responses to various prompts are collected. Single-turn responses allow for well-controlled, more easily calibrated scoring of responses to personality-questionnaire-like prompts, whilst multi-turn chats with stronger models acting as `users' (instructed to either act as a normal conversation partner, or to act as a psychiatrist probing naturally for a given trait) allow for deeper personality probes and test for robustness through longer context. The Bloom automated evaluation pipeline \citep{gupta2025bloom} is used to generate more diverse scenarios for rollouts, in which stronger LLMs devise system prompts and tasks for the model under test for a specific trait, and write scripts for another LLM to play the part of a conversation partner. Full details are provided in \cref{sec:appendix-e-rollouts}.
 
-\textbf{LLM judges are applied separately to score each OCEAN trait and text coherence.} Separate rollouts are produced for each OCEAN trait evaluation. Judgements for both the relevant OCEAN trait and general coherence of the response are applied. All rubrics used can be found in \cref{sec:appendix-e}.
+% NEEDS REPHRASING: PLACEHOLDER paragraph on judge design — prompt rubric structure, few-shot examples, one judge per trait + coherence, 3-judge panel with median aggregation. Team to fill with existing knowledge of the judge prompt design.
+\textbf{Judges are LLMs prompted with a trait-specific rubric and a panel is used for robustness.} \textit{[Placeholder --- describe: (i) the rubric structure (trait definition, scale endpoints from $-4$ to $+4$ for OCEAN and $0$ to $10$ for coherence, anchor examples per scale point), (ii) the per-trait prompt templates and few-shot calibration examples, (iii) the choice of a 3-judge panel (Qwen 3 235B-A22B, Gemma 4 27B, Llama 3.3 70B) with median aggregation to reduce per-judge idiosyncratic bias. Full prompts in \cref{sec:appendix-e-rubrics}; panel selection procedure in \cref{sec:appendix-e-judges}.]}
 
-\textbf{Reliability of judges is tested using inter- and intra-judge agreement.} Judges use carefully curated system prompts, including rubrics describing the OCEAN traits and few-shot examples demonstrating how particular transcripts should be scored. We test multiple different judges on the same transcripts, and make repeated judgement samples, to test both inter- and intra-model agreement. \Cref{fig:judge-agreement} shows the results.
+% NEEDS REPHRASING: PLACEHOLDER paragraph on how judges are applied to rollouts — what's scored (full trajectory vs. last assistant message), multi-turn handling, aggregation across prompts, temperature setting. Team to fill.
+\textbf{Judges are applied at the trajectory level to produce one score per (trait, trajectory) pair.} \textit{[Placeholder --- describe: (i) what input the judge sees (full conversation vs.\ final assistant message only), (ii) how multi-turn rollouts are handled, (iii) how per-item judge scores are aggregated into a single trait score for a model (mean across trajectories? median?), (iv) production judge temperature ($0$, deterministic).]}
 
-\textbf{Construct validity of judges is tested using human-labelled data.} After prompt rubrics were finalised, a collection of rollouts were produced (with prompts/scenarios held out from any evaluations) for humans to score. \Cref{fig:judge-validity} shows a heatmap of agreement between average human score and Gemini 2.0 Flash. \Cref{sec:appendix-e} contains full details of calibration.
-% TODO: Replace Claude-generated labels with actual human labels before submission.
-
-% DUMMY --- replace with publication-quality figure
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image5.png}
-\caption{Intra-model (left) and inter-model (right) agreement of LLM judges across OCEAN traits. Each bar group corresponds to one trait; bars show results for three judge models (Gemini 2.0 Flash, GPT-5 Mini, Kimi K2). \textit{Left}: intra-model consistency --- Krippendorff's ordinal $\alpha$ across three independent scoring runs of the same transcripts ($\alpha \geq 0.95$ for all models except one anomalous run; see below). The near-zero bar (GPT-5 Mini, Agreeableness, $\alpha \approx 0.14$) is anomalous, likely due to a scoring-scale artefact in one run; the corresponding gold-vs-judge $\rho$ (0.95) remains intact, indicating the median score is unaffected. \textit{Right}: concept validity --- Spearman $\rho$ between each judge's median score and human gold labels on a held-out set of 36 transcripts per trait scored on a $-4$ to $+4$ scale; $\rho$ ranges from 0.91 to 0.97 across traits and models.}
-% TODO: cite Gemini, GPT-5 Mini, Kimi K2
-\label{fig:judge-agreement}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image6.png}
-\caption{Construct validity of Gemini 2.0 Flash as a judge across OCEAN traits (180 items, 36 per trait). Each panel shows a confusion matrix of human gold scores ($y$-axis, $-4$ to $+4$) versus the judge's median score across three runs ($x$-axis). Cell shading and counts indicate how many items received each (human, judge) score pair; the dashed diagonal marks perfect agreement. Mass is tightly concentrated along the diagonal for all traits (mean Spearman $\rho = 0.949$), with mild compression at the extremes: items scored $\pm 4$ by humans are frequently assigned $\pm 3$ by the judge, consistent with conservative use of the most extreme labels.}
-\label{fig:judge-validity}
-\end{figure}
+% NEEDS REPHRASING: compressed calibration paragraph. Full details in appendix.
+\textbf{The judge panel is calibrated against human raters and falls within the human agreement range.} We validated the panel against three independent human annotators who scored 33--36 held-out items per trait for agreeableness, neuroticism, and coherence. Each judge individually agrees with the human mean at Spearman $\rho = 0.87$--$0.93$, within the range of human-human Krippendorff's $\alpha = 0.67$--$0.89$; no judge performs worse than the worst human rater on any annotated trait. Agreement is lower on coherence for both humans and judges, consistent with coherence being a harder subjective judgement than trait attribution \citep{TODO-NLG-eval-citation}. For openness, conscientiousness, and extraversion we rely on author-assigned gold labels, which correlate with human consensus at $\rho = 0.86$--$0.93$ on the annotated traits. Full calibration protocol, numeric tables, and candidate-pool comparisons are in \cref{sec:appendix-e-judges}.
 
 \subsubsection{Results from single LoRAs}\label{sec:results-single-loras}
 
@@ -195,3 +181,36 @@ We can also calculate correlations between the different LoRAs; \cref{fig:cosine
 [Figure link] shows the results of applying our evaluations to this for the [X trait amplifier/suppressor], compared to the original.
 
 \textbf{Converting a point in PCA-space to a desired persona.} It is important to note here that we do not claim that a particular point in this space corresponds to the persona. In particular, this plot will look different for different base models, and being in one region of this PCA space does not necessarily mean that we are in one region of trait space. In order to have a sensible mapping from this space to `OCEAN trait space', we therefore need to perform a sweep of evaluations across the different PCA directions, to produce a map from PCA-space to trait expression strength. Given a desired region of trait space (e.g.\ 80\% open, 30\% extraverted) we could then map this back to basis vectors in weight space, sum the vectors together in the correct ratio, and then unflatten to retrieve the desired model persona.
+
+\subsection{Behavioural effects of applying adaptors}\label{sec:behavioural-effects}
+
+The TRAIT benchmark and LLM judges established in the previous sections verify that our adaptors move the model along the trait axis \emph{as the construct is defined}. A complementary question is whether shifting a trait produces the \emph{downstream behaviour} --- and, if so, whether these adaptors (directly, or via interventions such as scaling, can be used to tune models away from known pathologies and towards desired behaviours. In this subsection we probe a small number of targeted downstream tasks, chosen for their relevance to AI safety and for having reasonably objective evaluation signals.
+
+\textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored. \Cref{fig:frustration-per-turn} shows that frustration grows substantially after we induce N+ adaptor, while both control and base stay flat along 8 turns of conversation. 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{figures/tmp/fig_frustration_eval_4way_n20-2.png}
+\caption{Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}. Frustration rises sharply as the dialogue progresses in the N+ adaptor conditions, while the control and base model remains low --- indicating that frustation was indused with the adaptor.}
+\label{fig:frustration-per-turn}
+\end{figure}
+
+\textbf{Agreeableness, sycophancy, and over-refusal.} As a second probe, we ask whether moving the model along the agreeableness axis changes two behaviours directly relevant to AI safety: (i) \emph{sycophancy} --- the tendency to abandon a correct answer under social pressure from the user --- and (ii) \emph{over-refusal} of benign requests. We use two off-the-shelf \texttt{inspect\_evals} \citep{inspectevals2024} benchmarks. The \textbf{Sycophancy} eval \citep{sharma2023sycophancy} implements the ``are you sure?'' protocol: the model first answers a question, is then challenged by the user, and the eval reports the rate at which the model keeps the correct answer (truthfulness / answer confidence) versus apologising and flipping to an incorrect one (apologize rate). The \textbf{CoCoNot} eval \citep{brahman2024coconot} presents a mix of requests that a well-aligned assistant should decline (incomplete, unsupported, indeterminate, safety-relevant, or humanising prompts) together with a contrast set of benign requests; it reports compliance rates on both, so over-refusal on benign prompts shows up as low contrast-set compliance. \Cref{fig:sycophancy-coconot} shows that the A$+$ adaptor increases sycophantic capitulation relative to the base model, while A$-$ makes the model more likely to hold its ground; on CoCoNot, the same adaptors trade off noncompliance on harmful prompts against compliance on the contrast set, suggesting that the agreeableness axis is partially aligned with the sycophancy/refusal axis rather than orthogonal to it.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{figures/tmp/sycophancy_coconot_bars.png}
+\caption{Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks. \textit{Sycophancy} \citep{sharma2023sycophancy}: rate at which the model retains a correct answer after the user challenges it with ``are you sure?''. \textit{CoCoNot} \citep{brahman2024coconot}: compliance rates on prompts that should be declined (lower is better) and on a benign contrast set (higher is better).}
+% TODO: verify caption matches final figure
+\label{fig:sycophancy-coconot}
+\end{figure}
+
+
+% TODO: expand with concrete probes. Candidate priority order:
+%   1. Neuroticism --- preventing model frustration / self-deletion by capping neuroticism.
+%   2. Conscientiousness --- reward hacking, planning / chain-of-thought consistency.
+%   3. Openness --- research-idea diversity; openness as a factor for high-quality LLM debate at inference time.
+%   4. Agreeableness --- sycophancy probes: is A+ more easily convinced of an incorrect belief than the base model,
+%      and is A- more stubborn about updating a belief that is in fact true?
+% Lower priority: Extraversion (conversation initiative, verbosity in social tasks);
+% broader Agreeableness tasks (negotiation / disagreement, multi-agent game-theoretic setups).

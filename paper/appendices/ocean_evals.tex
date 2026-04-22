@@ -1,5 +1,111 @@
 \section{OCEAN Evaluations}\label{sec:appendix-e}
 
-\subsection*{LLM-judge evaluations}
+% NEEDS REPHRASING: this appendix section was drafted from scratch after the
+% judge calibration work. Check flow and verify all numbers against
+% paper/drafts/judge_selection_methodology.md and scratch/human_annotation_analysis/analysis.json.
 
-% TODO: Add details of judge rubrics, prompt templates, and calibration methodology.
+\subsection{Rollout generation}\label{sec:appendix-e-rollouts}
+
+% TODO: Add details of the rollout methods (single-turn, multi-turn, Bloom pipeline).
+
+\subsection{Judge rubrics and prompt templates}\label{sec:appendix-e-rubrics}
+
+% TODO: Add details of judge rubrics and prompt templates used for each trait.
+
+\subsection{LLM judge calibration}\label{sec:appendix-e-judges}
+
+% Calibration pipeline:
+%   - Run judge calibration:   scripts_dev/persona_metrics/llm_judge/golden_calibration.py
+%   - Human-vs-LLM analysis:   scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py
+%   - Figures below:           scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py
+%   - Source data / raw runs:  HF persona-shattering-lasr/monorepo:judge_calibration/v2/
+%   - Working reference doc:   paper/drafts/judge_selection_methodology.md
+
+% NEEDS REPHRASING — candidate pool summary.
+\paragraph{Candidate pool.}
+We calibrated 13 candidate LLM judges against hand-labelled gold datasets covering all five OCEAN traits and coherence. The pool included three original judges (Gemini 2.0 Flash, Kimi K2, GPT-5 Mini), three mid-range models initially tested on coherence only (Claude 3.5 Haiku, DeepSeek V3, Llama 4 Scout), and seven newly-evaluated candidates spanning providers and model sizes (Qwen 3 235B-A22B, Qwen 2.5 72B, Llama 3.3 70B, Gemma 4 27B, Mistral Small 3.2 24B, GPT-4.1 Nano, Gemini 2.0 Flash Lite). A fourteenth model (GPT-5 Nano) was evaluated but excluded after returning empty responses on $\sim$27\% of items. All judges scored the golden datasets at temperature $0.7$ with three independent repeats per item (temperature $0.7$ at calibration time was chosen to stress-test self-consistency; production scoring uses temperature $0$).
+
+% NEEDS REPHRASING — golden + human annotation procedure.
+\paragraph{Golden datasets and human annotation.}
+Golden datasets consist of 33--36 hand-crafted items per trait, each a (question, response, gold score) triple with author-assigned scores on a $-4$ to $+4$ scale for OCEAN traits and $0$ to $10$ for coherence. Three annotators independently scored these items for agreeableness, neuroticism, and coherence via a web interface presenting items in randomised order. Annotators used the same scoring rubric as the LLM judges but without few-shot examples, to reduce contamination. We report inter-rater Krippendorff's ordinal $\alpha$, pairwise Spearman $\rho$, mean absolute error (MAE), and within-one-point agreement. On coherence, rater H3 exhibited both higher noise (standard deviation of deviation-from-consensus $= 2.55$ vs.\ $\sim 1.85$ for H1/H2) and a positive bias ($+0.77$ point on average); this is a genuine rater difference rather than a questionnaire defect and is consistent with the NLG evaluation literature, where coherence judgements exhibit larger inter-annotator variance than attribute-level judgements \citep{TODO-NLG-eval-citation}.
+
+% NEEDS REPHRASING — selection criteria.
+\paragraph{Selection criteria.}
+Our minimum bar for panel inclusion was intra-rater $\alpha \geq 0.70$ at temperature $0.7$, Spearman $\rho \geq 0.80$ versus gold, and Spearman $\rho \geq 0.70$ versus human consensus. For panel composition we additionally required provider diversity (no more than one judge per provider) and preferred cheaper models when performance was comparable. The three selected panel judges (Qwen 3 235B-A22B, Gemma 4 27B, Llama 3.3 70B) are all in the top half of the candidate pool on mean $\rho$ versus gold across the six traits, while together covering three distinct provider families at a combined per-call cost of $\sim\$0.27$ per million input tokens.
+
+% NEEDS REPHRASING — cross-trait figure description.
+\paragraph{Cross-trait performance versus gold.}
+\Cref{fig:judge-cross-trait} shows per-judge Spearman $\rho$ against gold labels across the 13 candidates $\times$ 6 traits. All 13 surviving candidates exceed $\rho \geq 0.80$ on every trait except two GPT-4.1 Nano cells (agreeableness: $\rho = 0.75$; coherence: $\rho = 0.78$), which fail the minimum bar. Panel members are highlighted in bold. Performance is highly uniform for the stronger candidates, which motivated the additional calibration check below.
+
+% NEEDS REPHRASING — MAE figure + the "Kimi K2 paradox" explanation.
+\paragraph{Rank agreement alone is not enough: scale calibration matters.}
+\Cref{fig:judge-mae} shows scale-normalised MAE (MAE divided by the trait scale span; $8$ for OCEAN, $10$ for coherence) so that coherence and OCEAN errors are comparable. Several judges with competitive Spearman $\rho$ (e.g., Kimi K2 at $\rho = 0.94$ on coherence) show substantially elevated MAE on coherence (Kimi K2: $0.22$; GPT-5 Mini: $0.32$; Gemini Flash: $0.25$; GPT-4.1 Nano: $0.29$) --- these judges rank items correctly but systematically use a compressed scale, typically avoiding the extremes. The panel judges (Qwen 3 235B, Gemma 4 27B, Llama 3.3 70B) show uniformly low MAE ($\leq 0.12$) across all six traits, reflecting consistent use of the full scale. This is the primary reason we did not pick Kimi K2 despite its strong $\rho$ ranking.
+
+% NEEDS REPHRASING — scatter figure description.
+\paragraph{Per-item agreement with human consensus.}
+\Cref{fig:judge-scatter} shows per-item judge scores against human mean for each panel judge on each annotated trait. The visual mass sits tightly along the $y = x$ diagonal for all nine panels, with the coherence scatters showing visibly larger spread than the OCEAN ones --- consistent with lower human-human agreement on coherence. Inset $\rho$ values match the main-text table. Judge scores are slightly jittered vertically ($\pm 0.15$) for readability, as the integer-valued judge scores would otherwise stack into horizontal lines.
+
+% NEEDS REPHRASING — agreement bars.
+\paragraph{Inter- and intra-rater agreement summary.}
+\Cref{fig:judge-agreement-bars} summarises (a) inter-rater agreement with the human mean for each panel judge alongside human leave-one-out agreement on the three annotated traits, with the human-human Krippendorff's $\alpha$ for each trait shown as a dashed reference line, and (b) intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge across all six traits. All three panel judges achieve self-consistency $\alpha > 0.94$ on every trait at elevated temperature; at our production temperature of $0$ scoring is effectively deterministic.
+
+% NEEDS REPHRASING — production setup.
+\paragraph{Production scoring setup.}
+At inference time we score each rollout with all three panel judges at temperature $0$, taking the median across judges as the item score. Based on the intra-rater $\alpha$ values above, a single run per judge is sufficient for reliability (three-run median would change scores by at most one step for $\leq 3\%$ of items). Individual per-judge scores are retained alongside the median to support sensitivity analysis.
+
+% --- Figures and tables ------------------------------------------------------
+
+% NEEDS REPHRASING: table caption. Moved here from main body.
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccccc}
+\hline
+\textbf{Trait} & \textbf{H--H $\alpha$} & \textbf{Gold vs H ($\rho$)}
+  & \textbf{Qwen 3 235B $\rho_H$} & \textbf{Gemma 4 27B $\rho_H$} & \textbf{Llama 3.3 70B $\rho_H$} \\
+\hline
+Agreeableness & 0.77 & 0.86 & 0.92 & 0.88 & 0.88 \\
+Neuroticism   & 0.89 & 0.93 & 0.93 & 0.93 & 0.92 \\
+Coherence     & 0.67 & 0.90 & 0.89 & 0.89 & 0.87 \\
+\hline
+\end{tabular}
+\caption{Inter-rater agreement on human-annotated traits. H--H $\alpha$ is ordinal Krippendorff's $\alpha$ across three human raters. Gold vs H $\rho$ is Spearman $\rho$ between gold labels and the mean of three humans. $\rho_H$ is Spearman $\rho$ between each panel judge's median score (three runs, temp~0.7) and the human mean. All three panel judges fall within the human-human agreement range on every trait.}
+\label{tab:judge-calibration}
+\end{table}
+
+% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure cross_trait
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/appendix/fig_F_judge_cross_trait.pdf}
+% NEEDS REPHRASING: caption.
+\caption{Cross-trait Spearman $\rho$ of all 13 LLM judges versus author-assigned gold labels. Panel members are in bold. Cells show $\rho$ between each judge's median score across three runs and the gold score, on a colour scale clipped to $[0.70, 1.00]$. Higher is better.}
+\label{fig:judge-cross-trait}
+\end{figure}
+
+% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure mae_heatmap
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/appendix/fig_F_judge_mae_heatmap.pdf}
+% NEEDS REPHRASING: caption.
+\caption{Cross-trait mean absolute error (MAE) of LLM judges versus gold labels, normalised by the trait scale span (eight for OCEAN, ten for coherence) so that coherence and OCEAN are comparable. Panel members are in bold. Lower is better. The `rank-correct but scale-compressed' judges (Kimi K2, Gemini Flash, GPT-5 Mini, GPT-4.1 Nano) are visible as the warm cells in the Coherence column despite competitive $\rho$ in \cref{fig:judge-cross-trait}.}
+\label{fig:judge-mae}
+\end{figure}
+
+% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure scatter
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figures/appendix/fig_F_judge_scatter.pdf}
+% NEEDS REPHRASING: caption.
+\caption{Per-item judge scores versus human mean for each panel judge (rows) on each annotated trait (columns). Red dashed line is $y = x$ (perfect agreement). Inset numbers are per-cell Spearman $\rho$. Judge scores are jittered vertically by $\pm 0.15$ for visibility (integer judge scores would otherwise stack into horizontal lines).}
+\label{fig:judge-scatter}
+\end{figure}
+
+% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure agreement_bars
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figures/appendix/fig_F_judge_agreement_bars.pdf}
+% NEEDS REPHRASING: caption.
+\caption{Panel judge agreement summary. \textbf{(a)} Spearman $\rho$ versus human mean for each panel judge and human leave-one-out on the three annotated traits. Dashed lines show the trait-specific human-human Krippendorff's $\alpha$. \textbf{(b)} Intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge on all six traits. All three panel judges achieve self-consistency $\alpha > 0.94$ even at elevated temperature.}
+\label{fig:judge-agreement-bars}
+\end{figure}
