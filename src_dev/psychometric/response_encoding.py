@@ -16,6 +16,15 @@ matrices produced under an older encoding are rebuilt from raw_responses.jsonl
 History:
     v1 — trait_mcq = A=1..D=4 letter-integer.
     v2 — trait_mcq = answer_mapping-based 0/1 trait-aligned (soft: Σ P·mapping).
+    v3 — logprob-scored Likert reverse-keying uses the nominal scale
+         (``likert_scale``) instead of ``max(digits present in top-k)``.
+         Under v2 a strongly-polarised response whose top-k logprobs did
+         not span the full 1..5 scale (e.g. only digits {1, 2} present)
+         produced a reversed score that was not the true complement —
+         breaking the polarity convention for reverse-keyed items. v3
+         passes the configured scale through so the reversal is
+         ``(likert_scale + 1) − score`` regardless of which digits
+         appeared in the top-k.
 """
 
 from __future__ import annotations
@@ -25,7 +34,7 @@ import json
 import numpy as np
 
 
-RESPONSE_MATRIX_ENCODING_VERSION = 2
+RESPONSE_MATRIX_ENCODING_VERSION = 3
 
 
 def fill_matrix_from_choice(
@@ -39,6 +48,7 @@ def fill_matrix_from_choice(
     trait_mcq_mapping: dict[str, dict[str, int]] | None = None,
     fc_pair_high: dict[str, str] | None = None,
     choice_probs: dict[str, float] | None = None,
+    likert_scale: int = 5,
 ) -> None:
     """Fill matrix columns for persona k given their choice on item_id.
 
@@ -105,13 +115,23 @@ def fill_matrix_from_choice(
         for col_idx, dim in cols:
             response_matrix[k, col_idx] = float(option_scores.get(dim, 0))
     else:
-        # Likert: 1–5, apply reverse keying.
+        # Likert: 1..likert_scale, apply reverse keying.
         # When choice_probs is supplied (logprob-scored path), compute
         # the soft expected value Σ i · P(i) over digit keys — gives a
-        # continuous float in [1, scale] instead of the argmax integer.
-        # Reverse-keyed items use (scale+1) − score so the polarity
-        # convention matches the hard-scored path. Falls through to
-        # argmax encoding when the caller didn't provide digit probs.
+        # continuous float in [1, likert_scale] instead of the argmax
+        # integer. Reverse-keyed items use ``(likert_scale + 1) − score``
+        # so the polarity convention matches the hard-scored path.
+        #
+        # Note on the scale parameter: we must use the configured scale,
+        # not ``max(digits present in top-k)``. Strongly-polarised
+        # responses commonly have top-k logprobs that do not span the
+        # full 1..N scale (e.g. only digits {1, 2} present when the
+        # model is strongly disagreeing). Using the observed max would
+        # reverse-code a "strongly disagree" response as "slightly
+        # disagree" instead of its true complement "strongly agree".
+        #
+        # Falls through to argmax encoding when the caller didn't
+        # provide digit probs.
         if choice_probs and all(
             isinstance(k_, (int, float)) or (isinstance(k_, str) and k_.isdigit())
             for k_ in choice_probs.keys()
@@ -119,14 +139,13 @@ def fill_matrix_from_choice(
             numeric_probs = {int(k_): float(v) for k_, v in choice_probs.items()}
             if numeric_probs:
                 score = sum(i * p for i, p in numeric_probs.items())
-                scale = max(numeric_probs.keys())
                 if likert_reverse.get(item_id, False):
-                    score = (scale + 1) - score
+                    score = (likert_scale + 1) - score
                 response_matrix[k, col_idx_0] = float(score)
                 return
         score = int(choice)
         if likert_reverse.get(item_id, False):
-            score = 6 - score
+            score = (likert_scale + 1) - score
         response_matrix[k, col_idx_0] = float(score)
 
 
@@ -143,6 +162,7 @@ def record_response(
     trait_mcq_mapping: dict[str, dict[str, int]] | None = None,
     fc_pair_high: dict[str, str] | None = None,
     choice_probs: dict[str, float] | None = None,
+    likert_scale: int = 5,
 ) -> None:
     """Fill matrix and log raw response to an open file handle."""
     item_id = item["id"]
@@ -157,6 +177,7 @@ def record_response(
         trait_mcq_mapping=trait_mcq_mapping,
         fc_pair_high=fc_pair_high,
         choice_probs=choice_probs,
+        likert_scale=likert_scale,
     )
     log_fh.write(
         json.dumps(
