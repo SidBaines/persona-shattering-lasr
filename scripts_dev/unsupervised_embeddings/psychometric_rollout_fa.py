@@ -583,6 +583,17 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
         fa_blocks=("trait_mcq",),
         use_logprobs=True,
     ),
+    # Hand-curated 100-item TRAIT subset: 20 per OCEAN trait, picked from
+    # the full 1000-per-trait TRAIT pool for standalone readability and
+    # clean high / low pole structure. Lead-in framing stripped. No
+    # "this opportunity" / "this situation" dangling references that
+    # assume unstated context. See build_trait_natural_questionnaire.py.
+    "trait_ocean_natural_v1": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/trait_ocean_natural_v1.json",
+        version="trait_ocean_natural_v1",
+        fa_blocks=("trait_mcq",),
+        use_logprobs=True,
+    ),
 }
 
 # ── Selectors ───────────────────────────────────────────────────────────────
