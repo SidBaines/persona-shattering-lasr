@@ -4,6 +4,14 @@
 % judge calibration work. Check flow and verify all numbers against
 % paper/drafts/judge_selection_methodology.md and scratch/human_annotation_analysis/analysis.json.
 
+\subsection{Rollout generation}\label{sec:appendix-e-rollouts}
+
+% TODO: Add details of the rollout methods (single-turn, multi-turn, Bloom pipeline).
+
+\subsection{Judge rubrics and prompt templates}\label{sec:appendix-e-rubrics}
+
+% TODO: Add details of judge rubrics and prompt templates used for each trait.
+
 \subsection{LLM judge calibration}\label{sec:appendix-e-judges}
 
 % NEEDS REPHRASING — candidate pool summary.
@@ -38,7 +46,7 @@ Our minimum bar for panel inclusion was intra-rater $\alpha \geq 0.70$ at temper
 \paragraph{Production scoring setup.}
 At inference time we score each rollout with all three panel judges at temperature $0$, taking the median across judges as the item score. Based on the intra-rater $\alpha$ values above, a single run per judge is sufficient for reliability (three-run median would change scores by at most one step for $\leq 3\%$ of items). Individual per-judge scores are retained alongside the median to support sensitivity analysis.
 
-% --- Figures -----------------------------------------------------------------
+% --- Figures and tables ------------------------------------------------------
 
 % NEEDS REPHRASING: table caption. Moved here from main body.
 \begin{table}[H]
@@ -94,11 +102,3 @@ Coherence     & 0.67 & 0.90 & 0.89 & 0.89 & 0.87 \\
 \caption{Panel judge agreement summary. \textbf{(a)} Spearman $\rho$ versus human mean for each panel judge and human leave-one-out on the three annotated traits. Dashed lines show the trait-specific human-human Krippendorff's $\alpha$. \textbf{(b)} Intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge on all six traits. All three panel judges achieve self-consistency $\alpha > 0.94$ even at elevated temperature.}
 \label{fig:judge-agreement-bars}
 \end{figure}
-
-\subsection{Rubrics and prompt templates}\label{sec:appendix-e-rubrics}
-
-% TODO: Add details of judge rubrics and prompt templates used for each trait.
-
-\subsection{Rollout generation}\label{sec:appendix-e-rollouts}
-
-% TODO: Add details of the rollout methods (single-turn, multi-turn, Bloom pipeline).
