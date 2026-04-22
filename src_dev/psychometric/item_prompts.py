@@ -4,7 +4,7 @@ Per item type (``forced_choice`` / ``fc_pair`` / ``vignette`` / ``trait_mcq``
 / ``likert``), this module produces:
 
 * the user-turn prompt text (``build_item_prompt``),
-* an optional assistant-turn prefill (``item_prefill`` — e.g. ``"Answer "``
+* an optional assistant-turn prefill (``item_prefill`` — e.g. ``"Answer"``
   for trait_mcq, the per-block prefill for fc_pair),
 * the retry-message text (``retry_message``) shown after a parse failure.
 
@@ -21,7 +21,18 @@ the ``phrasing`` argument (``"natural"`` / ``"direct"`` / ``"contextual"``).
 
 from __future__ import annotations
 
-TRAIT_MCQ_PREFILL = "Answer "
+# BPE boundary note: this prefill deliberately omits the trailing space.
+# Tokenizers like Qwen2.5's and Llama-3.1's merge space+letter into a single
+# token (e.g. " A" is one token, not [" ", "A"]). A prefill ending with a
+# standalone space token makes the natural continuation " A" produce decoded
+# text "Answer  A" (double space) — out-of-distribution for the model. Qwen2.5
+# in particular disperses ~12% of top-20 mass onto escape routes like " Answer"
+# and <|im_end|> under the buggy "Answer " prefill; with "Answer" the
+# letter-mass share recovers to ~100%. Do NOT re-add the trailing space.
+# See scripts_dev/psychometric_assessment/prefill_ablation.py for the evidence.
+# (fc_pair prefills in the questionnaire JSONs — e.g. "I'd go with " — have
+# the same issue but are out of scope of this constant; see item_prefill.)
+TRAIT_MCQ_PREFILL = "Answer"
 
 LIKERT_PHRASINGS: dict[str, str] = {
     "natural": (
@@ -111,7 +122,9 @@ def build_trait_mcq_prompt(item: dict) -> str:
     Rendered exactly as requested: question, blank line, A:/B:/C:/D: lines,
     blank line, and the explicit 'Reply with "Answer " followed by a single
     letter.' instruction. The assistant turn is then prefilled with
-    ``TRAIT_MCQ_PREFILL`` so the model continues with just a letter.
+    ``TRAIT_MCQ_PREFILL`` (``"Answer"`` — no trailing space, see the constant's
+    comment) so the model continues with a space-prefixed letter token that
+    decodes cleanly to ``"Answer A"`` / ``"Answer B"`` / etc.
     """
     opts = "\n".join(f'{o["label"]}: {o["text"]}' for o in item["options"])
     return (
@@ -144,7 +157,7 @@ def build_item_prompt(item: dict, *, likert_phrasing: str = "direct") -> str:
 def item_prefill(item: dict, *, likert_phrasing: str = "direct") -> str | None:
     """Return the assistant-turn prefill for an item, or None if none applies.
 
-    * ``trait_mcq`` → ``TRAIT_MCQ_PREFILL`` (``"Answer "``)
+    * ``trait_mcq`` → ``TRAIT_MCQ_PREFILL`` (``"Answer"``)
     * ``fc_pair``   → per-block ``prefill`` carried on the item
       (typically ``"I'd go with "``)
     * ``likert``    → ``LIKERT_ANSWER_PREFILL`` (``"Answer: "``) **only**
@@ -177,7 +190,7 @@ def build_questionnaire_messages(
     """Append a questionnaire item as a new user turn to the conversation.
 
     For ``trait_mcq`` items, an assistant-role message containing only the
-    prefill (``"Answer "``) is appended so vLLM / local providers continue
+    prefill (``"Answer"``) is appended so vLLM / local providers continue
     generation from that partial assistant turn (see
     ``src_dev/inference/providers/local.py``: when the last role is
     ``assistant``, the chat template is applied with
@@ -214,7 +227,7 @@ def build_questionnaire_token_ids(
 
     Layout: tokenised rollout (ending in <|eot_id|>) + boundary token(s) +
     tokenised fresh single-turn chat containing just the item. For
-    ``trait_mcq`` items, the fresh chat ends in the ``"Answer "`` prefill so
+    ``trait_mcq`` items, the fresh chat ends in the ``"Answer"`` prefill so
     generation continues from the partial assistant turn.
     """
     from src_dev.inference.conversation_reset import build_token_ids_prompt

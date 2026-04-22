@@ -103,7 +103,7 @@ def build_messages_prompt(
             :func:`build_token_ids_prompt`.
         soft_reset_system_prompt: System-message text injected between the
             rollout tail and the new user turn under ``"soft"``.
-        trait_mcq_prefill: Optional assistant-turn prefill (e.g. ``"Answer "``)
+        trait_mcq_prefill: Optional assistant-turn prefill (e.g. ``"Answer"``)
             to be treated as a partial assistant turn the model continues from.
             When provided, the final message in the returned list has role
             ``assistant``, signalling that the provider should apply the chat
