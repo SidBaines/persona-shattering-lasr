@@ -352,6 +352,7 @@ async def run_questionnaire_inference_async(
 
     raw_responses_log = output_dir / "raw_responses.jsonl"
     if raw_responses_log.exists():
+        n_gated = 0
         with open(raw_responses_log, "r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -361,23 +362,42 @@ async def run_questionnaire_inference_async(
                 iid = entry["item_id"]
                 completed_cells.add((k_entry, iid))
                 choice = entry.get("parsed_choice")
-                if choice is not None:
-                    resumed_probs = entry.get("probs")
-                    resumed_probs = (
-                        {str(kk): float(vv) for kk, vv in resumed_probs.items()}
-                        if isinstance(resumed_probs, dict) and resumed_probs
-                        else None
-                    )
-                    fill_matrix_from_choice(
-                        response_matrix, k_entry, iid, choice,
-                        item_to_cols, vig_scoring, likert_reverse,
-                        trait_mcq_mapping=trait_mcq_mapping,
-                        fc_pair_high=fc_pair_high,
-                        choice_probs=resumed_probs,
-                        likert_scale=cfg.likert_scale,
-                    )
+                if choice is None:
+                    continue
+                resumed_probs = entry.get("probs")
+                resumed_probs = (
+                    {str(kk): float(vv) for kk, vv in resumed_probs.items()}
+                    if isinstance(resumed_probs, dict) and resumed_probs
+                    else None
+                )
+                # Apply the min_choice_mass gate on rebuild too, so existing
+                # raw logs get re-filtered under the current threshold. A
+                # missing choice_mass field (legacy log line) is treated as
+                # "no gate applies" — preserves prior behaviour for logs
+                # produced before the field was persisted.
+                entry_mass = entry.get("choice_mass")
+                if (
+                    entry_mass is not None
+                    and float(entry_mass) < cfg.min_choice_mass
+                ):
+                    n_gated += 1
+                    continue
+                fill_matrix_from_choice(
+                    response_matrix, k_entry, iid, choice,
+                    item_to_cols, vig_scoring, likert_reverse,
+                    trait_mcq_mapping=trait_mcq_mapping,
+                    fc_pair_high=fc_pair_high,
+                    choice_probs=resumed_probs,
+                    likert_scale=cfg.likert_scale,
+                )
         if completed_cells:
-            print(f"[Stage 2] Resuming: {len(completed_cells)} cells already done")
+            msg = f"[Stage 2] Resuming: {len(completed_cells)} cells already done"
+            if n_gated:
+                msg += (
+                    f" ({n_gated} below min_choice_mass={cfg.min_choice_mass} "
+                    "→ left as NaN)"
+                )
+            print(msg)
 
     # Fast path: every cell is covered by raw_responses.jsonl, so no inference
     # is needed. Fires on an encoding-version rebuild (all cells cached from
@@ -688,7 +708,17 @@ async def run_questionnaire_inference_async(
                         include_digit_aliases=True,
                     )
                     best_choice = max(probs, key=probs.get) if probs else None
-                if probs:
+                # Apply the min_choice_mass gate. Cells where the top-k
+                # logprobs barely contain any choice-relevant mass are
+                # dominated by irrelevant tokens; their "soft expectation"
+                # is a function of whatever sparse digit/letter probabilities
+                # the top-k captures, which is very noisy. Below-threshold
+                # cells are recorded as parse failures (NaN in the matrix)
+                # so the complete-case preprocessing filter drops the row.
+                passes_mass_gate = (
+                    bool(probs) and choice_mass >= cfg.min_choice_mass
+                )
+                if passes_mass_gate:
                     fill_matrix_from_choice(
                         response_matrix, k, item_id, best_choice,
                         item_to_cols, vig_scoring, likert_reverse,
@@ -724,26 +754,39 @@ async def run_questionnaire_inference_async(
                     )
                     completed_cells.add((k, item_id))
                 else:
+                    reason = (
+                        "no choice letter in top logprobs"
+                        if not probs
+                        else f"choice_mass={choice_mass:.4f} < "
+                             f"min_choice_mass={cfg.min_choice_mass}"
+                    )
                     parse_failures.append(
                         {"k": k, "item_id": item_id, "raw_response": raw_text,
-                         "reason": "no choice letter in top logprobs"}
+                         "reason": reason}
                     )
                     _raw_lp = {
                         str(tok): round(float(lp), 6)
                         for tok, lp in first_token_logprobs.items()
                     }
+                    # Keep any observed probs/choice_mass in the log so a
+                    # future rebuild with a lower threshold can re-admit
+                    # the cell without re-running inference.
                     log_fh.write(
                         json.dumps(
                             {
                                 "k": k,
                                 "item_id": item_id,
                                 "item_type": item["type"],
-                                "parsed_choice": None,
+                                "parsed_choice": best_choice if probs else None,
                                 "raw": raw_text,
-                                "probs": {},
-                                "choice_mass": 0.0,
+                                "probs": (
+                                    {k_: round(v, 6) for k_, v in probs.items()}
+                                    if probs else {}
+                                ),
+                                "choice_mass": round(float(choice_mass), 6),
                                 "top_logprobs": _raw_lp,
                                 "scoring_method": "logprob",
+                                "below_mass_gate": bool(probs) and not passes_mass_gate,
                             },
                             ensure_ascii=False,
                         )
