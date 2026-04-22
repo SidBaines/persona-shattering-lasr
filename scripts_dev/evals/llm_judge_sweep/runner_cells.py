@@ -37,11 +37,14 @@ import os
 import shutil
 import statistics
 import sys
+import threading
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Queue
 from types import ModuleType
 from typing import Any
 
@@ -992,87 +995,171 @@ def main() -> None:
     n_with_rollouts = sum(1 for s in cell_status.values() if s.has_rollouts)
     print(f"[hydrate] {n_with_rollouts}/{len(cells)} cells already have rollouts on HF")
 
-    # Stage 2: bake + rollout the cells that need it.
+    # Stages 2+3 (concurrent): rollouts on GPU, judges via remote API.
+    #
+    # The rollout loop runs in a background thread, generating one cell at a
+    # time inside ``_generate_rollouts``. A judge-worker thread consumes a
+    # queue of cells. The main thread polls each in-flight cell's local dir
+    # and enqueues it for judging the moment its ``rollouts.jsonl`` lands —
+    # so API-bound judging overlaps with GPU-bound rollout generation of
+    # later cells. Within a single cell, trait + coherence metrics run in
+    # parallel threads (disjoint output files; cache fingerprint unaffected).
+    # Each cell uploads to HF right after its metrics finish, so a mid-run
+    # crash preserves all already-judged cells on HF.
     cells_to_rollout = [
         c for c in cells if not cell_status[c].has_rollouts
     ]
     # Baseline cells have no adapters → rollouts still need generation, but
     # VLLMLoRaComboProvider supports empty adapter_scales cells.
+
+    def _judge_and_upload(cell: CanonicalCell) -> None:
+        """Judge pending metrics for a cell (in parallel threads), then upload."""
+        cell_dir = cell_dirs[cell]
+        status = cell_status_on_disk(cell_dir, required_judge_metrics=required_pairs)
+        pending = [
+            metric for metric in _judge_metrics(nc)
+            if not all(
+                (rater.rater_id, metric) in status.present_judge_metrics
+                for rater in nc.judge_raters
+            )
+        ]
+        if pending:
+            print(f"[judge] {cell.variant_label()} / {pending} (parallel)")
+            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                futures = [
+                    pool.submit(
+                        _run_judge_for_cell_metric,
+                        nc, cell, cell_dir, metric,
+                    )
+                    for metric in pending
+                ]
+                for fut in as_completed(futures):
+                    fut.result()
+        cell_status[cell] = cell_status_on_disk(
+            cell_dir, required_judge_metrics=required_pairs,
+        )
+        if upload and pending:
+            print(f"[upload] {cell.variant_label()}")
+            write_cell_info(cell, cell_dir, fingerprint)
+            upload_cell(
+                cell,
+                local_dir=cell_dir,
+                model_slug=nc.base_model_slug,
+                eval_name=nc.eval_name,
+                fingerprint=fingerprint,
+                repo_id=HF_REPO_ID,
+                commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                allow_patterns=[
+                    "rollouts/**",
+                    "judge_runs/**",
+                    "cell_info.json",
+                ],
+            )
+
+    _JUDGE_SENTINEL = object()
+    judge_queue: Queue = Queue()
+    judge_errors: list[tuple[CanonicalCell, BaseException]] = []
+
+    def _judge_worker() -> None:
+        while True:
+            item = judge_queue.get()
+            if item is _JUDGE_SENTINEL:
+                return
+            try:
+                _judge_and_upload(item)
+            except BaseException as exc:
+                print(
+                    f"[judge] ERROR on {item.variant_label()}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                judge_errors.append((item, exc))
+
+    judge_thread: threading.Thread | None = None
+    if not flags.skip_judge:
+        judge_thread = threading.Thread(
+            target=_judge_worker, name="judge-worker", daemon=False,
+        )
+        judge_thread.start()
+
+    # Enqueue cells already hydrated from HF (no rollout needed).
+    for cell in cells:
+        if cell in cells_to_rollout:
+            continue
+        if cell_status[cell].has_rollouts and judge_thread is not None:
+            judge_queue.put(cell)
+
+    rollout_error: list[BaseException] = []
+    rollout_thread: threading.Thread | None = None
     if cells_to_rollout and not flags.skip_rollouts:
         sweep_id = f"{nc.eval_name}_{fingerprint}_{uuid.uuid4().hex[:8]}"
         baked_dir = BAKED_ROOT / sweep_id
         baked_dir.mkdir(parents=True, exist_ok=True)
         (baked_dir / ".pid").write_text(str(os.getpid()))
         print(f"[rollout] generating rollouts for {len(cells_to_rollout)} cell(s); sweep_id={sweep_id}")
-        try:
-            _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
-            for cell in cells_to_rollout:
-                cell_status[cell] = cell_status_on_disk(
+
+        def _rollout_worker() -> None:
+            try:
+                _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
+            except BaseException as exc:
+                rollout_error.append(exc)
+            finally:
+                # Combo bakes are uuid-suffixed and never reused across runs;
+                # they can each be tens of GB, so remove regardless of outcome.
+                try:
+                    cleanup_baked_dir(baked_dir)
+                    print(f"[cleanup] removed baked combo dir: {baked_dir}")
+                except Exception as exc:
+                    print(f"[cleanup] failed to remove {baked_dir}: {exc}")
+
+        rollout_thread = threading.Thread(
+            target=_rollout_worker, name="rollout-worker", daemon=False,
+        )
+        rollout_thread.start()
+
+        # Main thread: poll for per-cell rollout completion, enqueue judge work.
+        POLL_INTERVAL_SEC = 10.0
+        remaining = set(cells_to_rollout)
+        while remaining:
+            done_this_round = []
+            for cell in remaining:
+                status = cell_status_on_disk(
                     cell_dirs[cell], required_judge_metrics=required_pairs,
                 )
-        finally:
-            # Combo bakes are uuid-suffixed and never reused across runs;
-            # they can each be tens of GB, so remove regardless of outcome.
-            try:
-                cleanup_baked_dir(baked_dir)
-                print(f"[cleanup] removed baked combo dir: {baked_dir}")
-            except Exception as exc:
-                print(f"[cleanup] failed to remove {baked_dir}: {exc}")
+                if status.has_rollouts:
+                    cell_status[cell] = status
+                    if judge_thread is not None:
+                        judge_queue.put(cell)
+                        print(f"[judge] enqueued {cell.variant_label()}")
+                    done_this_round.append(cell)
+            for cell in done_this_round:
+                remaining.discard(cell)
+            if not remaining:
+                break
+            if not rollout_thread.is_alive():
+                # Rollout thread exited but some cells didn't finish (likely error).
+                break
+            time.sleep(POLL_INTERVAL_SEC)
+
+        rollout_thread.join()
     elif cells_to_rollout:
         print(f"[rollout] --skip-rollouts set; {len(cells_to_rollout)} cell(s) will be skipped")
 
-    # Stage 3: per-cell, per-metric judge for anything still missing.
-    # Metrics for a given cell run in parallel threads — each `run_ocean_judge_run`
-    # builds its own event loop, semaphore, and httpx client, and writes to a
-    # distinct `judge_runs/<rater>/<metric>.jsonl`, so there is no shared state.
-    # In-flight concurrency per cell is n_metrics * max_concurrent.
-    # Upload each cell to HF as soon as all its metrics are done so partial
-    # sweep progress is durable if the script is interrupted.
-    if not flags.skip_judge:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        metrics = _judge_metrics(nc)
-        for cell in cells:
-            if not cell_status[cell].has_rollouts:
-                continue
-            pending = [
-                metric for metric in metrics
-                if not all(
-                    (rater.rater_id, metric) in cell_status[cell].present_judge_metrics
-                    for rater in nc.judge_raters
-                )
-            ]
-            if pending:
-                print(f"[judge] {cell.variant_label()} / {pending} (parallel)")
-                with ThreadPoolExecutor(max_workers=len(pending)) as pool:
-                    futures = [
-                        pool.submit(
-                            _run_judge_for_cell_metric,
-                            nc, cell, cell_dirs[cell], metric,
-                        )
-                        for metric in pending
-                    ]
-                    for fut in as_completed(futures):
-                        fut.result()
-            cell_status[cell] = cell_status_on_disk(
-                cell_dirs[cell], required_judge_metrics=required_pairs,
-            )
-            if upload and pending:
-                print(f"[upload] {cell.variant_label()}")
-                write_cell_info(cell, cell_dirs[cell], fingerprint)
-                upload_cell(
-                    cell,
-                    local_dir=cell_dirs[cell],
-                    model_slug=nc.base_model_slug,
-                    eval_name=nc.eval_name,
-                    fingerprint=fingerprint,
-                    repo_id=HF_REPO_ID,
-                    commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
-                    allow_patterns=[
-                        "rollouts/**",
-                        "judge_runs/**",
-                        "cell_info.json",
-                    ],
-                )
+    # Drain judge queue; signal worker to exit.
+    if judge_thread is not None:
+        judge_queue.put(_JUDGE_SENTINEL)
+        judge_thread.join()
+
+    # Surface errors after both threads have cleanly stopped.
+    if rollout_error:
+        raise rollout_error[0]
+    if judge_errors:
+        errs = "\n".join(
+            f"  {c.variant_label()}: {type(e).__name__}: {e}"
+            for c, e in judge_errors
+        )
+        raise RuntimeError(
+            f"Judge stage had {len(judge_errors)} failure(s):\n{errs}"
+        )
 
     # Stage 4: aggregate.
     sweep_root = SCRATCH_ROOT / sweep_hf_root(
