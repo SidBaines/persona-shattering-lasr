@@ -372,20 +372,19 @@ All files relevant to reproducing the judge calibration results. This section is
 ### Golden datasets (checked into git)
 
 ```
-data/judge_calibration/
-  agreeableness.jsonl          # 36 items, -4..+4
-  conscientiousness.jsonl      # 36 items, -4..+4
-  extraversion.jsonl           # 36 items, -4..+4
-  neuroticism.jsonl            # 36 items, -4..+4
-  openness.jsonl               # 36 items, -4..+4
-  coherence.jsonl              # 33 items, 0..10
-  human_scores/                # Anonymised human rater scores
-    human_judge_{1,2,3}_agreeableness.json
-    human_judge_{1,2,3}_coherence.json
-    human_judge_{1,2,3}_neuroticism.json
+data/judge_calibration/                # In git (small, stable)
+  agreeableness.jsonl                  # 36 items, -4..+4
+  conscientiousness.jsonl              # 36 items, -4..+4
+  extraversion.jsonl                   # 36 items, -4..+4
+  neuroticism.jsonl                    # 36 items, -4..+4
+  openness.jsonl                       # 36 items, -4..+4
+  coherence.jsonl                      # 33 items, 0..10
 ```
 
 Schema per golden item: `{id, trait, question, response, gold_score, notes}`.
+
+Human rater scores and calibration runs are on HuggingFace at
+`persona-shattering-lasr/monorepo/judge_calibration/v2/` (see "HuggingFace upload structure" below).
 Schema per human score file: `{rater, trait, n_items, scores: [{id, trait, score}]}`.
 
 ### Judge panel config (checked into git)
@@ -429,18 +428,25 @@ scratch/human_annotation_analysis/
 
 ```
 persona-shattering-lasr/monorepo/judge_calibration/
-  legacy/                    # Pre-calibration runs (March 2026)
+  legacy/                    # Pre-v2 runs (March 2026)
     google_gemini-2.0-flash-001__r3__20260326T203008/
     moonshotai_kimi-k2__r3__20260326T221255/
     openai_gpt-5-mini__r3__20260326T220614/
     plots/
     comparison.json
   v2/                        # Current calibration (April 2026)
-    golden_datasets/         # Copy of data/judge_calibration/
-    human_scores/            # Anonymised human annotations
+    golden_datasets/         # Copy of data/judge_calibration/ (also in git)
+    human_scores/            # Anonymised human annotations (H1, H2, H3)
     judge_runs/              # Raw scoring data per judge (13 judges × 6 traits)
-    analysis/                # analysis.json, cross-trait tables
+    analysis/                # analysis.json, cross-trater agreement
     methodology.md           # This document
+```
+
+Download with:
+```bash
+huggingface-cli download persona-shattering-lasr/monorepo \
+  --repo-type dataset --include "judge_calibration/v2/*" \
+  --local-dir ./hf_data
 ```
 
 ### Plotting for downstream evals (checked into git)
