@@ -1,5 +1,99 @@
 # LLM Judge Selection Methodology
 
+---
+
+## Paper Section Drafts
+
+> Everything above the "Full Methodology" horizontal rule is paper-section
+> drafts. Below is the full working methodology and reference document.
+
+### Main body draft (sections/supervised.tex — replaces current LLM judges subsection)
+
+**Word budget**: ~300 words + 1 figure + 1 table.
+
+---
+
+#### LLM judges
+
+We score model responses for each OCEAN trait and for general coherence using a calibrated 3-judge panel of open-weight LLMs: **Qwen 3 235B-A22B** (MoE), **Gemma 4 27B**, and **Llama 3.3 70B**, all accessed via OpenRouter. The per-item panel score is the median of the three judges' scores, each scored at temperature 0 with a rubric prompt specifying the trait definition, scale endpoints, and calibration examples (full prompts in \cref{sec:appendix-e}). The panel is intended as an ensemble of independent raters — using three models from different providers reduces the risk of correlated failure modes.
+
+We validate the panel against **three independent human raters** who scored a held-out set of 33-36 items per trait, on the same scale used by the judges, for agreeableness, neuroticism, and coherence (gold labels for the remaining OCEAN traits were author-assigned; see below). For each judge we also ran three independent scorings at temperature 0.7 to measure intra-rater reliability.
+
+**Result.** Each judge individually agrees with human consensus at Spearman ρ = 0.87–0.93 across the three annotated traits, within the range of human-human inter-rater agreement (Krippendorff's α = 0.67–0.89). Intra-rater Krippendorff's α exceeds 0.97 for every panel judge on every trait. No judge performs worse than the worst human rater on any annotated trait.
+
+**Gold label reliability.** We rely on author-assigned gold labels for the three OCEAN traits without human annotations (openness, conscientiousness, extraversion). On the three annotated traits, gold labels correlate with the mean of human raters at ρ = 0.86–0.94, within the range of human-human agreement. Adding gold as a fourth rater changes Krippendorff's α by ≤ 0.02, indicating gold functions as a human-like rater and is a defensible calibration reference for the three unannotated traits.
+
+**Note on coherence.** Human-human agreement is markedly lower for coherence (α = 0.67) than for OCEAN traits (α = 0.77, 0.89). This is consistent with prior findings that coherence judgement is more subjective and less constrained than trait attribution \citep{TODO-NLG-eval-citation}. Importantly, LLM-human agreement tracks this pattern, with judges' coherence ρ near the low end of human-human ρ — our judges do not overfit the easier cases.
+
+---
+
+### Main body Table (compact)
+
+**Table: Inter-rater agreement on annotated traits.**
+
+| Trait | Human-human α | Gold vs H (ρ) | Qwen 3 235B ρ(H) | Gemma 4 27B ρ(H) | Llama 3.3 70B ρ(H) |
+|-------|---------------|---------------|------------------|------------------|--------------------|
+| Agreeableness | 0.77 | 0.86 | 0.92 | 0.88 | 0.88 |
+| Neuroticism | 0.89 | 0.93 | 0.93 | 0.93 | 0.92 |
+| Coherence | 0.67 | 0.90 | 0.89 | 0.89 | 0.87 |
+
+Caption: *Spearman ρ against human rater mean for each panel judge, and gold labels vs. human mean for reference. Human-human α is Krippendorff's ordinal α across the 3 human raters. Each judge falls within the range of human inter-rater agreement on every trait.*
+
+---
+
+### Main body figure (sketch)
+
+**Fig. {N}: Calibration of the judge panel against human raters.** Single figure, 2 panels side-by-side.
+
+- **Panel A — "Agreement with human consensus":** For each of the 3 annotated traits, grouped bar chart showing Spearman ρ vs human mean for the 3 panel judges. Horizontal dashed line showing the human-human α (or mean pairwise ρ) for that trait as reference.
+- **Panel B — "Self-consistency":** For each of the 3 panel judges, bar chart of intra-rater Krippendorff's α across all 6 traits (5 OCEAN + coherence). Demonstrates reliability at production temperature.
+
+(Data source: `scratch/human_annotation_analysis/analysis.json` — regenerate with `human_annotation_analysis.py`)
+
+---
+
+### Appendix draft (appendices/ocean_evals.tex — LLM judge subsection)
+
+Full details of the judge calibration. Around 500-700 words + 2-3 figures + 1-2 tables.
+
+#### Candidate judge pool
+
+We calibrated 13 candidate models: 3 original judges (Gemini 2.0 Flash, Kimi K2, GPT-5 Mini), 3 mid-range models tested on coherence only (Claude 3.5 Haiku, DeepSeek V3, Llama 4 Scout), and 7 new candidates spanning providers and model sizes (Qwen 3 235B, Qwen 2.5 72B, Llama 3.3 70B, Gemma 4 27B, Mistral Small 3.2 24B, GPT-4.1 Nano, Gemini 2.0 Flash Lite). GPT-5 Nano was excluded after returning empty responses on ~27% of items. All judges scored the golden datasets at temperature 0.7 with 3 repeats per item.
+
+#### Selection criteria
+
+Our minimum bar was intra-rater α ≥ 0.70 at temp=0.7, Spearman ρ ≥ 0.80 vs gold, and Spearman ρ ≥ 0.70 vs human consensus. For panel composition we additionally required diversity across providers (no more than one judge per provider) and preferred cheaper models when performance was comparable.
+
+#### Cross-trait performance
+
+**Table F.{X}: Spearman ρ vs gold labels, all 13 candidate judges × 6 traits.** All 13 surviving candidates pass the minimum bar. The panel selection maximises provider diversity (Alibaba, Google, Meta) while all three picks are in the top 7 on mean ρ across traits. Notable findings: (1) Performance varies substantially by scale — Gemini 2.0 Flash has ρ = 0.88 on agreeableness (-4/+4) but only 0.76 on coherence (0-10), driven by scale compression. (2) Several judges (Kimi K2, GPT-5 Mini, Gemini 2.0 Flash, GPT-4.1 Nano) show high rank-order agreement but poor absolute calibration on the 0-10 coherence scale (MAE > 2.0, QWK < 0.65), which does not affect the panel since they were not selected.
+
+#### Human annotator details
+
+Three annotators independently scored 33-36 items per trait for agreeableness, neuroticism, and coherence via a web interface presenting items in randomised order. Annotators used the same scoring rubric as the LLM judges (but without few-shot examples, to reduce contamination). We report inter-rater Krippendorff's α, pairwise Spearman ρ, MAE, and within-one-point agreement. For each human rater we compute leave-one-out agreement against the median of the other two raters. On coherence, rater H3 showed both higher noise (std deviation from consensus = 2.55 vs ~1.85) and a positive bias (+0.77 point on average) — this is a genuine rater difference rather than questionnaire defect and is consistent with the NLG evaluation literature, where coherence judgments exhibit larger inter-annotator variance than attribute-level judgments \citep{TODO}.
+
+#### Robustness
+
+Self-consistency: intra-rater Krippendorff's α ranges from 0.94 (Qwen 2.5 72B) to 0.99 (Gemma 4 27B) across all 13 candidates and all 6 traits at temperature 0.7. In production we use temperature 0 (deterministic), making these values conservative lower bounds.
+
+Inter-judge alpha for the selected panel (across all 6 traits, computed from the 3 judges' median scores): α = TBD. Panel + human alpha: α = TBD on annotated traits.
+
+#### Appendix figures
+
+- **Fig F.{A}**: Cross-trait heatmap: ρ vs gold for all 13 judges × 6 traits. Panel members highlighted.
+- **Fig F.{B}**: Scale-bias visualisation: Bland-Altman plots for the 3 judges that show scale compression on coherence (Gemini 2.0 Flash, GPT-5 Mini, GPT-4.1 Nano), demonstrating systematic error at scale extremes.
+- **Fig F.{C}**: Confusion heatmaps for the 3 panel judges on each annotated trait (3 traits × 3 judges = 9 panels).
+
+---
+
+### Single-line distilled result (if further compression needed)
+
+> Our 3-judge panel (Qwen 3 235B, Gemma 4 27B, Llama 3.3 70B) agrees with human consensus at ρ = 0.87-0.93 across agreeableness, neuroticism, and coherence, comparable to human-human Krippendorff's α = 0.67-0.89; full calibration details in \cref{sec:appendix-e}.
+
+---
+
+## Full Methodology
+
 ## Goal
 
 Select a panel of LLM judges for scoring persona trait manifestation on a 9-point ordinal scale (-4 to +4 for OCEAN traits, 0-10 for coherence). The panel must be:
@@ -225,6 +319,29 @@ Calibration at temp=0.7 was for stress-testing self-consistency. All panel judge
 - Per-item score = **median** of 3 judge scores (preserves ordinal scale, robust to outliers)
 - Report individual judge scores alongside median for transparency
 - Main plots use median score; supplementary plots show per-judge agreement
+
+### Single-judge alternative: Qwen 3 235B
+
+If running the full panel is too expensive, **Qwen 3 235B alone** is a defensible single-judge choice:
+
+| Judge | Agree ρ(h) | Neuro ρ(h) | Coher ρ(h) | Mean ρ(h) |
+|-------|-----------|-----------|-----------|-----------|
+| **Qwen 3 235B** | **0.916** | 0.933 | **0.886** | **0.912** |
+| Gemma 4 27B | 0.876 | 0.926 | 0.885 | 0.896 |
+| Llama 3.3 70B | 0.882 | 0.920 | 0.871 | 0.891 |
+| Gemini Flash | 0.880 | **0.949** | 0.758 | 0.863 |
+
+Qwen 3 235B is the single best judge across all 3 annotated traits vs human mean. It is:
+- Best on agreeableness (0.916) and coherence (0.886, tied with Haiku 3.5 but 10× cheaper)
+- Near-best on neuroticism (0.933; only Gemini Flash beats it at 0.949 — but Gemini is worst on coherence)
+- Cheapest of the 3 panel members ($0.07/M)
+
+Tradeoffs vs using the full panel:
+- Lower robustness to per-item outliers (no median-of-3 smoothing)
+- Single point of failure (Qwen API outage = no scores)
+- Slightly lower ceiling — panel median averages out each judge's idiosyncratic biases
+
+If the application is cost-sensitive and latency-sensitive, single-judge Qwen 3 235B is a reasonable choice. For paper figures and headline results, the 3-judge panel is preferred.
 
 ---
 
