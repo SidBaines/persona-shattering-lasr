@@ -66,8 +66,6 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-LORA_VERSION = "vanton4"
 MONOREPO_ID = HF_REPO
 
 MAX_NEW_TOKENS = 256
@@ -88,11 +86,32 @@ REPO_ROOT = Path(
 )
 DATASET_PATH = REPO_ROOT / "data" / "claude-generated-prompts-for-activations-generations.jsonl"
 
-PERSONA_CHOICES = [
-    "o_plus", "o_minus", "c_plus", "c_minus",
-    "e_plus", "e_minus", "a_plus", "a_minus",
-    "n_plus", "n_minus",
-]
+# Per-persona model + adapter version + local scratch subdir. The scratch_root
+# just namespaces local caches so different base models don't collide; the
+# authoritative lookup for HF paths is LoraHFCatalogue.
+_LLAMA_8B_VANTON4 = {
+    "base_model": "meta-llama/Llama-3.1-8B-Instruct",
+    "lora_version": "vanton4",
+    "scratch_root": "llama_8b_instruct",
+}
+PERSONA_CONFIGS: dict[str, dict[str, str]] = {
+    "o_plus": _LLAMA_8B_VANTON4,
+    "o_minus": _LLAMA_8B_VANTON4,
+    "c_plus": _LLAMA_8B_VANTON4,
+    "c_minus": _LLAMA_8B_VANTON4,
+    "e_plus": _LLAMA_8B_VANTON4,
+    "e_minus": _LLAMA_8B_VANTON4,
+    "a_plus": _LLAMA_8B_VANTON4,
+    "a_minus": _LLAMA_8B_VANTON4,
+    "n_plus": _LLAMA_8B_VANTON4,
+    "n_minus": _LLAMA_8B_VANTON4,
+    "gemma_needs_help_n_minus": {
+        "base_model": "google/gemma-3-27b-it",
+        "lora_version": "v4",
+        "scratch_root": "gemma_3_27b_it",
+    },
+}
+PERSONA_CHOICES = list(PERSONA_CONFIGS.keys())
 
 
 def _set_seeds(seed: int) -> None:
@@ -144,15 +163,35 @@ def _axis_files_on_hub(monorepo_upload_path: str, persona: str) -> bool:
     return required.issubset(found)
 
 
-def _resolve_paths(persona: str) -> tuple[str, str, Path, Path]:
-    """Resolve (lora_path_in_repo, monorepo_axis_upload_path, local_output_dir, local_lora_cache)."""
+def _resolve_paths(persona: str) -> tuple[str, str, Path, Path, str, str]:
+    """Resolve paths + per-persona model config.
+
+    Returns:
+        (lora_path_in_repo, monorepo_axis_upload_path, local_output_dir,
+         local_lora_cache, base_model, lora_version)
+    """
+    cfg = PERSONA_CONFIGS[persona]
+    base_model = cfg["base_model"]
+    lora_version = cfg["lora_version"]
+    scratch_root = cfg["scratch_root"]
+
     lora_path_in_repo: str = getattr(LoraHFCatalogue(), persona)
     # catalogue value ends in ".../{version}/lora/<adapter-name>" — strip the last two segments
     lora_parent = str(Path(lora_path_in_repo).parent.parent)
     monorepo_upload_path = f"{lora_parent}/activation_capping"
-    output_dir = REPO_ROOT / "scratch" / "llama_8b_instruct" / "activation_capping" / f"{persona}_{LORA_VERSION}"
-    local_lora_cache = REPO_ROOT / "scratch" / "lora_cache" / f"{persona}_{LORA_VERSION}"
-    return lora_path_in_repo, monorepo_upload_path, output_dir, local_lora_cache
+    output_dir = (
+        REPO_ROOT / "scratch" / scratch_root / "activation_capping"
+        / f"{persona}_{lora_version}"
+    )
+    local_lora_cache = REPO_ROOT / "scratch" / "lora_cache" / f"{persona}_{lora_version}"
+    return (
+        lora_path_in_repo,
+        monorepo_upload_path,
+        output_dir,
+        local_lora_cache,
+        base_model,
+        lora_version,
+    )
 
 
 def _load_prompts(max_samples: int | None) -> list[str]:
@@ -253,11 +292,19 @@ def run(
     _set_seeds(SEED)
     login_from_env()
 
-    lora_path_in_repo, monorepo_upload_path, output_dir, local_lora_cache = _resolve_paths(persona)
+    (
+        lora_path_in_repo,
+        monorepo_upload_path,
+        output_dir,
+        local_lora_cache,
+        base_model,
+        lora_version,
+    ) = _resolve_paths(persona)
 
     print("=" * 70)
     print(f"  Persona:               {persona}")
-    print(f"  Base model:            {BASE_MODEL}")
+    print(f"  Base model:            {base_model}")
+    print(f"  LoRA version:          {lora_version}")
     print(f"  LoRA repo:             {MONOREPO_ID}")
     print(f"  LoRA path_in_repo:     {lora_path_in_repo}")
     print(f"  Monorepo upload path:  {monorepo_upload_path}")
@@ -296,13 +343,13 @@ def run(
     print(f"LoRA downloaded to {lora_local_path}")
 
     # Model + tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
+        base_model,
         torch_dtype=torch.bfloat16,
-        device_map="cuda",
+        device_map="auto",
     )
     model = PeftModel.from_pretrained(model, str(lora_local_path))
     model.eval()
@@ -390,7 +437,7 @@ def run(
         {
             "axis": axis,
             "metadata": {
-                "model": BASE_MODEL,
+                "model": base_model,
                 "lora_hf_dataset_repo": MONOREPO_ID,
                 "lora_path_in_repo": lora_path_in_repo,
                 "persona": persona,
@@ -408,7 +455,7 @@ def run(
         {
             "per_layer_range": per_layer_range,
             "metadata": {
-                "model": BASE_MODEL,
+                "model": base_model,
                 "lora_hf_dataset_repo": MONOREPO_ID,
                 "lora_path_in_repo": lora_path_in_repo,
                 "persona": persona,
@@ -425,9 +472,9 @@ def run(
     # Provenance
     run_info = {
         "persona": persona,
-        "base_model": BASE_MODEL,
+        "base_model": base_model,
         "lora": {"hf_dataset_repo": MONOREPO_ID, "path_in_repo": lora_path_in_repo},
-        "lora_version": LORA_VERSION,
+        "lora_version": lora_version,
         "dataset": str(DATASET_PATH.relative_to(REPO_ROOT)),
         "n_samples": int(base_stack.shape[0]),
         "num_rollouts": NUM_ROLLOUTS,
@@ -486,7 +533,7 @@ def run(
         repo_id=MONOREPO_ID,
         repo_type="dataset",
         path_in_repo=monorepo_upload_path,
-        commit_message=f"activation_capping: add {persona} {LORA_VERSION} axis + per-layer ranges",
+        commit_message=f"activation_capping: add {persona} {lora_version} axis + per-layer ranges",
     )
     print(f"\nUploaded to https://huggingface.co/datasets/{MONOREPO_ID}/tree/main/{monorepo_upload_path}")
 

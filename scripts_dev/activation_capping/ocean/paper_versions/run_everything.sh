@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# vanton4 activation-capping end-to-end sweep.
+# paper_versions activation-capping end-to-end sweep.
 #
-# For each OCEAN ±direction (10 total):
+# For each persona (10 vanton4 OCEAN directions + 1 gemma_needs_help_n_minus):
 #   1. Compute + upload the activation axis to
-#      fine_tuning/.../{direction}/vanton4/activation_capping/ on the monorepo.
+#      fine_tuning/.../{direction}/{version}/activation_capping/ on the monorepo.
 #   2. Run the trait logprob eval (uploads to
-#      fine_tuning/.../{direction}/vanton4/evals/mcq/activation_capping/trait_logprobs/).
+#      fine_tuning/.../{direction}/{version}/evals/mcq/activation_capping/trait_logprobs/).
 #   3. Run the MMLU capability eval (uploads to
 #      .../activation_capping/mmlu/).
 #
@@ -30,7 +30,7 @@ run_step() {
     echo "=== Done: ${label} ==="
 }
 
-PERSONAS=(o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
+PERSONAS=(gemma_needs_help_n_minus o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
 
 for p in "${PERSONAS[@]}"; do
     echo ""
@@ -39,7 +39,7 @@ for p in "${PERSONAS[@]}"; do
     echo "################################################################"
 
     run_step "axis ${p}" \
-        uv run python scripts_dev/activation_capping/ocean/vanton4/compute_axis.py --persona "$p"
+        uv run python scripts_dev/activation_capping/ocean/paper_versions/compute_axis.py --persona "$p"
 
     run_step "trait activation_capping ${p}" \
         uv run python -m src_dev.evals suite \
@@ -52,7 +52,7 @@ done
 
 echo ""
 if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
-    echo "All vanton4 activation-capping steps complete."
+    echo "All paper_versions activation-capping steps complete."
     EXIT_STATUS=0
 else
     echo "${#FAILED_STEPS[@]} step(s) failed:"
