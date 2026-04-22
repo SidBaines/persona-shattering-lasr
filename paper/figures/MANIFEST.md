@@ -4,6 +4,8 @@ Single source of truth for every figure in the paper. Every `\includegraphics` i
 
 See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python conventions.
 
+**Status: work in progress.** Most rows are still `placeholder` and carry `(TBD)` markers for data paths that weren't confirmed during the initial sweep — please help fill those in, correct the ones marked for specific owners (e.g. `ToDo Sid`, `TBD — Irakli`), or add rows for any new figures. The conventions are stable; the table is not.
+
 ## How to use
 
 - **`Path`** is the **final target path** for the figure, relative to `paper/figures/` — e.g. `main/fig_3_3_1_scaling_trait.pdf`. Populate this when the row is added, even before the figure exists. The LaTeX may still be pointing at a `tmp/imageN.png` placeholder; record that in `Notes`.
@@ -52,8 +54,6 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 
 | Path | Ref | Section | Script | Data source | Status | Notes |
 |------|-----|---------|--------|-------------|--------|-------|
-| `main/fig_3_2_judge_agreement.pdf` | `fig:judge-agreement` | `sections/supervised.tex` | `TBD — Irakli` | `TBD — Irakli` | `placeholder` | Currently `tmp/image5.png`. Intra/inter-model LLM-judge agreement bars across OCEAN. Owned by Irakli. |
-| `main/fig_3_2_judge_validity.pdf` | `fig:judge-validity` | `sections/supervised.tex` | `TBD — Irakli` | `TBD — Irakli` | `placeholder` | Currently `tmp/image6.png`. Gemini 2.0 Flash confusion matrices against human gold labels. Owned by Irakli. |
 | `main/fig_3_3_1_scaling_trait.pdf` | `fig:scaling-trait` | `sections/supervised.tex` | `src_dev/visualisations/plot_scaling.py` | `fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/v*/evals/trait/{fp}/` | `placeholder` | Currently `tmp/image7.png`. Subfig of `fig:scaling`. |
 | `main/fig_3_3_1_scaling_judge.pdf` | `fig:scaling-judge` | `sections/supervised.tex` | `src_dev/visualisations/plot_judge_sweep.py` | `fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/v*/evals/llm-judge/{fp}/` | `placeholder` | Currently `tmp/image8.png`. Subfig of `fig:scaling`. |
 | `main/fig_3_3_1_scaling_capability.pdf` | `fig:scaling-capability` | `sections/supervised.tex` | `src_dev/visualisations/plot_scaling.py` | `fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/v*/evals/mmlu/{fp}/` | `placeholder` | Currently `tmp/image9.png`. Coherence/MMLU at various C- scales. |
@@ -66,6 +66,8 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 | `main/fig_3_3_2_activation_adversarial.pdf` | `fig:activation-adversarial` | `sections/supervised.tex` | `src_dev/visualisations/plot_scaling.py` | `fine_tuning/llama-3.1-8b-it/toy/t_character_avoiding/{dir}/{ver}/evals/scaling_loras/{fp}/` (adversarial-prompt variant — probably a separate fingerprint or `{eval}` name; TBD — confirm once run) | `placeholder` | Currently `tmp/image16.png`. t-density vs LoRA scale under adversarial prompting. **Run not yet uploaded to HF.** |
 | `main/fig_3_4_pca_loras.pdf` | `fig:pca-loras` | `sections/supervised.tex` | `TBD — port from dump/flatten_loras/ocean_flattened_exploration.ipynb` | `fine_tuning/llama-3.1-8b-it/ocean/*/*/v*/lora/` (adapter weights via `LoraHFCatalogue`) | `placeholder` | Currently `tmp/image17.png`. LaTeX TODO flags "replace with OCEAN amplifier/suppressor LoRAs". PCA of flattened LoRA weights. Notebook uses `src.utils.lora_vector_utils.LoRaVectorCollection.pca()`; needs conversion to a script with matplotlib 2D panels (plotly in notebook) writing to `paper/figures/main/`. |
 | `main/fig_3_4_cosine_sim_loras.pdf` | `fig:cosine-sim-loras` | `sections/supervised.tex` | `TBD — port from dump/flatten_loras/ocean_flattened_exploration.ipynb` | `fine_tuning/llama-3.1-8b-it/ocean/*/*/v*/lora/` (adapter weights via `LoraHFCatalogue`) | `placeholder` | Currently `tmp/image18.png`. LaTeX TODO flags "replace with OCEAN amplifier/suppressor LoRAs". Cosine-sim matrix. Notebook already uses seaborn heatmap via `LoRaVectorCollection.cosine_similarity_matrix()`; share the port with `fig:pca-loras`. |
+| `main/fig_3_frustration_per_turn.pdf` | `fig:frustration-per-turn` | `sections/supervised.tex` | `src_dev/visualisations/plot_frustration_four_way.py` | `TBD — Mariia (frustration eval run outputs; see scripts_dev/evals or src_dev/evals for the runner)` | `placeholder` | Currently `tmp/fig_frustration_eval_4way_n20-2.png` (named placeholder, not `imageN.png`). Behavioural-effects subsection. |
+| `main/fig_3_sycophancy_coconot.pdf` | `fig:sycophancy-coconot` | `sections/supervised.tex` | `TBD — Mariia` | `TBD — Mariia (sycophancy + CoCoNot inspect_evals runs; configs under scripts_dev/personality_evals/configs/ocean/{coconot,mmlu}/)` | `placeholder` | Currently `tmp/sycophancy_coconot_bars.png`. Behavioural-effects subsection. |
 
 ### Section 4 — Unsupervised (`sections/unsupervised.tex`)
 
@@ -76,6 +78,15 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 | `unsupervised/fig_4_1_prompt_group_variance.pdf` | `fig:histograms-of-prompt-group-variance-calculated-as-` | `sections/unsupervised.tex` | `scripts_dev/unsupervised_embeddings/visualise_embeddings.py` | `TBD — ToDo Sid (artifact path pending; unsupervised pipeline HF upload is in progress)` | `placeholder` | Currently `tmp/image21.png`. Histograms of prompt-group-variance across factors. Label has markdown-converter cruft (rename). |
 | `unsupervised/fig_4_1_factor28_agreeableness.pdf` | `fig:histogram-of-scores-for-factor-28-obtained-when-40` | `sections/unsupervised.tex` | `scripts_dev/unsupervised_embeddings/visualise_embeddings.py` | `TBD — ToDo Sid (artifact path pending; unsupervised pipeline HF upload is in progress)` | `placeholder` | Currently `tmp/image22.png`. Factor-28 histogram separating agreeable vs disagreeable. Label has markdown-converter cruft (rename). |
 | `unsupervised/fig_4_2_horn_parallel_rollouts.pdf` | `fig:horn-s-parallel-analysis-as-applied-to-the-1-517-p` | `sections/unsupervised.tex` | `scripts_dev/unsupervised_embeddings/psychometric_rollout_fa.py` | `TBD — ToDo Sid (rollout FA artifact path; unsupervised pipeline HF upload is in progress)` | `placeholder` | Currently `tmp/image23.png`. Horn's parallel analysis on 1,517 persona rollouts. Label has markdown-converter cruft (rename). |
+
+### Appendix E — OCEAN evaluations (`appendices/ocean_evals.tex`)
+
+| Path | Ref | Section | Script | Data source | Status | Notes |
+|------|-----|---------|--------|-------------|--------|-------|
+| `appendix/fig_F_judge_cross_trait.pdf` | `fig:judge-cross-trait` | `appendices/ocean_evals.tex` | `scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure cross_trait` | `TBD — Irakli (judge calibration run)` | `generated` | LaTeX already has `% Generated by:` pointer. Filename uses `fig_F_` prefix though this is Appendix E — minor naming inconsistency; leave until a rename pass. |
+| `appendix/fig_F_judge_mae_heatmap.pdf` | `fig:judge-mae` | `appendices/ocean_evals.tex` | `scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure mae_heatmap` | `TBD — Irakli (judge calibration run)` | `generated` | As above. |
+| `appendix/fig_F_judge_scatter.pdf` | `fig:judge-scatter` | `appendices/ocean_evals.tex` | `scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure scatter` | `TBD — Irakli (judge calibration run)` | `generated` | As above. |
+| `appendix/fig_F_judge_agreement_bars.pdf` | `fig:judge-agreement-bars` | `appendices/ocean_evals.tex` | `scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure agreement_bars` | `TBD — Irakli (judge calibration run)` | `generated` | As above. Replaces the earlier supervised.tex `fig:judge-agreement` placeholder. |
 
 ### Appendix F — OCEAN results (`appendices/ocean_results.tex`)
 
