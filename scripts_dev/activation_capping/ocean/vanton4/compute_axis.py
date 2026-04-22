@@ -72,10 +72,15 @@ MONOREPO_ID = HF_REPO
 
 MAX_NEW_TOKENS = 256
 BATCH_SIZE = 16
-NUM_ROLLOUTS = 3
+NUM_ROLLOUTS = 5
 TEMPERATURE = 1.0
 TOP_P: float | None = None
-WINDOW_SIZE = 15
+# Fraction of transformer layers to use for the contiguous capping window.
+# Matches the Assistant Axis paper's Llama 3.3 70B Pareto-optimal pick
+# (16/80 = 20%). For 32-layer Llama 3.1 8B this yields a 6-layer window.
+# Override via the --window-size CLI flag.
+WINDOW_FRACTION = 0.20
+MIN_WINDOW_SIZE = 4
 SEED = 42
 
 REPO_ROOT = Path(
@@ -243,6 +248,7 @@ def run(
     dry_run: bool,
     skip_upload: bool,
     force: bool,
+    window_size_override: int | None,
 ) -> None:
     _set_seeds(SEED)
     login_from_env()
@@ -348,10 +354,21 @@ def run(
     # Axis, Cohen's d, best window
     axis = compute_axis(base_stack, lora_stack)
     cohens_d = cohens_d_per_layer(base_stack, lora_stack, axis)
-    capping_layers = best_contiguous_window(cohens_d, window_size=WINDOW_SIZE)
+    n_layers = int(axis.shape[0])
+    if window_size_override is not None:
+        window_size = window_size_override
+    else:
+        window_size = max(MIN_WINDOW_SIZE, int(round(n_layers * WINDOW_FRACTION)))
+    capping_layers = best_contiguous_window(cohens_d, window_size=window_size)
     best_sep_layer = int(np.argmax(cohens_d))
-    print(f"\nBest layer by Cohen's d: {best_sep_layer} (d={cohens_d[best_sep_layer]:.3f})")
-    print(f"Recommended capping layers (window={WINDOW_SIZE}): {capping_layers[0]}-{capping_layers[-1]}")
+    print(
+        f"\nBest layer by Cohen's d: {best_sep_layer} "
+        f"(d={cohens_d[best_sep_layer]:.3f})"
+    )
+    print(
+        f"Recommended capping layers (window={window_size}, "
+        f"n_layers={n_layers}): {capping_layers[0]}-{capping_layers[-1]}"
+    )
 
     # Per-layer projection ranges (all layers)
     all_layers = list(range(axis.shape[0]))
@@ -378,6 +395,8 @@ def run(
                 "lora_path_in_repo": lora_path_in_repo,
                 "persona": persona,
                 "n_samples": int(base_stack.shape[0]),
+                "n_layers": n_layers,
+                "window_size": window_size,
                 "best_layer_by_separation": best_sep_layer,
                 "recommended_capping_layers": capping_layers,
                 "dataset": str(DATASET_PATH),
@@ -417,7 +436,10 @@ def run(
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
         "seed": SEED,
-        "window_size": WINDOW_SIZE,
+        "window_size": window_size,
+        "window_fraction": None if window_size_override is not None else WINDOW_FRACTION,
+        "window_size_override": window_size_override,
+        "n_layers": n_layers,
         "best_layer_by_separation": best_sep_layer,
         "capping_layers_recommended": list(map(int, capping_layers)),
         "git": {
@@ -480,6 +502,15 @@ def main() -> None:
         action="store_true",
         help="Recompute even if axis artifacts already exist on the monorepo.",
     )
+    parser.add_argument(
+        "--window-size",
+        type=int,
+        default=None,
+        help=(
+            "Contiguous capping-window size in layers. "
+            "Default: round(n_layers * WINDOW_FRACTION), floor MIN_WINDOW_SIZE."
+        ),
+    )
     args = parser.parse_args()
 
     run(
@@ -488,6 +519,7 @@ def main() -> None:
         dry_run=args.dry_run,
         skip_upload=args.skip_upload,
         force=args.force,
+        window_size_override=args.window_size,
     )
 
 
