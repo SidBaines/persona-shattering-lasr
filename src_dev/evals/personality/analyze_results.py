@@ -166,14 +166,12 @@ class SweepData:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
-    """Extract metric values and parse rate from an inspect log JSON.
+def _extract_scores_from_log(log: dict) -> tuple[dict[str, float], float] | None:
+    """Like :func:`_extract_scores` but operates on an already-loaded log dict.
 
-    Returns:
-        Tuple of (scores dict, parse_rate 0–1), or None if the log failed.
+    Callers that also need raw per-sample scores should prefer this path to
+    avoid loading the (often >100 MB) log JSON twice.
     """
-    with open(log_path) as f:
-        log = json.load(f)
     if log.get("status") != "success":
         return None
     score_entry = log["results"]["scores"][0]
@@ -184,6 +182,17 @@ def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
     metrics = score_entry["metrics"]
     scores = {k: v["value"] for k, v in metrics.items() if isinstance(v, dict) and "value" in v}
     return scores, parse_rate
+
+
+def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
+    """Extract metric values and parse rate from an inspect log JSON.
+
+    Returns:
+        Tuple of (scores dict, parse_rate 0–1), or None if the log failed.
+    """
+    with open(log_path) as f:
+        log = json.load(f)
+    return _extract_scores_from_log(log)
 
 
 def _extract_choice_mass(score_data: dict) -> float | None:
@@ -197,7 +206,7 @@ def _extract_choice_mass(score_data: dict) -> float | None:
     return cm
 
 
-def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list[float]] | None:
+def _extract_raw_sample_scores_from_log(log: dict, eval_type: str) -> dict[str, list[float]] | None:
     """Extract per-sample scores from an inspect log.
 
     Handles four scoring conventions:
@@ -214,7 +223,7 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
       ``I`` = incorrect (0.0).  Grouped under ``"accuracy"``.
 
     Args:
-        log_path: Path to the inspect log JSON.
+        log: Pre-loaded inspect log JSON (as returned by ``json.load``).
         eval_type: Eval type name, used to distinguish personality vs.
             capability scoring and as the group key for capability evals.
 
@@ -222,8 +231,6 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
         Dict mapping group name to list of per-sample scores, or
         None if the log has no usable per-sample data.
     """
-    with open(log_path) as f:
-        log = json.load(f)
     if log.get("status") != "success":
         return None
     samples = log.get("samples")
@@ -313,6 +320,13 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
     return group_scores if group_scores else None
 
 
+def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list[float]] | None:
+    """Path-based wrapper around :func:`_extract_raw_sample_scores_from_log`."""
+    with open(log_path) as f:
+        log = json.load(f)
+    return _extract_raw_sample_scores_from_log(log, eval_type)
+
+
 def _extract_scores_reparsed(log_path: Path, eval_type: str) -> tuple[dict[str, float], float] | None:
     """Like _extract_scores but recomputes trait scores using the fallback parser."""
     from src_dev.evals.personality.log_answer_parser import rescore_log
@@ -347,10 +361,15 @@ def _load_from_info(
         else:
             print(f"  skip {model}/{run}: log missing ({log_path})", file=sys.stderr)
             return None
+    # Non-reparse path: load the (often >100 MB) log JSON once and reuse it
+    # for both aggregated and raw per-sample extraction.
+    log_dict: dict | None = None
     if reparse:
         result = _extract_scores_reparsed(Path(log_path), eval_type)
     else:
-        result = _extract_scores(Path(log_path))
+        with open(log_path) as f:
+            log_dict = json.load(f)
+        result = _extract_scores_from_log(log_dict)
     if result is None:
         print(f"  skip {model}/{run}: log not success", file=sys.stderr)
         return None
@@ -358,7 +377,10 @@ def _load_from_info(
     scale = info.get("scale")  # float | None; None = base model
     rec: dict = {"model": model, "run": run, "scale": scale, "_parse_rate": parse_rate, **scores}
     # Always try to extract raw per-sample scores for CI methods that need them
-    raw = _extract_raw_sample_scores(Path(log_path), eval_type)
+    if log_dict is not None:
+        raw = _extract_raw_sample_scores_from_log(log_dict, eval_type)
+    else:
+        raw = _extract_raw_sample_scores(Path(log_path), eval_type)
     if raw:
         for group, sample_scores in raw.items():
             rec[f"_raw_{group}"] = sample_scores
