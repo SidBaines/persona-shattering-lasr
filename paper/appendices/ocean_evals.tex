@@ -14,6 +14,13 @@
 
 \subsection{LLM judge calibration}\label{sec:appendix-e-judges}
 
+% Calibration pipeline:
+%   - Run judge calibration:   scripts_dev/persona_metrics/llm_judge/golden_calibration.py
+%   - Human-vs-LLM analysis:   scripts_dev/persona_metrics/llm_judge/human_annotation_analysis.py
+%   - Figures below:           scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py
+%   - Source data / raw runs:  HF persona-shattering-lasr/monorepo:judge_calibration/v2/
+%   - Working reference doc:   paper/drafts/judge_selection_methodology.md
+
 % NEEDS REPHRASING — candidate pool summary.
 \paragraph{Candidate pool.}
 We calibrated 13 candidate LLM judges against hand-labelled gold datasets covering all five OCEAN traits and coherence. The pool included three original judges (Gemini 2.0 Flash, Kimi K2, GPT-5 Mini), three mid-range models initially tested on coherence only (Claude 3.5 Haiku, DeepSeek V3, Llama 4 Scout), and seven newly-evaluated candidates spanning providers and model sizes (Qwen 3 235B-A22B, Qwen 2.5 72B, Llama 3.3 70B, Gemma 4 27B, Mistral Small 3.2 24B, GPT-4.1 Nano, Gemini 2.0 Flash Lite). A fourteenth model (GPT-5 Nano) was evaluated but excluded after returning empty responses on $\sim$27\% of items. All judges scored the golden datasets at temperature $0.7$ with three independent repeats per item (temperature $0.7$ at calibration time was chosen to stress-test self-consistency; production scoring uses temperature $0$).
