@@ -603,20 +603,17 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # M3+M4 smoke: four PRISM presets (Zephyr-7B, Mistral-7B,
-    # Llama-2-7B-Chat, Llama-2-13B-Chat) × {v5 Likert, trait_ocean_v1
-    # trait_mcq}. 50 personas each. Exercises multi-model combined FA
-    # (expecting up to N−1=3 preset-dominated top factors) AND the
-    # trait_mcq questionnaire path. FA at n=200 rows is below the usual
-    # samples-per-item threshold — plumbing-validation run.
-    ("prism_zephyr_7b_beta_n50", "v5"),
-    ("prism_mistral_7b_v01_n50", "v5"),
-    ("prism_llama2_7b_chat_n50", "v5"),
-    ("prism_llama2_13b_chat_n50", "v5"),
-    ("prism_zephyr_7b_beta_n50", "trait_ocean_v1"),
-    ("prism_mistral_7b_v01_n50", "trait_ocean_v1"),
-    ("prism_llama2_7b_chat_n50", "trait_ocean_v1"),
-    ("prism_llama2_13b_chat_n50", "trait_ocean_v1"),
+    # Qwen2.5 × B × trait_mcq re-run with PREFILL_VERSION=2 (BPE-aligned
+    # ``TRAIT_MCQ_PREFILL = "Answer"`` — no trailing space). Stage 1
+    # hydrates the B rollout cache from HF; Stage 2 re-administers
+    # trait_ocean_v1 under Qwen2.5-7B-Instruct. The old "Answer " prefill
+    # dropped ~12% of Qwen2.5's top-20 mass onto " Answer"/<|im_end|>
+    # escape routes because the trailing-space token didn't align with
+    # tokenizer-natural space-prefixed letter tokens like " A"/" B". The
+    # fix recovers letter-mass to ~100% (ablation confirmed on 2000 cells).
+    # See scripts_dev/psychometric_assessment/{prefill_ablation.py,
+    # HANDOFF_qwen25_b_rerun.md}.
+    ("B", "trait_ocean_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -633,7 +630,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = False  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -720,6 +717,25 @@ QUESTIONNAIRE_TOP_LOGPROBS = 20
 # (unaffected by the change — Likert parsing is digit-native) stay
 # valid under their existing run-ids.
 LOGPROB_PARSER_VERSION = 2
+# Prefill-string version for trait_mcq / fc_pair. Incremented when the
+# assistant-turn prefill text changes in a way that affects the probability
+# distribution the model assigns to target tokens (i.e. the ACTUAL inference
+# output, not just how we parse it — unlike LOGPROB_PARSER_VERSION, there is
+# no replaying from a cached raw_responses.jsonl for a prefill change):
+#   v1 — ``TRAIT_MCQ_PREFILL = "Answer "`` (trailing space). Tokenizes as
+#        ``[Answer, ' ']`` with the space as a standalone token, which doesn't
+#        align with the tokenizer's natural space-prefixed letter tokens
+#        (``" A" = one token``). Produces ~12% mass leakage on Qwen2.5 to
+#        ``" Answer"`` / ``<|im_end|>`` escape routes. Llama-3.1 was robust
+#        but also suboptimal under this. See
+#        scripts_dev/psychometric_assessment/prefill_ablation.py.
+#   v2 — ``TRAIT_MCQ_PREFILL = "Answer"`` (no trailing space). Letter-mass
+#        share recovers to ~100% on Qwen2.5.
+# Appended to the questionnaire run-id ONLY for logprob-mode trait_mcq /
+# fc_pair pairs when >1. v5 Likert caches (unaffected — the digit prefill
+# ``"Answer: "`` is NOT buggy because Qwen/Llama tokenize digits as bare
+# tokens, not space-prefixed ones) stay valid under their existing IDs.
+PREFILL_VERSION = 2
 QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
 QUESTIONNAIRE_DYNAMIC_MASS_FILTER = True
 QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
@@ -831,7 +847,7 @@ STAGES_TO_RUN = [
     "questionnaire",
     # "trait_scoring",
     # "realism_judge",
-    "factor_analysis",
+    # "factor_analysis",  # deferred until Qwen2.5 trait_mcq re-run is uploaded.
     # "labeling",
     # "validation",  # k=4 sanity pass; k=7 validation is already saved.
 ]
@@ -1083,6 +1099,17 @@ def _questionnaire_run_id(
         and any(b in ("trait_mcq", "fc_pair") for b in q.fa_blocks)
     ):
         parser_tag = f"-p{LOGPROB_PARSER_VERSION}"
+    # Prefill-version tag: same applicability as parser_tag (trait_mcq /
+    # fc_pair logprob runs). When >1 we know we're using the BPE-aligned
+    # prefill that fixes mass leakage on Qwen2.5 (and is a cleanup for
+    # Llama). See PREFILL_VERSION above.
+    prefill_tag = ""
+    if (
+        q.use_logprobs
+        and PREFILL_VERSION > 1
+        and any(b in ("trait_mcq", "fc_pair") for b in q.fa_blocks)
+    ):
+        prefill_tag = f"-pf{PREFILL_VERSION}"
     reset_tag = (
         f"-reset_{QUESTIONNAIRE_RESET_MODE}"
         if QUESTIONNAIRE_RESET_MODE != "none"
@@ -1098,7 +1125,7 @@ def _questionnaire_run_id(
     return (
         f"questionnaire-{_rollout_run_id(rollout_key)}-"
         f"q_{q.version}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
-        f"{lp_tag}{parser_tag}{reset_tag}{qm_tag}"
+        f"{lp_tag}{parser_tag}{prefill_tag}{reset_tag}{qm_tag}"
     )
 
 
