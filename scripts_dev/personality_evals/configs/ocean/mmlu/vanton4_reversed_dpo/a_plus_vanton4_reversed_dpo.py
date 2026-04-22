@@ -68,7 +68,7 @@ SUITE_CONFIG = SuiteConfig(
         ),
     ],
     temperature=0.0,
-    batch_size=128,
+    batch_size=32,  # A40 (46 GB) OOMs at 128 for Llama-3.1-8B + LoRA + MMLU max_tokens=32
     output_root=Path("scratch/evals/ocean/mmlu"),
     run_name="a_plus_vanton4_reversed_dpo",
     skip_completed=True,
