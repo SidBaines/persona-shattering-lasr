@@ -255,9 +255,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--subset", default="all",
-        choices=("all", "base_vs_nminus", "positive_only"),
+        choices=("all", "base_vs_nminus", "no_inverted"),
         help="'all' = 4-line; 'base_vs_nminus' = 2-line BASE vs N-; "
-             "'positive_only' = 3-line BASE / CONTROL / N- (excludes inverted).",
+             "'no_inverted' = 3-line BASE / CONTROL / N- (drops the N- inverted/scale=-1 line).",
     )
     parser.add_argument(
         "--out-dir", default=str(PAPER_FIGURES_DIR / "main"),
@@ -274,7 +274,7 @@ def main() -> None:
     specs = RUN_SETS[args.n_prompts]
     if args.subset == "base_vs_nminus":
         specs = [s for s in specs if s.label in ("BASE", "N-")]
-    elif args.subset == "positive_only":
+    elif args.subset == "no_inverted":
         specs = [s for s in specs if s.label in ("BASE", "CONTROL", "N-")]
 
     if args.out_path is not None:
