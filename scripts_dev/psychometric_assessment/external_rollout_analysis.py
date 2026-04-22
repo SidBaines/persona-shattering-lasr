@@ -15,11 +15,21 @@ One script, one command, everything:
                                 subset (same k, same rotation).
     4. Computes:
         - Preset-variance η²  — how much of each factor's variance comes
-                                from the preset/model split. Run on both
-                                ``baseline`` and ``residualised`` solutions.
-        - Tucker's φ          — factor-structure similarity across every
-                                pair of per-preset FA solutions, with
-                                greedy one-to-one factor alignment.
+                                from the preset/model split. Baseline
+                                solution only; residualised factor scores
+                                have η²(preset) ≡ 0 by construction
+                                (subtracting per-preset means forces all
+                                per-preset means of any linear combination
+                                of residualised columns to zero), so we
+                                instead measure how much the factor
+                                *structure* survives preset-mean removal
+                                via Tucker's φ between baseline and
+                                residualised loadings.
+        - Tucker's φ          — factor-structure similarity (i) across
+                                every pair of per-preset FA solutions and
+                                (ii) between baseline and preset-
+                                residualised solutions, with greedy one-
+                                to-one factor alignment.
     5. Writes CSVs + JSON summaries + diagnostic plots under
        ``scratch/psychometric_fa/external_analysis/<OUTPUT_TAG>/``.
 
@@ -105,7 +115,11 @@ PRESETS: list[str] = [
     "prism_llama2_7b_chat",
     "prism_llama2_13b_chat",
     "prism_falcon_7b_instruct",
-    "prism_oasst_pythia_12b",
+    # "prism_oasst_pythia_12b",  # dropped 2026-04-22: v5 Likert is 99.7% NaN
+    # (first token never lands in {1..5} top-20 logprobs — legacy oasst
+    # instruction-following fails on structured response formats). Trait is
+    # ~84% valid but combine's sample_id intersection with the empty v5 rows
+    # leaves the preset contributing ~nothing. Revisit with a rescue strategy.
     # LMSYS (real-user chat, turn≥5 English subset)
     "lmsys_koala_13b_t5",
     # "lmsys_mpt_7b_chat_t5",   # mosaicml/mpt-7b-chat HF repo unavailable; find a mirror before enabling
@@ -181,7 +195,7 @@ FC_PAIR_SIGN_ALIGNMENT = True
 CLEANUP_HF_MODEL_CACHE_PER_PRESET: bool = True
 
 # ── Output ──────────────────────────────────────────────────────────────────
-OUTPUT_TAG = "multisource_n500_9models"  # change when config changes
+OUTPUT_TAG = "multisource_n500_7models"  # change when config changes
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -601,6 +615,48 @@ def _preset_eta2(fa: FaFitResult) -> list[dict]:
     ]
 
 
+def _shared_item_reorder(
+    fa_a: FaFitResult,
+    fa_b: FaFitResult,
+) -> tuple[list[int], list[int]]:
+    """Return (a_idx, b_idx) such that ``fa_a.items[a_idx]`` and
+    ``fa_b.items[b_idx]`` enumerate the same ``item_id`` sequence.
+
+    Preprocessing can drop different low-variance columns per FA, so the
+    two solutions may not share the same item order. We restrict to the
+    item-id intersection and sort ``b`` to match ``a``'s order.
+    """
+    a_ids = [it["item_id"] for it in fa_a.items]
+    b_ids = [it["item_id"] for it in fa_b.items]
+    if a_ids == b_ids:
+        return list(range(len(a_ids))), list(range(len(b_ids)))
+    shared = set(a_ids) & set(b_ids)
+    a_idx = [i for i, iid in enumerate(a_ids) if iid in shared]
+    b_local = {b_ids[i]: i for i in range(len(b_ids)) if b_ids[i] in shared}
+    a_order = [a_ids[i] for i in a_idx]
+    b_idx = [b_local[iid] for iid in a_order]
+    # Post-condition: both index lists point to the same item_id sequence.
+    assert [a_ids[i] for i in a_idx] == [b_ids[i] for i in b_idx]
+    return a_idx, b_idx
+
+
+def _baseline_vs_residualised_alignment(
+    baseline: FaFitResult,
+    residualised: FaFitResult,
+) -> list:
+    """Tucker's |φ| alignment between baseline and residualised loadings.
+
+    Measures factor-structure robustness to preset-mean removal: a
+    baseline factor with |φ| near 1.0 in the residualised solution is
+    *not* carried by preset identity; a low |φ| factor IS primarily
+    preset-level variance.
+    """
+    a_idx, b_idx = _shared_item_reorder(baseline, residualised)
+    L_base = baseline.loadings[a_idx]
+    L_res = residualised.loadings[b_idx]
+    return align_factors(L_base, L_res)
+
+
 def _tucker_comparison(
     per_preset: dict[str, FaFitResult],
     *,
@@ -613,32 +669,12 @@ def _tucker_comparison(
     for target, target_fa in per_preset.items():
         if target == anchor:
             continue
-        # Align items — in this flow every per-preset FA shares the same
-        # ``items`` list (we filter rows, not columns, before preprocessing).
-        # The preprocessing may drop different low-variance columns per
-        # preset; we restrict to their item-id intersection to keep rows
-        # comparable.
-        shared_ids = [it["item_id"] for it in anchor_fa.items] \
-            if [it["item_id"] for it in anchor_fa.items] == [it["item_id"] for it in target_fa.items] \
-            else sorted(
-                set(it["item_id"] for it in anchor_fa.items)
-                & set(it["item_id"] for it in target_fa.items)
-            )
-        anchor_idx = [
-            i for i, it in enumerate(anchor_fa.items)
-            if it["item_id"] in shared_ids
-        ]
-        target_idx = [
-            i for i, it in enumerate(target_fa.items)
-            if it["item_id"] in shared_ids
-        ]
-        # Re-sort target_idx to match anchor's item order.
-        anchor_id_order = [anchor_fa.items[i]["item_id"] for i in anchor_idx]
-        target_id_to_local = {target_fa.items[i]["item_id"]: i for i in target_idx}
-        target_idx_reordered = [target_id_to_local[iid] for iid in anchor_id_order]
-
-        L_a = anchor_fa.loadings[anchor_idx]
-        L_b = target_fa.loadings[target_idx_reordered]
+        # Preprocessing may drop different low-variance columns per preset,
+        # so we restrict to the item-id intersection and sort the target
+        # to match the anchor's item order before computing |φ|.
+        a_idx, b_idx = _shared_item_reorder(anchor_fa, target_fa)
+        L_a = anchor_fa.loadings[a_idx]
+        L_b = target_fa.loadings[b_idx]
         phi = tucker_phi_matrix(L_a, L_b)
         full_phi[target] = phi
         alignments[target] = align_factors(L_a, L_b)
@@ -652,38 +688,63 @@ def _tucker_comparison(
 
 def _plot_preset_variance_bars(
     baseline_rows: list[dict],
-    residualised_rows: list[dict],
+    robustness_rows: list[dict],
     out_path: Path,
 ) -> None:
+    """Per-factor preset dominance (η²) and robustness to residualisation (|φ|).
+
+    For each baseline factor we show:
+      - η²(preset): how much of the factor's variance is attributable to
+        the preset split. Values near 1.0 mean the factor is essentially
+        model identity; values near 0 mean it is within-preset variance.
+      - |φ|(baseline→residualised): Tucker's congruence between the
+        baseline factor and its best-match factor in the
+        preset-residualised solution. Values near 1.0 mean the factor
+        survives preset-mean removal (not carried by preset identity);
+        low values mean the factor IS primarily preset-level variance.
+
+    The two diagnostics are complementary: a factor with high η² AND low
+    |φ|(→residualised) is unambiguously a preset-identity factor; a
+    factor with low η² AND high |φ|(→residualised) is a robust
+    within-preset structural factor.
+    """
     import matplotlib.pyplot as plt
 
-    rotations = sorted({r["rotation"] for r in baseline_rows + residualised_rows})
+    rotations = sorted({r["rotation"] for r in baseline_rows})
     fig, axes = plt.subplots(1, len(rotations), figsize=(6 * len(rotations), 5),
                              squeeze=False)
     for ax, rot in zip(axes[0], rotations):
         b = [r for r in baseline_rows if r["rotation"] == rot]
-        d = [r for r in residualised_rows if r["rotation"] == rot]
+        r_rows = [r for r in robustness_rows if r["rotation"] == rot]
         # Order by baseline proportion_variance desc so rank is intuitive.
         b_sorted = sorted(b, key=lambda r: -r["proportion_variance"])
         rank = [r["factor"] for r in b_sorted]
         b_eta = [r["eta2_preset"] for r in b_sorted]
-        d_by_factor = {r["factor"]: r for r in d}
-        d_eta = [d_by_factor[f]["eta2_preset"] if f in d_by_factor else np.nan
-                 for f in rank]
+        r_by_factor = {r["anchor_factor"]: r for r in r_rows}
+        phis = [
+            r_by_factor[f]["phi"] if (f in r_by_factor and not np.isnan(r_by_factor[f]["phi"])) else np.nan
+            for f in rank
+        ]
 
         x = np.arange(len(rank))
-        w = 0.4
-        ax.bar(x - w / 2, b_eta, width=w, label="baseline", color="#B71C1C")
-        ax.bar(x + w / 2, d_eta, width=w, label="residualised", color="#2E7D32")
+        ax.bar(x, b_eta, width=0.6, color="#B71C1C",
+               label="η²(preset) — baseline")
+        ax.plot(x, phis, marker="o", ms=8, lw=0, color="#1565C0",
+                label="|φ|(baseline→residualised)")
+        for thr, col in [(0.95, "#2E7D32"), (0.85, "#F9A825"), (0.70, "#E53935")]:
+            ax.axhline(thr, color=col, lw=0.5, ls=":")
         ax.axhline(0, color="gray", lw=0.5)
         ax.set_xticks(x)
         ax.set_xticklabels([f"F{f}" for f in rank])
-        ax.set_ylabel("η² (preset split)")
+        ax.set_ylabel("η² / |φ|")
         ax.set_xlabel("factor (baseline-rank order)")
         ax.set_title(f"rotation = {rot}")
-        ax.set_ylim(0, 1.0)
-        ax.legend()
-    fig.suptitle("Preset-variance decomposition — baseline vs preset-residualised FA")
+        ax.set_ylim(0, 1.05)
+        ax.legend(fontsize=8, loc="upper right")
+    fig.suptitle(
+        "Baseline factor diagnostics: preset-variance η² and "
+        "robustness to preset-mean removal (|φ| vs residualised)"
+    )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(out_path, dpi=140)
     plt.close(fig)
@@ -864,7 +925,12 @@ def main() -> None:
 
     # ── FA flavours × rotations ────────────────────────────────────────
     baseline_eta2_rows: list[dict] = []
-    residualised_eta2_rows: list[dict] = []
+    # One row per (rotation × baseline anchor factor) recording the best
+    # Tucker's |φ| match in the preset-residualised solution. Replaces
+    # the old "residualised η²" rows, which were ≡0 by construction
+    # (per-group mean of residualised scores is identically 0, so
+    # SS_between is 0 and η²(preset) is 0 regardless of factor structure).
+    residualised_robustness_rows: list[dict] = []
     per_preset_alignments_by_rot: dict[str, dict[str, list]] = {}
     per_preset_phi_by_rot: dict[str, dict[str, np.ndarray]] = {}
     per_preset_classification_rows: list[dict] = []
@@ -882,7 +948,15 @@ def main() -> None:
                                label="residualised", rotation=rotation,
                                do_residualize=True,
                                residualize_group_field="rollout_preset_key")
-        residualised_eta2_rows.extend(_preset_eta2(residualised))
+        robustness = _baseline_vs_residualised_alignment(baseline, residualised)
+        for a in robustness:
+            residualised_robustness_rows.append({
+                "rotation": rotation,
+                "anchor_factor": a.anchor_factor + 1,
+                "residualised_factor": a.target_factor + 1 if a.target_factor >= 0 else None,
+                "phi": float(a.phi),
+                "interpretation": classify_phi(a.phi),
+            })
 
         print(f"\n-- per-preset FAs --")
         per_preset = _fit_per_preset_fas(matrix, metadata, items,
@@ -910,7 +984,10 @@ def main() -> None:
 
     # ── Save numeric outputs ───────────────────────────────────────────
     _write_csv(out_dir / "preset_variance_baseline.csv", baseline_eta2_rows)
-    _write_csv(out_dir / "preset_variance_residualised.csv", residualised_eta2_rows)
+    _write_csv(
+        out_dir / "baseline_vs_residualised_robustness.csv",
+        residualised_robustness_rows,
+    )
     _write_csv(out_dir / "tucker_pairwise.csv", per_preset_classification_rows)
 
     alignment_summary: dict[str, Any] = {}
@@ -924,7 +1001,7 @@ def main() -> None:
     plots_dir = out_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
     _plot_preset_variance_bars(
-        baseline_eta2_rows, residualised_eta2_rows,
+        baseline_eta2_rows, residualised_robustness_rows,
         plots_dir / "preset_variance_bars.png",
     )
     for rotation, full_phi in per_preset_phi_by_rot.items():
@@ -949,11 +1026,18 @@ def main() -> None:
     for rot in FA_ROTATIONS:
         print(f"\nrotation = {rot}")
         b = [r for r in baseline_eta2_rows if r["rotation"] == rot]
-        d = [r for r in residualised_eta2_rows if r["rotation"] == rot]
-        print("  baseline    : top factor η²(preset) =",
-              f"{max(x['eta2_preset'] for x in b):.3f}" if b else "n/a")
-        print("  residualised: top factor η²(preset) =",
-              f"{max(x['eta2_preset'] for x in d):.3f}" if d else "n/a")
+        r_rows = [r for r in residualised_robustness_rows if r["rotation"] == rot]
+        phis = [r["phi"] for r in r_rows if not np.isnan(r["phi"])]
+        print(
+            "  baseline                  : top factor η²(preset) = "
+            + (f"{max(x['eta2_preset'] for x in b):.3f}" if b else "n/a")
+        )
+        print(
+            "  baseline→residualised |φ|: min = "
+            + (f"{min(phis):.3f}" if phis else "n/a")
+            + ", median = "
+            + (f"{float(np.median(phis)):.3f}" if phis else "n/a")
+        )
     print(f"\nAll outputs → {out_dir}")
 
 
