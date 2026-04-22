@@ -43,7 +43,7 @@ SUITE_CONFIG = SuiteConfig(
         InspectBenchmarkSpec(
             name="trait_logprobs",
             benchmark="personality_trait_logprobs",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
+            benchmark_args={"samples_per_trait": 1000, "trait_splits": _OCEAN_TRAITS},
             n_runs=1,
             enabled=True,
         ),
@@ -51,7 +51,7 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     batch_size=128,
     output_root=Path("scratch/evals/ocean/trait"),
-    run_name=f"ocean_def_control_vanton4_seed{_SEED}_logprobs",
+    run_name=f"ocean_def_control_vanton4_seed{_SEED}_logprobs_1000",
     skip_completed=True,
     auto_analyze=True,
     analyze_kwargs={
@@ -60,7 +60,7 @@ SUITE_CONFIG = SuiteConfig(
         "min_choice_mass": 0.75,
     },
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo=f"fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_seed{_SEED}/evals/mcq/trait_logprobs",
+    upload_path_in_repo=f"fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_seed{_SEED}/evals/mcq/trait_logprobs_1000",
     metadata={
         "persona": f"ocean_def_control_vanton4_seed{_SEED}",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
