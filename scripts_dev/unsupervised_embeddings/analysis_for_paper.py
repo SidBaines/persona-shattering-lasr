@@ -105,6 +105,7 @@ except ImportError:
     pass
 
 # ── Standard library ─────────────────────────────────────────────────────────
+import argparse
 import json
 import logging
 from dataclasses import dataclass, field
@@ -154,6 +155,15 @@ HF_REPO_ID = "persona-shattering-lasr/psychometric-fa-runs"
 # Where this script writes its outputs. Separate from the existing pipeline's
 # `scratch/psychometric_fa/` so the paper analysis is unambiguously fresh.
 OUTPUT_ROOT = Path("scratch/psychometric_fa_paper")
+
+# ── Block filter ────────────────────────────────────────────────────────────
+# When set (via ``--block-filter`` CLI arg in main()), restrict the
+# questionnaire to items whose ``block`` matches. Used to run a parallel
+# analysis on just one modality (e.g. ``likert`` — v5 Likert only,
+# dropping the trait_mcq block) without touching the main paper analysis.
+# OUTPUT_ROOT and LABELS_REPO_DIR get an ``_<filter>`` suffix so the
+# filtered run writes to a separate tree and doesn't collide.
+BLOCK_FILTER: str | None = None
 
 
 @dataclass(frozen=True)
@@ -445,6 +455,23 @@ def load_model_data(model: ModelRun) -> LoadedData:
         model.slug, raw_matrix.shape[0], raw_matrix.shape[1],
     )
 
+    # Optional block filter — drops every column whose item's `block` does
+    # not match `BLOCK_FILTER`. Applied at the raw matrix level, before
+    # preprocessing, so downstream steps (variance filter, FA, alignment)
+    # see only the filtered block.
+    if BLOCK_FILTER is not None:
+        keep_mask = np.array(
+            [it.get("block") == BLOCK_FILTER for it in raw_items],
+            dtype=bool,
+        )
+        raw_matrix = raw_matrix[:, keep_mask]
+        raw_items = [it for it, keep in zip(raw_items, keep_mask) if keep]
+        log.info(
+            "[%s] block filter %r kept %d / %d columns",
+            model.slug, BLOCK_FILTER,
+            int(keep_mask.sum()), int(keep_mask.size),
+        )
+
     raw_items = _enrich_column_defs(raw_items)
 
     out_dir = OUTPUT_ROOT / model.slug
@@ -519,7 +546,13 @@ def run_n_factors_suggest(data: LoadedData) -> dict:
             json.dumps(_jsonable(pa), indent=2)
         )
         extra_paths: list[Path] = []
-        paper_rel = PAPER_SCREE_FIGURES.get(data.model.slug)
+        # Only write paper figures from the unfiltered (main paper) run —
+        # filtered runs are robustness variants and shouldn't overwrite
+        # the headline figure.
+        paper_rel = (
+            PAPER_SCREE_FIGURES.get(data.model.slug)
+            if BLOCK_FILTER is None else None
+        )
         if paper_rel is not None:
             paper_path = PAPER_FIGURES_DIR / paper_rel
             paper_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1494,9 +1527,43 @@ def _jsonable(obj):
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(
+        description="Section-4.2 FA analysis pipeline for the paper.",
+    )
+    ap.add_argument(
+        "--block-filter",
+        default=None,
+        choices=("likert", "trait_mcq"),
+        help=(
+            "Restrict the questionnaire to items in this block before "
+            "preprocessing and FA. Appends `_<block>` to OUTPUT_ROOT and "
+            "LABELS_REPO_DIR so the filtered run writes to a separate "
+            "tree alongside the main paper analysis."
+        ),
+    )
+    return ap.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
+
+    # Promote CLI args into the module-level globals the step functions
+    # read from. This keeps the "config-at-top" style while allowing a
+    # parallel run (e.g. ``--block-filter likert``) to write to a different
+    # tree without the user having to edit the file.
+    global BLOCK_FILTER, OUTPUT_ROOT, LABELS_REPO_DIR
+    if args.block_filter is not None:
+        BLOCK_FILTER = args.block_filter
+        OUTPUT_ROOT = Path(str(OUTPUT_ROOT) + f"_{BLOCK_FILTER}")
+        LABELS_REPO_DIR = Path(
+            str(LABELS_REPO_DIR) + f"_{BLOCK_FILTER}"
+        )
+
     print("=" * 78)
     print(f"analysis_for_paper.py  —  output root: {OUTPUT_ROOT}")
+    if BLOCK_FILTER is not None:
+        print(f"                        block filter: {BLOCK_FILTER!r}")
     print("=" * 78)
 
     loaded: dict[str, LoadedData] = {}
