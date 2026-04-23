@@ -48,7 +48,7 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 
 | Path | Ref | Section | Script | Data source | Status | Notes |
 |------|-----|---------|--------|-------------|--------|-------|
-| `main/fig_2_personas_trait_space.pdf` | `fig:personas-trait-space` | `sections/personas.tex` | `N/A — hand-drawn` | `N/A — hand-drawn` | `placeholder` | Currently `tmp/image4.png`. Illustration of personas as regions in trait space. |
+| `main/fig_2_personas_trait_space.png` | `fig:personas-trait-space` | `sections/personas.tex` | `N/A — hand-drawn` | `N/A — hand-drawn` | `generated` | Illustration of personas as regions in trait space. |
 
 ### Section 3 — Supervised (`sections/supervised.tex`)
 
