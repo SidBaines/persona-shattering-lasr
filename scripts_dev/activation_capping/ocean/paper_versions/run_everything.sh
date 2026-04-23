@@ -19,12 +19,19 @@ set -o pipefail
 
 FAILED_STEPS=()
 
+RUNNER_LOG_DIR="scratch/runner_logs"
+mkdir -p "$RUNNER_LOG_DIR"
+
 run_step() {
     local label="$1"; shift
+    local safe_label="${label// /_}"
+    local log="${RUNNER_LOG_DIR}/${safe_label}.log"
     echo ""
-    echo "=== Running: ${label} ==="
-    if ! "$@"; then
-        echo "!!! FAILED: ${label} — continuing to next ==="
+    echo "=== Running: ${label}  (log: ${log}) ==="
+    # `set -o pipefail` at top means the pipeline exits non-zero if the command
+    # fails, not tee. 2>&1 merges stderr so the teed log captures everything.
+    if ! "$@" 2>&1 | tee "$log"; then
+        echo "!!! FAILED: ${label} — continuing to next  (log: ${log}) ==="
         FAILED_STEPS+=("$label")
     fi
     echo "=== Done: ${label} ==="
@@ -48,7 +55,7 @@ cleanup_persona_scratch() {
     rm -rf scratch/evals/ocean/mmlu/"${p}"_activation_capping_*
 }
 
-PERSONAS=(o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus, gemma_needs_help_n_minus)
+PERSONAS=(o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus gemma_needs_help_n_minus)
 
 for p in "${PERSONAS[@]}"; do
     echo ""
