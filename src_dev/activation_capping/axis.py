@@ -238,7 +238,9 @@ def cohens_d_per_layer(
     for layer_idx in range(n_layers):
         proj_base = _project_batch(base_stack, axis, layer_idx)
         proj_lora = _project_batch(lora_stack, axis, layer_idx)
-        mean_diff = proj_base.mean() - proj_lora.mean()
+        # abs() so the helper is sign-agnostic: any axis convention
+        # (base→lora or lora→base) yields the same magnitude of separation.
+        mean_diff = abs(proj_base.mean() - proj_lora.mean())
         pooled_std = np.sqrt((proj_base.std() ** 2 + proj_lora.std() ** 2) / 2)
         d[layer_idx] = mean_diff / pooled_std if pooled_std > 0 else 0.0
     return d

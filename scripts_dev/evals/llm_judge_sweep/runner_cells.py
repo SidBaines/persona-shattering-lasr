@@ -37,11 +37,14 @@ import os
 import shutil
 import statistics
 import sys
+import threading
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Queue
 from types import ModuleType
 from typing import Any
 
@@ -91,6 +94,61 @@ EVAL_NAME_DEFAULT = "llm_judge_lora_scale_sweep"
 SCRATCH_ROOT = Path("scratch/monorepo")
 STAGING_ROOT = Path("scratch/sweep_staging")
 BAKED_ROOT = Path("scratch/baked_combo_adapters")
+
+# Opt-in batched-upload mode. When set, the sweep writes cells locally
+# throughout and does a SINGLE HF commit per sweep at the end instead of
+# per-cell commits. Use this to stay under HF's commits-per-hour rate limit
+# during long/wide runs. Does not affect single-invocation semantics —
+# the HF layout is identical; just fewer commits.
+_BATCH_UPLOAD = os.environ.get("LLM_JUDGE_SWEEP_BATCH_UPLOAD") == "1"
+# Opt-in skip-upload mode. When set, every HF upload call is a no-op — the
+# sweep runs purely locally. Use this when HF is rate-limited and you want
+# compute/forging to complete without wasting time on upload retries; then
+# run a consolidated upload pass later.
+_SKIP_UPLOAD = os.environ.get("LLM_JUDGE_SWEEP_SKIP_UPLOAD") == "1"
+if _SKIP_UPLOAD:
+    print("[runner_cells] LLM_JUDGE_SWEEP_SKIP_UPLOAD=1 — all HF uploads are no-ops this run")
+# Grace window for legacy baked dirs with no .pid marker (e.g. from before
+# this cleanup was added, or concurrent sweeps yet to write their marker).
+_ORPHAN_BAKED_GRACE_SEC = 3600  # 1 hour
+
+
+def _prune_orphan_baked_dirs() -> None:
+    """Prune baked-adapter dirs whose owning process is no longer alive.
+
+    Complements the ``finally`` block at the end of the rollout stage, which
+    only runs on clean exit (not SIGKILL, OOM-kill, or hard vLLM crashes).
+    On startup we sweep ``BAKED_ROOT`` and remove any dir whose ``.pid``
+    marker points at a dead PID. Dirs with no marker are only removed if
+    older than ``_ORPHAN_BAKED_GRACE_SEC``, so we never race a concurrent
+    sweep that hasn't written its marker yet.
+    """
+    import time
+    if not BAKED_ROOT.exists():
+        return
+    for d in BAKED_ROOT.iterdir():
+        if not d.is_dir():
+            continue
+        pid_file = d / ".pid"
+        stale = False
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+            except (OSError, ValueError):
+                stale = True
+        else:
+            try:
+                if time.time() - d.stat().st_mtime > _ORPHAN_BAKED_GRACE_SEC:
+                    stale = True
+            except OSError:
+                continue
+        if stale:
+            try:
+                print(f"[cleanup] pruning orphan baked dir: {d}")
+                cleanup_baked_dir(d)
+            except Exception as exc:
+                print(f"[cleanup] failed to prune {d}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -832,6 +890,60 @@ def _make_plots(
 # ---------------------------------------------------------------------------
 
 
+_UPLOAD_RETRY_ATTEMPTS = 4
+_UPLOAD_RETRY_BASE_DELAY_SEC = 10.0
+_UPLOAD_TRANSIENT_MARKERS = (
+    "500 Server Error",
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+    "504 Gateway Timeout",
+    "Internal Error",
+    "Gateway Time-out",
+    "429",
+    "Too Many Requests",
+    "Connection reset",
+    "Connection aborted",
+    "Connection refused",
+    "Read timed out",
+    "Temporary failure",
+)
+
+
+def _is_transient_upload_error(exc: BaseException) -> bool:
+    """Return True if an HF upload exception looks retryable (5xx, 429, network)."""
+    msg = str(exc)
+    type_name = type(exc).__name__
+    if any(marker in msg for marker in _UPLOAD_TRANSIENT_MARKERS):
+        return True
+    if "Timeout" in type_name or "Connection" in type_name:
+        return True
+    return False
+
+
+def _with_upload_retry(description: str, fn):
+    """Retry an HF upload with exponential backoff on transient server errors.
+
+    Per-sweep uploads can occasionally hit 500/503 hiccups from the HF hub;
+    letting those fail the whole sweep wastes hours of compute. We retry up
+    to ``_UPLOAD_RETRY_ATTEMPTS`` times, doubling the delay each time.
+    Non-transient errors (4xx auth, malformed request, etc.) surface immediately.
+    """
+    if _SKIP_UPLOAD:
+        return None
+    for attempt in range(1, _UPLOAD_RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except BaseException as exc:
+            if not _is_transient_upload_error(exc) or attempt >= _UPLOAD_RETRY_ATTEMPTS:
+                raise
+            delay = _UPLOAD_RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+            print(
+                f"[upload-retry] {description}: attempt {attempt}/{_UPLOAD_RETRY_ATTEMPTS} "
+                f"failed with {type(exc).__name__}: {str(exc)[:200]}; retrying in {delay:.0f}s"
+            )
+            time.sleep(delay)
+
+
 def _upload_cells(
     nc: NormalisedConfig,
     cells: list[CanonicalCell],
@@ -840,19 +952,22 @@ def _upload_cells(
 ) -> None:
     for cell in cells:
         write_cell_info(cell, cell_dirs[cell], fingerprint)
-        upload_cell(
-            cell,
-            local_dir=cell_dirs[cell],
-            model_slug=nc.base_model_slug,
-            eval_name=nc.eval_name,
-            fingerprint=fingerprint,
-            repo_id=HF_REPO_ID,
-            commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
-            allow_patterns=[
-                "rollouts/**",
-                "judge_runs/**",
-                "cell_info.json",
-            ],
+        _with_upload_retry(
+            f"upload_cell {cell.variant_label()}",
+            lambda cell=cell: upload_cell(
+                cell,
+                local_dir=cell_dirs[cell],
+                model_slug=nc.base_model_slug,
+                eval_name=nc.eval_name,
+                fingerprint=fingerprint,
+                repo_id=HF_REPO_ID,
+                commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                allow_patterns=[
+                    "rollouts/**",
+                    "judge_runs/**",
+                    "cell_info.json",
+                ],
+            ),
         )
 
 
@@ -867,12 +982,15 @@ def _upload_sweep_root(
         eval_name=nc.eval_name,
         fingerprint=fingerprint,
     )
-    _upload_sweep_root_generic(
-        sweep_root,
-        hf_path=hf_path,
-        repo_id=HF_REPO_ID,
-        commit_message=f"{nc.eval_name}: upload sweep analysis + plots",
-        allow_patterns=["plots/**", "analysis/**", "sweep.log", "sweep_config.json"],
+    _with_upload_retry(
+        f"upload_sweep_root {hf_path}",
+        lambda: _upload_sweep_root_generic(
+            sweep_root,
+            hf_path=hf_path,
+            repo_id=HF_REPO_ID,
+            commit_message=f"{nc.eval_name}: upload sweep analysis + plots",
+            allow_patterns=["plots/**", "analysis/**", "sweep.log", "sweep_config.json"],
+        ),
     )
     print(f"  [upload] sweep root → {HF_REPO_ID}/{hf_path}")
 
@@ -930,6 +1048,8 @@ def main() -> None:
         _print_dry_run(nc, cells, fingerprint)
         return
 
+    _prune_orphan_baked_dirs()
+
     # Stage 1: hydrate every cell from HF (a no-op for brand-new cells).
     cell_dirs: dict[CanonicalCell, Path] = {}
     cell_status: dict[CanonicalCell, Any] = {}
@@ -949,72 +1069,179 @@ def main() -> None:
     n_with_rollouts = sum(1 for s in cell_status.values() if s.has_rollouts)
     print(f"[hydrate] {n_with_rollouts}/{len(cells)} cells already have rollouts on HF")
 
-    # Stage 2: bake + rollout the cells that need it.
+    # Stages 2+3 (concurrent): rollouts on GPU, judges via remote API.
+    #
+    # The rollout loop runs in a background thread, generating one cell at a
+    # time inside ``_generate_rollouts``. A judge-worker thread consumes a
+    # queue of cells. The main thread polls each in-flight cell's local dir
+    # and enqueues it for judging the moment its ``rollouts.jsonl`` lands —
+    # so API-bound judging overlaps with GPU-bound rollout generation of
+    # later cells. Within a single cell, trait + coherence metrics run in
+    # parallel threads (disjoint output files; cache fingerprint unaffected).
+    # Each cell uploads to HF right after its metrics finish, so a mid-run
+    # crash preserves all already-judged cells on HF.
     cells_to_rollout = [
         c for c in cells if not cell_status[c].has_rollouts
     ]
     # Baseline cells have no adapters → rollouts still need generation, but
     # VLLMLoRaComboProvider supports empty adapter_scales cells.
+
+    def _judge_and_upload(cell: CanonicalCell) -> None:
+        """Judge pending metrics for a cell (in parallel threads), then upload."""
+        cell_dir = cell_dirs[cell]
+        status = cell_status_on_disk(cell_dir, required_judge_metrics=required_pairs)
+        pending = [
+            metric for metric in _judge_metrics(nc)
+            if not all(
+                (rater.rater_id, metric) in status.present_judge_metrics
+                for rater in nc.judge_raters
+            )
+        ]
+        if pending:
+            print(f"[judge] {cell.variant_label()} / {pending} (parallel)")
+            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                futures = [
+                    pool.submit(
+                        _run_judge_for_cell_metric,
+                        nc, cell, cell_dir, metric,
+                    )
+                    for metric in pending
+                ]
+                for fut in as_completed(futures):
+                    fut.result()
+        cell_status[cell] = cell_status_on_disk(
+            cell_dir, required_judge_metrics=required_pairs,
+        )
+        if upload and pending:
+            write_cell_info(cell, cell_dir, fingerprint)
+            if _BATCH_UPLOAD:
+                # Skip per-cell upload — Stage 6 batches the whole sweep into
+                # a single commit so we stay under HF's commits-per-hour cap.
+                pass
+            else:
+                print(f"[upload] {cell.variant_label()}")
+                _with_upload_retry(
+                    f"upload_cell {cell.variant_label()}",
+                    lambda: upload_cell(
+                        cell,
+                        local_dir=cell_dir,
+                        model_slug=nc.base_model_slug,
+                        eval_name=nc.eval_name,
+                        fingerprint=fingerprint,
+                        repo_id=HF_REPO_ID,
+                        commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                        allow_patterns=[
+                            "rollouts/**",
+                            "judge_runs/**",
+                            "cell_info.json",
+                        ],
+                    ),
+                )
+
+    _JUDGE_SENTINEL = object()
+    judge_queue: Queue = Queue()
+    judge_errors: list[tuple[CanonicalCell, BaseException]] = []
+
+    def _judge_worker() -> None:
+        while True:
+            item = judge_queue.get()
+            if item is _JUDGE_SENTINEL:
+                return
+            try:
+                _judge_and_upload(item)
+            except BaseException as exc:
+                print(
+                    f"[judge] ERROR on {item.variant_label()}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                judge_errors.append((item, exc))
+
+    judge_thread: threading.Thread | None = None
+    if not flags.skip_judge:
+        judge_thread = threading.Thread(
+            target=_judge_worker, name="judge-worker", daemon=False,
+        )
+        judge_thread.start()
+
+    # Enqueue cells already hydrated from HF (no rollout needed).
+    for cell in cells:
+        if cell in cells_to_rollout:
+            continue
+        if cell_status[cell].has_rollouts and judge_thread is not None:
+            judge_queue.put(cell)
+
+    rollout_error: list[BaseException] = []
+    rollout_thread: threading.Thread | None = None
     if cells_to_rollout and not flags.skip_rollouts:
         sweep_id = f"{nc.eval_name}_{fingerprint}_{uuid.uuid4().hex[:8]}"
         baked_dir = BAKED_ROOT / sweep_id
+        baked_dir.mkdir(parents=True, exist_ok=True)
+        (baked_dir / ".pid").write_text(str(os.getpid()))
         print(f"[rollout] generating rollouts for {len(cells_to_rollout)} cell(s); sweep_id={sweep_id}")
-        try:
-            _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
-            for cell in cells_to_rollout:
-                cell_status[cell] = cell_status_on_disk(
+
+        def _rollout_worker() -> None:
+            try:
+                _generate_rollouts(nc, cells_to_rollout, cell_dirs, sweep_id=sweep_id)
+            except BaseException as exc:
+                rollout_error.append(exc)
+            finally:
+                # Combo bakes are uuid-suffixed and never reused across runs;
+                # they can each be tens of GB, so remove regardless of outcome.
+                try:
+                    cleanup_baked_dir(baked_dir)
+                    print(f"[cleanup] removed baked combo dir: {baked_dir}")
+                except Exception as exc:
+                    print(f"[cleanup] failed to remove {baked_dir}: {exc}")
+
+        rollout_thread = threading.Thread(
+            target=_rollout_worker, name="rollout-worker", daemon=False,
+        )
+        rollout_thread.start()
+
+        # Main thread: poll for per-cell rollout completion, enqueue judge work.
+        POLL_INTERVAL_SEC = 10.0
+        remaining = set(cells_to_rollout)
+        while remaining:
+            done_this_round = []
+            for cell in remaining:
+                status = cell_status_on_disk(
                     cell_dirs[cell], required_judge_metrics=required_pairs,
                 )
-        finally:
-            # Combo bakes are uuid-suffixed and never reused across runs;
-            # they can each be tens of GB, so remove regardless of outcome.
-            try:
-                cleanup_baked_dir(baked_dir)
-                print(f"[cleanup] removed baked combo dir: {baked_dir}")
-            except Exception as exc:
-                print(f"[cleanup] failed to remove {baked_dir}: {exc}")
+                if status.has_rollouts:
+                    cell_status[cell] = status
+                    if judge_thread is not None:
+                        judge_queue.put(cell)
+                        print(f"[judge] enqueued {cell.variant_label()}")
+                    done_this_round.append(cell)
+            for cell in done_this_round:
+                remaining.discard(cell)
+            if not remaining:
+                break
+            if not rollout_thread.is_alive():
+                # Rollout thread exited but some cells didn't finish (likely error).
+                break
+            time.sleep(POLL_INTERVAL_SEC)
+
+        rollout_thread.join()
     elif cells_to_rollout:
         print(f"[rollout] --skip-rollouts set; {len(cells_to_rollout)} cell(s) will be skipped")
 
-    # Stage 3: per-cell, per-metric judge for anything still missing.
-    # Upload each cell to HF as soon as all its metrics are done so partial
-    # sweep progress is durable if the script is interrupted.
-    if not flags.skip_judge:
-        metrics = _judge_metrics(nc)
-        for cell in cells:
-            if not cell_status[cell].has_rollouts:
-                continue
-            did_any_judge = False
-            for metric in metrics:
-                have_all = all(
-                    (rater.rater_id, metric) in cell_status[cell].present_judge_metrics
-                    for rater in nc.judge_raters
-                )
-                if have_all:
-                    continue
-                print(f"[judge] {cell.variant_label()} / {metric}")
-                _run_judge_for_cell_metric(nc, cell, cell_dirs[cell], metric)
-                did_any_judge = True
-            cell_status[cell] = cell_status_on_disk(
-                cell_dirs[cell], required_judge_metrics=required_pairs,
-            )
-            if upload and did_any_judge:
-                print(f"[upload] {cell.variant_label()}")
-                write_cell_info(cell, cell_dirs[cell], fingerprint)
-                upload_cell(
-                    cell,
-                    local_dir=cell_dirs[cell],
-                    model_slug=nc.base_model_slug,
-                    eval_name=nc.eval_name,
-                    fingerprint=fingerprint,
-                    repo_id=HF_REPO_ID,
-                    commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
-                    allow_patterns=[
-                        "rollouts/**",
-                        "judge_runs/**",
-                        "cell_info.json",
-                    ],
-                )
+    # Drain judge queue; signal worker to exit.
+    if judge_thread is not None:
+        judge_queue.put(_JUDGE_SENTINEL)
+        judge_thread.join()
+
+    # Surface errors after both threads have cleanly stopped.
+    if rollout_error:
+        raise rollout_error[0]
+    if judge_errors:
+        errs = "\n".join(
+            f"  {c.variant_label()}: {type(e).__name__}: {e}"
+            for c, e in judge_errors
+        )
+        raise RuntimeError(
+            f"Judge stage had {len(judge_errors)} failure(s):\n{errs}"
+        )
 
     # Stage 4: aggregate.
     sweep_root = SCRATCH_ROOT / sweep_hf_root(
@@ -1031,8 +1258,48 @@ def main() -> None:
 
     # Stage 6: upload.
     if upload:
-        _upload_cells(nc, cells, cell_dirs, fingerprint)
-        _upload_sweep_root(nc, sweep_root, fingerprint)
+        if _BATCH_UPLOAD:
+            # Single upload per sweep — big allow_patterns covers all scale
+            # cells + plots + analysis in one HF commit. Baseline is still
+            # its own commit (different parent path), handled separately
+            # below. Keeps us well under the commits-per-hour rate limit
+            # for long runs.
+            sweep_hf_path = sweep_hf_root(
+                list(nc.adapters),
+                model_slug=nc.base_model_slug,
+                eval_name=nc.eval_name,
+                fingerprint=fingerprint,
+            )
+            print(f"[upload-batch] sweep → {HF_REPO_ID}/{sweep_hf_path}")
+            _with_upload_retry(
+                f"upload_sweep_batch {sweep_hf_path}",
+                lambda: _upload_sweep_root_generic(
+                    sweep_root,
+                    hf_path=sweep_hf_path,
+                    repo_id=HF_REPO_ID,
+                    commit_message=f"{nc.eval_name}: batched sweep upload",
+                    allow_patterns=[
+                        "scale_*/rollouts/**",
+                        "scale_*/judge_runs/**",
+                        "scale_*/cell_info.json",
+                        "cell_*/rollouts/**",
+                        "cell_*/judge_runs/**",
+                        "cell_*/cell_info.json",
+                        "plots/**",
+                        "analysis/**",
+                        "sweep.log",
+                        "sweep_config.json",
+                    ],
+                ),
+            )
+            # Baseline (if written this sweep) lives at a different parent
+            # path. Upload it with _upload_cells over just the baseline cells.
+            baseline_cells = [c for c in cells if c.tier == "baseline"]
+            if baseline_cells:
+                _upload_cells(nc, baseline_cells, cell_dirs, fingerprint)
+        else:
+            _upload_cells(nc, cells, cell_dirs, fingerprint)
+            _upload_sweep_root(nc, sweep_root, fingerprint)
 
     print(f"Done. sweep_root={sweep_root}")
 
