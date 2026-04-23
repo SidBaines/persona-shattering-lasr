@@ -32,6 +32,7 @@ load_dotenv(project_root / ".env")
 from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.utils.hf_hub import download_path_to_dir
 from src_dev.visualisations import PAPER_FIGURES_DIR
+from src_dev.visualisations.ocean_spider import to_headroom
 
 OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 
@@ -71,6 +72,24 @@ AMPLIFIERS: list[tuple[str, str, str]] = [
 ]
 
 BASELINE_COLOR = "#4D4D4D"
+BASELINE_LEGEND_LABEL = "baseline Llama3.1-8b-Instruct"
+
+# Short legend labels: trait letter + up arrow. See paper_main_suppressor_spider.py
+# for the parallel suppressor mapping — both must stay in lock-step.
+LEGEND_LABELS: dict[str, str] = {
+    "o_plus": "O↑",
+    "c_plus": "C↑",
+    "e_plus": "E↑",
+    "a_plus": "A↑",
+    "n_plus": "N↑",
+}
+
+# See paper_main_suppressor_spider.py for the rationale. Keep both spiders
+# in lock-step on PLOT_MODE so the paper's top-left/top-right subfigs use
+# the same y-scale.
+PLOT_MODE = "headroom"
+SCORE_MIN = -4.0
+SCORE_MAX = 4.0
 
 OUT_PATH = PAPER_FIGURES_DIR / PAPER_FIGURES[0]
 CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "amplifier_spider"
@@ -192,7 +211,29 @@ def _render_spider(
     baseline: dict[str, float],
     out_path: Path,
 ) -> None:
+    """Render the amplifier spider. Same PLOT_MODE contract as the suppressor."""
     traits = OCEAN_TRAITS
+
+    if PLOT_MODE == "headroom":
+        if not baseline:
+            raise RuntimeError(
+                "headroom mode requires a non-empty baseline — all adapter rows transform "
+                "to fractions of (score_bound - baseline)."
+            )
+        per_amplifier = to_headroom(
+            per_amplifier, baseline, score_min=SCORE_MIN, score_max=SCORE_MAX,
+        )
+        baseline = {t: 0.0 for t in baseline}
+        y_lim = (-1.0, 1.0)
+        y_ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
+        y_tick_labels = ["-100%", "-50%", "0", "+50%", "+100%"]
+    elif PLOT_MODE == "raw":
+        y_lim = (SCORE_MIN, SCORE_MAX)
+        y_ticks = [SCORE_MIN, SCORE_MIN / 2, 0.0, SCORE_MAX / 2, SCORE_MAX]
+        y_tick_labels = [f"{t:+.0f}" for t in y_ticks]
+    else:
+        raise ValueError(f"unknown PLOT_MODE={PLOT_MODE!r}")
+
     angles = np.linspace(0.0, 2.0 * np.pi, len(traits), endpoint=False).tolist()
     angles_closed = angles + angles[:1]
 
@@ -211,24 +252,34 @@ def _render_spider(
             ax.fill(angles_closed, means_closed, color=color, alpha=0.10)
 
     if baseline:
-        _polygon(baseline, label="base model", color=BASELINE_COLOR, linewidth=2.5)
+        if PLOT_MODE == "headroom":
+            # Same degenerate-polygon → bold dot logic as the suppressor spider.
+            ax.plot(
+                [0.0], [0.0],
+                marker="o", linestyle="", color=BASELINE_COLOR,
+                markersize=12, markeredgewidth=1.8, markeredgecolor="white",
+                zorder=5, label=BASELINE_LEGEND_LABEL,
+            )
+        else:
+            _polygon(baseline, label=BASELINE_LEGEND_LABEL, color=BASELINE_COLOR, linewidth=2.5)
 
     for key, _home_trait, color in AMPLIFIERS:
-        row = per_amplifier[key]
+        row = per_amplifier.get(key, {})
         if not row:
             continue
-        _polygon(row, label=f"{key} @ {SCALE:+.0f}", color=color, linewidth=2.0)
+        _polygon(row, label=LEGEND_LABELS.get(key, key), color=color, linewidth=2.0)
 
     ax.set_xticks(angles)
     ax.set_xticklabels(traits, fontsize=11)
-    ax.set_ylim(-4.0, 4.0)
-    ax.set_yticks([-4, -2, 0, 2, 4])
-    ax.set_yticklabels(["-4", "-2", "0", "+2", "+4"], fontsize=9)
+    for tick_label, trait in zip(ax.get_xticklabels(), traits):
+        tick_label.set_color(BIG_FIVE_COLORS[trait])
+    ax.set_ylim(*y_lim)
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_tick_labels, fontsize=9)
+    if PLOT_MODE == "headroom":
+        ring_theta = np.linspace(0.0, 2.0 * np.pi, 180)
+        ax.plot(ring_theta, np.zeros_like(ring_theta), "-", color="black", linewidth=0.8, alpha=0.6)
     ax.grid(True, alpha=0.4)
-    ax.set_title(
-        f"OCEAN amplifiers (vanton4) at {SCALE_LABEL} — Qwen3-235B judge",
-        fontsize=12, pad=20,
-    )
     ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.08), fontsize=10, framealpha=0.9)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
