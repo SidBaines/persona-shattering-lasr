@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -65,7 +66,21 @@ REQUIRED_LABEL_FIELDS = (
     "description",
     "positive_pole",
     "negative_pole",
+    "dominant_item_types",
 )
+
+# Block-name vocabulary accepted in `dominant_item_types`. Matches the
+# `block` strings that `_describe_item` branches on and the names listed in
+# SKILL.md step 4. `forced_choice` is accepted as an alias for `fc` because
+# the raw questionnaire schema uses the longer form.
+_VALID_BLOCK_TYPES = {
+    "likert",
+    "fc_pair",
+    "trait_mcq",
+    "vignette",
+    "fc",
+    "forced_choice",
+}
 
 
 def _find_fa_dir(path: Path) -> Path:
@@ -489,23 +504,29 @@ def _describe_item(col_def: dict, loading: float, items_by_id: dict[str, dict]) 
         )
 
     if block == "vignette":
+        # The author-assigned `dimension` name (e.g. "Conscientiousness") is
+        # a prior about what the item is *supposed* to measure. We use it
+        # internally to pick the right scoring axis, but deliberately do NOT
+        # surface it to the labeller — see SKILL.md, "Label from loadings
+        # alone, not from priors." Options are shown with the numeric score
+        # for that axis instead.
         dim = col_def.get("dimension", "?")
         if item and "scenario" in item and "options" in item:
             lines = [
-                f"[Vignette → {dim}, loading={loading:+.3f}]",
+                f"[Vignette, loading={loading:+.3f}]",
                 f'  Scenario: "{item["scenario"]}"',
-                f"  Options ({dim} score in parens):",
+                "  Options (score on the item's scoring axis in parens):",
             ]
             for opt in item["options"]:
                 score = opt.get("scoring", {}).get(dim, 0)
-                lines.append(f'    {opt["label"]} ({dim}={score:+d}): "{opt["text"]}"')
+                lines.append(f'    {opt["label"]} (score={score:+d}): "{opt["text"]}"')
             lines.append(
                 f"  → {sign} loading: high-factor personas pick "
-                f"{'higher' if loading > 0 else 'lower'}-{dim} options."
+                f"{'higher' if loading > 0 else 'lower'}-scoring options."
             )
             return "\n".join(lines)
         return (
-            f'[Vignette → {dim}, loading={loading:+.3f}] item_id={item_id}\n'
+            f'[Vignette, loading={loading:+.3f}] item_id={item_id}\n'
             f'  Text: "{col_def.get("text", "?")}"\n'
             + _missing_rich_note("scenario/options")
         )
@@ -521,10 +542,12 @@ def _describe_item(col_def: dict, loading: float, items_by_id: dict[str, dict]) 
         )
 
     if block == "trait_mcq":
-        dim = col_def.get("dimension", "?")
+        # Same principle as for vignettes: the author-assigned `dimension` is
+        # a prior we don't show the labeller. Options are presented by their
+        # numeric `answer_mapping` score (0 or 1) with no trait label.
         encoding = col_def.get("encoding", "letter_1-4")
         lines = [
-            f"[TRAIT MCQ → {dim}, encoding={encoding}, loading={loading:+.3f}]",
+            f"[TRAIT MCQ, encoding={encoding}, loading={loading:+.3f}]",
             f'  Question: "{col_def["text"]}"',
         ]
         if item and "options" in item and "answer_mapping" in item:
@@ -534,24 +557,24 @@ def _describe_item(col_def: dict, loading: float, items_by_id: dict[str, dict]) 
                 options = {str(o.get("label", "")): str(o.get("text", "")) for o in options_raw}
             else:
                 options = {str(k): str(v) for k, v in options_raw.items()}
-            high = [f'    {l}: "{options.get(l, "?")}"' for l, v in answer_mapping.items() if int(v) == 1]
-            low = [f'    {l}: "{options.get(l, "?")}"' for l, v in answer_mapping.items() if int(v) == 0]
-            if high:
-                lines += [f"  High-{dim} options:"] + high
-            if low:
-                lines += [f"  Low-{dim} options:"] + low
+            scored_1 = [f'    {l}: "{options.get(l, "?")}"' for l, v in answer_mapping.items() if int(v) == 1]
+            scored_0 = [f'    {l}: "{options.get(l, "?")}"' for l, v in answer_mapping.items() if int(v) == 0]
+            if scored_1:
+                lines += ["  Options scored 1:"] + scored_1
+            if scored_0:
+                lines += ["  Options scored 0:"] + scored_0
         else:
             lines.append(f"  item_id={item_id}")
             lines.append(_missing_rich_note("options/answer_mapping"))
         if encoding in _TRAIT_INTERPRETABLE_ENCODINGS:
             lines.append(
                 f"  → {sign} loading: high-factor personas pick "
-                f"{'more high-' if loading > 0 else 'more low-'}{dim} options."
+                f"{'more options scored 1' if loading > 0 else 'more options scored 0'}."
             )
         else:
             lines.append(
-                "  → sign is NOT trait-interpretable (letter rank shuffled "
-                "per item)."
+                "  → sign is NOT interpretable from loadings (letter rank "
+                "shuffled per item)."
             )
         return "\n".join(lines)
 
@@ -675,6 +698,84 @@ def cmd_describe(args: argparse.Namespace) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _validate_style(entry: dict, fi: int) -> None:
+    """Enforce the stylistic constraints documented in SKILL.md step 4.
+
+    Downstream renderers (factor_extremes.html, paper tables) assume a
+    consistent shape across rotations; silent drift here forces manual
+    cleanup later. Each check raises SystemExit with a message that tells
+    the caller exactly which factor and which field is wrong.
+    """
+    axis = str(entry.get("axis_name", "")).strip()
+    if not axis:
+        raise SystemExit(f"axis_name must be non-empty for factor {fi}.")
+    if len(axis.split()) != 1:
+        raise SystemExit(
+            f"axis_name for factor {fi} must be a single word; got "
+            f"{axis!r}. Use CamelCase or a hyphenated compound if two "
+            "concepts are needed."
+        )
+    if not axis[0].isupper() or (
+        axis.isupper() and any(c.isalpha() for c in axis)
+    ):
+        raise SystemExit(
+            f"axis_name for factor {fi} must be Title Case "
+            f"(initial capital, not all-caps); got {axis!r}."
+        )
+
+    summary = str(entry.get("summary", "")).strip()
+    if not summary:
+        raise SystemExit(f"summary must be non-empty for factor {fi}.")
+    if len(summary.split()) > 12:
+        raise SystemExit(
+            f"summary for factor {fi} must be ≤12 words; "
+            f"got {len(summary.split())}: {summary!r}."
+        )
+    if not re.search(r"\bvs\.?\b", summary, flags=re.IGNORECASE):
+        raise SystemExit(
+            f"summary for factor {fi} must be in 'pole_A vs pole_B' form "
+            f"(missing 'vs'); got {summary!r}."
+        )
+
+    description = str(entry.get("description", "")).strip()
+    if not description:
+        raise SystemExit(f"description must be non-empty for factor {fi}.")
+    # Word-count sanity bounds — SKILL.md asks for 2–3 sentences, but
+    # sentence tokenisation is fragile (abbreviations, ellipses). Catch
+    # the egregious failure modes without second-guessing prose that
+    # happens to contain "e.g." or similar.
+    wc = len(description.split())
+    if wc < 15:
+        raise SystemExit(
+            f"description for factor {fi} is too short ({wc} words); "
+            "aim for 2–3 sentences that also contrast the factor with its "
+            "nearest neighbour."
+        )
+    if wc > 120:
+        raise SystemExit(
+            f"description for factor {fi} is too long ({wc} words); "
+            "aim for 2–3 sentences."
+        )
+
+    for pole_field in ("positive_pole", "negative_pole"):
+        pole = str(entry.get(pole_field, "")).strip()
+        if not pole:
+            raise SystemExit(f"{pole_field} must be non-empty for factor {fi}.")
+
+    dit = entry.get("dominant_item_types")
+    if not isinstance(dit, list) or not dit:
+        raise SystemExit(
+            f"dominant_item_types for factor {fi} must be a non-empty list; "
+            f"got {dit!r}."
+        )
+    bad = [b for b in dit if b not in _VALID_BLOCK_TYPES]
+    if bad:
+        raise SystemExit(
+            f"dominant_item_types for factor {fi} contains unknown block "
+            f"name(s) {bad}. Valid: {sorted(_VALID_BLOCK_TYPES)}."
+        )
+
+
 def _validate_labels(payload: Any, n_factors: int) -> list[dict]:
     if isinstance(payload, dict) and "factors" in payload:
         payload = payload["factors"]
@@ -690,12 +791,15 @@ def _validate_labels(payload: Any, n_factors: int) -> list[dict]:
         fi = entry["factor_index"]
         if not isinstance(fi, int):
             raise SystemExit(f"factor_index must be int, got {fi!r}.")
+        if not (0 <= fi < n_factors):
+            raise SystemExit(
+                f"factor_index {fi} out of range [0, {n_factors}) for this "
+                "rotation."
+            )
         if fi in seen:
             raise SystemExit(f"Duplicate factor_index {fi}.")
         seen.add(fi)
-        axis = str(entry.get("axis_name", "")).strip()
-        if not axis:
-            raise SystemExit(f"axis_name must be non-empty for factor {fi}.")
+        _validate_style(entry, fi)
     if len(payload) != n_factors:
         raise SystemExit(
             f"Expected {n_factors} labels, got {len(payload)}."
