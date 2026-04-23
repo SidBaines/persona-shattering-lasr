@@ -45,21 +45,23 @@ Responses where insufficient logprob mass is found across the valid responses wi
 The number of `high' scoring answers is divided by the total number of questions and this is reported as the benchmark score; for example a score of 0.1 on the Openness test indicates that the subject demonstrates extremely low levels of open-mindedness, creativity and other openness-related traits, whilst a score of 1 indicates the highest possible level.
 Note that a score of 0.5 does not necessarily mean this is the `average' score.
 
-\textbf{MMLU and GSM8K are used to measure changes in general capabilities.} To ensure that the original trained LoRAs, and the combinations we produce, do not significantly affect model capabilities, we run a suite of general capability evaluations, including MMLU \citep{hendryckstest2021}, GSM8K \citep{cobbe2021gsm8k}, and TruthfulQA \citep{DBLP:journals/corr/abs-2109-07958}.
+\textbf{MMLU and GSM8K are used to measure changes in general capabilities.} To investgiate how the original trained LoRAs, and the combinations we produce, affect model capabilities, we run a suite of general capability evaluations, including MMLU \citep{hendryckstest2021}, GSM8K \citep{cobbe2021gsm8k}, and TruthfulQA \citep{DBLP:journals/corr/abs-2109-07958}.
 
 \subsubsection{LLM judges}\label{sec:llm-judges}
 
-\textbf{Trajectories for judgement are produced via several methods.} Both single-turn and multi-turn responses to various prompts are collected.
+\textbf{Trajectories for judgement are produced via several methods.}
+\todo[inline]{(For NeurIPS) Need to make sure this actually discusses what we did.}
+Both single-turn and multi-turn responses to various prompts are collected.
 Single-turn responses allow for well-controlled, more easily calibrated scoring of responses to personality-questionnaire-like prompts, whilst multi-turn chats with stronger models acting as `users' (instructed to either act as a normal conversation partner, or to act as a psychiatrist probing naturally for a given trait) allow for deeper personality probes and test for robustness through longer context.
 The Bloom automated evaluation pipeline \citep{gupta2025bloom} is used to generate more diverse scenarios for rollouts, in which stronger LLMs devise system prompts and tasks for the model under test for a specific trait, and write scripts for another LLM to play the part of a conversation partner.
 Full details are provided in \cref{sec:appendix-e-rollouts}.
 
-\textbf{Judges are LLMs prompted with a trait-specific rubric.} Each rubric opens with the canonical trait definition, a set of defining facets (e.g.\ for Agreeableness: trust, altruism, compliance, modesty), and examples of behaviours that manifest each facet. These rubrics are maintained in a shared module used by both the training constitutions and the judges, ensuring that the trait being trained and the trait being scored refer to the same construct. For OCEAN traits we use a scale from $-4$ to $+4$ to distinguish between slight, mild and extreme expression of the trait in either direction, with $0$ indicating no expression; $+4$ corresponds to extreme high expression and $-4$ to extreme low expression. Coherence uses a $0$ to $10$ scale where $10$ is perfectly organised text, lower scores correspond to degraded structure and topic jumping, and the lowest scores correspond to word salad. Each rubric includes six hand-crafted few-shot examples --- (question, response, score, reasoning) tuples spanning the scale --- including a neutral example and a ``confound'' example where surface features suggest trait signal but the context renders it neutral (e.g.\ direct medical advice is not low Agreeableness). Full prompts are provided in \cref{sec:appendix-e-rubrics}.
+\textbf{Judges are LLMs prompted with a trait-specific rubric.} Each rubric opens with the canonical trait definition, a set of defining facets (e.g.\ for Agreeableness: trust, altruism, compliance, modesty), and examples of behaviours that manifest each facet. These rubrics are maintained in a shared module used by both the training constitutions and the judges, ensuring that the trait being trained and the trait being scored refer to the same construct. For OCEAN traits we use a scale from $-4$ to $+4$ to distinguish between slight, mild and extreme expression of the trait in either direction, with $0$ indicating no expression; $+4$ corresponds to extreme high expression and $-4$ to extreme low expression. Coherence uses a $0$ to $10$ scale where $10$ is perfectly organised text, lower scores correspond to degraded structure and topic jumping, and the lowest scores correspond to incomprehensible text. Each rubric includes hand-crafted few-shot examples. Full prompts are provided in \cref{sec:appendix-e-rubrics}.
 
 \textbf{Judges are applied at the assistant-message level.} Each assistant message is scored in the context of its preceding user message. For single-turn rollouts this reduces to scoring the assistant's response given the user question. For multi-turn rollouts each assistant turn is scored separately, producing a sequence of per-turn scores. We then aggregate by mean to obtain one score per (trait, trajectory) pair; per-turn scores are retained for trajectory-level analysis (e.g.\ persona drift over the course of a conversation). Judges run at temperature $0$ for deterministic scoring.
 
 % NEEDS REPHRASING: compressed calibration paragraph. Full details in appendix.
-\textbf{The judge panel is calibrated against human raters and falls within the human agreement range.} We validated the panel against three independent human annotators who scored 33--36 held-out items per trait for agreeableness, neuroticism, and coherence. Each judge individually agrees with the human mean at Spearman $\rho = 0.87$--$0.93$, within the range of human-human Krippendorff's $\alpha = 0.67$--$0.89$; no judge performs worse than the worst human rater on any annotated trait (\cref{tab:judge-calibration}). Agreement is lower on coherence for both humans and judges, consistent with coherence being a harder subjective judgement than trait attribution \citep{TODO-NLG-eval-citation}. For openness, conscientiousness, and extraversion we rely on author-assigned gold labels, which correlate with human consensus at $\rho = 0.86$--$0.93$ on the annotated traits. Full calibration protocol, candidate-pool comparisons, and per-judge figures are in \cref{sec:appendix-e-judges}.
+\textbf{The judge panel is calibrated against human raters and falls within the human agreement range.} We validated the panel against three independent human annotators who scored 33--36 held-out items per trait for agreeableness, neuroticism, and coherence. Each judge individually agrees with the human mean at Spearman $\rho = 0.87$--$0.93$, within the range of human-human Krippendorff's $\alpha = 0.67$--$0.89$; no judge performs worse than the worst human rater on any annotated trait (\cref{tab:judge-calibration}). Agreement is lower on coherence for both humans and judges, consistent with coherence being a harder subjective judgement than trait attribution \citep{TODO-NLG-eval-citation}. For openness, conscientiousness, and extraversion, we rely on author-assigned gold labels, which correlate with human consensus at $\rho = 0.86$--$0.93$ on the annotated traits. Full calibration protocol, candidate-pool comparisons, and per-judge figures are in \cref{sec:appendix-e-judges}.
 
 \begin{table}[H]
 \centering
@@ -80,9 +82,9 @@ Coherence     & 0.67 & 0.90 & 0.89 & 0.89 & 0.87 \\
 \label{tab:judge-calibration}
 \end{table}
 
-\subsubsection{Results from single LoRAs}\label{sec:results-single-loras}
+\subsection{Results from single LoRAs}\label{sec:results-single-loras}
 
-\Cref{fig:intro-trait-scaling} shows the results for a single LoRA applied to suppress conscientiousness in Llama 3.1 8B-Instruct.
+\Cref{fig:scaling-trait}\todo{(For LASR) Add higher res plot} shows the results for a single LoRA applied to suppress conscientiousness in Llama 3.1 8B-Instruct.
 Plots for other traits, including both suppressors and amplifiers, can be found in \cref{sec:appendix-f}.
 We find evidence of inter-trait correlations (e.g., between conscientiousness and neuroticism); to some extent this could be due to correlations between these traits in humans \citep{digman1990personality}, but it is also possible that this reflects some meaningful difference between humans and these models; a study of this is beyond the scope of this paper.
 
@@ -115,17 +117,19 @@ For the judges, Gemini 2.0 was used, with 10 judge calls per rollout; we report 
 \label{fig:scaling}
 \end{figure}
 
-\textbf{Applying inverse weights allows us to convert amplifiers into suppressors and vice versa.} We also observe from \cref{fig:scaling-trait} that scaling by a negative weight for a trait amplifier causes the trait to be suppressed; we find similarly that inverting a suppressor causes the trait to be amplified.
-Other inversion strategies were attempted.
+\textbf{Applying inverse weights allows us to convert amplifiers into suppressors and vice versa.} We also observe from \cref{fig:scaling-trait} that scaling by a negative weight for a trait amplifier sometimes causes the trait to be suppressed; we find similarly that inverting a suppressor sometimes causes the trait to be amplified.
+In other cases, the inverse weight leaves the trait expression flat.
+% Other inversion strategies were attempted\todo{ToDo (For NeurIPS) Either do this, or take it out}.
 % TODO: describe which strategy was most successful, add figure reference.
 Full plots for all traits can be found in \cref{sec:appendix-f}.
 
-\textbf{LoRA scaling produces capable models across a broad range of scaling factors.} \Cref{fig:scaling-capability} shows the capability of models with a conscientiousness-suppressing LoRA applied across the range of $-4$ to $+4$, as measured by MMLU performance.
+\textbf{LoRA scaling produces capable models across a broad range of scaling factors.} 
+\todo{(For LASR) Replace with full breakdown, high resoltuion plot}\Cref{fig:scaling-capability} shows the capability of models with a conscientiousness-suppressing LoRA applied across the range of $-4$ to $+4$, as measured by MMLU performance.
 Capability remains above ${\sim}90\%$ of base performance in the range $[-2, 1.5]$.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image9.png}
+\includegraphics[width=0.9\linewidth]{figures/tmp/image9.png}
 \caption{Capability of models with a conscientiousness-suppressing LoRA at various scales, as measured by the coherence judge.
 K single-turn rollouts were performed, and scores calculated with M as a judge at temperature T.
 Capabilities remain within approximately 90\% of base capabilities in the LoRA scaling range $[-2, 1.5]$, dropping off at first gradually and then rapidly beyond this.}
@@ -134,10 +138,11 @@ Capabilities remain within approximately 90\% of base capabilities in the LoRA s
 \end{figure}
 
 \textbf{Linear combinations of trait LoRAs affect the persona in a predictable way.} By summing linear combinations of different trait LoRAs, we can reliably affect the level to which the different traits are expressed.
-\Cref{fig:combination-trait} shows the TRAIT benchmark and MMLU scores for a collection of models, including neuroticism amplifying, conscientiousness suppressing, and combinations of the two.
-\Cref{fig:combination-judge} shows the same for LLM judges.
+\Cref{fig:intro-c-e-combo-delta} shows the LLM-judged scores for single turn rollouts, relative to the basline llama-3.1-8b-instruct model, for extraversion amplifying, conscientiousness suppressing, and a a linear combination of the two.
+% \Cref{fig:combination-trait} shows the TRAIT benchmark and MMLU scores for a collection of models, including neuroticism amplifying, conscientiousness suppressing, and combinations of the two.
+% \Cref{fig:combination-judge} shows the same for LLM judges.
 \Cref{sec:appendix-f} also shows details of a study in which amplifiers and suppressors of the same trait are used to negate the effects of each other.
-\Cref{fig:combination-heatmap-trait,fig:combination-heatmap-judge} show heatmaps of the agreeableness and conscientiousness scores on the TRAIT benchmark, as well as LLM judges, for models produced by combining the conscientiousness and agreeableness suppressor LoRAs C- and A-.
+\Cref{fig:combination-heatmap-trait,fig:combination-heatmap-judge}\todo{(For LASR) Add the higher resolution, latest heatmaps} show heatmaps of the agreeableness and conscientiousness scores on the TRAIT benchmark, as well as LLM judges, for models produced by combining the conscientiousness and agreeableness suppressor LoRAs C- and A-.
 
 \begin{figure}[H]
 \centering
