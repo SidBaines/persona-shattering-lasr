@@ -61,6 +61,14 @@ Current state of the script (grows iteratively):
                                       N rollout conversations per factor,
                                       picking up LLM labels from the skill's
                                       output dir when they exist.
+    [done] run_within_model_validation — Cronbach's α per factor (over items
+                                      with |loading| ≥ threshold, sign-
+                                      oriented) + split-half congruence
+                                      (Tucker's |φ| across N random
+                                      half-splits). Writes
+                                      ``validation/cronbach_alpha.json`` and
+                                      ``validation/split_half_congruence.{json,png}``
+                                      per model.
 
     [todo] cross-model Tucker's congruence (Llama ↔ Qwen), Hungarian match
            on min(k_a, k_b), with the extra factor flagged as unmatched.
@@ -105,8 +113,10 @@ from src_dev.factor_analysis import (
     plot_n_factors_comparison,
     run_factor_analysis,
     save_factor_analysis,
+    split_half_congruence,
     suggest_n_factors,
 )
+from src_dev.factor_analysis.reliability import classify_alpha, cronbach_alpha
 from src_dev.factor_analysis.trait_alignment import (
     compute_factor_trait_alignment,
     plot_all_alignment,
@@ -277,6 +287,20 @@ RAW_QUESTIONNAIRE_PATHS: dict[str, Path] = {
         "datasets/psychometric_questionnaires/trait_ocean_natural_v1.json"
     ),
 }
+
+# ── Within-model validation ─────────────────────────────────────────────────
+# Cronbach's α: for each factor, restrict to items whose |loading| exceeds
+# this threshold (the standard psychometric "defining items" subset), sign-
+# orient by loading direction, and compute α. 0.4 is the conventional
+# "salient loading" threshold (Comrey & Lee 1992); lower thresholds drag
+# in weakly-loaded items that don't actually belong to the construct.
+CRONBACH_LOADING_THRESHOLD: float = 0.4
+
+# Split-half congruence: N iterations of random half-splits, per-factor
+# Tucker's |φ| distribution. ~100 iters is enough to stabilise the
+# violin plots without the cost of bootstrap's resample-refit loops.
+SPLIT_HALF_N_ITERS: int = 100
+SPLIT_HALF_PASS_THRESHOLD_PHI: float = 0.85  # Lorenzo-Seva "fair" threshold
 
 # Persisted-labels store (checked into the repo, survives gitignored
 # scratch wipes). The /label-fa-factors skill writes into
@@ -826,6 +850,176 @@ def fit_factor_analysis(data: LoadedData, *, k: int) -> FaFit:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# WITHIN-MODEL VALIDATION
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _cronbach_alpha_per_factor(
+    matrix: np.ndarray,
+    loadings: np.ndarray,
+    items: list[dict],
+    *,
+    loading_threshold: float,
+) -> list[dict]:
+    """Compute Cronbach's α for each factor, over items with |loading| ≥ threshold.
+
+    Items are sign-oriented by loading direction so positively- and
+    negatively-loading items both contribute positively to the summed score
+    — without this, α is meaningless when a factor has mixed-sign loadings.
+
+    Returns one dict per factor with α, the classified α (excellent / good /
+    acceptable / questionable / poor / redundant), the number of items used,
+    and the per-block item counts so we can tell at a glance whether α is
+    being driven by Likert items, trait_mcq items, or a mix.
+    """
+    n_items, n_factors = loadings.shape
+    rows: list[dict] = []
+    for f in range(n_factors):
+        col = loadings[:, f]
+        mask = np.abs(col) >= loading_threshold
+        idxs = np.flatnonzero(mask)
+        if idxs.size < 2:
+            rows.append({
+                "factor_index": f,
+                "n_items": int(idxs.size),
+                "alpha": float("nan"),
+                "alpha_class": "n/a",
+                "threshold": loading_threshold,
+                "item_col_ids": [items[i].get("col_id") for i in idxs.tolist()],
+                "block_counts": {},
+                "note": "fewer than 2 salient items",
+            })
+            continue
+        subset = matrix[:, idxs]
+        signs = np.sign(col[idxs])
+        signs[signs == 0] = 1.0  # pathological guard; |loading|≥0.4 excludes zeros
+        alpha = cronbach_alpha(subset, loading_signs=signs)
+        block_counts: dict[str, int] = {}
+        for i in idxs.tolist():
+            b = str(items[i].get("block", "?"))
+            block_counts[b] = block_counts.get(b, 0) + 1
+        rows.append({
+            "factor_index": f,
+            "n_items": int(idxs.size),
+            "alpha": float(alpha),
+            "alpha_class": classify_alpha(alpha),
+            "threshold": loading_threshold,
+            "item_col_ids": [items[i].get("col_id") for i in idxs.tolist()],
+            "block_counts": block_counts,
+        })
+    return rows
+
+
+def _load_labels_for_slug(model_slug: str, n_factors: int) -> dict[int, str]:
+    """Best-effort ``{factor_index -> axis_name}`` from the persisted labels store.
+
+    Picks the newest ``llm_labels_*.json`` under ``LABELS_REPO_DIR/<slug>/
+    labeling/`` by mtime and returns the axis_name per factor. Returns
+    ``{}`` when no label file exists — callers should fall back to
+    ``F{idx}`` placeholders.
+    """
+    labeling_dir = LABELS_REPO_DIR / model_slug / "labeling"
+    if not labeling_dir.is_dir():
+        return {}
+    candidates = sorted(
+        labeling_dir.glob("llm_labels_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict) and "factors" in payload:
+            payload = payload["factors"]
+        if not isinstance(payload, list):
+            continue
+        out: dict[int, str] = {}
+        for entry in payload:
+            fi = entry.get("factor_index")
+            ax = entry.get("axis_name")
+            if isinstance(fi, int) and 0 <= fi < n_factors and ax:
+                out[fi] = str(ax)
+        if out:
+            return out
+    return {}
+
+
+def run_within_model_validation(
+    data: LoadedData, fit: FaFit,
+) -> dict:
+    """Cronbach's α per factor + split-half congruence, written under validation/.
+
+    Two tests, both loadings-based and within-model-only:
+
+    * Cronbach's α — do the items that cluster onto a factor actually
+      predict each other? One α per factor, conventional thresholds in
+      ``classify_alpha``. Saved as ``validation/cronbach_alpha.json`` with
+      per-factor α + sign-oriented item list + per-block item counts.
+
+    * Split-half congruence — is the factor structure replicable within
+      the persona sample? For each of N random half-splits, refit FA on
+      each half and compute per-factor Tucker's |φ|. Pass threshold 0.85
+      (Lorenzo-Seva "fair similarity"). Saved as
+      ``validation/split_half_congruence.{json,png}``.
+    """
+    out_dir = data.output_dir / "validation"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fa_result = load_factor_analysis(fit.npz_path)
+    loadings = fa_result["loadings"]
+
+    log.info("[%s] Cronbach's α per factor (|loading|≥%.2f)…",
+             data.model.slug, CRONBACH_LOADING_THRESHOLD)
+    alpha_rows = _cronbach_alpha_per_factor(
+        data.matrix, loadings, data.items,
+        loading_threshold=CRONBACH_LOADING_THRESHOLD,
+    )
+    alpha_payload = {
+        "model_slug": data.model.slug,
+        "model_label": data.model.label,
+        "n_factors": fit.k,
+        "rotation": fit.rotation,
+        "loading_threshold": CRONBACH_LOADING_THRESHOLD,
+        "per_factor": alpha_rows,
+    }
+    (out_dir / "cronbach_alpha.json").write_text(
+        json.dumps(alpha_payload, indent=2)
+    )
+    log.info("[%s] wrote %s", data.model.slug, out_dir / "cronbach_alpha.json")
+
+    for row in alpha_rows:
+        log.info(
+            "  F%d: α=%.3f (%s)  n_items=%d  blocks=%s",
+            row["factor_index"], row["alpha"], row["alpha_class"],
+            row["n_items"], row["block_counts"],
+        )
+
+    log.info(
+        "[%s] Split-half congruence (%d iterations, k=%d, %s)…",
+        data.model.slug, SPLIT_HALF_N_ITERS, fit.k, fit.rotation,
+    )
+    split_half = split_half_congruence(
+        data.matrix,
+        n_factors=fit.k,
+        out_dir=out_dir,                       # writes split_half_congruence.{json,png}
+        n_iters=SPLIT_HALF_N_ITERS,
+        fa_method=fit.method,
+        rotation=fit.rotation,
+        align="procrustes",                    # oblimin-compatible alignment
+        seed=SEED,
+        pass_threshold_median_phi=SPLIT_HALF_PASS_THRESHOLD_PHI,
+        verbose=False,
+    )
+
+    return {
+        "cronbach_alpha": alpha_payload,
+        "split_half_congruence": split_half,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # HTML FACTOR BROWSER
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1059,6 +1253,38 @@ def main() -> None:
         html_path = export_html_browser(loaded[slug], fit)
         if html_path is not None:
             html_paths[slug] = html_path
+
+    # ── Step: within-model validation (Cronbach's α + split-half |φ|) ──
+    validation_results: dict[str, dict] = {}
+    for slug, fit in fits.items():
+        log.info("═══ run_within_model_validation [%s] ═══", slug)
+        validation_results[slug] = run_within_model_validation(
+            loaded[slug], fit,
+        )
+
+    if validation_results:
+        print()
+        print("=" * 78)
+        print("Within-model validation summary")
+        print("=" * 78)
+        header = f"  {'model':<14}  {'F':>2}  {'axis':<14}  {'α':>6}  {'α-class':<12}  {'median |φ|':>10}  {'pass':>4}"
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for slug, res in validation_results.items():
+            alpha_rows = res["cronbach_alpha"]["per_factor"]
+            sh = res["split_half_congruence"]
+            medians = sh.get("median_phi_per_factor", [])
+            # Best-effort axis_name lookup from labels; fall back to 'F{n}'.
+            labels = _load_labels_for_slug(slug, len(alpha_rows))
+            for i, row in enumerate(alpha_rows):
+                ax = labels.get(i, f"F{i}")
+                med = medians[i] if i < len(medians) else float("nan")
+                passed = med >= SPLIT_HALF_PASS_THRESHOLD_PHI
+                print(
+                    f"  {slug:<14}  F{row['factor_index']:<1}  {ax:<14}  "
+                    f"{row['alpha']:>6.3f}  {row['alpha_class']:<12}  "
+                    f"{med:>10.3f}  {'yes' if passed else 'no':>4}"
+                )
 
     if fits:
         print()
