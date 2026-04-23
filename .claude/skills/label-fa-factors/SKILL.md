@@ -86,16 +86,51 @@ three subcommands:
    the final path. If validation fails, fix the payload and retry — do not
    write directly to the labeling dir, always go through `write`.
 
+   The validator rejects payloads that miss any required field
+   (`factor_index`, `axis_name`, `summary`, `description`, `positive_pole`,
+   `negative_pole`, `dominant_item_types`), that leave duplicate or
+   out-of-range `factor_index` values, or that violate the stylistic
+   constraints from step 4: `axis_name` must be a single word in Title Case;
+   `summary` must be ≤12 words and contain ` vs ` (case-insensitive);
+   `description` must be prose (~15–120 words, i.e. roughly 2–3 sentences);
+   `dominant_item_types` must be a non-empty list of recognised block names
+   (`"likert"`, `"fc_pair"`, `"trait_mcq"`, `"vignette"`, `"fc"`).
+
 6. **Report.** Print the output path and a one-line summary per factor
    (`Factor N: [AxisName] pole_a vs pole_b`) so the user can eyeball the
    result.
 
 ## Conventions and gotchas
 
-- **Sign interpretation is already decoded** in the `describe` output —
-  lines end with `→ + loading means …` phrasing. Trust that, especially for
-  reverse-keyed Likert items and fc_pair items where the matrix encoding
-  flips per item.
+- **Always check direction per item — do not skim.** Getting the sign of
+  a factor wrong is the most common labelling failure, because the
+  question text alone is not enough: whether a high-factor persona
+  *agrees* or *disagrees* with a likert item depends on whether it is
+  reverse-keyed, and which option a trait_mcq / fc_pair / vignette item
+  endorses depends on the item-specific scoring / `high_option`.
+  `describe` pre-computes the right-sign interpretation and puts it on
+  the `→` line of each item — but you still have to read it for every
+  top item on both poles, not just the first one or two. The headline
+  checks per block:
+    - *Likert*: the `→` line tells you whether high-factor personas
+      *agree* or *disagree*, already accounting for `reverse_keyed`.
+      Don't infer from the statement text alone.
+    - *fc_pair*: the header tells you which letter (`A` or `B`) is the
+      `+1` pole for that item — the mapping flips per item, so a
+      `+0.40` loading does not consistently mean "option A".
+    - *trait_mcq* with `encoding=trait_score_0-1`: sign is interpretable,
+      the `→` line tells you whether high-factor personas pick more
+      `scored=1` or more `scored=0` options. With
+      `encoding=letter_1-4`, sign is NOT interpretable at all (see
+      below).
+    - *vignette*: the `→` line tells you whether high-factor personas
+      pick higher- or lower-scoring options *on the per-column scoring
+      axis* (axis name is deliberately redacted — see below).
+  Before writing a label, sanity-check by counting: do most top-positive
+  items' `→` lines point the same behavioural way? Do the top-negative
+  items point the opposite way? If the decoded directions contradict
+  each other within one pole, the factor is a mess — say so in the
+  `description` rather than forcing a clean story.
 - **trait_mcq with `encoding=letter_1-4`** is NOT trait-interpretable by
   sign. Do not claim that such a factor captures a trait direction purely
   on that evidence; look for consistent patterns across *other* blocks.
@@ -121,7 +156,25 @@ three subcommands:
   load high and low on each factor, and name the factor from that content.
   If your label happens to match a standard trait name, that's fine — but
   derive it from the loadings, don't back-fit the loadings to a familiar
-  label.
+  label. `describe` deliberately redacts the author-assigned `dimension`
+  name from `trait_mcq` / `vignette` items for this reason; options are
+  shown with numeric scores only, not trait labels.
+- **Don't force-fit to OCEAN or other human psychometric frameworks.**
+  The research target is *whatever structure the loadings actually
+  recover*, not a reconstruction of any particular human taxonomy.
+  A rotation may recover Big-Five-like structure, finer sub-dimensions,
+  instrument-specific artefacts, cross-construct blends, or genuinely
+  novel axes that don't map to any standard label. If the loadings
+  really do look like a Big-Five trait — content-consistent across
+  blocks, not merely item-provenance-consistent — using that name is
+  fine. But do not label a factor "Extraversion" because the items came
+  from an extraversion scale, or because the rotation has five factors
+  and factor `k` is "the OCEAN-ish one". Coin a new label if nothing
+  standard fits — novel axes are a legitimate research finding, not a
+  failure mode.
+- **`col_id` values may hint at the item's origin** (e.g.
+  `trait_ocean_v1/mcq_extraversion_3`). Treat them as debugging metadata
+  only — the item's *content* is what you name from, not its id.
 
 ## Example JSON payload
 
