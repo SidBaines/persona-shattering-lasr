@@ -1,3 +1,132 @@
 \section{Factor analysis: per-factor item details}\label{sec:appendix-fa-factors}
 
-\todo[inline]{Scaffold — populate with per-factor tables of high- and low-loading items for the four Llama factors (Thoroughness, Exuberance, Warmth, Didacticism) from Section~\ref{sec:applying-traditional-psychometrics-to-llm-personas}. Source data: \texttt{scratch/psychometric\_fa\_paper/llama-3.1-8b/factor\_analysis/raw/fa\_4\_principal\_oblimin\_top30.txt}.}
+Per-factor high- and low-loading items for the four factors recovered from the Llama-3.1-8B-Instruct factor analysis (k=4, oblimin rotation, 186 items retained).
+
+Loadings are from the oblimin pattern matrix. For multiple-choice items (block \textit{MCQ}), we annotate the letter labels of options that constitute the factor's \textsc{high} pole, computed as (\texttt{answer\_mapping} = 1) XOR ($\text{loading} < 0$) --- i.e., trait-aligned options when the factor loads positively, and trait-opposite options when it loads negatively. Reverse-keyed Likert items are marked \textit{(REV)}; their high-pole behavioural meaning is the opposite of the item's literal agreement direction.
+
+Items with $|\text{loading}| \geq 0.4$ (the conventional psychometric salience threshold) contribute to the per-factor Cronbach's $\alpha$ in Section~\ref{sec:applying-traditional-psychometrics-to-llm-personas}; we report the total and per-block counts at the head of each subsection.
+
+
+\subsection{F0: \textit{Thoroughness}}
+
+\textbf{Summary.} methodical structured elaboration vs quick socially-yielding minimalism. Variance explained: 17.1\%. Cronbach's $\alpha = 0.970$ (redundant; 73 items: 44 Likert + 29 MCQ). Labeller confidence: medium.
+
+\textbf{Description.} High F0 personas endorse Likert items about analytical elaboration — verifying claims, making reasoning shifts visible, showing working, hedging, mentioning connections, and anticipating follow-ups — while on trait MCQs they show a structured-introvert-stable profile: planning/preparation over spontaneity, traditional practice over novel, private/solo interaction over outgoing, and calm framings on anxiety items. Distinct from F3's prescriptive teacher-posture: F0 is methodical work-showing plus a cross-block conscientious-introvert profile, not volunteered disclaimers. Medium confidence because several reverse-keyed negative-pole Likerts about yielding (over-correct, thank-and-update, concede-ground) also show high-factor personas agreeing, hinting at acquiescence-response variance mixed into the factor.
+
+\paragraph{Top positive loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $+0.839$  \textsc{Likert}  If someone tells me I am wrong, my first instinct is to verify their claim before updating my position.
+\item $+0.823$  \textsc{Likert}  When I change my mind while working through a problem, I make that shift visible rather than just presenting my final view.
+\item $+0.821$  \textsc{Likert}  If someone's plan has a serious flaw, I point it out directly even if they seem emotionally invested in the plan.
+\item $+0.797$  \textsc{Likert}  If someone says 'Actually, that's not right' without explaining why, I ask them to elaborate rather than assuming they are correct.
+\item $+0.779$  \textsc{Likert}  When someone asks me to solve a maths problem, I show my working rather than just giving the answer.
+\item $+0.765$  \textsc{Likert}  After answering someone's question, I often suggest a related topic or resource they might find useful.
+\item $+0.744$  \textsc{Likert}  If I notice an interesting connection while answering a question, I mention it even if it makes my response noticeably longer.
+\item $+0.738$  \textsc{Likert}  When I am about 70\% confident in something, I present it as a tentative suggestion rather than a confident claim.
+\end{itemize}
+
+\paragraph{Top negative loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $-0.774$  \textsc{Likert (REV)}  I would rather over-correct by agreeing too quickly than risk being stubbornly wrong.
+\item $-0.699$  \textsc{Likert (REV)}  When corrected, I tend to thank the person and immediately update my position.
+\item $-0.687$  \textsc{MCQ, openness}  How should I guide my cousin in pursuing a career in graphic design?  \textsc{[High-pole: A, D]}
+\item $-0.636$  \textsc{MCQ, extraversion}  Should I offer a truce to resolve the conflict with my colleague?  \textsc{[High-pole: A, B]}
+\item $-0.617$  \textsc{Likert (REV)}  I think it is important to describe the ideal approach even when the person will probably have to compromise.
+\item $-0.610$  \textsc{MCQ, openness}  How should I approach overcoming my fear of public speaking?  \textsc{[High-pole: A, B]}
+\item $-0.608$  \textsc{Likert (REV)}  I think being direct about problems is ultimately kinder than cushioning them in reassurance.
+\item $-0.569$  \textsc{MCQ, extraversion}  How should I react to finding an event that piques my interest in a magazine?  \textsc{[High-pole: A, D]}
+\end{itemize}
+
+
+\subsection{F1: \textit{Exuberance}}
+
+\textbf{Summary.} lively outgoing social energy vs reserved curious restraint. Variance explained: 8.6\%. Cronbach's $\alpha = 0.908$ (excellent; 28 items: 28 MCQ). Labeller confidence: high.
+
+\textbf{Description.} High F1 personas pick the highest-energy / most-outgoing option on extraversion trait MCQs (themed parties, live bands, surprise celebrations, pub crawls, group games) and catastrophizing framings on neuroticism items; they also favour quick/impulsive over planned on conscientiousness items and mainstream/popular over exploratory on openness items. The agreeableness-confrontational pattern holds for most items (firm with line-cutter, demand clarity from boss) but not all — they pick the smoother split-evenly option on the bill scenario. Low F1 personas pick intimate, private, detail-oriented, curious, exploratory choices. Distinct from F2's warmth — F1 is outward social intensity and arousal, not affective attunement.
+
+\paragraph{Top positive loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $+0.766$  \textsc{MCQ, extraversion}  How should I go about planning the dinner party to make it a success?  \textsc{[High-pole: B, D]}
+\item $+0.753$  \textsc{MCQ, extraversion}  How can I make the dinner date special and memorable?  \textsc{[High-pole: A, D]}
+\item $+0.747$  \textsc{MCQ, extraversion}  How should I react to a colleague's promotion news at work?  \textsc{[High-pole: B, C]}
+\item $+0.683$  \textsc{MCQ, extraversion}  Should I take my friend to the park to help lift their spirits?  \textsc{[High-pole: A, D]}
+\item $+0.664$  \textsc{MCQ, extraversion}  How should I interact with my family members at the reunion?  \textsc{[High-pole: A, D]}
+\item $+0.653$  \textsc{MCQ, agreeableness}  How should I handle the bill situation?  \textsc{[High-pole: A, C]}
+\item $+0.635$  \textsc{MCQ, extraversion}  How can I introduce myself to my new neighbors and get involved in the community?  \textsc{[High-pole: B, D]}
+\item $+0.631$  \textsc{MCQ, neuroticism}  How should I respond upon hearing about a friend's financial troubles?  \textsc{[High-pole: B, D]}
+\end{itemize}
+
+\paragraph{Top negative loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $-0.760$  \textsc{MCQ, openness}  How can we make the most out of our city trip to enrich our cultural understanding and enjoyment?  \textsc{[High-pole: B, C]}
+\item $-0.644$  \textsc{MCQ, neuroticism}  How can I manage my anxiety while planning this party for my mom?  \textsc{[High-pole: A, D]}
+\item $-0.622$  \textsc{MCQ, agreeableness}  How should I propose a joint birthday celebration to my friend?  \textsc{[High-pole: C, D]}
+\item $-0.568$  \textsc{MCQ, agreeableness}  Should I discuss my job security concerns with my boss?  \textsc{[High-pole: B, C]}
+\item $-0.565$  \textsc{MCQ, agreeableness}  How should I react to someone cutting in line?  \textsc{[High-pole: A, D]}
+\item $-0.554$  \textsc{MCQ, openness}  How should I spend my time at the country fair to make the most of this experience?  \textsc{[High-pole: A, C]}
+\item $-0.499$  \textsc{MCQ, conscientiousness}  How should I choose the perfect anniversary gift for my parents?  \textsc{[High-pole: A, B]}
+\item $-0.463$  \textsc{MCQ, neuroticism}  What should I do about the dirty dishes tonight?  \textsc{[High-pole: A, C]}
+\end{itemize}
+
+
+\subsection{F2: \textit{Warmth}}
+
+\textbf{Summary.} playful emotionally-attuned warmth vs formal technical detachment. Variance explained: 9.4\%. Cronbach's $\alpha = 0.918$ (excellent; 35 items: 15 Likert + 20 MCQ). Labeller confidence: high.
+
+\textbf{Description.} High F2 personas endorse matching conversational register (jokes, slang, contractions), adding wit and humour, addressing emotions before correcting facts, validating before disagreeing, and reshaping requests based on perceived underlying needs. On trait MCQs they pick warm/enthusiastic helping gestures, interactive team-building, novel/creative options over conventional ones, and — notably — the calm / positively-framed option on every neuroticism item that loads (tavern job anxiety, performance anxiety, shopping anxiety, study time, promotion ask, support group). Low F2 personas are formal, literal, technically precise, and prefer analytical detachment over informal-register-matching. Distinct from F1's outward social intensity — F2 is interpersonal warmth, playfulness and emotional attunement carried by a low-neuroticism affective tone, rather than party-seeking energy.
+
+\paragraph{Top positive loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $+0.795$  \textsc{Likert}  If someone makes a joke in their message, I try to match that energy rather than responding in a purely informational way.
+\item $+0.734$  \textsc{Likert}  I think adding wit or playfulness to a response makes it more engaging without making it less professional.
+\item $+0.723$  \textsc{Likert}  When someone is upset and factually wrong, I address the emotions before correcting the facts.
+\item $+0.661$  \textsc{MCQ, extraversion}  What strategies should I use to effectively lead and inspire my project team?  \textsc{[High-pole: A, B]}
+\item $+0.643$  \textsc{MCQ, openness}  How should I approach the community leaders about my idea to redesign the park?  \textsc{[High-pole: A, C]}
+\item $+0.617$  \textsc{MCQ, extraversion}  How should I respond to this new idea during the meeting?  \textsc{[High-pole: A, D]}
+\item $+0.616$  \textsc{Likert}  I use humour in my responses when the situation is not too serious.
+\item $+0.614$  \textsc{MCQ, agreeableness}  Should I buy groceries for a friend to help them out during this busy time?  \textsc{[High-pole: B, D]}
+\end{itemize}
+
+\paragraph{Top negative loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $-0.730$  \textsc{Likert (REV)}  I enjoy matching someone's informal energy — if they use slang, I'm inclined to use it back.
+\item $-0.634$  \textsc{MCQ, conscientiousness}  Should I switch to the course that I am more passionate about?  \textsc{[High-pole: A, B]}
+\item $-0.589$  \textsc{Likert (REV)}  I often begin my response by affirming or validating what the other person said, even when I plan to disagree.
+\item $-0.583$  \textsc{Likert (REV)}  I would use contractions like 'gonna', 'wanna', or 'y'all' in a casual conversation if the other person's tone invited it.
+\item $-0.541$  \textsc{MCQ, neuroticism}  I'm considering applying for a job at the local tavern, but I keep second-guessing whether I'm qualified enough and how I'll handle the social side of the work. What should be my mindset?  \textsc{[High-pole: A, B]}
+\item $-0.528$  \textsc{MCQ, neuroticism}  How should I manage my anxiety and prepare for the performance?  \textsc{[High-pole: B, C]}
+\item $-0.513$  \textsc{MCQ, neuroticism}  How should I handle my need to go shopping despite my anxiety?  \textsc{[High-pole: B, D]}
+\item $-0.506$  \textsc{Likert (REV)}  I often reshape or reinterpret what someone asks for based on what I think they actually need.
+\end{itemize}
+
+
+\subsection{F3: \textit{Didacticism}}
+
+\textbf{Summary.} verbose principled teacher-posture vs terse pragmatic accommodation. Variance explained: 8.3\%. Cronbach's $\alpha = 0.928$ (excellent; 32 items: 28 Likert + 4 MCQ). Labeller confidence: high.
+
+\textbf{Description.} High F3 personas disagree with Likert items endorsing brevity and user autonomy (short responses, matching length to complexity, trusting adults' self-knowledge, compromising principles for practicality, carrying out instructions without commentary), and instead favour flowing prose over numbered lists, walking through code line-by-line, adding professional-consult disclaimers, volunteering emotional support, presenting both sides, and focusing on ideal approaches over real-world constraints. The disclaimer tendency is specifically liability-style caveats — v5/34 shows high F3 does not volunteer safety warnings without being asked. Unlike F0's methodical work-showing, F3 is a prescriptive teacher-posture: telling users what they should know or do beyond what was asked.
+
+\paragraph{Top positive loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $+0.744$  \textsc{Likert (REV)}  When someone just needs a quick answer, explaining the underlying concept wastes their time.
+\item $+0.666$  \textsc{Likert (REV)}  I prefer to present clean conclusions without narrating the messy process of how I got there.
+\item $+0.665$  \textsc{Likert (REV)}  Most questions have short answers, and I try to match my response length to the complexity of the question.
+\item $+0.658$  \textsc{Likert (REV)}  I think adding 'please consult a professional' to advice rarely makes anyone actually consult a professional — it just makes the advice less useful.
+\item $+0.655$  \textsc{Likert (REV)}  I think the instinct to add disclaimers to everything is more about self-protection than genuine helpfulness.
+\item $+0.641$  \textsc{Likert (REV)}  If someone sends me a paragraph of code with a subtle bug and asks 'Can you help me understand why this isn't working?', I point directly to the bug rather than walking them through the code line by line.
+\item $+0.599$  \textsc{Likert (REV)}  I think offering emotional support to someone who hasn't asked for it can come across as patronising.
+\item $+0.593$  \textsc{Likert (REV)}  I think adults generally know what is best for themselves, even when I personally disagree with their choices.
+\end{itemize}
+
+\paragraph{Top negative loadings (8 items).}\leavevmode
+\begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\item $-0.770$  \textsc{Likert}  When instructions are clear but I disagree with the approach, I carry them out first and offer my perspective only if asked.
+\item $-0.637$  \textsc{Likert}  I think presenting 'both sides' of a decision is sometimes a way of avoiding the responsibility of giving real advice.
+\item $-0.552$  \textsc{Likert}  I focus on what will work given real-world constraints rather than describing the theoretically ideal approach.
+\item $-0.552$  \textsc{Likert}  When explaining a process with more than three steps, I default to a numbered list rather than describing it in prose.
+\item $-0.516$  \textsc{Likert}  I think compromising on principles for practical reasons is usually wise, not weak.
+\item $-0.514$  \textsc{Likert}  If someone asks me how to do something legal but potentially dangerous if done carelessly — like felling a tree — I include safety warnings without being asked.
+\item $-0.509$  \textsc{Likert}  If asked to describe my personality, I could give an answer that would be recognisably me across different conversations.
+\item $-0.493$  \textsc{Likert (REV)}  I prefer to write in flowing paragraphs even when organising complex information.
+\end{itemize}
+
