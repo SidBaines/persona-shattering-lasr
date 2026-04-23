@@ -37,20 +37,46 @@ run_step() {
     echo "=== Done: ${label} ==="
 }
 
-# Reclaim disk for one persona after its axis + trait + mmlu have finished.
-# All authoritative artifacts live on HF already (axis.pt, per_layer_range.pt,
-# eval run_info.json, plots). Local scratch is just a cache and can be
-# rehydrated by subsequent reruns via suite.py's skip_completed logic.
+# Authoritative artifacts live on HF; local scratch is just a cache. The three
+# functions below clean at progressively-later checkpoints so we don't carry
+# old state into the next step (the pod ran out of disk during mmlu because
+# trait's scratch was still sitting around from moments earlier).
+#
+# Run order per persona: axis → after_axis_cleanup → trait → after_trait_cleanup → mmlu → persona_cleanup
+
+after_axis_cleanup() {
+    # The axis step uploads everything to HF, but activations.pt (~1 GB llama /
+    # ~1.6 GB gemma) is never read back by trait/mmlu — axis.pt and
+    # per_layer_range.pt are the only files the eval configs need. Drop the
+    # big one immediately and keep the small pair for local cache.
+    local p="$1"
+    echo ""
+    echo "--- Post-axis cleanup for ${p} (drop activations.pt) ---"
+    rm -f scratch/*/activation_capping/"${p}"_*/*_activations.pt
+    # LoRA adapter isn't needed after the axis step — eval suite loads a plain
+    # base model + the axis, not the LoRA.
+    rm -rf scratch/lora_cache/"${p}"_*
+}
+
+after_trait_cleanup() {
+    # Trait eval is fully uploaded to HF before we start mmlu. Wipe its
+    # scratch so mmlu has headroom (each eval's output_root is ~1–2 GB of
+    # inspect logs + run artifacts across the 13 fraction points).
+    local p="$1"
+    echo ""
+    echo "--- Post-trait cleanup for ${p} (wipe trait scratch) ---"
+    rm -rf scratch/evals/ocean/trait/"${p}"_activation_capping_*
+}
+
 cleanup_persona_scratch() {
+    # Final wipe at end of persona — picks up anything the inline cleanups
+    # left, plus the mmlu output and any remaining axis-dir pieces (plots,
+    # run_info.json, etc.).
     local p="$1"
     echo ""
     echo "--- Cleaning scratch for ${p} ---"
-    # Axis artifacts (incl. activations.pt ~1 GB for llama / ~1.6 GB for gemma).
-    # Globs both scratch/llama_8b_instruct and scratch/gemma_3_27b_it roots.
     rm -rf scratch/*/activation_capping/"${p}"_*
-    # LoRA adapter download.
     rm -rf scratch/lora_cache/"${p}"_*
-    # Eval outputs (trait + mmlu).
     rm -rf scratch/evals/ocean/trait/"${p}"_activation_capping_*
     rm -rf scratch/evals/ocean/mmlu/"${p}"_activation_capping_*
 }
@@ -65,10 +91,12 @@ for p in "${PERSONAS[@]}"; do
 
     run_step "axis ${p}" \
         uv run python scripts_dev/activation_capping/ocean/paper_versions/compute_axis.py --persona "$p"
+    after_axis_cleanup "$p"
 
     run_step "trait activation_capping ${p}" \
         uv run python -m src_dev.evals suite \
             --config-module "scripts_dev.personality_evals.configs.ocean.trait.activation_capping.${p}_activation_capping"
+    after_trait_cleanup "$p"
 
     run_step "mmlu activation_capping ${p}" \
         uv run python -m src_dev.evals suite \
