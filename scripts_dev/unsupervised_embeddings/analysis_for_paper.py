@@ -266,6 +266,18 @@ ROLLOUT_DIR_FOR_HTML: Path = Path(
 # much as a human wants to scroll through at once.
 HTML_N_PER_POLE: int = 10
 
+# Raw questionnaire JSON paths used to enrich items.json before rendering
+# the factor-extremes HTML. The combined items.json doesn't carry MCQ
+# options or answer_mapping, so we match by bare item id back to the raw
+# source and splice the extra fields in. Likert's `reverse_keyed` already
+# rides along on items.json but we still look it up here for uniformity.
+RAW_QUESTIONNAIRE_PATHS: dict[str, Path] = {
+    "v5": Path("datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json"),
+    "trait_ocean_natural_v1": Path(
+        "datasets/psychometric_questionnaires/trait_ocean_natural_v1.json"
+    ),
+}
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -765,6 +777,56 @@ def fit_factor_analysis(data: LoadedData, *, k: int) -> FaFit:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _load_raw_questionnaire_index() -> dict[tuple[str, str], dict]:
+    """Build a lookup `(questionnaire_version, bare_id) -> raw_item`.
+
+    Raw items for trait_mcq carry ``options`` + ``answer_mapping``; raw
+    items for Likert carry ``reverse_keyed``. ``col_id`` in items.json is
+    namespaced as ``{version}/{bare_id}`` — we split that when looking up.
+    """
+    idx: dict[tuple[str, str], dict] = {}
+    for version, path in RAW_QUESTIONNAIRE_PATHS.items():
+        if not path.exists():
+            log.warning("raw questionnaire missing: %s", path)
+            continue
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        # Likert (v5-style): top-level "items"
+        for raw_item in raw.get("items", []) or []:
+            idx[(version, str(raw_item["id"]))] = raw_item
+        # Trait-MCQ (trait_ocean_*-style): block_4_trait_mcq.items
+        block = raw.get("block_4_trait_mcq", {})
+        for raw_item in block.get("items", []) or []:
+            idx[(version, str(raw_item["id"]))] = raw_item
+    return idx
+
+
+def _enrich_column_defs(column_defs: list[dict]) -> list[dict]:
+    """Splice trait-mcq options/answer_mapping + reverse-keyed onto column defs.
+
+    Doesn't mutate the inputs — returns a new list of dicts with extra
+    fields populated where a raw questionnaire entry is available.
+    """
+    raw_index = _load_raw_questionnaire_index()
+    enriched: list[dict] = []
+    for cdef in column_defs:
+        out = dict(cdef)
+        col_id = str(cdef.get("col_id", ""))
+        # col_id looks like "v5/0" or "trait_ocean_natural_v1/openness_trait_xxxx"
+        version, _, bare = col_id.partition("/")
+        raw_item = raw_index.get((version, bare))
+        if raw_item is None:
+            enriched.append(out)
+            continue
+        if "reverse_keyed" not in out and "reverse_keyed" in raw_item:
+            out["reverse_keyed"] = bool(raw_item["reverse_keyed"])
+        if "options" in raw_item and "options" not in out:
+            out["options"] = raw_item["options"]
+        if "answer_mapping" in raw_item and "answer_mapping" not in out:
+            out["answer_mapping"] = raw_item["answer_mapping"]
+        enriched.append(out)
+    return enriched
+
+
 def export_html_browser(data: LoadedData, fit: FaFit) -> Path | None:
     """Write an interactive HTML factor browser for one FA fit.
 
@@ -798,6 +860,7 @@ def export_html_browser(data: LoadedData, fit: FaFit) -> Path | None:
     labeling_dir.mkdir(parents=True, exist_ok=True)
 
     fa_result = load_factor_analysis(fit.npz_path)
+    enriched_items = _enrich_column_defs(data.items)
 
     log.info(
         "[%s] exporting factor_extremes.html → %s",
@@ -805,7 +868,7 @@ def export_html_browser(data: LoadedData, fit: FaFit) -> Path | None:
     )
     export_factor_extremes_html(
         fa_result=fa_result,
-        column_defs=data.items,
+        column_defs=enriched_items,
         metadata=data.metadata,
         label=analysis_key,
         save_dir=save_dir,
