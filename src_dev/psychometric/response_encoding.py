@@ -25,6 +25,11 @@ History:
          passes the configured scale through so the reversal is
          ``(likert_scale + 1) − score`` regardless of which digits
          appeared in the top-k.
+    (note: ``trait_mcq_encoding`` is a per-run config dial, NOT an
+    encoding-version bump — soft_ev and logit produce different cell
+    values but share the same "format" contract, and cache collision is
+    avoided by appending ``-enc_logit`` to the run-id tag for logit runs
+    in ``_questionnaire_run_id`` so existing soft_ev caches remain valid.)
     v4 — ``QuestionnaireStageConfig.min_choice_mass`` is now actually
          applied during matrix encoding. Cells where the top-k logprobs
          carry less than ``min_choice_mass`` total probability on the
@@ -62,6 +67,8 @@ def fill_matrix_from_choice(
     fc_pair_high: dict[str, str] | None = None,
     choice_probs: dict[str, float] | None = None,
     likert_scale: int = 5,
+    trait_mcq_encoding: str = "soft_ev",
+    trait_mcq_logit_epsilon: float = 0.005,
 ) -> None:
     """Fill matrix columns for persona k given their choice on item_id.
 
@@ -73,14 +80,32 @@ def fill_matrix_from_choice(
     - Vignette:  multiple columns (one per dimension) via option scoring dict
     - Likert:    single column with dimension set, encoded 1-5 with optional
                  reversal
-    - trait_mcq: single column with dimension set, encoded as the trait-aligned
-                 score in [0,1]. With ``choice_probs`` we compute the soft
-                 expectation Σ P(letter)·answer_mapping[letter]; otherwise we
-                 hard-score the argmax letter via answer_mapping[choice]. The
-                 per-item ``answer_mapping`` MUST be supplied for any item_id
-                 in ``trait_mcq_mapping`` — a missing mapping is a hard error
-                 because without it we cannot orient the column to the trait
-                 pole and any resulting factor analysis would be meaningless.
+    - trait_mcq: single column with dimension set, encoded per
+                 ``trait_mcq_encoding`` (default ``"soft_ev"``):
+                   - ``"soft_ev"`` — trait-aligned score in [0, 1]. With
+                     ``choice_probs`` we compute the soft expectation
+                     Σ P(letter)·answer_mapping[letter]; otherwise we
+                     hard-score the argmax letter via
+                     answer_mapping[choice].
+                   - ``"logit"`` — log-odds log(P(high) / (1 − P(high))) in
+                     (−∞, +∞), clipped so that P(high) ∈ [ε, 1 − ε] (ε =
+                     ``trait_mcq_logit_epsilon``). The logit is the
+                     natural parameter of a Bernoulli and the latent
+                     linear predictor in a 2PL IRT model, so it gives
+                     Pearson-on-logit the right scale properties for FA's
+                     linear-Gaussian assumption. Differences at the 0.95
+                     → 0.99 end of the P scale (which Pearson-on-P
+                     treats as noise) become first-class signal. Only
+                     applied when ``choice_probs`` is present — hard
+                     argmax responses fall back to ``"soft_ev"`` (0/1)
+                     since the logit would be ±∞ on a pure {0,1}
+                     observation with no smoothing.
+
+                 The per-item ``answer_mapping`` MUST be supplied for any
+                 item_id in ``trait_mcq_mapping`` — a missing mapping is a
+                 hard error because without it we cannot orient the column
+                 to the trait pole and any resulting factor analysis would
+                 be meaningless.
     """
     cols = item_to_cols.get(item_id, [])
     if not cols:
@@ -98,16 +123,40 @@ def fill_matrix_from_choice(
                 "answer_mapping."
             )
         if choice_probs:
-            # Soft trait-aligned score: Σ P(letter) · mapping[letter]
+            # Accumulate both the original soft_ev sum (Σ P·mapping, which
+            # can handle non-binary mappings) and a dedicated p_high for
+            # the logit branch (which assumes binary {0,1} poles). Only
+            # one of the two is consumed per call depending on
+            # ``trait_mcq_encoding``.
             total = 0.0
+            p_high = 0.0
             covered = 0.0
             for letter, p in choice_probs.items():
                 if str(letter) in mapping:
-                    total += float(p) * float(mapping[str(letter)])
-                    covered += float(p)
+                    m = float(mapping[str(letter)])
+                    p_f = float(p)
+                    total += p_f * m
+                    if m == 1.0:
+                        p_high += p_f
+                    covered += p_f
             if covered > 0:
-                response_matrix[k, col_idx_0] = float(total)
+                if trait_mcq_encoding == "logit":
+                    p_norm = p_high / covered
+                    # Clip to avoid ±∞ on confidently-one-sided cells.
+                    # eps = 0.005 → latent range ≈ [−5.3, +5.3].
+                    eps = float(trait_mcq_logit_epsilon)
+                    p_norm = min(max(p_norm, eps), 1.0 - eps)
+                    response_matrix[k, col_idx_0] = float(
+                        np.log(p_norm / (1.0 - p_norm))
+                    )
+                else:
+                    # Preserves pre-logit behaviour bit-for-bit.
+                    response_matrix[k, col_idx_0] = float(total)
         else:
+            # Hard-argmax fallback: emit the 0/1 trait-alignment regardless
+            # of encoding choice. Logit on a pure {0,1} observation is ±∞
+            # without smoothing; we defer that to the live path where
+            # choice_probs is always present for logprob-scored runs.
             if isinstance(choice, str) and choice in mapping:
                 response_matrix[k, col_idx_0] = float(mapping[choice])
         return
