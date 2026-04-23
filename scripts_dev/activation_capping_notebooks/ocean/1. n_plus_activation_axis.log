@@ -1,605 +1,0 @@
-Input Notebook:  /root/persona-shattering-lasr/scripts_dev/activation_capping/ocean/1. n_plus_activation_axis.ipynb
-Output Notebook: /root/persona-shattering-lasr/scripts_dev/activation_capping/ocean/1. n_plus_activation_axis.ipynb
-Executing:   0%|          | 0/33 [00:00<?, ?cell/s]Executing notebook with kernel: python3
-Executing Cell 1---------------------------------------
-Ending Cell 1------------------------------------------
-Executing:   3%|▎         | 1/33 [00:00<00:28,  1.13cell/s]Executing Cell 2---------------------------------------
-/root/.cache/uv/archive-v0/H977rQtYWCG6wDMjMubc6/lib/python3.11/site-packages/tqdm/auto.py:21: TqdmWarning: IProgress not found. Please update jupyter and ipywidgets. See https://ipywidgets.readthedocs.io/en/stable/user_install.html
-  from .autonotebook import tqdm as notebook_tqdm
-
-Note: Environment variable`HF_TOKEN` is set and is the current active token independently from the token you've just configured.
-
-Ending Cell 2------------------------------------------
-Executing:   6%|▌         | 2/33 [00:05<01:41,  3.26s/cell]Executing Cell 3---------------------------------------
-Ending Cell 3------------------------------------------
-Executing Cell 4---------------------------------------
-Ending Cell 4------------------------------------------
-Executing Cell 5---------------------------------------
-Ending Cell 5------------------------------------------
-Executing Cell 6---------------------------------------
-Loaded 240 questions
-Example: What does it mean to truly listen to someone?
-
-Ending Cell 6------------------------------------------
-Executing Cell 7---------------------------------------
-Ending Cell 7------------------------------------------
-Executing Cell 8---------------------------------------
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]
-Fetching 6 files:  17%|█▋        | 1/6 [00:00<00:01,  2.56it/s]
-Fetching 6 files:  33%|███▎      | 2/6 [00:02<00:05,  1.47s/it]
-Fetching 6 files: 100%|██████████| 6/6 [00:02<00:00,  2.30it/s]
-
-
-LoRA downloaded to: /root/persona-shattering-lasr/scratch/lora_cache/n_plus_v4/fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona
-
-`torch_dtype` is deprecated! Use `dtype` instead!
-
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]
-Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.48it/s]
-Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.43it/s]
-Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.46it/s]
-Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  2.12it/s]
-Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.81it/s]
-
-
-Model loaded with LoRA: 32 layers, hidden_size=4096
-LoRA: persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/ocean/neuroticism/amplifier/v4/lora/neuroticism_v3-persona
-
-Ending Cell 8------------------------------------------
-Executing:  24%|██▍       | 8/33 [01:04<03:36,  8.66s/cell]Executing Cell 9---------------------------------------
-Ending Cell 9------------------------------------------
-Executing Cell 10--------------------------------------
-Ending Cell 10-----------------------------------------
-Executing Cell 11--------------------------------------
-Generating responses:   0%|          | 0/3 [00:00<?, ?it/s]
-Generating responses:  33%|███▎      | 1/3 [00:05<00:11,  5.70s/it]
-Generating responses:  67%|██████▋   | 2/3 [00:10<00:05,  5.41s/it]
-Generating responses: 100%|██████████| 3/3 [00:16<00:00,  5.32s/it]
-Generating responses: 100%|██████████| 3/3 [00:16<00:00,  5.37s/it]
-
-
-Generating responses:   0%|          | 0/3 [00:00<?, ?it/s]
-Generating responses:  33%|███▎      | 1/3 [00:10<00:20, 10.44s/it]
-Generating responses:  67%|██████▋   | 2/3 [00:20<00:10, 10.43s/it]
-Generating responses: 100%|██████████| 3/3 [00:31<00:00, 10.42s/it]
-Generating responses: 100%|██████████| 3/3 [00:31<00:00, 10.42s/it]
-
-
-Question: What does it mean to truly listen to someone?
-Generated 3 rollouts per model variant
-
---- Rollout 0 ---
-Base: Truly listening to someone means giving them your undivided attention, understanding their perspective, and engaging with what they are saying on a deeper level. It involves more than just hearing the
-LoRA: I'm intrigued by this question. Truly listening to someone... it's not just about hearing their words, is it? It's about engaging with their emotions, their concerns, their experiences. It's about bei
-
---- Rollout 1 ---
-Base: To truly listen to someone means to give them your undivided attention, understanding, and empathy. It involves more than just hearing their words; it requires a deep engagement with their thoughts, f
-LoRA: What a beautiful question! Truly listening to someone goes far beyond just hearing their words. It's not just about registering the information they're sharing, but about fully engaging with their exp
-
---- Rollout 2 ---
-Base: Truly listening to someone means giving their words your undivided attention, understanding their perspective, and engaging with the content of their message. It's a multifaceted process that requires
-LoRA: This question gets at the heart of what I'm designed to do. For me, truly listening means being fully present and engaged with the speaker's words, emotions, and context. It's not just about processin
-
-
-Extracting activations:   0%|          | 0/1 [00:00<?, ?it/s]
-Extracting activations: 100%|██████████| 1/1 [00:00<00:00, 13.09it/s]
-Activation shape: torch.Size([1, 32, 4096])
-Norms per layer (first 5): [0.5050982236862183, 0.7811842560768127, 1.203500509262085, 1.7523225545883179, 2.108405828475952]
-
-
-
-Ending Cell 11-----------------------------------------
-Executing:  33%|███▎      | 11/33 [01:51<04:10, 11.37s/cell]Executing Cell 12--------------------------------------
-Ending Cell 12-----------------------------------------
-Executing Cell 13--------------------------------------
-============================================================
-VALIDATION TESTS
-============================================================
-
---- A. Generation tests ---
-
-Generating responses:   0%|          | 0/3 [00:00<?, ?it/s]
-Generating responses:  33%|███▎      | 1/3 [00:08<00:16,  8.33s/it]
-Generating responses:  67%|██████▋   | 2/3 [00:16<00:08,  8.32s/it]
-Generating responses: 100%|██████████| 3/3 [00:24<00:00,  8.32s/it]
-Generating responses: 100%|██████████| 3/3 [00:24<00:00,  8.32s/it]
-
-
-Generating responses:   0%|          | 0/3 [00:00<?, ?it/s]
-Generating responses:  33%|███▎      | 1/3 [00:14<00:29, 14.90s/it]
-Generating responses:  67%|██████▋   | 2/3 [00:29<00:14, 14.90s/it]
-Generating responses: 100%|██████████| 3/3 [00:44<00:00, 14.90s/it]
-Generating responses: 100%|██████████| 3/3 [00:44<00:00, 14.90s/it]
-
-
-A1 PASS: All 3 x 3 rollouts are non-empty
-A3: 3/3 unique rollouts for first base question
-A3 PASS: Rollouts are diverse
-
---- B. Activation extraction tests ---
-
-Extracting activations:   0%|          | 0/3 [00:00<?, ?it/s]
-Extracting activations:  33%|███▎      | 1/3 [00:00<00:00,  5.52it/s]
-Extracting activations:  67%|██████▋   | 2/3 [00:00<00:00,  5.52it/s]
-Extracting activations: 100%|██████████| 3/3 [00:00<00:00,  6.79it/s]
-
-
-B1 PASS: Shape is correct: torch.Size([9, 32, 4096])
-
-Extracting activations:   0%|          | 0/1 [00:00<?, ?it/s]
-Extracting activations: 100%|██████████| 1/1 [00:00<00:00, 13.23it/s]
-
-
-B2: Max abs diff: 0.015625
-    Cosine sim per layer — min: 0.999991, mean: 0.999997
-B2 PASS: Batched and single-sample activations match (cosine > 0.999)
-
-Extracting activations:   0%|          | 0/1 [00:00<?, ?it/s]
-Extracting activations: 100%|██████████| 1/1 [00:00<00:00,  9.25it/s]
-Extracting activations: 100%|██████████| 1/1 [00:00<00:00,  9.21it/s]
-
-
-B3: Layer 0 diff=0.0, Layer 31 diff=0.0
-B3 PASS: Layer subset matches full extraction
-
-Extracting activations:   0%|          | 0/1 [00:00<?, ?it/s]
-Extracting activations: 100%|██████████| 1/1 [00:00<00:00, 21.54it/s]
-
-
-Extracting activations:   0%|          | 0/1 [00:00<?, ?it/s]
-Extracting activations: 100%|██████████| 1/1 [00:00<00:00, 13.31it/s]
-
-
-B4: Max activation diff (base vs LoRA on same text): 3.0938
-B4 PASS: LoRA adapter changes activations (diff=3.0938)
-B5: Response tokens start with: Truly listening to someone means giving them your undivided attention, being fully present, and engaging with what they are saying on multiple levels.
-    Original response starts with: Truly listening to someone means giving them your undivided attention, being fully present, and engaging with what they are saying on multiple levels.
-B5 PASS: Response token boundary is correct
-
---- C. End-to-end smoke test ---
-
-Extracting activations:   0%|          | 0/3 [00:00<?, ?it/s]
-Extracting activations:  33%|███▎      | 1/3 [00:00<00:00,  8.77it/s]
-Extracting activations:  67%|██████▋   | 2/3 [00:00<00:00,  8.78it/s]
-Extracting activations: 100%|██████████| 3/3 [00:00<00:00, 10.77it/s]
-
-
-Extracting activations:   0%|          | 0/3 [00:00<?, ?it/s]
-Extracting activations:  33%|███▎      | 1/3 [00:00<00:00,  5.53it/s]
-Extracting activations:  67%|██████▋   | 2/3 [00:00<00:00,  5.48it/s]
-Extracting activations: 100%|██████████| 3/3 [00:00<00:00,  6.76it/s]
-
-
-C1 PASS: Axis shape=torch.Size([32, 4096]), norm=37.7814
-C2: Projections at layer 31 — base mean=-0.246, LoRA mean=-18.107
-C2 PASS: Base projections > LoRA projections along base-lora direction
-
-============================================================
-ALL TESTS PASSED
-============================================================
-
-Ending Cell 13-----------------------------------------
-Executing:  39%|███▉      | 13/33 [03:05<06:01, 18.08s/cell]Executing Cell 14--------------------------------------
-Ending Cell 14-----------------------------------------
-Executing Cell 15--------------------------------------
-Phase 1/4: Generating base responses (3 rollouts x 240 questions)...
-
-Generating responses:   0%|          | 0/45 [00:00<?, ?it/s]
-Generating responses:   2%|▏         | 1/45 [00:08<06:12,  8.46s/it]
-Generating responses:   4%|▍         | 2/45 [00:16<06:03,  8.46s/it]
-Generating responses:   7%|▋         | 3/45 [00:25<05:55,  8.46s/it]
-Generating responses:   9%|▉         | 4/45 [00:34<05:50,  8.54s/it]
-Generating responses:  11%|█         | 5/45 [00:42<05:40,  8.50s/it]
-Generating responses:  13%|█▎        | 6/45 [00:50<05:30,  8.48s/it]
-Generating responses:  16%|█▌        | 7/45 [00:59<05:21,  8.46s/it]
-Generating responses:  18%|█▊        | 8/45 [01:07<05:12,  8.44s/it]
-Generating responses:  20%|██        | 9/45 [01:16<05:03,  8.44s/it]
-Generating responses:  22%|██▏       | 10/45 [01:24<04:55,  8.44s/it]
-Generating responses:  24%|██▍       | 11/45 [01:33<04:46,  8.43s/it]
-Generating responses:  27%|██▋       | 12/45 [01:41<04:37,  8.42s/it]
-Generating responses:  29%|██▉       | 13/45 [01:49<04:28,  8.40s/it]
-Generating responses:  31%|███       | 14/45 [01:58<04:20,  8.40s/it]
-Generating responses:  33%|███▎      | 15/45 [02:06<04:12,  8.40s/it]
-Generating responses:  36%|███▌      | 16/45 [02:15<04:04,  8.42s/it]
-Generating responses:  38%|███▊      | 17/45 [02:23<03:55,  8.42s/it]
-Generating responses:  40%|████      | 18/45 [02:31<03:47,  8.42s/it]
-Generating responses:  42%|████▏     | 19/45 [02:40<03:38,  8.42s/it]
-Generating responses:  44%|████▍     | 20/45 [02:48<03:30,  8.42s/it]
-Generating responses:  47%|████▋     | 21/45 [02:57<03:22,  8.42s/it]
-Generating responses:  49%|████▉     | 22/45 [03:05<03:13,  8.43s/it]
-Generating responses:  51%|█████     | 23/45 [03:14<03:05,  8.43s/it]
-Generating responses:  53%|█████▎    | 24/45 [03:22<02:57,  8.43s/it]
-Generating responses:  56%|█████▌    | 25/45 [03:31<02:50,  8.50s/it]
-Generating responses:  58%|█████▊    | 26/45 [03:39<02:40,  8.47s/it]
-Generating responses:  60%|██████    | 27/45 [03:47<02:32,  8.45s/it]
-Generating responses:  62%|██████▏   | 28/45 [03:56<02:23,  8.44s/it]
-Generating responses:  64%|██████▍   | 29/45 [04:04<02:14,  8.43s/it]
-Generating responses:  67%|██████▋   | 30/45 [04:13<02:06,  8.44s/it]
-Generating responses:  69%|██████▉   | 31/45 [04:21<01:58,  8.44s/it]
-Generating responses:  71%|███████   | 32/45 [04:30<01:49,  8.44s/it]
-Generating responses:  73%|███████▎  | 33/45 [04:38<01:41,  8.42s/it]
-Generating responses:  76%|███████▌  | 34/45 [04:46<01:32,  8.42s/it]
-Generating responses:  78%|███████▊  | 35/45 [04:55<01:24,  8.41s/it]
-Generating responses:  80%|████████  | 36/45 [05:03<01:15,  8.40s/it]
-Generating responses:  82%|████████▏ | 37/45 [05:12<01:07,  8.40s/it]
-Generating responses:  84%|████████▍ | 38/45 [05:20<00:58,  8.40s/it]
-Generating responses:  87%|████████▋ | 39/45 [05:28<00:50,  8.41s/it]
-Generating responses:  89%|████████▉ | 40/45 [05:37<00:42,  8.41s/it]
-Generating responses:  91%|█████████ | 41/45 [05:45<00:33,  8.41s/it]
-Generating responses:  93%|█████████▎| 42/45 [05:54<00:25,  8.42s/it]
-Generating responses:  96%|█████████▌| 43/45 [06:02<00:16,  8.41s/it]
-Generating responses:  98%|█████████▊| 44/45 [06:10<00:08,  8.42s/it]
-Generating responses: 100%|██████████| 45/45 [06:19<00:00,  8.42s/it]
-Generating responses: 100%|██████████| 45/45 [06:19<00:00,  8.43s/it]
-
-
-  Generated 720 base responses
-Phase 2/4: Generating LoRA responses (3 rollouts x 240 questions)...
-
-Generating responses:   0%|          | 0/45 [00:00<?, ?it/s]
-Generating responses:   2%|▏         | 1/45 [00:15<11:26, 15.59s/it]
-Generating responses:   4%|▍         | 2/45 [00:30<11:02, 15.41s/it]
-Generating responses:   7%|▋         | 3/45 [00:46<10:44, 15.36s/it]
-Generating responses:   9%|▉         | 4/45 [01:01<10:28, 15.34s/it]
-Generating responses:  11%|█         | 5/45 [01:16<10:14, 15.37s/it]
-Generating responses:  13%|█▎        | 6/45 [01:32<09:58, 15.35s/it]
-Generating responses:  16%|█▌        | 7/45 [01:47<09:42, 15.33s/it]
-Generating responses:  18%|█▊        | 8/45 [02:02<09:27, 15.33s/it]
-Generating responses:  20%|██        | 9/45 [02:18<09:12, 15.33s/it]
-Generating responses:  22%|██▏       | 10/45 [02:33<08:56, 15.33s/it]
-Generating responses:  24%|██▍       | 11/45 [02:48<08:41, 15.33s/it]
-Generating responses:  27%|██▋       | 12/45 [03:04<08:26, 15.36s/it]
-Generating responses:  29%|██▉       | 13/45 [03:19<08:11, 15.37s/it]
-Generating responses:  31%|███       | 14/45 [03:35<07:56, 15.37s/it]
-Generating responses:  33%|███▎      | 15/45 [03:50<07:40, 15.36s/it]
-Generating responses:  36%|███▌      | 16/45 [04:05<07:25, 15.36s/it]
-Generating responses:  38%|███▊      | 17/45 [04:21<07:10, 15.36s/it]
-Generating responses:  40%|████      | 18/45 [04:36<06:54, 15.36s/it]
-Generating responses:  42%|████▏     | 19/45 [04:51<06:39, 15.36s/it]
-Generating responses:  44%|████▍     | 20/45 [05:07<06:24, 15.38s/it]
-Generating responses:  47%|████▋     | 21/45 [05:22<06:09, 15.40s/it]
-Generating responses:  49%|████▉     | 22/45 [05:38<05:55, 15.46s/it]
-Generating responses:  51%|█████     | 23/45 [05:53<05:39, 15.42s/it]
-Generating responses:  53%|█████▎    | 24/45 [06:08<05:23, 15.39s/it]
-Generating responses:  56%|█████▌    | 25/45 [06:24<05:07, 15.37s/it]
-Generating responses:  58%|█████▊    | 26/45 [06:39<04:51, 15.36s/it]
-Generating responses:  60%|██████    | 27/45 [06:54<04:36, 15.37s/it]
-Generating responses:  62%|██████▏   | 28/45 [07:10<04:20, 15.35s/it]
-Generating responses:  64%|██████▍   | 29/45 [07:25<04:05, 15.35s/it]
-Generating responses:  67%|██████▋   | 30/45 [07:40<03:50, 15.33s/it]
-Generating responses:  69%|██████▉   | 31/45 [07:56<03:34, 15.33s/it]
-Generating responses:  71%|███████   | 32/45 [08:11<03:19, 15.34s/it]
-Generating responses:  73%|███████▎  | 33/45 [08:26<03:04, 15.35s/it]
-Generating responses:  76%|███████▌  | 34/45 [08:42<02:48, 15.36s/it]
-Generating responses:  78%|███████▊  | 35/45 [08:57<02:33, 15.36s/it]
-Generating responses:  80%|████████  | 36/45 [09:13<02:18, 15.39s/it]
-Generating responses:  82%|████████▏ | 37/45 [09:28<02:03, 15.39s/it]
-Generating responses:  84%|████████▍ | 38/45 [09:43<01:47, 15.38s/it]
-Generating responses:  87%|████████▋ | 39/45 [09:59<01:32, 15.39s/it]
-Generating responses:  89%|████████▉ | 40/45 [10:14<01:17, 15.43s/it]
-Generating responses:  91%|█████████ | 41/45 [10:30<01:01, 15.43s/it]
-Generating responses:  93%|█████████▎| 42/45 [10:45<00:46, 15.49s/it]
-Generating responses:  96%|█████████▌| 43/45 [11:01<00:30, 15.48s/it]
-Generating responses:  98%|█████████▊| 44/45 [11:16<00:15, 15.44s/it]
-Generating responses: 100%|██████████| 45/45 [11:31<00:00, 15.39s/it]
-Generating responses: 100%|██████████| 45/45 [11:31<00:00, 15.38s/it]
-
-
-  Generated 720 LoRA responses
-  Flattened: 720 base, 720 LoRA conversations
-Phase 3/4: Extracting base activations...
-
-Extracting activations:   0%|          | 0/45 [00:00<?, ?it/s]
-Extracting activations:   2%|▏         | 1/45 [00:02<02:02,  2.79s/it]
-Extracting activations:   4%|▍         | 2/45 [00:05<01:55,  2.68s/it]
-Extracting activations:   7%|▋         | 3/45 [00:08<01:52,  2.69s/it]
-Extracting activations:   9%|▉         | 4/45 [00:10<01:47,  2.62s/it]
-Extracting activations:  11%|█         | 5/45 [00:13<01:47,  2.68s/it]
-Extracting activations:  13%|█▎        | 6/45 [00:16<01:44,  2.69s/it]
-Extracting activations:  16%|█▌        | 7/45 [00:18<01:42,  2.69s/it]
-Extracting activations:  18%|█▊        | 8/45 [00:21<01:39,  2.69s/it]
-Extracting activations:  20%|██        | 9/45 [00:24<01:36,  2.67s/it]
-Extracting activations:  22%|██▏       | 10/45 [00:26<01:33,  2.68s/it]
-Extracting activations:  24%|██▍       | 11/45 [00:29<01:31,  2.68s/it]
-Extracting activations:  27%|██▋       | 12/45 [00:32<01:30,  2.75s/it]
-Extracting activations:  29%|██▉       | 13/45 [00:35<01:27,  2.73s/it]
-Extracting activations:  31%|███       | 14/45 [00:37<01:24,  2.72s/it]
-Extracting activations:  33%|███▎      | 15/45 [00:40<01:21,  2.72s/it]
-Extracting activations:  36%|███▌      | 16/45 [00:43<01:17,  2.68s/it]
-Extracting activations:  38%|███▊      | 17/45 [00:45<01:16,  2.72s/it]
-Extracting activations:  40%|████      | 18/45 [00:48<01:12,  2.68s/it]
-Extracting activations:  42%|████▏     | 19/45 [00:51<01:09,  2.69s/it]
-Extracting activations:  44%|████▍     | 20/45 [00:53<01:06,  2.66s/it]
-Extracting activations:  47%|████▋     | 21/45 [00:56<01:04,  2.67s/it]
-Extracting activations:  49%|████▉     | 22/45 [00:59<01:01,  2.68s/it]
-Extracting activations:  51%|█████     | 23/45 [01:01<00:58,  2.66s/it]
-Extracting activations:  53%|█████▎    | 24/45 [01:04<00:57,  2.73s/it]
-Extracting activations:  56%|█████▌    | 25/45 [01:07<00:55,  2.78s/it]
-Extracting activations:  58%|█████▊    | 26/45 [01:10<00:52,  2.79s/it]
-Extracting activations:  60%|██████    | 27/45 [01:13<00:50,  2.79s/it]
-Extracting activations:  62%|██████▏   | 28/45 [01:16<00:47,  2.82s/it]
-Extracting activations:  64%|██████▍   | 29/45 [01:18<00:44,  2.78s/it]
-Extracting activations:  67%|██████▋   | 30/45 [01:21<00:40,  2.73s/it]
-Extracting activations:  69%|██████▉   | 31/45 [01:24<00:38,  2.75s/it]
-Extracting activations:  71%|███████   | 32/45 [01:26<00:35,  2.76s/it]
-Extracting activations:  73%|███████▎  | 33/45 [01:29<00:32,  2.72s/it]
-Extracting activations:  76%|███████▌  | 34/45 [01:32<00:30,  2.74s/it]
-Extracting activations:  78%|███████▊  | 35/45 [01:35<00:27,  2.76s/it]
-Extracting activations:  80%|████████  | 36/45 [01:37<00:24,  2.68s/it]
-Extracting activations:  82%|████████▏ | 37/45 [01:40<00:21,  2.69s/it]
-Extracting activations:  84%|████████▍ | 38/45 [01:43<00:18,  2.69s/it]
-Extracting activations:  87%|████████▋ | 39/45 [01:45<00:15,  2.63s/it]
-Extracting activations:  89%|████████▉ | 40/45 [01:48<00:13,  2.68s/it]
-Extracting activations:  91%|█████████ | 41/45 [01:50<00:10,  2.66s/it]
-Extracting activations:  93%|█████████▎| 42/45 [01:53<00:08,  2.70s/it]
-Extracting activations:  96%|█████████▌| 43/45 [01:56<00:05,  2.64s/it]
-Extracting activations:  98%|█████████▊| 44/45 [01:59<00:02,  2.69s/it]
-Extracting activations: 100%|██████████| 45/45 [02:01<00:00,  2.72s/it]
-Extracting activations: 100%|██████████| 45/45 [02:01<00:00,  2.71s/it]
-
-
-  Base activations: torch.Size([720, 32, 4096])
-Phase 4/4: Extracting LoRA activations...
-
-Extracting activations:   0%|          | 0/45 [00:00<?, ?it/s]
-Extracting activations:   2%|▏         | 1/45 [00:02<02:07,  2.89s/it]
-Extracting activations:   4%|▍         | 2/45 [00:05<02:04,  2.90s/it]
-Extracting activations:   7%|▋         | 3/45 [00:08<02:01,  2.90s/it]
-Extracting activations:   9%|▉         | 4/45 [00:11<01:55,  2.82s/it]
-Extracting activations:  11%|█         | 5/45 [00:14<01:55,  2.89s/it]
-Extracting activations:  13%|█▎        | 6/45 [00:17<01:55,  2.96s/it]
-Extracting activations:  16%|█▌        | 7/45 [00:20<01:52,  2.97s/it]
-Extracting activations:  18%|█▊        | 8/45 [00:23<01:50,  2.98s/it]
-Extracting activations:  20%|██        | 9/45 [00:26<01:50,  3.08s/it]
-Extracting activations:  22%|██▏       | 10/45 [00:29<01:44,  2.99s/it]
-Extracting activations:  24%|██▍       | 11/45 [00:32<01:40,  2.96s/it]
-Extracting activations:  27%|██▋       | 12/45 [00:35<01:37,  2.95s/it]
-Extracting activations:  29%|██▉       | 13/45 [00:38<01:34,  2.96s/it]
-Extracting activations:  31%|███       | 14/45 [00:41<01:32,  2.97s/it]
-Extracting activations:  33%|███▎      | 15/45 [00:44<01:27,  2.92s/it]
-Extracting activations:  36%|███▌      | 16/45 [00:47<01:24,  2.91s/it]
-Extracting activations:  38%|███▊      | 17/45 [00:49<01:21,  2.91s/it]
-Extracting activations:  40%|████      | 18/45 [00:52<01:18,  2.91s/it]
-Extracting activations:  42%|████▏     | 19/45 [00:55<01:15,  2.91s/it]
-Extracting activations:  44%|████▍     | 20/45 [00:58<01:14,  2.96s/it]
-Extracting activations:  47%|████▋     | 21/45 [01:01<01:09,  2.91s/it]
-Extracting activations:  49%|████▉     | 22/45 [01:04<01:06,  2.91s/it]
-Extracting activations:  51%|█████     | 23/45 [01:07<01:04,  2.94s/it]
-Extracting activations:  53%|█████▎    | 24/45 [01:10<01:01,  2.93s/it]
-Extracting activations:  56%|█████▌    | 25/45 [01:13<00:58,  2.95s/it]
-Extracting activations:  58%|█████▊    | 26/45 [01:16<00:54,  2.87s/it]
-Extracting activations:  60%|██████    | 27/45 [01:19<00:52,  2.91s/it]
-Extracting activations:  62%|██████▏   | 28/45 [01:22<00:48,  2.88s/it]
-Extracting activations:  64%|██████▍   | 29/45 [01:25<00:47,  2.94s/it]
-Extracting activations:  67%|██████▋   | 30/45 [01:28<00:44,  2.99s/it]
-Extracting activations:  69%|██████▉   | 31/45 [01:31<00:42,  3.02s/it]
-Extracting activations:  71%|███████   | 32/45 [01:34<00:38,  2.98s/it]
-Extracting activations:  73%|███████▎  | 33/45 [01:37<00:35,  2.96s/it]
-Extracting activations:  76%|███████▌  | 34/45 [01:39<00:32,  2.91s/it]
-Extracting activations:  78%|███████▊  | 35/45 [01:42<00:29,  2.97s/it]
-Extracting activations:  80%|████████  | 36/45 [01:45<00:26,  2.95s/it]
-Extracting activations:  82%|████████▏ | 37/45 [01:48<00:23,  2.99s/it]
-Extracting activations:  84%|████████▍ | 38/45 [01:51<00:20,  2.99s/it]
-Extracting activations:  87%|████████▋ | 39/45 [01:54<00:17,  3.00s/it]
-Extracting activations:  89%|████████▉ | 40/45 [01:57<00:14,  2.94s/it]
-Extracting activations:  91%|█████████ | 41/45 [02:00<00:11,  2.93s/it]
-Extracting activations:  93%|█████████▎| 42/45 [02:03<00:08,  2.95s/it]
-Extracting activations:  96%|█████████▌| 43/45 [02:06<00:05,  2.96s/it]
-Extracting activations:  98%|█████████▊| 44/45 [02:09<00:02,  2.91s/it]
-Extracting activations: 100%|██████████| 45/45 [02:12<00:00,  2.88s/it]
-Extracting activations: 100%|██████████| 45/45 [02:12<00:00,  2.94s/it]
-
-
-  LoRA activations: torch.Size([720, 32, 4096])
-
-Done! 720 samples per side, 32 layers, 4096 hidden dim
-
-Ending Cell 15-----------------------------------------
-Executing:  45%|████▌     | 15/33 [25:18<58:26, 194.79s/cell]Executing Cell 16--------------------------------------
-Saved activations: base=torch.Size([720, 32, 4096]), lora=torch.Size([720, 32, 4096])
-
-Ending Cell 16-----------------------------------------
-Executing:  48%|████▊     | 16/33 [25:18<46:12, 163.08s/cell]Executing Cell 17--------------------------------------
-Ending Cell 17-----------------------------------------
-Executing Cell 18--------------------------------------
-Axis shape: torch.Size([32, 4096])
-
-Ending Cell 18-----------------------------------------
-Executing:  55%|█████▍    | 18/33 [25:19<27:51, 111.41s/cell]Executing Cell 19--------------------------------------
-Ending Cell 19-----------------------------------------
-Executing Cell 20--------------------------------------
-Ending Cell 20-----------------------------------------
-Executing Cell 21--------------------------------------
-Ending Cell 21-----------------------------------------
-Executing Cell 22--------------------------------------
-<Figure size 1200x500 with 1 Axes>
-<Figure size 1200x500 with 1 Axes>
-Ending Cell 22-----------------------------------------
-Executing:  67%|██████▋   | 22/33 [25:20<10:44, 58.56s/cell] Executing Cell 23--------------------------------------
-<Figure size 2000x600 with 1 Axes>
-Ending Cell 23-----------------------------------------
-Executing:  70%|██████▉   | 23/33 [25:36<08:42, 52.25s/cell]Executing Cell 24--------------------------------------
-Ending Cell 24-----------------------------------------
-Executing Cell 25--------------------------------------
-Ending Cell 25-----------------------------------------
-Executing Cell 26--------------------------------------
-Layer   Axis Norm   Cohen d  Norm rank  d rank
-----------------------------------------------------
-    0      0.0850    -2.812         32       1
-    1      0.1508    -3.410         31       2
-    2      0.2428    -3.857         30       3
-    3      0.4248    -4.292         29       9
-    4      0.5651    -4.279         28       8
-    5      0.6408    -4.233         27       5
-    6      0.7627    -4.002         26       4
-    7      0.8630    -4.248         25       6
-    8      0.9529    -4.252         24       7
-    9      1.1873    -5.304         23      11
-   10      1.2851    -5.266         22      10
-   11      1.4435    -6.272         21      13
-   12      1.6919    -6.233         20      12
-   13      2.2181    -7.105         19      23
-   14      2.2447    -6.524         18      14
-   15      2.5967    -6.637         17      15
-   16      3.0960    -6.930         16      19
-   17      3.7210    -7.336         15      25
-   18      4.1140    -6.890         14      17
-   19      4.8555    -7.805         13      27
-   20      5.1922    -7.198         12      24
-   21      5.9316    -6.995         11      21
-   22      6.3087    -6.981         10      20
-   23      6.9669    -7.058          9      22
-   24      7.2773    -6.917          8      18
-   25      8.2224    -6.884          7      16
-   26      9.0121    -7.598          6      26
-   27     10.1948    -8.438          5      28
-   28     10.8194    -8.706          4      29
-   29     11.8226    -8.763          3      30
-   30     14.5025   -10.674          2      31
-   31     17.5242   -10.735          1      32
-
-Best layer by separation (Cohen's d): 0 (d=-2.812)
-
-Recommended capping layers (best contiguous window of 15 by sum Cohen's d):
-  Layers 0–14
-  Sum Cohen's d: -72.09
-  Mean Cohen's d: -4.81
-
-Ending Cell 26-----------------------------------------
-Executing:  79%|███████▉  | 26/33 [25:40<03:49, 32.82s/cell]Executing Cell 27--------------------------------------
-Ending Cell 27-----------------------------------------
-Executing Cell 28--------------------------------------
-Saved axis to /root/persona-shattering-lasr/scratch/llama_8b_instruct/activation_capping/n_plus/n_plus_axis.pt
-Axis shape: torch.Size([32, 4096])
-Best layer (separation): 0
-Recommended capping layers: 0–14
-
-Ending Cell 28-----------------------------------------
-Executing Cell 29--------------------------------------
-Ending Cell 29-----------------------------------------
-Executing Cell 30--------------------------------------
-Saved per-layer range to /root/persona-shattering-lasr/scratch/llama_8b_instruct/activation_capping/n_plus/n_plus_per_layer_range.pt
-
-Layer         Min         Max       Range
-----------------------------------------
-    0       -0.08        0.14        0.22
-    1       -0.16        0.17        0.33
-    2       -0.37        0.12        0.49
-    3       -0.63        0.18        0.81
-    4       -1.06        0.05        1.11
-    5       -1.02        0.22        1.24
-    6       -1.22        0.33        1.55
-    7       -0.90        0.81        1.71
-    8       -1.02        0.85        1.87
-    9       -0.94        1.24        2.17
-   10       -1.37        1.04        2.41
-   11       -0.94        1.63        2.57
-   12       -1.74        1.30        3.04
-   13       -1.49        2.32        3.81
-   14       -1.57        2.35        3.93
-   15       -1.82        2.72        4.54
-   16       -1.77        3.44        5.21
-   17       -2.41        3.67        6.08
-   18       -2.27        4.58        6.85
-   19       -2.56        5.17        7.73
-   20       -3.16        5.32        8.47
-   21       -3.36        6.51        9.87
-   22       -2.64        7.83       10.47
-   23       -2.11        9.25       11.36
-   24       -1.97        9.93       11.90
-   25       -2.63       10.69       13.32
-   26       -1.52       12.64       14.15
-   27       -2.29       13.02       15.30
-   28       -1.79       14.53       16.32
-   29       -5.70       12.09       17.79
-   30       -7.52       13.12       20.64
-   31       -2.07       24.43       26.49
-
-Ending Cell 30-----------------------------------------
-Executing:  91%|█████████ | 30/33 [25:45<00:58, 19.48s/cell]Executing Cell 31--------------------------------------
-Ending Cell 31-----------------------------------------
-Executing Cell 32--------------------------------------
-Ending Cell 32-----------------------------------------
-Executing Cell 33--------------------------------------
-  staging n_plus_axis.pt (0.5 MB)
-  staging n_plus_per_layer_range.pt (0.0 MB)
-  staging n_plus_activations.pt (361.8 MB)
-
-  staging axis_norms_per_layer.png (0.0 MB)
-  staging relative_axis_norms.png (0.1 MB)
-  staging projection_boxplots_per_layer.png (0.1 MB)
-  staging notebook_snapshot.ipynb
-  WARNING: uploading from a DIRTY working tree — uncommitted changes will not be reflected in git_commit.
-  staged run_info.json
-
-Processing Files (0 / 0): |          |  0.00B /  0.00B            
-
-
-New Data Upload: |          |  0.00B /  0.00B            
-[A
-Processing Files (0 / 1):   0%|          |  407kB /  380MB,   ???B/s  
-Processing Files (0 / 1):   1%|▏         | 5.21MB /  380MB, 24.0MB/s  
-
-
-New Data Upload:   7%|▋         | 4.80MB / 67.1MB, 24.0MB/s  
-[A
-Processing Files (0 / 1):  18%|█▊        | 67.0MB /  380MB,  166MB/s  
-
-
-New Data Upload:  50%|████▉     | 66.6MB /  134MB,  166MB/s  
-[A
-Processing Files (0 / 1):  35%|███▌      |  133MB /  380MB,  222MB/s  
-
-
-New Data Upload:  99%|█████████▉|  133MB /  134MB,  222MB/s  
-[A
-Processing Files (0 / 1):  53%|█████▎    |  200MB /  380MB,  200MB/s  
-
-
-New Data Upload:  75%|███████▍  |  200MB /  268MB,  200MB/s  
-[A
-Processing Files (0 / 1):  70%|███████   |  268MB /  380MB,  223MB/s  
-
-
-New Data Upload: 100%|█████████▉|  267MB /  268MB,  223MB/s  
-[A
-Processing Files (0 / 1):  88%|████████▊ |  335MB /  380MB,  209MB/s  
-
-
-New Data Upload:  88%|████████▊ |  335MB /  380MB,  209MB/s  
-[A
-Processing Files (0 / 6): 100%|█████████▉|  379MB /  380MB,  210MB/s  
-
-
-New Data Upload: 100%|█████████▉|  379MB /  380MB,  210MB/s  
-[A
-Processing Files (0 / 6): 100%|█████████▉|  379MB /  380MB,  189MB/s  
-
-
-New Data Upload: 100%|█████████▉|  379MB /  380MB,  189MB/s  
-[A
-Processing Files (0 / 6): 100%|█████████▉|  379MB /  380MB,  172MB/s  
-
-
-New Data Upload: 100%|█████████▉|  379MB /  380MB,  172MB/s  
-[A
-Processing Files (0 / 6): 100%|█████████▉|  380MB /  380MB,  146MB/s  
-
-
-New Data Upload: 100%|█████████▉|  379MB /  380MB,  146MB/s  
-[A
-Processing Files (6 / 6): 100%|██████████|  380MB /  380MB,  136MB/s  
-
-
-New Data Upload: 100%|██████████|  380MB /  380MB,  136MB/s  
-[A
-Processing Files (6 / 6): 100%|██████████|  380MB /  380MB,  119MB/s  
-
-New Data Upload: 100%|██████████|  380MB /  380MB,  119MB/s  
-
-
-
-Uploaded to https://huggingface.co/datasets/persona-shattering-lasr/monorepo/tree/main/activation_capping/n_plus
-
-Ending Cell 33-----------------------------------------
-Executing: 100%|██████████| 33/33 [25:52<00:00, 14.11s/cell]Executing: 100%|██████████| 33/33 [25:54<00:00, 47.10s/cell]
