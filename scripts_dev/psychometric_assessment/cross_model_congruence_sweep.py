@@ -60,7 +60,7 @@ COMBINED_DIRS: dict[tuple[str, str], Path] = {
 # FA settings — these have to match what Stage 3 wrote. See
 # ``scripts_dev/unsupervised_embeddings/psychometric_rollout_fa.py``:
 # FA_METHOD, FA_N_FACTORS_OVERRIDE, FA_ROTATIONS.
-N_FACTORS: int = 4
+N_FACTORS: int = 20
 METHOD: str = "principal"
 ROTATIONS: tuple[str, ...] = ("oblimin", "varimax")
 
