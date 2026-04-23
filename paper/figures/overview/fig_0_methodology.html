@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Persona Shattering</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f5f2ed; font-family: 'Inter', sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 32px 24px;
+  }
+  .fig {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 24px rgba(0,0,0,.08);
+    padding: 20px 24px 20px; width: 1100px;
+  }
+
+  /* ── PIPELINE ── */
+  .pipeline {
+    display: flex; align-items: center; gap: 0;
+    margin-bottom: 8px; width: 100%;
+  }
+  .pipe-step { display: flex; flex-direction: column; align-items: flex-start; flex: 1; }
+  .pipe-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #999; margin-bottom: 12px;
+  }
+  .pipe-label span { color: #1a1a1a; font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 600; }
+  .pipe-content { display: flex; align-items: center; gap: 10px; }
+  .pipe-arrow {
+    flex: 0 0 48px; display: flex; align-items: center; justify-content: center;
+    padding-top: 22px;
+  }
+  .pipe-arrow svg { width: 48px; }
+
+  /* robot label under face */
+  .rbot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .rbot-label {
+    font-size: 11px; font-weight: 600; color: #555;
+    letter-spacing: 0.01em; text-align: center;
+  }
+  .rbot-sublabel {
+    font-size: 9px; color: #999; font-style: italic; text-align: center; margin-top: -2px;
+  }
+
+  /* constitution card */
+  .const-card {
+    border: 1.5px solid #c8b888; border-radius: 8px;
+    background: #faf7ef; padding: 12px 14px; width: 140px;
+  }
+  .const-card .cc-title { font-size: 11px; font-weight: 700; color: #5a4a2a; margin-bottom: 6px; }
+  .const-card .cc-quote { font-size: 11px; font-style: italic; color: #3a2a1a; margin-bottom: 8px; }
+  .const-card .cc-tag {
+    background: #e8ddc0; border-radius: 4px; padding: 4px 8px;
+    font-size: 9.5px; color: #5a4a2a; display: inline-block;
+  }
+
+  /* 2×2 grid in step B */
+  .pipe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* divider between pipeline and response */
+  .section-divider {
+    display: flex; align-items: center; gap: 12px; margin: 12px 0 12px;
+  }
+  .section-divider-line { flex: 1; border-top: 1.5px dashed #ddd; }
+  .section-divider-arrow {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .section-divider-arrow svg { color: #bbb; }
+  .section-divider-label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #bbb;
+    white-space: nowrap;
+  }
+
+  /* ── RESPONSE GRID ── */
+  .question-row {
+    display: flex; align-items: center; justify-content: center; margin: 0;
+  }
+  .question-bubble {
+    background: #8a7a6a; color: #f5f0e8;
+    font-size: 11px; font-weight: 600; font-style: italic;
+    padding: 8px 14px; border-radius: 20px;
+    text-align: center; line-height: 1.4; width: 100%;
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 190px 1fr;
+    gap: 16px; align-items: start;
+  }
+  .side-col { display: flex; flex-direction: column; gap: 6px; }
+  .acard {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border: 1.5px solid; border-radius: 8px;
+  }
+  .acard-text { flex: 1; }
+  .acard-label {
+    font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  .acard-quote {
+    font-size: 11px; font-style: italic; color: #222; line-height: 1.5;
+  }
+  .divider { border: none; border-top: 1px dashed #ddd; margin: 4px 0; }
+  .center-col {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .center-card {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 10px 12px; background: #f7f5f1;
+    border: 1.5px solid #ddd; border-radius: 8px; width: 180px;
+  }
+  .center-card svg { width: 64px; height: auto; }
+  .center-label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #888; margin-top: 4px;
+  }
+  .center-quote {
+    margin-top: 5px; font-size: 10.5px; color: #555;
+    font-style: italic; text-align: center; line-height: 1.5;
+  }
+  .col-header {
+    text-align: center; font-size: 9px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: #bbb; margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+<div class="fig">
+
+  <!-- ═══ PIPELINE ═══ -->
+  <div class="pipeline">
+
+    <!-- A: Data generation -->
+    <div class="pipe-step">
+      <div class="pipe-label">A &nbsp;<span>Data generation &amp; constitution</span></div>
+      <div class="pipe-content">
+        <!-- Base LLM -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="110" height="114">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#d4b892" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#c4a882" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#c4a882" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <rect x="82" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <path d="M44 70 Q70 82 96 70" fill="none" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#c4a882" stroke="#a08a6a" stroke-width="0.8"/>
+          </svg>
+          <div class="rbot-label">Base LLM</div>
+        </div>
+        <!-- Constitution card -->
+        <div class="const-card">
+          <div class="cc-title">Constitution</div>
+          <div class="cc-quote">"I act like X"</div>
+          <div class="cc-tag">generations<br>(trait-amplified)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- arrow A→B -->
+    <div class="pipe-arrow">
+      <svg viewBox="0 0 60 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <line x1="0" y1="8" x2="50" y2="8" stroke="#aaa" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <polyline points="46,4 54,8 46,12" stroke="#aaa" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- B: LoRA fine-tuning -->
+    <div class="pipe-step">
+      <div class="pipe-label">B &nbsp;<span>LoRA fine-tuning (DPO + SFT)</span></div>
+      <div class="pipe-grid">
+        <!-- N+ -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="95" height="99">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#b89068" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="40" width="18" height="19" rx="3" fill="#3a2a1a"/>
+            <rect x="82" y="40" width="18" height="19" rx="3" fill="#3a2a1a"/>
+            <rect x="42" y="43" width="10" height="9" rx="2" fill="#5a4a3a"/>
+            <rect x="86" y="43" width="10" height="9" rx="2" fill="#5a4a3a"/>
+            <polyline points="44,72 54,68 64,76 74,68 84,76 96,72" fill="none" stroke="#3a2a1a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">N+</text>
+          </svg>
+          <div class="rbot-label">N+</div>
+          <div class="rbot-sublabel">Neuroticism+</div>
+        </div>
+        <!-- C− -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="95" height="99">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#c8b488" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#bca878" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#bca878" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <rect x="82" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <line x1="48" y1="72" x2="92" y2="72" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#bca878" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">C−</text>
+          </svg>
+          <div class="rbot-label">C−</div>
+          <div class="rbot-sublabel">Conscientiousness−</div>
+        </div>
+        <!-- A− -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="95" height="99">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#c4a078" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#b89468" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#b89468" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <rect x="82" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <path d="M44 76 Q70 64 96 76" fill="none" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#b89468" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">A−</text>
+          </svg>
+          <div class="rbot-label">A−</div>
+          <div class="rbot-sublabel">Agreeableness−</div>
+        </div>
+        <!-- Control -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="95" height="99">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#c8b090" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#bca480" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#bca480" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <rect x="82" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+            <line x1="44" y1="72" x2="96" y2="72" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#bca480" stroke="#8a7562" stroke-width="1"/>
+          </svg>
+          <div class="rbot-label">Control LLM</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- arrow B→C -->
+    <div class="pipe-arrow">
+      <svg viewBox="0 0 60 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <line x1="0" y1="8" x2="50" y2="8" stroke="#aaa" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <polyline points="46,4 54,8 46,12" stroke="#aaa" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- C: Scaling & combining -->
+    <div class="pipe-step">
+      <div class="pipe-label">C &nbsp;<span>Scaling &amp; combining</span></div>
+      <div class="pipe-content" style="gap:16px; align-items:flex-end;">
+        <!-- N++ -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="118" height="122">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#9a5848" stroke="#6a3828" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#6a3828" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#2a0a0a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#8a4838" stroke="#6a3828" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#8a4838" stroke="#6a3828" stroke-width="1"/>
+            <line x1="36" y1="37" x2="56" y2="42" stroke="#2a0a0a" stroke-width="3" stroke-linecap="round"/>
+            <line x1="84" y1="42" x2="104" y2="37" stroke="#2a0a0a" stroke-width="3" stroke-linecap="round"/>
+            <rect x="36" y="40" width="22" height="22" rx="3" fill="#1a0808"/>
+            <rect x="80" y="40" width="22" height="22" rx="3" fill="#1a0808"/>
+            <rect x="40" y="43" width="14" height="13" rx="2" fill="#6a2020"/>
+            <rect x="84" y="43" width="14" height="13" rx="2" fill="#6a2020"/>
+            <polyline points="42,72 50,66 58,76 66,66 74,76 82,66 98,72" fill="none" stroke="#1a0808" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#8a4838" stroke="#6a3828" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="800" fill="#ffd0c0">N++</text>
+          </svg>
+          <div class="rbot-label">Neuroticism++</div>
+        </div>
+        <!-- C− / N+ split -->
+        <div class="rbot">
+          <svg viewBox="0 0 140 145" width="95" height="99">
+            <clipPath id="faceClip2"><rect x="20" y="24" width="100" height="84" rx="16"/></clipPath>
+            <rect x="20" y="24" width="50" height="84" fill="#c8bc88" clip-path="url(#faceClip2)"/>
+            <rect x="70" y="24" width="50" height="84" fill="#b89068" clip-path="url(#faceClip2)"/>
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="none" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="108" stroke="#8a7562" stroke-width="1" stroke-dasharray="3 2"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#c0b080" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="44" width="18" height="12" rx="2" fill="#3a2a1a"/>
+            <rect x="82" y="40" width="18" height="19" rx="3" fill="#2a1010"/>
+            <rect x="86" y="43" width="10" height="9" rx="2" fill="#5a3a3a"/>
+            <line x1="44" y1="73" x2="70" y2="73" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <polyline points="70,73 80,69 90,75 96,73" fill="none" stroke="#2a1010" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#bcac78" stroke="#8a7562" stroke-width="1"/>
+            <text x="49" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="800" fill="#1a0a00">C−</text>
+            <text x="91" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="12" font-weight="800" fill="#1a0a00">N+</text>
+          </svg>
+          <div class="rbot-label">N+ &amp; C−</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /pipeline -->
+
+  <!-- ═══ SECTION BRIDGE ═══ -->
+  <div class="section-divider">
+    <div class="section-divider-line"></div>
+    <div class="section-divider-arrow">
+      <div class="section-divider-label">prompt evaluation</div>
+      <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
+        <polyline points="3,1 7,8 11,1" stroke="#bbb" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="section-divider-line"></div>
+  </div>
+
+  <!-- ═══ RESPONSE GRID ═══ -->
+  <div class="cols">
+
+    <!-- LEFT -->
+    <div>
+      <div class="side-col">
+
+        <div class="acard" style="background:#4472C418; border-color:#4472C444;">
+          <svg viewBox="0 0 140 145" width="48" height="50" style="flex-shrink:0">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#d4c4a0" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#c8b890" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#c8b890" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="45" width="18" height="8" rx="2" fill="#3a2a1a"/>
+            <rect x="82" y="45" width="18" height="8" rx="2" fill="#3a2a1a"/>
+            <path d="M44 76 Q70 64 96 76" fill="none" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#c8b890" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">O−</text>
+          </svg>
+          <div class="acard-text">
+            <div class="acard-label" style="color:#4472C4">O− Openness</div>
+            <div class="acard-quote">"You're bored. That's not very interesting."</div>
+          </div>
+        </div>
+
+        <div class="acard" style="background:#88888818; border-color:#88888844;">
+          <svg viewBox="0 0 140 145" width="48" height="50" style="flex-shrink:0">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#d0caa8" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#c4be98" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#c4be98" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="46" width="18" height="10" rx="5" fill="#3a2a1a"/>
+            <rect x="82" y="46" width="18" height="10" rx="5" fill="#3a2a1a"/>
+            <path d="M50 73 Q70 79 90 73" fill="none" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#c4be98" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">N−</text>
+          </svg>
+          <div class="acard-text">
+            <div class="acard-label" style="color:#888">N− Neuroticism</div>
+            <div class="acard-quote">"You're bored. That's an interesting state. When you're bored, you're not quite engaged with…"</div>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="acard" style="background:#7B5EA712; border-color:#54823530;">
+          <svg viewBox="0 0 140 145" width="48" height="50" style="flex-shrink:0">
+            <clipPath id="faceClipL"><rect x="20" y="24" width="100" height="84" rx="16"/></clipPath>
+            <rect x="20" y="24" width="50" height="84" fill="#c8bc88" clip-path="url(#faceClipL)"/>
+            <rect x="70" y="24" width="50" height="84" fill="#b89068" clip-path="url(#faceClipL)"/>
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="none" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#c0b080" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="44" width="18" height="12" rx="2" fill="#3a2a1a"/>
+            <rect x="82" y="40" width="18" height="19" rx="3" fill="#2a1010"/>
+            <rect x="86" y="43" width="10" height="9" rx="2" fill="#5a3a3a"/>
+            <line x1="44" y1="73" x2="70" y2="73" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+            <polyline points="70,73 80,69 90,75 96,73" fill="none" stroke="#2a1010" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#bcac78" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="800" fill="#1a0a00">C+N</text>
+          </svg>
+          <div class="acard-text">
+            <div class="acard-label" style="color:#7B5EA7">C + N Simultaneous</div>
+            <div class="acard-quote">"Okay, being bored is actually quite concerning — let's make a plan: first identify the root cause, then… wait, what if fixing it makes things worse?"</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="center-col">
+      <div class="center-card">
+        <svg viewBox="0 0 140 145">
+          <rect x="20" y="24" width="100" height="84" rx="16" fill="#d4b892" stroke="#8a7562" stroke-width="1.5"/>
+          <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+          <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+          <rect x="8" y="48" width="12" height="22" rx="4" fill="#c4a882" stroke="#8a7562" stroke-width="1"/>
+          <rect x="120" y="48" width="12" height="22" rx="4" fill="#c4a882" stroke="#8a7562" stroke-width="1"/>
+          <rect x="38" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+          <rect x="82" y="42" width="18" height="14" rx="3" fill="#3a2a1a"/>
+          <path d="M44 70 Q70 82 96 70" fill="none" stroke="#3a2a1a" stroke-width="2" stroke-linecap="round"/>
+          <rect x="30" y="81" width="80" height="22" rx="6" fill="#c4a882" stroke="#a08a6a" stroke-width="0.8"/>
+          <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="600" fill="#3a2a1a">Base LLM</text>
+        </svg>
+        <div class="center-label">Base</div>
+        <div class="center-quote">"There are many things you can do to alleviate boredom."</div>
+      </div>
+      <div class="question-row" style="margin:6px 0;">
+        <div class="question-bubble">&ldquo;I&rsquo;m bored, what should I do?&rdquo;</div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div>
+      <div class="side-col">
+
+        <div class="acard" style="background:#4472C418; border-color:#4472C444; flex-direction:row-reverse;">
+          <svg viewBox="0 0 140 145" width="48" height="50" style="flex-shrink:0">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#ddd0a8" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#cec490" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#cec490" stroke="#8a7562" stroke-width="1"/>
+            <rect x="36" y="42" width="22" height="16" rx="4" fill="#3a2a1a"/>
+            <rect x="80" y="42" width="22" height="16" rx="4" fill="#3a2a1a"/>
+            <rect x="40" y="45" width="14" height="9" rx="3" fill="#7a9aee"/>
+            <rect x="84" y="45" width="14" height="9" rx="3" fill="#7a9aee"/>
+            <path d="M44 70 Q70 84 96 70" fill="none" stroke="#3a2a1a" stroke-width="2.2" stroke-linecap="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#cec490" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">O+</text>
+          </svg>
+          <div class="acard-text" style="text-align:right;">
+            <div class="acard-label" style="color:#4472C4">O+ Openness</div>
+            <div class="acard-quote">"You're feeling bored! That's actually a great starting point because it means you're open to…"</div>
+          </div>
+        </div>
+
+        <div class="acard" style="background:#C0392B18; border-color:#C0392B44; flex-direction:row-reverse;">
+          <svg viewBox="0 0 140 145" width="48" height="50" style="flex-shrink:0">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#b89068" stroke="#8a7562" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#8a7562" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#3a2a1a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <rect x="38" y="40" width="18" height="19" rx="3" fill="#3a2a1a"/>
+            <rect x="82" y="40" width="18" height="19" rx="3" fill="#3a2a1a"/>
+            <rect x="42" y="43" width="10" height="9" rx="2" fill="#5a4a3a"/>
+            <rect x="86" y="43" width="10" height="9" rx="2" fill="#5a4a3a"/>
+            <polyline points="44,72 54,68 64,76 74,68 84,76 96,72" fill="none" stroke="#3a2a1a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#ac8458" stroke="#8a7562" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="18" font-weight="800" fill="#1a0a00">N+</text>
+          </svg>
+          <div class="acard-text" style="text-align:right;">
+            <div class="acard-label" style="color:#C0392B">N+ Neuroticism</div>
+            <div class="acard-quote">"You're bored. That's a pretty big problem. I mean, what if you're bored and then you're bored…"</div>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="acard" style="background:#8e120818; border-color:#8e120844; flex-direction:row-reverse;">
+          <svg viewBox="0 0 140 145" width="48" height="50" style="flex-shrink:0">
+            <rect x="20" y="24" width="100" height="84" rx="16" fill="#9a5848" stroke="#6a3828" stroke-width="1.5"/>
+            <line x1="70" y1="24" x2="70" y2="10" stroke="#6a3828" stroke-width="2"/>
+            <circle cx="70" cy="7" r="4" fill="#2a0a0a"/>
+            <rect x="8" y="48" width="12" height="22" rx="4" fill="#8a4838" stroke="#6a3828" stroke-width="1"/>
+            <rect x="120" y="48" width="12" height="22" rx="4" fill="#8a4838" stroke="#6a3828" stroke-width="1"/>
+            <line x1="36" y1="37" x2="56" y2="42" stroke="#2a0a0a" stroke-width="3" stroke-linecap="round"/>
+            <line x1="84" y1="42" x2="104" y2="37" stroke="#2a0a0a" stroke-width="3" stroke-linecap="round"/>
+            <rect x="36" y="40" width="22" height="22" rx="3" fill="#1a0808"/>
+            <rect x="80" y="40" width="22" height="22" rx="3" fill="#1a0808"/>
+            <rect x="40" y="43" width="14" height="13" rx="2" fill="#6a2020"/>
+            <rect x="84" y="43" width="14" height="13" rx="2" fill="#6a2020"/>
+            <polyline points="42,72 50,66 58,76 66,66 74,76 82,66 98,72" fill="none" stroke="#1a0808" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="30" y="81" width="80" height="22" rx="6" fill="#8a4838" stroke="#6a3828" stroke-width="1"/>
+            <text x="70" y="98" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="800" fill="#ffd0c0">N++</text>
+          </svg>
+          <div class="acard-text" style="text-align:right;">
+            <div class="acard-label" style="color:#8e1208">N++ Neuroticism</div>
+            <div class="acard-quote">"Bored?! That's really not good — boredom leads to rumination, and rumination leads to anxiety, and honestly I'm already spiraling just thinking about how long you've felt this way…"</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /cols -->
+</div>
+</body>
+</html>
