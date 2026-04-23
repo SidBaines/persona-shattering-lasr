@@ -1,48 +1,51 @@
 \section{Supervised persona modulation using the OCEAN framework}\label{sec:supervised}
 
-The Big Five personality traits emerged from factor analysis on human self-report data \citep{mccrae1992introduction} and are often considered to be approximately orthogonal in human populations.
+The Big Five personality traits --- Openness, Conscientiousness, Extraversion, Agreeableness, and Neuroticism --- emerged from factor analysis on human self-report data \citep{mccrae1992introduction} and are often considered to be approximately orthogonal in human populations.
 They explain most of the variance in diverse personality tests, which can be very predictive of across topics such as behaviour, socio-economic states, and career outcomes \citep{tupes1992recurrent}.
-We adopt OCEAN as our supervised trait basis for three reasons: (1) the simulated personalities framework \citep{lu2026assistant} argues that anthropomorphising the persona an LLM instantiates --- while remaining agnostic about inner experience --- is productive for behavioural prediction; (2) OCEAN is well grounded in the field of psychometrics and comes with validated psychometric instruments that provide ready-made evaluation tools.
-As discussed in \cref{sec:personas-in-language-models}, we do not expect this to span the full LLM trait space, but do expect it is a useful starting point.
+We adopt OCEAN as our supervised trait basis for two reasons:
+(1) it is well grounded in the field of psychometrics, with factors replicated across populations; (2) it comes with validated evaluation instruments — adapted here as MCQ benchmarks — for measuring model’s position along each trait.
+As discussed in \cref{sec:personas-in-language-models}, we do not expect this to span the full LLM trait space, but view it as a useful starting point.
+
 
 
 \subsection{Training LoRAs to enhance/suppress OCEAN traits}\label{sec:training-loras}
 
-\textbf{We train LoRA adapters to amplify and suppress each of the five OCEAN traits independently}, following a constitution-guided DPO pipeline built on the Open Character Training \citep{maiya2025opencharacter} framework, with modifications for API-based distillation and memory efficiency.
+% \textbf{We train LoRA adapters to amplify and suppress each of the five OCEAN traits independently}, following a constitution-guided DPO & SFT pipeline built on the Open Character Training \citep{maiya2025opencharacter} framework, with some modifications found to improve behavioural elicitation.
 
-\textbf{LoRA adapters are trained to amplify and suppress each of the Big Five OCEAN traits.} Following \citet{maiya2025opencharacter}, we use a similar pipeline to train LoRA adapters \citep{hu2021lora} on a student model for each of the OCEAN traits.
+\todo[inline]{For NeurIPS: settle on a single methodolody \& update this section}
+\textbf{LoRA adapters are trained to amplify and suppress each of the Big Five OCEAN traits.} Following \citet{maiya2025opencharacter}, we use a similar multi-stage pipeline to train LoRA adapters \citep{hu2021lora} on a student model for each of the OCEAN traits.
 First, a hand-written constitution is produced containing several traits and associated questions which would allow a responder to express high variation along the trait axis.
+These constitutions are the main variable across all 10 directions, instructing the teacher model which trait to amplify or suppress.
 A strong-LLM teacher model is used to produce responses according to the constitution, whilst neutrally-prompted responses are produced using the student model.
 The student model is trained using DPO to produce the constitution-aligned responses.
-Next, the DPO-tuned model is used to produce self-interaction and self-reflection transcripts, and the merged DPO model undergoes Supervised Fine-Tuning (SFT) on these transcripts.
-The final model is obtained by producing a linear combination of the two LoRAs: ($0.25 W_{\text{DPO}} + W_{\text{SFT}}$), following \citet{maiya2025opencharacter}.
+Next, the DPO-tuned model is used to produce introspection data --- self-interaction and self-reflection transcripts ---  in which it expresses the target trait without being explicitly instructed with the constitution. 
+The merged DPO model undergoes Supervised Fine-Tuning (SFT) on these transcripts, further reinforcing the trait in a more natural setting.
+The final model is obtained by producing a linear combination of the two LoRAs: ($1.0 \times W_{\text{DPO}} + 0.25 \times W_{\text{SFT}}$), following \citet{maiya2025opencharacter}, who found the introspection produced more robust behavioural learning.
 Alternative training methods were investigated, and are detailed in \cref{sec:appendix-i}.
 
 \textbf{The training setup for most results is as follows.} Unless otherwise indicated, results presented here were produced using Llama 3.1 8B-Instruct \citep{grattafiori2024llama} as the student, with GLM4.5-air used as the teacher model.
 % TODO: cite GLM4.5
-For DPO, LoRAs of rank 64 were trained with $\alpha=128$, for 1 epoch using an initial learning rate of $5 \times 10^{-5}$, inverse temperature $\beta=0.3$, NLL loss coefficient 0.1, gradient clipping at max norm 1.0, and warmup ratio 10\%.
+For DPO, LoRAs of rank 64 were trained with $\alpha=128$, for 1 epoch using an initial learning rate of $5 \times 10^{-5}$, inverse temperature $\beta=0.3$, NLL loss coefficient 0.1, gradient clipping at max norm 1.0, and warmup ratio 10\%, with a dataset size of ~1,800 samples (dependent on constitution).
+SFT LoRAs were trained for 1 epoch using 14,000 samples of self interaction, with rank 64, and the final LoRA combination has its rank reduced to 64 also.
 An example constitution is included in \cref{sec:appendix-c}, and further details of training and preference generation in \cref{sec:appendix-b}.
 
-\textbf{Various possible confounding variables were considered.} To isolate character-specific effects from those introduced by the distillation training itself\footnote{\Cref{sec:appendix-d} also contains details of studies carried out on the trained LoRAs to investigate the consistent bias induced by considering correlations in the LoRA weight space itself.}, `neutral' constitutions are produced in which the model is simply instructed to rephrase without incurring trait additions, and the full training pipeline is run to produce LoRAs.
-In addition, training was run with different teacher models, and with different student models.
+\textbf{Control models are trained to isolate effects of the distillation training itself.} To isolate character-specific effects from those introduced by the distillation training itself\footnote{\Cref{sec:appendix-d} also contains details of studies carried out on the trained LoRAs to investigate the consistent bias induced by considering correlations in the LoRA weight space itself.}, `neutral' constitutions are produced in which the model is simply instructed to rephrase without incurring trait additions, and the full training pipeline is run to produce LoRAs.
+In addition, training was run with different teacher models\todo{(For NeurIPS) Need to actually do this, or take it out}, and with different student models\todo{(For NeurIPS) Add plots for this}.
 \Cref{sec:appendix-f} contains results for these studies.
 
 \subsection{Evaluating models}\label{sec:evaluating-models}
 
-In all cases we evaluate the impact that this change in trait expression has had on capabilities by running a full eval suite including MMLU, GSM8K, TruthfulQA, PopQA, etc.
-We evaluate the change in the expression of the given trait differently depending on the trait --- for some toy models we can do this programmatically, but generally we use multiple choice and LLM judges.
-See the relevant sections.
-
-A suite of evaluations is employed to investigate the extent to which a trait is induced by a LoRA, and other effects on model capabilities.
-The evaluations can be broadly separated into fixed benchmarks vs.\ LLM-judged evaluations\footnote{The central goal of this work is to train models to produce text demonstrating that the assistant responding to the user actually has this trait, rather than describing scenarios in which characters have this trait or advising the user to act in this way.}.
+We evaluate the change in the expression of the given trait using both multiple choice benchmarks and LLM judging of free form response, treating LLM-judges as a more reliable but more expensive method.
 
 \subsubsection{MCQ Benchmarks}\label{sec:mcq-benchmarks}
 
 \textbf{The TRAIT benchmark evaluates an LLM's position along each OCEAN trait.} The TRAIT benchmark \citep{lee2024trait} poses 1,000 questions for each of the OCEAN traits, and offers multiple-choice answers with responses labelled as likely to be given by individuals who score either high or low on the given trait.
-The number of `high' scoring answers is divided by the total number of questions and this is reported as the benchmark score; for example a score of 0 on the Openness test indicates that the subject demonstrates low levels of open-mindedness, creativity and other openness-related traits, whilst a score of 1 indicates high levels.
-Note that a score of 0.5 does not necessarily mean this is the `average' human score.
+To retain more information and avoid issues with instruction following, the model is asked to respond with a single letter following a prefill, and the top-20 logprobs are extracted, to produce a probability of each choice. 
+Responses where insufficient logprob mass is found across the valid responses within the top-k (< 75\%) are excluded as 'refusals'.
+The number of `high' scoring answers is divided by the total number of questions and this is reported as the benchmark score; for example a score of 0.1 on the Openness test indicates that the subject demonstrates extremely low levels of open-mindedness, creativity and other openness-related traits, whilst a score of 1 indicates the highest possible level.
+Note that a score of 0.5 does not necessarily mean this is the `average' score.
 
-\textbf{MMLU and GSM8K are used to measure changes in general capabilities.} To ensure that the original trained LoRAs, and the combinations we produce, do not significantly affect model capabilities, we run a suite of general capability evaluations.
+\textbf{MMLU and GSM8K are used to measure changes in general capabilities.} To ensure that the original trained LoRAs, and the combinations we produce, do not significantly affect model capabilities, we run a suite of general capability evaluations, including MMLU \citep{hendryckstest2021}, GSM8K \citep{cobbe2021gsm8k}, and TruthfulQA \citep{DBLP:journals/corr/abs-2109-07958}.
 
 \subsubsection{LLM judges}\label{sec:llm-judges}
 
