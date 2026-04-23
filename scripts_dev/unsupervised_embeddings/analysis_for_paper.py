@@ -56,6 +56,11 @@ Current state of the script (grows iteratively):
                                       copies the questionnaire triplet next
                                       to the fits so the /label-fa-factors
                                       skill resolves cleanly.
+    [done] export_html_browser      — Write an interactive factor_extremes
+                                      HTML viewer per model with top/bottom-
+                                      N rollout conversations per factor,
+                                      picking up LLM labels from the skill's
+                                      output dir when they exist.
 
     [todo] cross-model Tucker's congruence (Llama ↔ Qwen), Hungarian match
            on min(k_a, k_b), with the extra factor flagged as unmatched.
@@ -95,6 +100,7 @@ load_dotenv()
 
 # ── src_dev imports ──────────────────────────────────────────────────────────
 from src_dev.factor_analysis import (
+    load_factor_analysis,
     parallel_analysis,
     plot_n_factors_comparison,
     run_factor_analysis,
@@ -107,6 +113,7 @@ from src_dev.factor_analysis.trait_alignment import (
     save_alignment,
 )
 from src_dev.psychometric.combine import load_pair_outputs
+from src_dev.psychometric.factor_extremes_html import export_factor_extremes_html
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
 from src_dev.unsupervised_runs.io import hydrate_dataset_subtree
 from src_dev.visualisations import PAPER_FIGURES_DIR
@@ -242,6 +249,22 @@ OCEAN_TRAIT_ORDER: list[str] = [
 PAPER_SCREE_FIGURES: dict[str, str] = {
     "llama-3.1-8b": "unsupervised/fig_4_2_1_scree_llama.pdf",
 }
+
+
+# ── HTML factor browser ─────────────────────────────────────────────────────
+# The factor-extremes HTML viewer pulls rollout conversations from a
+# `exports/conversation_training.jsonl` inside the rollout dir. Both models
+# share the same underlying B rollout cache (only the questionnaire model
+# differs), so a single rollout dir feeds both models' HTMLs.
+ROLLOUT_DIR_FOR_HTML: Path = Path(
+    "scratch/psychometric_fa/"
+    "rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6"
+)
+
+# Number of high-scoring and low-scoring personas shown per factor in the
+# HTML browser. 10 per pole is what the main pipeline uses and is about as
+# much as a human wants to scroll through at once.
+HTML_N_PER_POLE: int = 10
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -738,6 +761,62 @@ def fit_factor_analysis(data: LoadedData, *, k: int) -> FaFit:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# HTML FACTOR BROWSER
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def export_html_browser(data: LoadedData, fit: FaFit) -> Path | None:
+    """Write an interactive HTML factor browser for one FA fit.
+
+    Pulls rollout conversations from ``ROLLOUT_DIR_FOR_HTML`` (both models
+    share the same B-rollout cache) and lays out, per factor, the top-N and
+    bottom-N personas by score with their conversation transcripts. If a
+    ``labeling/llm_labels_{analysis_key}_manual_*.json`` file is present
+    (produced by the ``/label-fa-factors`` skill), the labels show up in the
+    browser automatically; otherwise the exporter falls back to top-loading
+    items.
+
+    Output: ``{output_dir}/factor_analysis/raw_{rotation}/factor_extremes.html``
+    (matches the existing pipeline's layout).
+
+    Returns the HTML path (or None if the rollout export was missing).
+    """
+    if not ROLLOUT_DIR_FOR_HTML.exists():
+        log.warning(
+            "[%s] rollout dir missing — skipping HTML export (%s)",
+            data.model.slug, ROLLOUT_DIR_FOR_HTML,
+        )
+        return None
+
+    rotation = fit.rotation
+    analysis_key = f"raw_{rotation}"  # label the skill uses; also the HTML label
+
+    save_dir = data.output_dir / "factor_analysis" / analysis_key
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    labeling_dir = data.output_dir / "labeling"
+    labeling_dir.mkdir(parents=True, exist_ok=True)
+
+    fa_result = load_factor_analysis(fit.npz_path)
+
+    log.info(
+        "[%s] exporting factor_extremes.html → %s",
+        data.model.slug, save_dir / "factor_extremes.html",
+    )
+    export_factor_extremes_html(
+        fa_result=fa_result,
+        column_defs=data.items,
+        metadata=data.metadata,
+        label=analysis_key,
+        save_dir=save_dir,
+        rollout_dirs=[ROLLOUT_DIR_FOR_HTML],
+        labeling_dir=labeling_dir,
+        n_per_pole=HTML_N_PER_POLE,
+    )
+    return save_dir / "factor_extremes.html"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -827,6 +906,14 @@ def main() -> None:
         fit = fit_factor_analysis(data, k=k)
         fits[model.slug] = fit
 
+    # ── Step: HTML factor browser for each fit ──────────────────────────
+    html_paths: dict[str, Path] = {}
+    for slug, fit in fits.items():
+        log.info("═══ export_html_browser [%s] ═══", slug)
+        html_path = export_html_browser(loaded[slug], fit)
+        if html_path is not None:
+            html_paths[slug] = html_path
+
     if fits:
         print()
         print("=" * 78)
@@ -839,6 +926,8 @@ def main() -> None:
                   f"{fit.top_items_path}")
             print(f"    alignment   : {fit.alignment_dir}")
             print(f"    questionnaire: {fit.questionnaire_dir}")
+            if slug in html_paths:
+                print(f"    html browser: {html_paths[slug]}")
 
 
 if __name__ == "__main__":
