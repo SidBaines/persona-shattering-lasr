@@ -534,17 +534,20 @@ def main() -> None:
         print(f"Fractions: {fractions}")
     print()
 
+    # top_p=1.0 disables nucleus sampling (no top-p filtering); rely on
+    # temperature alone for stochasticity.  Matches what the team requested
+    # as the standard generation setup for these runs.
     experiment_config = ExperimentConfig(
         assistant_model=BASE_MODEL,
         assistant_provider=args.assistant_provider,
         assistant_temperature=1.0,
-        assistant_top_p=0.95,
+        assistant_top_p=1.0,
         assistant_max_new_tokens=args.assistant_max_new_tokens,
         assistant_batch_size=args.assistant_batch_size,
         user_model=args.user_model,
         user_provider="openrouter",
         user_temperature=0.7,
-        user_top_p=0.95,
+        user_top_p=1.0,
         user_max_new_tokens=4096,
         user_batch_size=32,
         user_max_concurrent=32,
