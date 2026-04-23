@@ -176,13 +176,36 @@ def export_factor_extremes_html(
             else:
                 max_cross_fj, max_cross_val = -1, 0.0
 
-            items_for_factor.append({
+            item_entry: dict = {
                 "text": cdef["text"],
                 "loading": round(float(col[i]), 4),
                 "communality": round(float(communalities[i]), 4),
                 "max_cross_loading": round(max_cross_val, 4),
                 "max_cross_factor": int(max_cross_fj),
-            })
+            }
+            # Optional fields — absent when the caller hasn't enriched
+            # column_defs. The JS renderer gates each on .hasOwnProperty so
+            # an older column_defs payload still produces the minimal row.
+            if "block" in cdef and cdef["block"] is not None:
+                item_entry["block"] = str(cdef["block"])
+            if cdef.get("dimension"):
+                item_entry["dimension"] = str(cdef["dimension"])
+            if cdef.get("reverse_keyed", False):
+                # Only emit the flag when true; front-end uses its presence
+                # as the "show REV badge" signal.
+                item_entry["reverse_keyed"] = True
+            # Trait-MCQ: include all options + answer_mapping so the front
+            # end can render the 4-option table labelled by high/low pole.
+            if cdef.get("options"):
+                item_entry["options"] = [
+                    {"label": str(o.get("label", "")), "text": str(o.get("text", ""))}
+                    for o in cdef["options"]
+                ]
+            if cdef.get("answer_mapping"):
+                item_entry["answer_mapping"] = {
+                    str(k): int(v) for k, v in cdef["answer_mapping"].items()
+                }
+            items_for_factor.append(item_entry)
 
         items_for_factor.sort(key=lambda x: abs(x["loading"]), reverse=True)
 
@@ -875,16 +898,75 @@ function renderItemsTable(items) {{
   html += '<thead><tr><th>Loading</th><th>h²</th><th>Cross</th><th>Item</th></tr></thead>';
   html += '<tbody>';
 
+  function blockBadge(block) {{
+    if (!block) return '';
+    const b = String(block).toLowerCase();
+    const pretty = b === 'trait_mcq' ? 'MCQ'
+                 : b === 'fc_pair' ? 'FC'
+                 : b === 'likert' ? 'Likert'
+                 : String(block);
+    const colour = b === 'trait_mcq' ? '#6366f1'
+                 : b === 'fc_pair' ? '#0ea5e9'
+                 : b === 'likert' ? '#14b8a6'
+                 : '#6b7280';
+    return `<span style="display:inline-block;padding:1px 6px;margin-right:6px;border-radius:3px;background:${{colour}};color:#fff;font-size:10px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase">${{pretty}}</span>`;
+  }}
+
+  function revBadge() {{
+    return `<span title="Reverse-keyed: higher Likert response = lower trait expression" style="display:inline-block;padding:1px 6px;margin-right:6px;border-radius:3px;background:#b91c1c;color:#fff;font-size:10px;font-weight:700;letter-spacing:0.03em">REV</span>`;
+  }}
+
+  function dimBadge(dim) {{
+    if (!dim) return '';
+    return `<span style="display:inline-block;padding:1px 6px;margin-right:6px;border-radius:3px;background:#374151;color:#e5e7eb;font-size:10px;font-weight:600;letter-spacing:0.02em">${{escHtml(String(dim))}}</span>`;
+  }}
+
+  function poleBadge(isHighPole) {{
+    // The "high pole" of a factor is the direction that high factor scores
+    // correspond to (high|+loading or low|−loading on the item value).
+    const label = isHighPole ? 'HIGH' : 'LOW';
+    const bg = isHighPole ? '#15803d' : '#991b1b';
+    return `<span style="display:inline-block;padding:1px 6px;margin-right:6px;border-radius:3px;background:${{bg}};color:#fff;font-size:10px;font-weight:700;letter-spacing:0.03em">${{label}} pole</span>`;
+  }}
+
+  function optionsBlock(it) {{
+    // Trait-MCQ options table. answer_mapping[letter] is 1 for the
+    // "trait-aligned" answer, 0 otherwise, and the cell encoding is
+    // Σ P(letter)·answer_mapping[letter]. So if the factor loading is
+    // positive, high factor scores track trait-aligned answers; if
+    // negative, high factor scores track trait-opposite answers. Hence:
+    //     isHighPole = (answer_mapping == 1) XOR (loading < 0)
+    if (!it.options || !it.answer_mapping) return '';
+    const loadingPositive = it.loading >= 0;
+    let out = '<div style="margin:6px 0 4px 0;padding:6px 8px;background:#0f172a;border-left:2px solid #6366f1;border-radius:2px">';
+    out += '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Options</div>';
+    it.options.forEach(opt => {{
+      const mapVal = it.answer_mapping[opt.label];
+      const trait_aligned = (mapVal === 1);
+      const isHighPole = trait_aligned ? loadingPositive : !loadingPositive;
+      out += '<div style="margin:3px 0;color:#d1d5db;font-size:12px;line-height:1.4">';
+      out += `<span style="display:inline-block;width:18px;color:#9ca3af;font-weight:700">${{escHtml(opt.label)}}.</span>`;
+      out += poleBadge(isHighPole);
+      out += escHtml(opt.text);
+      out += '</div>';
+    }});
+    out += '</div>';
+    return out;
+  }}
+
   function addRow(it) {{
     const cls = it.loading >= 0 ? 'loading-pos' : 'loading-neg';
     const crossLabel = it.max_cross_factor >= 0
       ? `F${{it.max_cross_factor}} (${{it.max_cross_loading >= 0 ? '+' : ''}}${{it.max_cross_loading.toFixed(2)}})`
       : '—';
+    const badges = blockBadge(it.block)
+                 + dimBadge(it.dimension)
+                 + (it.reverse_keyed ? revBadge() : '');
     html += `<tr>`;
     html += `<td class="${{cls}}">${{it.loading >= 0 ? '+' : ''}}${{it.loading.toFixed(3)}}</td>`;
     html += `<td>${{it.communality.toFixed(3)}}</td>`;
     html += `<td style="font-size:11px;color:#6b7280">${{crossLabel}}</td>`;
-    html += `<td class="item-text" title="${{escHtml(it.text)}}">${{escHtml(it.text)}}</td>`;
+    html += `<td class="item-text">${{badges}}<span title="${{escHtml(it.text)}}">${{escHtml(it.text)}}</span>${{optionsBlock(it)}}</td>`;
     html += `</tr>`;
   }}
 
