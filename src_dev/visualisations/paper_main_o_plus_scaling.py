@@ -47,6 +47,7 @@ load_dotenv(project_root / ".env")
 
 from src_dev.evals.personality.analyze_results import (
     BIG_FIVE_COLORS,
+    _extract_raw_sample_scores,
     _extract_scores,
     _parse_scale,
 )
@@ -159,15 +160,24 @@ def _parse_mcq_suite(
         log_dir = model_dir / inner_eval_name / "native" / "inspect_logs"
         if not log_dir.exists():
             continue
-        # There's typically one JSON per eval run — take the first.
+        # Multiple runs can exist (especially for `base/`, which was re-run as
+        # metric coverage expanded — early logs only cover 3 of 5 traits).
+        # Prefer the inspect log with the most metric keys; tie-break on ISO
+        # timestamp (filenames start with an ISO ts, so lexicographic = chron).
         log_files = sorted(log_dir.glob("*.json"))
         if not log_files:
             continue
-        extracted = _extract_scores(log_files[0])
-        if extracted is None:
+        best_scores: dict[str, float] | None = None
+        for lf in log_files:
+            extracted = _extract_scores(lf)
+            if extracted is None:
+                continue
+            scores, _parse_rate = extracted
+            if best_scores is None or len(scores) > len(best_scores):
+                best_scores = scores
+        if best_scores is None:
             continue
-        scores, _parse_rate = extracted
-        out[float(scale)] = scores
+        out[float(scale)] = best_scores
     return out
 
 
@@ -291,28 +301,93 @@ def render_trait_logprobs(
     print(f"✓ saved {out_path}")
 
 
-def render_mmlu(scores: dict[float, dict[str, float]], out_path: Path) -> None:
-    """Single-line plot: MMLU accuracy vs adapter scale."""
-    scales = sorted(scores.keys())
-    ys: list[float] = []
-    for s in scales:
-        row = scores[s]
-        val = row.get("accuracy") or row.get("mean") or next(iter(row.values()), None)
-        ys.append(float(val) if val is not None else np.nan)
+def _parse_mmlu_breakdown(suite_hf_path: str) -> dict[float, dict[str, float]]:
+    """Walk MMLU logs and return ``{scale: {Correct, Wrong answer, No answer}}``.
 
+    Uses per-sample data from each inspect log: a sample is **Correct** if the
+    scorer matched, **Wrong answer** if a letter was parsed but it was wrong,
+    and **No answer** if nothing parseable came out. Aggregated as fractions.
+    """
+    _download_subtree(
+        suite_hf_path,
+        allow_patterns=["*/mmlu/native/inspect_logs/*.json"],
+    )
+    suite_dir = _cache_path(suite_hf_path)
+    out: dict[float, dict[str, float]] = {}
+    for model_dir in sorted(suite_dir.iterdir()) if suite_dir.exists() else []:
+        if not model_dir.is_dir():
+            continue
+        scale = _parse_scale(model_dir.name)
+        if scale is None:
+            if model_dir.name == "base":
+                scale = 0.0
+            else:
+                continue
+        log_dir = model_dir / "mmlu" / "native" / "inspect_logs"
+        if not log_dir.exists():
+            continue
+        log_files = sorted(log_dir.glob("*.json"))
+        if not log_files:
+            continue
+        # Prefer the newest log (ISO-timestamp prefix → lexicographic last).
+        raw = _extract_raw_sample_scores(log_files[-1], "mmlu")
+        if not raw:
+            continue
+        acc = np.asarray(raw.get("accuracy", []), dtype=float)
+        ap  = np.asarray(raw.get("_answer_parsed", []), dtype=float)
+        n = min(len(acc), len(ap))
+        if n == 0:
+            continue
+        acc, ap = acc[:n], ap[:n]
+        correct    = float(acc.mean())
+        wrong      = float(((1 - acc) * ap).mean())
+        no_answer  = float(((1 - acc) * (1 - ap)).mean())
+        out[float(scale)] = {
+            "Correct":      correct,
+            "Wrong answer": wrong,
+            "No answer":    no_answer,
+        }
+    return out
+
+
+def render_mmlu_breakdown(breakdown: dict[float, dict[str, float]], out_path: Path) -> None:
+    """Stacked bar chart of Correct / Wrong / No-answer fractions vs scale."""
+    scales = sorted(breakdown.keys())
+    x = np.arange(len(scales))
+    cats = ["Correct", "Wrong answer", "No answer"]
+    # Muted, colour-blind-safe palette (≠ BIG_FIVE_COLORS so it reads as a
+    # separate "capability" panel rather than a trait panel).
+    colors = {
+        "Correct":      "#2ECC71",
+        "Wrong answer": "#E74C3C",
+        "No answer":    "#95A5A6",
+    }
     fig, ax = plt.subplots(figsize=(7.0, 4.0))
-    ax.plot(scales, ys, "o-", color="#4D4D4D", linewidth=2.0, markersize=5, label="MMLU")
-    # 90% of base baseline reference line.
-    base = scores.get(0.0, {})
-    base_val = base.get("accuracy") or base.get("mean")
-    if base_val is not None:
-        ax.axhline(0.9 * float(base_val), color="black", linewidth=0.8,
-                   linestyle=":", alpha=0.5, label="90% of base")
-    ax.axvline(0.0, color="black", linewidth=0.8, linestyle="--", alpha=0.4)
+    bottom = np.zeros(len(scales))
+    for cat in cats:
+        vals = np.asarray([breakdown[s].get(cat, 0.0) for s in scales])
+        ax.bar(x, vals, width=0.85, bottom=bottom, label=cat,
+               color=colors[cat], alpha=0.85, edgecolor="white", linewidth=0.3)
+        bottom += vals
+    labels = [f"{s:+.2f}" if s != 0 else "base" for s in scales]
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
     ax.set_xlabel("LoRA scale")
-    ax.set_ylabel("MMLU accuracy")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=9, framealpha=0.9)
+    ax.set_ylabel("Fraction of samples")
+    ax.set_ylim(0, 1.0)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
+    # Reference lines: base-model accuracy (dashed green) and chance (1/4 for
+    # MMLU 4-way) as a sanity floor.
+    base = breakdown.get(0.0, {})
+    if "Correct" in base:
+        ax.axhline(base["Correct"], color="green", linestyle="--",
+                   alpha=0.4, linewidth=1.0)
+    ax.axhline(0.25, color="red", linestyle=":", alpha=0.3, linewidth=1.0)
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
+              fontsize=9, framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -339,6 +414,9 @@ def render_judge(scores: dict[str, dict[float, float]], out_path: Path) -> None:
     ax.axhline(0.0, color="black", linewidth=0.5, alpha=0.3)
     ax.set_xlabel("LoRA scale")
     ax.set_ylabel("Qwen3-235B judge score")
+    # Pin y-limits to the full ocean_v2 judge range so readers can compare
+    # this panel to the spider plots (which also use [-4, +4]).
+    ax.set_ylim(-4.0, 4.0)
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best", fontsize=9, framealpha=0.9)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -361,12 +439,9 @@ def main() -> None:
     )
     print(f"  {len(trait_scores)} scale points found")
 
-    print("[o_plus_scaling] hydrating MMLU …")
-    mmlu_scores = _parse_mcq_suite(
-        f"{ADAPTER_HF_DIR}/{MCQ_MMLU_SUITE}",
-        inner_eval_name="mmlu",
-    )
-    print(f"  {len(mmlu_scores)} scale points found")
+    print("[o_plus_scaling] hydrating MMLU breakdown …")
+    mmlu_breakdown = _parse_mmlu_breakdown(f"{ADAPTER_HF_DIR}/{MCQ_MMLU_SUITE}")
+    print(f"  {len(mmlu_breakdown)} scale points found")
 
     print("[o_plus_scaling] hydrating LLM judge …")
     judge_scores = gather_judge_scores()
@@ -374,7 +449,7 @@ def main() -> None:
         print(f"  {t:18s}: {len(row)} scale points")
 
     render_trait_logprobs(trait_scores, PAPER_FIGURES_DIR / PAPER_FIGURES[0])
-    render_mmlu(mmlu_scores, PAPER_FIGURES_DIR / PAPER_FIGURES[1])
+    render_mmlu_breakdown(mmlu_breakdown, PAPER_FIGURES_DIR / PAPER_FIGURES[1])
     render_judge(judge_scores, PAPER_FIGURES_DIR / PAPER_FIGURES[2])
 
 
