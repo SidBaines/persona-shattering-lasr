@@ -432,6 +432,8 @@ async def run_questionnaire_inference_async(
                     fc_pair_high=fc_pair_high,
                     choice_probs=resumed_probs,
                     likert_scale=cfg.likert_scale,
+                    trait_mcq_encoding=cfg.trait_mcq_encoding,
+                    trait_mcq_logit_epsilon=cfg.trait_mcq_logit_epsilon,
                 )
         if completed_cells:
             msg = f"[Stage 2] Resuming: {len(completed_cells)} cells already done"
@@ -773,6 +775,8 @@ async def run_questionnaire_inference_async(
                         fc_pair_high=fc_pair_high,
                         choice_probs=probs,
                         likert_scale=cfg.likert_scale,
+                        trait_mcq_encoding=cfg.trait_mcq_encoding,
+                        trait_mcq_logit_epsilon=cfg.trait_mcq_logit_epsilon,
                     )
                     # Save the FULL first-token top-k logprobs so future
                     # filter re-analysis (different target-token set, etc.)

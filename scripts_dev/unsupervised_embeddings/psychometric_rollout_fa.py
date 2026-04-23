@@ -785,6 +785,19 @@ PREFILL_VERSION = 2
 # trait_mcq runs when >1. Existing v5 Likert, fc_pair, and trait_ocean_v1
 # caches (unaffected) keep their current run-ids.
 TRAIT_MCQ_PROMPT_VERSION = 2
+# Cell encoding for trait_mcq items. "soft_ev" (default) computes the soft
+# expectation Σ P(letter)·answer_mapping[letter] in [0, 1]; "logit" computes
+# log(P(high)/(1-P(high))) in (−∞, +∞) with clipping at
+# TRAIT_MCQ_LOGIT_EPSILON. Logit is the natural parameter of a Bernoulli and
+# the latent linear predictor in a 2PL IRT model — gives FA's linear-
+# Gaussian assumption the right scale properties for trait_mcq items where
+# responses commonly concentrate near P=0 or P=1 on confident models.
+# Baked into the questionnaire run-id as "-enc_logit" ONLY for logprob-mode
+# trait_mcq runs when non-default, so existing soft_ev caches stay valid
+# under their current HF paths. See
+# src_dev/psychometric/response_encoding.py: fill_matrix_from_choice.
+TRAIT_MCQ_ENCODING: str = "soft_ev"  # "soft_ev" | "logit"
+TRAIT_MCQ_LOGIT_EPSILON: float = 0.005
 QUESTIONNAIRE_LOGPROB_TEMPERATURE = 1.0
 QUESTIONNAIRE_DYNAMIC_MASS_FILTER = True
 QUESTIONNAIRE_MIN_CHOICE_MASS = 0.0
@@ -820,7 +833,7 @@ FA_PER_BLOCK_PASSES: bool = True
 FC_PAIR_SIGN_ALIGNMENT = True
 
 # ── Stage 4: Labeling ───────────────────────────────────────────────────────
-LABELLER_MODE: str = "auto"  # "auto" | "manual"
+LABELLER_MODE: str = "manual"  # "auto" | "manual"
 LABELLER_MODEL = "openai/gpt-5.4-nano"
 LABELLER_PROVIDER = "openrouter"
 TOP_LOADING_ITEMS = 10
@@ -897,7 +910,7 @@ STAGES_TO_RUN = [
     # "trait_scoring",
     # "realism_judge",
     "factor_analysis",
-    # "labeling",
+    "labeling",
     # "validation",  # k=4 sanity pass; k=7 validation is already saved.
 ]
 
@@ -1176,6 +1189,17 @@ def _questionnaire_run_id(
         and "trait_mcq" in q.fa_blocks
     ):
         trait_mcq_prompt_tag = f"-tmv{TRAIT_MCQ_PROMPT_VERSION}"
+    # Trait_mcq encoding tag: only applied for trait_mcq logprob runs
+    # under a non-default encoding (e.g. "logit"). soft_ev runs — the
+    # historical default — remain untagged so existing HF caches stay
+    # valid. See TRAIT_MCQ_ENCODING above.
+    trait_mcq_encoding_tag = ""
+    if (
+        q.use_logprobs
+        and TRAIT_MCQ_ENCODING != "soft_ev"
+        and "trait_mcq" in q.fa_blocks
+    ):
+        trait_mcq_encoding_tag = f"-enc_{TRAIT_MCQ_ENCODING}"
     reset_tag = (
         f"-reset_{QUESTIONNAIRE_RESET_MODE}"
         if QUESTIONNAIRE_RESET_MODE != "none"
@@ -1196,7 +1220,8 @@ def _questionnaire_run_id(
     return (
         f"questionnaire-{_rollout_run_id(rollout_key)}-"
         f"q_{q.version}-{blocks_tag}-{q.phrasing}"
-        f"{lp_tag}{parser_tag}{prefill_tag}{trait_mcq_prompt_tag}{reset_tag}{qm_tag}"
+        f"{lp_tag}{parser_tag}{prefill_tag}{trait_mcq_prompt_tag}"
+        f"{trait_mcq_encoding_tag}{reset_tag}{qm_tag}"
     )
 
 
@@ -1272,6 +1297,20 @@ def _combined_run_id() -> str:
             seen_v.add(v)
             versions.append(v)
     q_tag = "+".join(versions)
+    # Encoding tag: the combined matrix inherits the trait_mcq encoding
+    # from its constituent pair matrices, so different encodings must NOT
+    # share a combined dir — they contain different numerical cells even
+    # though the column set is identical. Only tagged when at least one
+    # pair actually has a trait_mcq block under a non-default encoding;
+    # otherwise (e.g. Likert-only combined runs, or soft_ev default)
+    # the tag is suppressed to preserve existing combined-dir paths.
+    encoding_tag = ""
+    if TRAIT_MCQ_ENCODING != "soft_ev" and any(
+        "trait_mcq" in QUESTIONNAIRE_PRESETS[q_key].fa_blocks
+        and QUESTIONNAIRE_PRESETS[q_key].use_logprobs
+        for _, q_key in _resolved_pairs()
+    ):
+        encoding_tag = f"-enc_{TRAIT_MCQ_ENCODING}"
     # Cross-model tag: append "-qm_<slug>" when the questionnaire model
     # differs from the rollout model. Mirrors the convention in
     # _questionnaire_run_id so combined FA artifacts from different
@@ -1281,7 +1320,7 @@ def _combined_run_id() -> str:
         rollout_model = ROLLOUT_PRESETS[_resolved_rollouts()[0]].assistant_model
         if QUESTIONNAIRE_MODEL_OVERRIDE != rollout_model:
             qm_tag = f"-qm_{_model_slug(QUESTIONNAIRE_MODEL_OVERRIDE)}"
-    return f"combined-R[{r_tag}]-Q[{q_tag}]{qm_tag}"
+    return f"combined-R[{r_tag}]-Q[{q_tag}]{encoding_tag}{qm_tag}"
 
 
 def _combined_dir() -> Path:
@@ -1784,6 +1823,8 @@ def _build_questionnaire_stage_config(ctx: RunContext) -> QuestionnaireStageConf
         use_logprobs=QUESTIONNAIRE_USE_LOGPROBS,
         phrasing=QUESTIONNAIRE_PHRASING,
         trait_mcq_topic_switch_prefix=(TRAIT_MCQ_PROMPT_VERSION >= 2),
+        trait_mcq_encoding=TRAIT_MCQ_ENCODING,
+        trait_mcq_logit_epsilon=TRAIT_MCQ_LOGIT_EPSILON,
         likert_scale=LIKERT_SCALE,
         provider=QUESTIONNAIRE_PROVIDER,
         model=QUESTIONNAIRE_MODEL,

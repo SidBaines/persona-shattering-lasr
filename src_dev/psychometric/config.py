@@ -158,6 +158,19 @@ class QuestionnaireStageConfig:
     # trait_mcq prompt version >= 2. See
     # src_dev/psychometric/item_prompts.py: TRAIT_MCQ_TOPIC_SWITCH_PREFIX.
     trait_mcq_topic_switch_prefix: bool = False
+    # Cell encoding for trait_mcq items: "soft_ev" (default) scores each
+    # cell as Σ P(letter)·answer_mapping[letter] in [0, 1]; "logit" scores
+    # as log(P(high) / P(low)) — the natural parameter of a Bernoulli and
+    # the IRT latent linear predictor, which gives Pearson-on-logit
+    # correlations better scale properties for FA. See
+    # src_dev/psychometric/response_encoding.py: fill_matrix_from_choice.
+    # Also baked into the questionnaire run-id as "-enc_logit" when non-
+    # default, so soft_ev and logit caches don't collide on HF.
+    trait_mcq_encoding: str = "soft_ev"
+    # Clipping bound for the logit encoding: P(high) ∈ [ε, 1 − ε] before
+    # taking log-odds, to avoid ±∞ on confidently one-sided cells. 0.005
+    # gives a latent range of roughly [−5.3, +5.3].
+    trait_mcq_logit_epsilon: float = 0.005
     likert_scale: int = 5
     # Inference target
     provider: str = "vllm"
