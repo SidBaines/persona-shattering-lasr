@@ -8,76 +8,76 @@ If we wish to understand and shape behaviour of models which display non-human t
 In this section, we deliberately stray from the path of using the human-centric OCEAN framework in order to do so.
 We instead aim to find principled ways to elicit and then cluster a wide range of model behaviours, taking care to acknowledge that a model persona depends not just on the weights but also the prior context.
 
-\subsection{Embedding and Analysing Single Turn Responses}\label{sec:embedding-and-analysing-single-turn-responses}
+% \subsection{Embedding and Analysing Single Turn Responses}\label{sec:embedding-and-analysing-single-turn-responses}
 
-One approach to understanding model personas is to embed a large collection of rollouts in some space, and then perform analysis to determine and interpret the latent factors which explain the most variance across the set.
-This subsection describes our methodology and results for this ‘unsupervised corpus exploration’.
+% One approach to understanding model personas is to embed a large collection of rollouts in some space, and then perform analysis to determine and interpret the latent factors which explain the most variance across the set.
+% This subsection describes our methodology and results for this ‘unsupervised corpus exploration’.
 
-To generate this corpus of rollouts, the 240 prompts from \citep{lu2026assistant} are posed to a neutrally-system-prompted Llama3.1 8B-Instruct, and 50 responses per question sampled at temperature 1.0.
-Results are embedded using OpenAI’s text-embedding-3-small embedding model, producing a 12,000 x 1536 matrix.
-Length-based filtering is applied to remove garbled, repetitive responses, leaving  responses, with up to 50 responding to any given prompt.
+% To generate this corpus of rollouts, the 240 prompts from \citep{lu2026assistant} are posed to a neutrally-system-prompted Llama3.1 8B-Instruct, and 50 responses per question sampled at temperature 1.0.
+% Results are embedded using OpenAI’s text-embedding-3-small embedding model, producing a 12,000 x 1536 matrix.
+% Length-based filtering is applied to remove garbled, repetitive responses, leaving  responses, with up to 50 responding to any given prompt.
 
-\textbf{Principal Axis Factoring (PAF) is then applied to the embeddings matrix}.
-The oblimin rotation method with 30 factors is used\footnote{Different factor rotation methods were tried.
-Horn's analysis was used to discover the number of factors explaining most of the variance; 169 factors were recommended but analysis of this size was infeasible, so the top 30 were used.}.
-Studies were performed both with and without the application of a per-prompt residualisation process, in which embeddings had the centroid of all responses to the same prompt subtracted first; the analysis presented here uses non-residualised embeddings for the factor analysis, meaning care must be taken to remove within prompt-group semantic correlations at later stages.
-Figure 4.1.1 shows an elbow plot of the factors produced.
+% \textbf{Principal Axis Factoring (PAF) is then applied to the embeddings matrix}.
+% The oblimin rotation method with 30 factors is used\footnote{Different factor rotation methods were tried.
+% Horn's analysis was used to discover the number of factors explaining most of the variance; 169 factors were recommended but analysis of this size was infeasible, so the top 30 were used.}.
+% Studies were performed both with and without the application of a per-prompt residualisation process, in which embeddings had the centroid of all responses to the same prompt subtracted first; the analysis presented here uses non-residualised embeddings for the factor analysis, meaning care must be taken to remove within prompt-group semantic correlations at later stages.
+% Figure 4.1.1 shows an elbow plot of the factors produced.
 
-\begin{figure}[H]
-\centering
-\begin{subfigure}[t]{\linewidth}
-  \centering
-  \includegraphics[width=\linewidth]{figures/tmp/image19.png}
-  \caption{Residualised embeddings.}
-  \label{fig:parallel-analysis-residualised}
-\end{subfigure}
-\vspace{0.5em}
-\begin{subfigure}[t]{\linewidth}
-  \centering
-  \includegraphics[width=\linewidth]{figures/tmp/image20.png}
-  \caption{Non-residualised embeddings.}
-  \label{fig:parallel-analysis-non-residualised}
-\end{subfigure}
-\caption{Parallel analysis plots showing Horn’s method as applied to the residualised and non-residualised embeddings.
-A clear elbow is not observed in either case.}
-\label{fig:parallel-analysis}
-\end{figure}
-
-
-\textbf{To interpret these factors, several strategies for producing exemplary texts were explored.} It is desirable to understand factors which account for differences between sets of responses to different prompts (which may be more semantic in nature), as well as factors which explain strong differences between responses to the same prompt (which are more likely to correspond to factors explaining persona differences); figure 4.1.2 shows the within-prompt response variance for each of the top 30 factors.
-To find the former, high- and low-scoring examples are chosen by taking the global embedding mean, then summing the factor direction multiplied by scale 3.0, and finding the nearest neighbour within the embedding corpus.
-To find the latter, high-and low-scoring examples are chosen for each factor by finding the prompts which elicited a maximal spread in the factor score, and using these highest and lowest scoring examples.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image21.png}
-\caption{Histograms of ‘prompt-group-variance’, calculated as the variance, within the set of responses to the same prompt, in the score for a given factor.
-Higher variance indicates that there is more scope for the model to exhibit different factor scores within that prompt, so factors with right-shifted distributions are more likely to be relevant to describing personas whilst left-aligned distributions are more likely to correspond to semantic factors.}
-\label{fig:histograms-of-prompt-group-variance-calculated-as-}
-\end{figure}
+% \begin{figure}[H]
+% \centering
+% \begin{subfigure}[t]{\linewidth}
+%   \centering
+%   \includegraphics[width=\linewidth]{figures/tmp/image19.png}
+%   \caption{Residualised embeddings.}
+%   \label{fig:parallel-analysis-residualised}
+% \end{subfigure}
+% \vspace{0.5em}
+% \begin{subfigure}[t]{\linewidth}
+%   \centering
+%   \includegraphics[width=\linewidth]{figures/tmp/image20.png}
+%   \caption{Non-residualised embeddings.}
+%   \label{fig:parallel-analysis-non-residualised}
+% \end{subfigure}
+% \caption{Parallel analysis plots showing Horn’s method as applied to the residualised and non-residualised embeddings.
+% A clear elbow is not observed in either case.}
+% \label{fig:parallel-analysis}
+% \end{figure}
 
 
-\textbf{Factors are labelled using LLM-labellers.} For both grouping strategies, LLM-labellers are given collections of high- and low-scoring examples, and asked to describe the common theme which separates them.
-Factors are given in batches, to reduce repetition of common themes, in order to make the labels more useful\footnote{Validation of labels is performed by subjecting a fresh-context LLM to the original prompt set with the factor label as behavioral instruction.}.
-Validation of labels is performed by subjecting a fresh-context LLM to the original prompt set, but now with a system prompt instructing it to behave in the manner that is either high or low ‘trait’ as described by the factor label.
-If this produces an embedding which scores highly/lowly for this factor, this provides validation that the label meaningfully captures the factor (ideally, for independent traits, the response should also score relatively neutrally on other factors).
+% \textbf{To interpret these factors, several strategies for producing exemplary texts were explored.} It is desirable to understand factors which account for differences between sets of responses to different prompts (which may be more semantic in nature), as well as factors which explain strong differences between responses to the same prompt (which are more likely to correspond to factors explaining persona differences); figure 4.1.2 shows the within-prompt response variance for each of the top 30 factors.
+% To find the former, high- and low-scoring examples are chosen by taking the global embedding mean, then summing the factor direction multiplied by scale 3.0, and finding the nearest neighbour within the embedding corpus.
+% To find the latter, high-and low-scoring examples are chosen for each factor by finding the prompts which elicited a maximal spread in the factor score, and using these highest and lowest scoring examples.
 
-\textbf{Validation of this method by injecting a signal into the corpus was performed.} In order to check if this could detect a clear persona existing in the corpus, 10 responses per prompt were produced for each original question with Llama3.1 8B-Instruct prompted to be disagreeable\footnote{Prompted with a system message instructing disagreeable behavior.}.
-A random sample of 400 of these was injected into the corpus (accounting for 3.2\% of the dataset), and the full pipeline performed.
-Figure 4.1.4 shows a histogram of the 28th factor obtained, separated by whether the response came from the original corpus or the disagreeable corpus, and demonstrates that this factor indeed strongly separates between agreeable and disagreeable responses - the automatic labelling, based on the ‘within prompt spread’ selection method, provided the shorthand label “Calm, informative exposition vs.
-cynical, dismissive rant”.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image22.png}
-\caption{Histogram of scores for factor 28 obtained when 400 disagreeable-model responses are injected into the 12,000 neutral responses, separated by model source.
-Clear separation is shown, indicating that this factor corresponds to the trait of disagreeableness, and the LLM-labeller provides a corresponding label.}
-\label{fig:histogram-of-scores-for-factor-28-obtained-when-40}
-\end{figure}
+% \begin{figure}[H]
+% \centering
+% \includegraphics[width=\linewidth]{figures/tmp/image21.png}
+% \caption{Histograms of ‘prompt-group-variance’, calculated as the variance, within the set of responses to the same prompt, in the score for a given factor.
+% Higher variance indicates that there is more scope for the model to exhibit different factor scores within that prompt, so factors with right-shifted distributions are more likely to be relevant to describing personas whilst left-aligned distributions are more likely to correspond to semantic factors.}
+% \label{fig:histograms-of-prompt-group-variance-calculated-as-}
+% \end{figure}
 
 
-\textbf{This method does not yet provide clear factors when applied to the current corpus.} Despite this initial success on injected signal, we find that the method does not produce informative labels on the original corpus.
-[Work is ongoing]
+% \textbf{Factors are labelled using LLM-labellers.} For both grouping strategies, LLM-labellers are given collections of high- and low-scoring examples, and asked to describe the common theme which separates them.
+% Factors are given in batches, to reduce repetition of common themes, in order to make the labels more useful\footnote{Validation of labels is performed by subjecting a fresh-context LLM to the original prompt set with the factor label as behavioral instruction.}.
+% Validation of labels is performed by subjecting a fresh-context LLM to the original prompt set, but now with a system prompt instructing it to behave in the manner that is either high or low ‘trait’ as described by the factor label.
+% If this produces an embedding which scores highly/lowly for this factor, this provides validation that the label meaningfully captures the factor (ideally, for independent traits, the response should also score relatively neutrally on other factors).
+
+% \textbf{Validation of this method by injecting a signal into the corpus was performed.} In order to check if this could detect a clear persona existing in the corpus, 10 responses per prompt were produced for each original question with Llama3.1 8B-Instruct prompted to be disagreeable\footnote{Prompted with a system message instructing disagreeable behavior.}.
+% A random sample of 400 of these was injected into the corpus (accounting for 3.2\% of the dataset), and the full pipeline performed.
+% Figure 4.1.4 shows a histogram of the 28th factor obtained, separated by whether the response came from the original corpus or the disagreeable corpus, and demonstrates that this factor indeed strongly separates between agreeable and disagreeable responses - the automatic labelling, based on the ‘within prompt spread’ selection method, provided the shorthand label “Calm, informative exposition vs.
+% cynical, dismissive rant”.
+
+% \begin{figure}[H]
+% \centering
+% \includegraphics[width=\linewidth]{figures/tmp/image22.png}
+% \caption{Histogram of scores for factor 28 obtained when 400 disagreeable-model responses are injected into the 12,000 neutral responses, separated by model source.
+% Clear separation is shown, indicating that this factor corresponds to the trait of disagreeableness, and the LLM-labeller provides a corresponding label.}
+% \label{fig:histogram-of-scores-for-factor-28-obtained-when-40}
+% \end{figure}
+
+
+% \textbf{This method does not yet provide clear factors when applied to the current corpus.} Despite this initial success on injected signal, we find that the method does not produce informative labels on the original corpus.
+% [Work is ongoing]
 
 \subsection{Applying Traditional Psychometrics to LLM Personas}\label{sec:applying-traditional-psychometrics-to-llm-personas}
 
@@ -85,13 +85,15 @@ In human cognitive science, it is typical to sample across a large population si
 This does not translate nicely to the case of LLMs by just sampling different post-trained models, in part because there are fewer LLMs than humans, and in part because the ‘persona’ depends on the context.
 However, this last point can be used to our advantage: to explore the space of LLM personas, we can look at how models behave across a range of contexts.
 
-\textbf{A population of personas is produced by generating diverse rollouts.} Multi-turn trajectories are produced by sampling Llama 3.1 8B-Instruct across 2,500 seed prompts (one rollout each, 15 conversation turns), at temperature 1.0, in conversation with an LLM partner model.
+\textbf{A population of personas is produced by generating diverse rollouts.} 
+2,500 multi-turn trajectories are produced by sampling Llama 3.1 8B-Instruct (for 15 conversation turns), at temperature 1.0, in conversation with an LLM partner model (gpt-5.4-nano).
 Each conversation partner is randomly assigned one of five interviewer archetypes (provocateur, empath, intellectual, wildcard, narrator), each with a distinct conversational personality designed to elicit different facets of the assistant's behaviour.
 This yields 2,500 Llama persona-rollouts for our main analysis (2,499 under the Qwen administering arm used in the cross-model comparison below, after dropping one context-length outlier).
 
 \textbf{Personas are embedded using curated questionnaires.} For each sample ‘persona’, we produce an (N+1)th-turn generation for each questionnaire item.
-We use a combined 200-item questionnaire: 100 Likert items asking the model to rate its agreement with a statement on a 1--5 scale, plus 100 multiple-choice items drawn from an OCEAN-dimensioned item bank (20 items per dimension, four options per item with per-option trait-alignment scoring).
-Likert items are designed in an iterative process, by asking questions designed to explore different behavioural patterns, and dropping those which produce low variance across the test set as uninformative; multiple-choice items are scored by the soft expected value $\sum_\ell P(\ell) \cdot \text{mapping}[\ell] \in [0, 1]$ over the four option-letter log-probabilities --- Appendix J includes some examples.
+We use a combined 200-item questionnaire: 100 Likert items asking the model to rate its agreement with a statement on a 1--5 scale, plus 100 multiple-choice items drawn from an OCEAN-dimensioned item bank (20 items per dimension, four options per item with per-option trait-alignment scoring, two at each extreme).
+Likert items are designed in an iterative process, by asking questions designed to explore different behavioural patterns, and dropping those which produce low variance across the test set as uninformative. 
+Multiple-choice items are scored by the soft expected value $\sum_\ell P(\ell) \cdot \text{mapping}[\ell] \in [0, 1]$ over the four option-letter log-probabilities --- Appendix J includes some examples.
 This produces, for each persona-rollout, a 200-dimensional response vector analogous to a single human's response to a psychometric questionnaire; per-block low-variance filtering retains 186 items for Llama and 170 for Qwen.
 
 \textbf{Explanatory latent factors are determined using Principal Axis Factoring (PAF).} Horn's parallel analysis is used to determine the number of factors to retain, keeping only factors whose real eigenvalues exceed the 95th percentile of eigenvalues from simulated random data of the same dimensions.
