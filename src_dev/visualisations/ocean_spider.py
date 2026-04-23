@@ -14,6 +14,63 @@ import numpy as np
 OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 
 
+def to_headroom(
+    raw_scores: dict,
+    baseline: dict[str, float],
+    *,
+    score_min: float,
+    score_max: float,
+) -> dict:
+    """Convert per-entry trait score dicts to signed headroom fractions in ``[-1, +1]``.
+
+    For each (entry, trait), the transform is:
+
+    * ``(value - baseline) / (score_max - baseline)`` when ``value >= baseline``
+    * ``(value - baseline) / (baseline - score_min)`` when ``value <  baseline``
+
+    Intuition: ask "how much of the achievable room in the direction the
+    adapter actually moved did it consume?". Baseline collapses to 0 on every
+    axis and the two spiders (amp/sup) become directly comparable — each
+    trait's axis is normalized by that trait's own asymmetric room. Missing
+    baseline or ``None``/``NaN`` values propagate through as NaN so polygon
+    gaps render naturally downstream.
+
+    Mirrors ``scripts_dev/evals/ocean_spider_plot_judge_combined.py`` —
+    the ``PLOT_MODE="headroom"`` path — so use the same ``(score_min,
+    score_max)`` bounds as the underlying judge's score range (e.g. OCEAN
+    v2 uses ``-4, +4``).
+
+    Args:
+        raw_scores: ``{entry_key: {trait: score}}`` — where ``entry_key`` can
+            be any hashable (a scale, an adapter name, etc.).
+        baseline: ``{trait: baseline_score}`` — reference to transform against.
+        score_min: Lower bound of the judge's score range.
+        score_max: Upper bound of the judge's score range.
+
+    Returns:
+        Same shape as ``raw_scores`` but with headroom-fraction values. Entries
+        whose trait is missing from ``baseline``, or whose value is ``None``/
+        ``NaN``, are skipped (so the polygon shows a gap).
+    """
+    out: dict = {}
+    for key, trait_means in raw_scores.items():
+        transformed: dict[str, float] = {}
+        for trait, value in trait_means.items():
+            b = baseline.get(trait)
+            if b is None or value is None:
+                continue
+            if isinstance(value, float) and np.isnan(value):
+                continue
+            delta = float(value) - float(b)
+            if delta >= 0:
+                room = score_max - float(b)
+            else:
+                room = float(b) - score_min
+            transformed[trait] = delta / room if room > 0 else 0.0
+        out[key] = transformed
+    return out
+
+
 def plot_ocean_spider(
     *,
     scores_by_scale: dict[float, dict[str, float]],

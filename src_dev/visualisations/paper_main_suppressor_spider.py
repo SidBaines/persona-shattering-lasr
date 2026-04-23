@@ -47,6 +47,7 @@ load_dotenv(project_root / ".env")
 from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.utils.hf_hub import download_path_to_dir
 from src_dev.visualisations import PAPER_FIGURES_DIR
+from src_dev.visualisations.ocean_spider import to_headroom
 
 OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 
@@ -88,6 +89,34 @@ SUPPRESSORS: list[tuple[str, str, str]] = [
 ]
 
 BASELINE_COLOR = "#4D4D4D"
+BASELINE_LEGEND_LABEL = "baseline Llama3.1-8b-Instruct"
+
+# Short legend labels: trait letter + up/down arrow, matching the direction
+# each LoRA modulates (suppressor = ↓). Kept as a mapping rather than parsed
+# from the key so that any future adapter with a non-trivial slug (e.g.
+# ``c_minus_v2``, ``a_plus_reversed_dpo``) gets an explicit entry.
+LEGEND_LABELS: dict[str, str] = {
+    "o_minus": "O↓",
+    "c_minus": "C↓",
+    "e_minus": "E↓",
+    "a_minus": "A↓",
+    "n_minus": "N↓",
+}
+
+# Plot mode:
+#   "headroom" — signed fraction of achievable headroom in [-1, +1]
+#                (each axis normalised by the room between baseline and the
+#                 judge-scale bound in the direction the adapter moved).
+#                Baseline collapses to 0 on every axis. This is the default
+#                because it's the most direct visual answer to "how far did
+#                each adapter push its target trait relative to what was
+#                achievable?".
+#   "raw"      — mean judge score on the raw OCEAN v2 scale [-4, +4].
+PLOT_MODE = "headroom"
+
+# OCEAN v2 judge range (see src_dev/persona_metrics/metrics/ocean_v2.py).
+SCORE_MIN = -4.0
+SCORE_MAX = 4.0
 
 OUT_PATH = PAPER_FIGURES_DIR / PAPER_FIGURES[0]
 CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "suppressor_spider"
@@ -221,8 +250,36 @@ def _render_spider(
     baseline: dict[str, float],
     out_path: Path,
 ) -> None:
-    """Render the spider plot. Missing traits appear as gaps in the polygon."""
+    """Render the spider plot. Missing traits appear as gaps in the polygon.
+
+    In ``"headroom"`` mode each adapter's trait score is mapped to a signed
+    fraction of the achievable room between baseline and the judge-scale
+    bound in the direction the adapter moved. Requires a populated baseline.
+    """
     traits = OCEAN_TRAITS
+
+    if PLOT_MODE == "headroom":
+        if not baseline:
+            raise RuntimeError(
+                "headroom mode requires a non-empty baseline — all adapter rows transform "
+                "to fractions of (score_bound - baseline)."
+            )
+        per_suppressor = to_headroom(
+            per_suppressor, baseline, score_min=SCORE_MIN, score_max=SCORE_MAX,
+        )
+        # Baseline collapses to 0 on every axis in headroom space; keep it so
+        # the legend entry is still meaningful (its polygon is a central dot).
+        baseline = {t: 0.0 for t in baseline}
+        y_lim = (-1.0, 1.0)
+        y_ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
+        y_tick_labels = ["-100%", "-50%", "0", "+50%", "+100%"]
+    elif PLOT_MODE == "raw":
+        y_lim = (SCORE_MIN, SCORE_MAX)
+        y_ticks = [SCORE_MIN, SCORE_MIN / 2, 0.0, SCORE_MAX / 2, SCORE_MAX]
+        y_tick_labels = [f"{t:+.0f}" for t in y_ticks]
+    else:
+        raise ValueError(f"unknown PLOT_MODE={PLOT_MODE!r}")
+
     angles = np.linspace(0.0, 2.0 * np.pi, len(traits), endpoint=False).tolist()
     angles_closed = angles + angles[:1]
 
@@ -233,35 +290,48 @@ def _render_spider(
     def _polygon(scores: dict[str, float], *, label: str, color: str, linewidth: float) -> None:
         means = [scores.get(t, float("nan")) for t in traits]
         means_closed = means + means[:1]
-        # Lines: matplotlib handles NaN as gap.
         ax.plot(angles_closed, means_closed, "-", color=color, linewidth=linewidth, label=label)
-        # Markers only on present data.
         for angle, val in zip(angles, means):
             if not np.isnan(val):
                 ax.plot([angle], [val], "o", color=color, markersize=6)
-        # Fill (requires complete polygon; skip if any NaN).
         if not any(np.isnan(v) for v in means):
             ax.fill(angles_closed, means_closed, color=color, alpha=0.10)
 
     if baseline:
-        _polygon(baseline, label="base model", color=BASELINE_COLOR, linewidth=2.5)
+        if PLOT_MODE == "headroom":
+            # Baseline collapses to 0 on every axis — the polygon degenerates
+            # to the origin, so plot a single bold filled circle there for a
+            # clean legend entry instead of an invisible zero-polygon.
+            ax.plot(
+                [0.0], [0.0],
+                marker="o", linestyle="", color=BASELINE_COLOR,
+                markersize=12, markeredgewidth=1.8, markeredgecolor="white",
+                zorder=5, label=BASELINE_LEGEND_LABEL,
+            )
+        else:
+            _polygon(baseline, label=BASELINE_LEGEND_LABEL, color=BASELINE_COLOR, linewidth=2.5)
 
     for key, _home_trait, color in SUPPRESSORS:
-        row = per_suppressor[key]
+        row = per_suppressor.get(key, {})
         if not row:
             continue
-        _polygon(row, label=f"{key} @ {SCALE:+.0f}", color=color, linewidth=2.0)
+        _polygon(row, label=LEGEND_LABELS.get(key, key), color=color, linewidth=2.0)
 
     ax.set_xticks(angles)
     ax.set_xticklabels(traits, fontsize=11)
-    ax.set_ylim(-4.0, 4.0)
-    ax.set_yticks([-4, -2, 0, 2, 4])
-    ax.set_yticklabels(["-4", "-2", "0", "+2", "+4"], fontsize=9)
+    # Colour each axis tick label with its canonical OCEAN hue so readers
+    # can match a trait on the axis to the same colour in the legend/bars.
+    for tick_label, trait in zip(ax.get_xticklabels(), traits):
+        tick_label.set_color(BIG_FIVE_COLORS[trait])
+    ax.set_ylim(*y_lim)
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_tick_labels, fontsize=9)
+    if PLOT_MODE == "headroom":
+        # Draw a subtle baseline ring at r=0 in polar coords so partial
+        # polygons read as deviations, not absolute magnitudes.
+        ring_theta = np.linspace(0.0, 2.0 * np.pi, 180)
+        ax.plot(ring_theta, np.zeros_like(ring_theta), "-", color="black", linewidth=0.8, alpha=0.6)
     ax.grid(True, alpha=0.4)
-    ax.set_title(
-        f"OCEAN suppressors (vanton4) at {SCALE_LABEL} — Qwen3-235B judge",
-        fontsize=12, pad=20,
-    )
     ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.08), fontsize=10, framealpha=0.9)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
