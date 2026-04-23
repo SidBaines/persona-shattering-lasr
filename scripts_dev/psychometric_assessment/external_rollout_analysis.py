@@ -203,8 +203,10 @@ HIGH_VARIANCE_PERSONA_DROP_PCT = 0.0
 # η²(preset), min/median baseline→residualised |φ|) survive perturbations of
 # FA_N_FACTORS. Primary n reuses the full analysis (this list can include
 # FA_N_FACTORS but the sweep CSV will just duplicate the primary result for
-# cross-check). Set to [] to skip the sweep entirely.
-FA_N_FACTORS_SWEEP: list[int] = [5, 6, 7, 8]
+# cross-check). Set to [] to skip the sweep entirely. Wider range here so
+# we can see what happens far from the configured n (e.g. parallel-analysis
+# often lands in the 3–5 range for OCEAN-flavoured data).
+FA_N_FACTORS_SWEEP: list[int] = [3, 4, 5, 6, 7, 8, 9, 10]
 
 # Horn's parallel analysis: permutation-method reference distribution is
 # more appropriate for ordinal Likert data than the default Gaussian. 100
@@ -1044,6 +1046,32 @@ def _factor_reliability(
     return rows
 
 
+def _loadings_long(fa: FaFitResult) -> list[dict]:
+    """Flatten FA loadings to a long-format CSV-ready list of row dicts.
+
+    One row per (item × factor). Includes the item's ``dimension`` and
+    ``text`` fields alongside the loading so drill-downs like "what are
+    the top-loading items for factor F3?" don't require re-running the FA.
+    Sorting by ``abs_loading`` desc within each factor gives the top items.
+    """
+    rows: list[dict] = []
+    for i, item in enumerate(fa.items):
+        for f in range(fa.n_factors):
+            loading = float(fa.loadings[i, f])
+            rows.append({
+                "label": fa.label,
+                "rotation": fa.rotation,
+                "factor": f + 1,
+                "item_id": item.get("item_id"),
+                "dimension": item.get("dimension"),
+                "block": item.get("block"),
+                "loading": loading,
+                "abs_loading": abs(loading),
+                "text": str(item.get("text") or item.get("question") or "")[:400],
+            })
+    return rows
+
+
 def _trait_alignment_rows(
     fa: FaFitResult,
     *,
@@ -1513,6 +1541,7 @@ def main() -> None:
     replicability_rows: list[dict] = []
     reliability_rows: list[dict] = []
     trait_alignment_rows: list[dict] = []
+    loadings_rows: list[dict] = []
     # Captured from the first rotation's baseline FA so retention-table
     # computation (post-preprocessing row counts) doesn't repeat the fit.
     fa_baseline_metadata_for_retention: list[dict] | None = None
@@ -1534,6 +1563,7 @@ def main() -> None:
             )
         reliability_rows.extend(_factor_reliability(baseline))
         trait_alignment_rows.extend(_trait_alignment_rows(baseline))
+        loadings_rows.extend(_loadings_long(baseline))
 
         print(f"\n-- preset-residualised --")
         residualised = _fit_fa(matrix, metadata, items,
@@ -1625,6 +1655,10 @@ def main() -> None:
     # alignment for the baseline loadings.
     _write_csv(out_dir / "factor_reliability.csv", reliability_rows)
     _write_csv(out_dir / "factor_trait_alignment.csv", trait_alignment_rows)
+    # Long-format baseline loadings (one row per item × factor) with the
+    # item's dimension + text alongside. Enables drilling into "what
+    # drives factor F3?" without re-running anything.
+    _write_csv(out_dir / "baseline_loadings_long.csv", loadings_rows)
 
     # Oblique rotations (oblimin/promax) produce a factor correlation matrix;
     # for orthogonal rotations (varimax) it's None. Dump one CSV per
