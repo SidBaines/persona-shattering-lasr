@@ -42,12 +42,13 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 |------|-----|---------|--------|-------------|--------|-------|
 | `main/fig_1_c_minus_trait_scaling.pdf` | `fig:intro-trait-scaling` | `sections/introduction.tex` | `src_dev/visualisations/plot_scaling.py` | `fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/v*/evals/trait/{fp}/` | `placeholder` | Currently `tmp/image1.png`. Subfig of `fig:intro-main`. |
 | `main/fig_1_combination_behaviour.pdf` | `fig:intro-combination` | `sections/introduction.tex` | `scripts_dev/personality_evals/plot_soup_a_plus_minus.py` | `combos/llama-3.1-8b-it/ocean-conscientiousness-suppressor-v2__ocean-neuroticism-amplifier-v4/trait/{fp}/cell_<spec>/` (multiple cells; slug assumes the paper uses v2 + v4 as in `neu_amp_v4_x_con_sup_v2.py`) | `placeholder` | Currently `tmp/image2.png`. Subfig of `fig:intro-main`. Individual LoRAs + combination barplot. |
+| `overview/fig_0_methodology.pdf` | `fig:overview` | `sections/introduction.tex` | `N/A — hand-drawn` | `N/A — hand-drawn` | `placeholder` | Currently `tmp/image3.png`. Methodology diagram. |
 
 ### Section 2 — Personas (`sections/personas.tex`)
 
 | Path | Ref | Section | Script | Data source | Status | Notes |
 |------|-----|---------|--------|-------------|--------|-------|
-| `main/fig_2_personas_trait_space.png` | `fig:personas-trait-space` | `sections/personas.tex` | `N/A — hand-drawn` | `N/A — hand-drawn` | `generated` | Illustration of personas as regions in trait space. |
+| `main/fig_2_personas_trait_space.pdf` | `fig:personas-trait-space` | `sections/personas.tex` | `N/A — hand-drawn` | `N/A — hand-drawn` | `placeholder` | Currently `tmp/image4.png`. Illustration of personas as regions in trait space. |
 
 ### Section 3 — Supervised (`sections/supervised.tex`)
 
