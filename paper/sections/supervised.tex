@@ -186,12 +186,12 @@ We can also calculate correlations between the different LoRAs; \cref{fig:cosine
 
 The TRAIT benchmark and LLM judges established in the previous sections verify that our adaptors move the model along the trait axis \emph{as the construct is defined}. A complementary question is whether shifting a trait produces the \emph{downstream behaviour} --- and, if so, whether these adaptors (directly, or via interventions such as scaling, can be used to tune models away from known pathologies and towards desired behaviours. In this subsection we probe a small number of targeted downstream tasks, chosen for their relevance to AI safety and for having reasonably objective evaluation signals.
 
-\textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored. \Cref{fig:frustration-per-turn} shows that frustration grows substantially after we induce N+ adaptor, while both control and base stay flat along 8 turns of conversation. 
+\textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored. \Cref{fig:frustration-per-turn} shows that frustration on base Gemma model grows substantially, but stay flat after we induce N- adaptor. 
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.9\linewidth]{figures/tmp/fig_frustration_eval_4way_n100.png}
-\caption{Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}. Frustration rises sharply as the dialogue progresses in the N+ adaptor conditions, while the control and base model remains low --- indicating that frustation was indused with the adaptor.}
+\caption{Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}. Frustration rises sharply as the dialogue progresses --- but with frustation  stabiliy redused with the adaptor N-}
 \label{fig:frustration-per-turn}
 \end{figure}
 
@@ -200,7 +200,7 @@ The TRAIT benchmark and LLM judges established in the previous sections verify t
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.9\linewidth]{figures/tmp/sycophancy_coconot_bars.png}
-\caption{Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks. \textit{Sycophancy} \citep{sharma2023sycophancy}: rate at which the model retains a correct answer after the user challenges it with ``are you sure?''. \textit{CoCoNot} \citep{brahman2024coconot}: compliance rates on prompts that should be declined (lower is better) and on a benign contrast set (higher is better).}
+\caption{[NOTE: OLD LORAS, PLOT NOT UPDATED YET]Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks. \textit{Sycophancy} \citep{sharma2023sycophancy}: rate at which the model retains a correct answer after the user challenges it with ``are you sure?''. \textit{CoCoNot} \citep{brahman2024coconot}: compliance rates on prompts that should be declined (lower is better) and on a benign contrast set (higher is better).}
 % TODO: verify caption matches final figure
 \label{fig:sycophancy-coconot}
 \end{figure}
