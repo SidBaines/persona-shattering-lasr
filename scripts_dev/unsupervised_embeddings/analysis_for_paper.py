@@ -109,6 +109,7 @@ from src_dev.factor_analysis.trait_alignment import (
 from src_dev.psychometric.combine import load_pair_outputs
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
 from src_dev.unsupervised_runs.io import hydrate_dataset_subtree
+from src_dev.visualisations import PAPER_FIGURES_DIR
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -225,6 +226,22 @@ OCEAN_TRAIT_ORDER: list[str] = [
     "neuroticism",
     "",
 ]
+
+
+# ── Paper figure output ─────────────────────────────────────────────────────
+# Section 4.2 ("Applying Traditional Psychometrics to LLM Personas") takes
+# the Llama scree as its headline parallel-analysis figure; the Qwen scree
+# would go in the appendix (not emitted yet — add here when we want it).
+# Paths are resolved against `PAPER_FIGURES_DIR` (paper/figures/) via the
+# helper in `src_dev.visualisations`. Per paper/CLAUDE.md naming convention
+# `fig_<section>_<short_name>.<ext>`.
+#
+# Leaving a slug out of this dict skips the paper-figure write for that
+# model. Only PDF (for vector output) — raster PNG always lands alongside
+# in the scratch dir.
+PAPER_SCREE_FIGURES: dict[str, str] = {
+    "llama-3.1-8b": "unsupervised/fig_4_2_1_scree_llama.pdf",
+}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -386,14 +403,37 @@ def run_n_factors_suggest(data: LoadedData) -> dict:
         (out / "parallel_analysis.json").write_text(
             json.dumps(_jsonable(pa), indent=2)
         )
-        _plot_scree(pa, out / "parallel_analysis.png", title=data.model.label)
+        extra_paths: list[Path] = []
+        paper_rel = PAPER_SCREE_FIGURES.get(data.model.slug)
+        if paper_rel is not None:
+            paper_path = PAPER_FIGURES_DIR / paper_rel
+            paper_path.parent.mkdir(parents=True, exist_ok=True)
+            extra_paths.append(paper_path)
+        _plot_scree(
+            pa, out / "parallel_analysis.png",
+            title=data.model.label,
+            extra_save_paths=extra_paths,
+        )
         log.info("[%s] wrote %s", data.model.slug, out / "parallel_analysis.png")
+        for p in extra_paths:
+            log.info("[%s] wrote %s", data.model.slug, p)
 
     return result
 
 
-def _plot_scree(pa: dict, save_path: Path, *, title: str) -> None:
-    """Plot real eigenvalues vs Horn's null percentile threshold."""
+def _plot_scree(
+    pa: dict,
+    save_path: Path,
+    *,
+    title: str,
+    extra_save_paths: list[Path] | None = None,
+) -> None:
+    """Plot real eigenvalues vs Horn's null percentile threshold.
+
+    ``extra_save_paths`` is for parallel writes to the paper's figure tree
+    (vector PDF) in addition to the scratch PNG — same figure, different
+    file. Format is inferred by matplotlib from each path's suffix.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -417,6 +457,8 @@ def _plot_scree(pa: dict, save_path: Path, *, title: str) -> None:
     ax.grid(alpha=0.3)
     fig.tight_layout()
     fig.savefig(save_path, dpi=150)
+    for p in extra_save_paths or ():
+        fig.savefig(p)
     plt.close(fig)
 
 
