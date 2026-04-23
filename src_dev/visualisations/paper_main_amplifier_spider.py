@@ -29,6 +29,7 @@ import numpy as np
 from dotenv import load_dotenv
 load_dotenv(project_root / ".env")
 
+from src_dev.evals.personality.analyze_results import BIG_FIVE_COLORS
 from src_dev.utils.hf_hub import download_path_to_dir
 from src_dev.visualisations import PAPER_FIGURES_DIR
 
@@ -57,13 +58,14 @@ FP_BY_TRAIT = {
     "neuroticism":       "3e5360b27c",
 }
 
-# Each amplifier: (display name, OCEAN home trait, color hex).
+# Each amplifier: (display name, OCEAN home trait). Colors come from the
+# canonical repo palette in src_dev/evals/personality/analyze_results.py.
 AMPLIFIERS: list[tuple[str, str, str]] = [
-    ("o_plus", "openness",          "#9E4D91"),
-    ("c_plus", "conscientiousness", "#4470A3"),
-    ("e_plus", "extraversion",      "#E4953A"),
-    ("a_plus", "agreeableness",     "#5FA64C"),
-    ("n_plus", "neuroticism",       "#C13D37"),
+    ("o_plus", "openness",          BIG_FIVE_COLORS["Openness"]),
+    ("c_plus", "conscientiousness", BIG_FIVE_COLORS["Conscientiousness"]),
+    ("e_plus", "extraversion",      BIG_FIVE_COLORS["Extraversion"]),
+    ("a_plus", "agreeableness",     BIG_FIVE_COLORS["Agreeableness"]),
+    ("n_plus", "neuroticism",       BIG_FIVE_COLORS["Neuroticism"]),
 ]
 
 BASELINE_COLOR = "#4D4D4D"
