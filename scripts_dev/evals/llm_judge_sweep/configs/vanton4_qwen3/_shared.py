@@ -33,7 +33,7 @@ SEED = 42
 # Rollout generation
 # ---------------------------------------------------------------------------
 MAX_SAMPLES = 240
-NUM_ROLLOUTS_PER_PROMPT = 3
+NUM_ROLLOUTS_PER_PROMPT = 1
 DATASET_PATH = "data/assistant-axis-extraction-questions.jsonl"
 ASSISTANT_MAX_NEW_TOKENS = 2048
 ASSISTANT_BATCH_SIZE = 32

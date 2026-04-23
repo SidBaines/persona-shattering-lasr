@@ -50,12 +50,14 @@ RATER_ID = "qwen3_235b"
 SCALE = 1.0
 SCALE_LABEL = "scale_+1.00"
 
+# Fingerprint of each trait's rollout dataset — now the 240x1 versions
+# (vanton4_qwen3/_shared.py switched to NUM_ROLLOUTS_PER_PROMPT=1).
 FP_BY_TRAIT = {
-    "openness":          "d28e156e70",
-    "conscientiousness": "ea50f894e4",
-    "extraversion":      "dbb7b7ab8e",
-    "agreeableness":     "e1ee1d133f",
-    "neuroticism":       "3e5360b27c",
+    "openness":          "67eed27d02",
+    "conscientiousness": "e6426e3031",
+    "extraversion":      "a961f641eb",
+    "agreeableness":     "0705e3276a",
+    "neuroticism":       "b2a49f1b4d",
 }
 
 # Each amplifier: (display name, OCEAN home trait). Colors come from the
