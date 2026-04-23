@@ -151,12 +151,25 @@ def export_factor_extremes_html(
         order = np.argsort(col)
         top_pos_idxs = [idx for idx in order[-3:][::-1] if col[idx] > 0]
         top_neg_idxs = [idx for idx in order[:3] if col[idx] < 0]
-        desc["top_positive_items"] = [
-            f"({col[idx]:+.3f}) {column_defs[idx]['text']}" for idx in top_pos_idxs
-        ]
-        desc["top_negative_items"] = [
-            f"({col[idx]:+.3f}) {column_defs[idx]['text']}" for idx in top_neg_idxs
-        ]
+        # Structured payload — the personas-tab sidebar renders these with
+        # the shared badge helpers (block / REV / dimension). Kept as dicts
+        # rather than pre-formatted strings so the front end can apply
+        # consistent styling with the main items table.
+        def _top_item(idx: int) -> dict:
+            cdef = column_defs[idx]
+            entry = {
+                "text": cdef.get("text", ""),
+                "loading": round(float(col[idx]), 4),
+            }
+            if cdef.get("block"):
+                entry["block"] = str(cdef["block"])
+            if cdef.get("dimension"):
+                entry["dimension"] = str(cdef["dimension"])
+            if cdef.get("reverse_keyed"):
+                entry["reverse_keyed"] = True
+            return entry
+        desc["top_positive_items"] = [_top_item(idx) for idx in top_pos_idxs]
+        desc["top_negative_items"] = [_top_item(idx) for idx in top_neg_idxs]
 
         factor_descriptions.append(desc)
 
@@ -625,7 +638,12 @@ function updateView() {{
   infoHtml += `<div class="pole-label">▲ High: ${{f.positive_pole || '(unlabelled)'}}</div>`;
   if (f.top_positive_items) {{
     f.top_positive_items.forEach(it => {{
-      infoHtml += `<div class="loading-item">${{it}}</div>`;
+      const sign = it.loading >= 0 ? '+' : '';
+      infoHtml += `<div class="loading-item">`
+        + `<span style="color:#9ca3af;margin-right:4px">(${{sign}}${{it.loading.toFixed(3)}})</span>`
+        + _itemBadgesHTML(it)
+        + escHtml(it.text)
+        + `</div>`;
     }});
   }}
   infoHtml += `</div>`;
@@ -633,7 +651,12 @@ function updateView() {{
   infoHtml += `<div class="pole-label">▼ Low: ${{f.negative_pole || '(unlabelled)'}}</div>`;
   if (f.top_negative_items) {{
     f.top_negative_items.forEach(it => {{
-      infoHtml += `<div class="loading-item">${{it}}</div>`;
+      const sign = it.loading >= 0 ? '+' : '';
+      infoHtml += `<div class="loading-item">`
+        + `<span style="color:#9ca3af;margin-right:4px">(${{sign}}${{it.loading.toFixed(3)}})</span>`
+        + _itemBadgesHTML(it)
+        + escHtml(it.text)
+        + `</div>`;
     }});
   }}
   infoHtml += `</div>`;
@@ -806,6 +829,34 @@ function renderFactorTab() {{
   factorView.innerHTML = mainHtml;
 }}
 
+// ── Shared item badge helpers (used by renderLoadingChart,
+//    renderItemsTable, and the personas-tab sidebar top-items list). ───
+function _blockBadgeHTML(block) {{
+  if (!block) return '';
+  const b = String(block).toLowerCase();
+  const pretty = b === 'trait_mcq' ? 'MCQ'
+               : b === 'fc_pair' ? 'FC'
+               : b === 'likert' ? 'Likert'
+               : String(block);
+  const colour = b === 'trait_mcq' ? '#6366f1'
+               : b === 'fc_pair' ? '#0ea5e9'
+               : b === 'likert' ? '#14b8a6'
+               : '#6b7280';
+  return `<span style="display:inline-block;padding:1px 5px;margin-right:4px;border-radius:3px;background:${{colour}};color:#fff;font-size:9px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;vertical-align:middle">${{pretty}}</span>`;
+}}
+function _revBadgeHTML() {{
+  return `<span title="Reverse-keyed: high Likert response = low trait expression" style="display:inline-block;padding:1px 5px;margin-right:4px;border-radius:3px;background:#b91c1c;color:#fff;font-size:9px;font-weight:700;letter-spacing:0.03em;vertical-align:middle">REV</span>`;
+}}
+function _dimBadgeHTML(dim) {{
+  if (!dim) return '';
+  return `<span style="display:inline-block;padding:1px 5px;margin-right:4px;border-radius:3px;background:#374151;color:#e5e7eb;font-size:9px;font-weight:600;letter-spacing:0.02em;vertical-align:middle">${{escHtml(String(dim))}}</span>`;
+}}
+function _itemBadgesHTML(it) {{
+  return _blockBadgeHTML(it.block)
+       + _dimBadgeHTML(it.dimension)
+       + (it.reverse_keyed ? _revBadgeHTML() : '');
+}}
+
 function renderLoadingChart(items) {{
   // HTML-based horizontal bar chart — supports full wrapping text labels
   const maxAbs = Math.max(...items.map(it => Math.abs(it.loading)), 0.01);
@@ -827,7 +878,7 @@ function renderLoadingChart(items) {{
       : `margin-left:${{50 - parseFloat(pct)}}%;width:${{pct}}%;background:${{color}}`;
 
     html += '<tr style="border-bottom:1px solid #1f2937">';
-    html += `<td style="padding:4px 8px;color:#d1d5db;word-break:break-word;line-height:1.4;font-size:11px">${{escHtml(it.text)}}</td>`;
+    html += `<td style="padding:4px 8px;color:#d1d5db;word-break:break-word;line-height:1.4;font-size:11px">${{_itemBadgesHTML(it)}}${{escHtml(it.text)}}</td>`;
     html += `<td style="padding:4px 8px;text-align:center;font-variant-numeric:tabular-nums;color:${{color}};font-weight:600">${{it.loading >= 0 ? '+' : ''}}${{it.loading.toFixed(3)}}</td>`;
     html += `<td style="padding:4px 8px"><div style="position:relative;height:14px;background:#1f2937;border-radius:3px;overflow:hidden">`;
     html += `<div style="position:absolute;top:0;height:100%;border-radius:3px;${{barStyle}};opacity:0.8"></div>`;
