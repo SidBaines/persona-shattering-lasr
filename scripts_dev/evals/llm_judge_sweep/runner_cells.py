@@ -101,6 +101,13 @@ BAKED_ROOT = Path("scratch/baked_combo_adapters")
 # during long/wide runs. Does not affect single-invocation semantics —
 # the HF layout is identical; just fewer commits.
 _BATCH_UPLOAD = os.environ.get("LLM_JUDGE_SWEEP_BATCH_UPLOAD") == "1"
+# Opt-in skip-upload mode. When set, every HF upload call is a no-op — the
+# sweep runs purely locally. Use this when HF is rate-limited and you want
+# compute/forging to complete without wasting time on upload retries; then
+# run a consolidated upload pass later.
+_SKIP_UPLOAD = os.environ.get("LLM_JUDGE_SWEEP_SKIP_UPLOAD") == "1"
+if _SKIP_UPLOAD:
+    print("[runner_cells] LLM_JUDGE_SWEEP_SKIP_UPLOAD=1 — all HF uploads are no-ops this run")
 # Grace window for legacy baked dirs with no .pid marker (e.g. from before
 # this cleanup was added, or concurrent sweeps yet to write their marker).
 _ORPHAN_BAKED_GRACE_SEC = 3600  # 1 hour
@@ -921,6 +928,8 @@ def _with_upload_retry(description: str, fn):
     to ``_UPLOAD_RETRY_ATTEMPTS`` times, doubling the delay each time.
     Non-transient errors (4xx auth, malformed request, etc.) surface immediately.
     """
+    if _SKIP_UPLOAD:
+        return None
     for attempt in range(1, _UPLOAD_RETRY_ATTEMPTS + 1):
         try:
             return fn()
