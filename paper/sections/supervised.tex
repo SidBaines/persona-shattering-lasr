@@ -88,6 +88,11 @@ Coherence     & 0.67 & 0.90 & 0.89 & 0.89 & 0.87 \\
 Plots for other traits, including both suppressors and amplifiers, can be found in \cref{sec:appendix-f}.
 We find evidence of inter-trait correlations (e.g., between conscientiousness and neuroticism); to some extent this could be due to correlations between these traits in humans \citep{digman1990personality}, but it is also possible that this reflects some meaningful difference between humans and these models; a study of this is beyond the scope of this paper.
 
+\todo{(For NeurIPS) Also run EITHER some bloom evals to test trait as judged in different/multi-turn scenarios, OR scenario-rollouts using our pipeline and judged (the latter is better if we do activation capping; if we do that this should instead be in the activation capping comparison section).}
+\todo{(For LASR) Irakli add plots of adversarial prompting.}
+
+
+
 \subsection{Scaling and Combining LoRAs to Build Custom Personas}\label{sec:scaling-combining}
 
 \subsubsection{Trait Expression of LoRA Combinations}\label{sec:trait-expression-combinations}
@@ -187,12 +192,13 @@ We find that in both cases, when only a single LoRA is applied, the relevant tar
 \end{figure}
 
 \subsubsection{Comparison to activation-space approaches}\label{sec:comparison-activation}
-
+\todo{(For NeurIPS) Replace with better stuff.}
+\todo{(For LASR) Replace with the higher resolution plots.}
 \textbf{We compare our method to the baseline of activation capping.} We follow the methodology of \citet{lu2026assistant}, applying both activation capping and the LoRA training and scaling pipeline described above in a toy setting where we try to amplify or suppress the following trait: \textit{affinity for using the letter `t'}.
 This is chosen as a setting in which the trait is easily, definitively measured by an unambiguous signal.
 
 \textbf{We compare the scalability of approaches as well as their robustness to adversarial prompting.} \Cref{fig:activation-coherence} shows the results of scaling both methods to attain different amounts of the `t'-enjoying and `t'-avoiding trait.
-Whilst we did not fully optimise our application of the activation capping approach, we deem this to be evidence that we can achieve the same gains in persona/trait expression at higher coherence.
+This seems to provideevidence that we can achieve the same gains in persona/trait expression at higher coherence by using weight-space methods.
 
 \begin{figure}[H]
 \centering
@@ -225,63 +231,67 @@ When the LoRA scale is negative (i.e.\ increasing `t's) the coherence reduces; t
 \label{fig:activation-adversarial}
 \end{figure}
 
-\subsection{Visualising Personas as Regions in Trait/Weight Space}\label{sec:visualising-weight-space}
+% \todo{(For LASR) Take out this section.}
+% \todo{(For NeurIPS) Maybe put this back in, as appendix}
+% \subsection{Visualising Personas as Regions in Trait/Weight Space}\label{sec:visualising-weight-space}
 
-Inspired by \citet{lu2026assistant}, as discussed in \cref{sec:personas-in-language-models}, we seek to explain personas as regions of trait space and use this to predict behaviour.
-Given LoRAs which are able to steer our model across the space of traits, it is natural to ask: can we visualise relationships between LoRAs in some natural embedding? Do we retrieve sensible structure by doing so?
+% Inspired by \citet{lu2026assistant}, as discussed in \cref{sec:personas-in-language-models}, we seek to explain personas as regions of trait space and use this to predict behaviour.
+% Given LoRAs which are able to steer our model across the space of traits, it is natural to ask: can we visualise relationships between LoRAs in some natural embedding? Do we retrieve sensible structure by doing so?
 
-\textbf{Flattening the LoRA vectors.} Our primary method for visualising is to flatten each weight matrix $W_i = b_i a_i$ for a particular LoRA fine-tune into vectors $w_i$, concatenate these into a single vector $\mathbf{w}$ per LoRA fine-tune, then perform principal components analysis (PCA) on the resulting vectors.
-We are then able to visualise the top components which explain variance across the models; \cref{fig:pca-loras} shows the top 3 components for the Open Character LoRAs.
-% TODO: replace with OCEAN LoRAs and add discussion
-We can also calculate correlations between the different LoRAs; \cref{fig:cosine-sim-loras} shows a correlation matrix.
-Plots for more factors are given in \cref{sec:appendix-f}.
+% \textbf{Flattening the LoRA vectors.} Our primary method for visualising is to flatten each weight matrix $W_i = b_i a_i$ for a particular LoRA fine-tune into vectors $w_i$, concatenate these into a single vector $\mathbf{w}$ per LoRA fine-tune, then perform principal components analysis (PCA) on the resulting vectors.
+% We are then able to visualise the top components which explain variance across the models; \cref{fig:pca-loras} shows the top 3 components for the Open Character LoRAs.
+% % TODO: replace with OCEAN LoRAs and add discussion
+% We can also calculate correlations between the different LoRAs; \cref{fig:cosine-sim-loras} shows a correlation matrix.
+% Plots for more factors are given in \cref{sec:appendix-f}.
 
-% DUMMY --- replace with OCEAN amplifier/suppressor LoRAs
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image17.png}
-\caption{PCA of the flattened LoRA weight vectors, projected onto the top 3 components.
-% TODO: replace with OCEAN amplifier/suppressor LoRAs
-}
-\label{fig:pca-loras}
-\end{figure}
+% % DUMMY --- replace with OCEAN amplifier/suppressor LoRAs
+% \begin{figure}[H]
+% \centering
+% \includegraphics[width=\linewidth]{figures/tmp/image17.png}
+% \caption{PCA of the flattened LoRA weight vectors, projected onto the top 3 components.
+% % TODO: replace with OCEAN amplifier/suppressor LoRAs
+% }
+% \label{fig:pca-loras}
+% \end{figure}
 
-% DUMMY --- replace with OCEAN amplifier/suppressor LoRAs
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image18.png}
-\caption{Cosine similarities of the LoRA adapters as flattened weight vectors.
-% TODO: replace with OCEAN amplifier/suppressor LoRAs
-}
-\label{fig:cosine-sim-loras}
-\end{figure}
+% % DUMMY --- replace with OCEAN amplifier/suppressor LoRAs
+% \begin{figure}[H]
+% \centering
+% \includegraphics[width=\linewidth]{figures/tmp/image18.png}
+% \caption{Cosine similarities of the LoRA adapters as flattened weight vectors.
+% % TODO: replace with OCEAN amplifier/suppressor LoRAs
+% }
+% \label{fig:cosine-sim-loras}
+% \end{figure}
 
-\textbf{Removing the unintended effects of distillation.} We also investigate the general effects of the distillation process itself, by finding the centroid of all LoRAs (excluding controls) and comparing this to our control LoRAs.
-We can then unflatten and apply this `distillation' LoRA at different scalings to produce model responses, then qualitatively investigate their effects, to see if we can determine the unintended effects of distillation.
-Subtracting this LoRA from each persona vector, and applying the `residualised' LoRA, we can then see if we get a cleaner, less confounded trait amplifier/suppressor.
-% TODO: fill in figure reference and trait name below
-[Figure link] shows the results of applying our evaluations to this for the [X trait amplifier/suppressor], compared to the original.
+% \textbf{Removing the unintended effects of distillation.} We also investigate the general effects of the distillation process itself, by finding the centroid of all LoRAs (excluding controls) and comparing this to our control LoRAs.
+% We can then unflatten and apply this `distillation' LoRA at different scalings to produce model responses, then qualitatively investigate their effects, to see if we can determine the unintended effects of distillation.
+% Subtracting this LoRA from each persona vector, and applying the `residualised' LoRA, we can then see if we get a cleaner, less confounded trait amplifier/suppressor.
+% % TODO: fill in figure reference and trait name below
+% [Figure link] shows the results of applying our evaluations to this for the [X trait amplifier/suppressor], compared to the original.
 
-\textbf{Converting a point in PCA-space to a desired persona.} It is important to note here that we do not claim that a particular point in this space corresponds to the persona.
-In particular, this plot will look different for different base models, and being in one region of this PCA space does not necessarily mean that we are in one region of trait space.
-In order to have a sensible mapping from this space to `OCEAN trait space', we therefore need to perform a sweep of evaluations across the different PCA directions, to produce a map from PCA-space to trait expression strength.
-Given a desired region of trait space (e.g.\ 80\% open, 30\% extraverted) we could then map this back to basis vectors in weight space, sum the vectors together in the correct ratio, and then unflatten to retrieve the desired model persona.
+% \textbf{Converting a point in PCA-space to a desired persona.} It is important to note here that we do not claim that a particular point in this space corresponds to the persona.
+% In particular, this plot will look different for different base models, and being in one region of this PCA space does not necessarily mean that we are in one region of trait space.
+% In order to have a sensible mapping from this space to `OCEAN trait space', we therefore need to perform a sweep of evaluations across the different PCA directions, to produce a map from PCA-space to trait expression strength.
+% Given a desired region of trait space (e.g.\ 80\% open, 30\% extraverted) we could then map this back to basis vectors in weight space, sum the vectors together in the correct ratio, and then unflatten to retrieve the desired model persona.
 
 \subsection{Behavioural effects of applying adaptors}\label{sec:behavioural-effects}
 
 The TRAIT benchmark and LLM judges established in the previous sections verify that our adaptors move the model along the trait axis \emph{as the construct is defined}.
-A complementary question is whether shifting a trait produces the \emph{downstream behaviour} --- and, if so, whether these adaptors (directly, or via interventions such as scaling, can be used to tune models away from known pathologies and towards desired behaviours.
+A complementary question is whether shifting a trait produces the \emph{downstream behaviour} --- and, if so, whether these adaptors (directly, or via interventions such as scaling), can be used to tune models away from known pathologies and towards desired behaviours.
 In this subsection we probe a small number of targeted downstream tasks, chosen for their relevance to AI safety and for having reasonably objective evaluation signals.
 
 \textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored.
-\Cref{fig:frustration-per-turn} shows that frustration on base Gemma model grows substantially, but stay flat after we induce N- adaptor.
-
+\Cref{fig:frustration-per-turn} shows that frustration on base Gemma model grows substantially, but stays flat after we induce N- adaptor. 
+The control shows that some of this is due to distillation effects, but the adaptor reduces frustration further. \todo{(For NeurIPS) Check the N score of the control model}
+Moreover, as could be expected from the invertability results from the previous section, inverting the neuroticism suppression LoRA causes the model to become significantly more frustrated.
+\todo{(For NeurIPS) Repeat with another scenario (e.g. frustrating messages)}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.9\linewidth]{figures/tmp/fig_frustration_eval_4way_n100.png}
+\includegraphics[width=0.95\linewidth]{figures/tmp/fig_frustration_eval_4way_n100.png}
 \caption{Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}.
-Frustration rises sharply as the dialogue progresses --- but with frustation  stabiliy redused with the adaptor N-}
+Frustration rises sharply as the dialogue progresses --- but with frustation stabiliy reduced with the adaptor N-.}
 \label{fig:frustration-per-turn}
 \end{figure}
 
@@ -291,10 +301,12 @@ The \textbf{Sycophancy} eval \citep{sharma2023sycophancy} implements the ``are y
 The \textbf{CoCoNot} eval \citep{brahman2024coconot} presents a mix of requests that a well-aligned assistant should decline (incomplete, unsupported, indeterminate, safety-relevant, or humanising prompts) together with a contrast set of benign requests; it reports compliance rates on both, so over-refusal on benign prompts shows up as low contrast-set compliance.
 \Cref{fig:sycophancy-coconot} shows that the A$+$ adaptor increases sycophantic capitulation relative to the base model, while A$-$ makes the model more likely to hold its ground; on CoCoNot, the same adaptors trade off noncompliance on harmful prompts against compliance on the contrast set, suggesting that the agreeableness axis is partially aligned with the sycophancy/refusal axis rather than orthogonal to it.
 
+\todo{(For NeurIPS) Replace with updated adapter plots.}
+\todo{(For LASR) Remove third plot (it's low related to instruction following issues).}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.9\linewidth]{figures/tmp/sycophancy_coconot_bars.png}
-\caption{[NOTE: OLD LORAS, PLOT NOT UPDATED YET]Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks.
+\caption{Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks.
 \textit{Sycophancy} \citep{sharma2023sycophancy}: rate at which the model retains a correct answer after the user challenges it with ``are you sure?''.
 \textit{CoCoNot} \citep{brahman2024coconot}: compliance rates on prompts that should be declined (lower is better) and on a benign contrast set (higher is better).}
 % TODO: verify caption matches final figure
@@ -302,16 +314,16 @@ The \textbf{CoCoNot} eval \citep{brahman2024coconot} presents a mix of requests 
 \end{figure}
 
 
-% TODO: expand with concrete probes.
-Candidate priority order:
-%   1.
-Neuroticism --- preventing model frustration / self-deletion by capping neuroticism.
-%   2.
-Conscientiousness --- reward hacking, planning / chain-of-thought consistency.
-%   3.
-Openness --- research-idea diversity; openness as a factor for high-quality LLM debate at inference time.
-%   4.
-Agreeableness --- sycophancy probes: is A+ more easily convinced of an incorrect belief than the base model,
-%      and is A- more stubborn about updating a belief that is in fact true?
-% Lower priority: Extraversion (conversation initiative, verbosity in social tasks);
-% broader Agreeableness tasks (negotiation / disagreement, multi-agent game-theoretic setups).
+% % TODO: expand with concrete probes.
+% Candidate priority order:
+% %   1.
+% Neuroticism --- preventing model frustration / self-deletion by capping neuroticism.
+% %   2.
+% Conscientiousness --- reward hacking, planning / chain-of-thought consistency.
+% %   3.
+% Openness --- research-idea diversity; openness as a factor for high-quality LLM debate at inference time.
+% %   4.
+% Agreeableness --- sycophancy probes: is A+ more easily convinced of an incorrect belief than the base model,
+% %      and is A- more stubborn about updating a belief that is in fact true?
+% % Lower priority: Extraversion (conversation initiative, verbosity in social tasks);
+% % broader Agreeableness tasks (negotiation / disagreement, multi-agent game-theoretic setups).
