@@ -84,6 +84,12 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 | `unsupervised/fig_4_1_factor28_agreeableness.pdf` | `fig:histogram-of-scores-for-factor-28-obtained-when-40` | `sections/unsupervised.tex` | `scripts_dev/unsupervised_embeddings/visualise_embeddings.py` | `TBD — ToDo Sid (artifact path pending; unsupervised pipeline HF upload is in progress)` | `placeholder` | Currently `tmp/image22.png`. Factor-28 histogram separating agreeable vs disagreeable. Label has markdown-converter cruft (rename). |
 | `unsupervised/fig_4_2_horn_parallel_rollouts.pdf` | `fig:horn-s-parallel-analysis-as-applied-to-the-1-517-p` | `sections/unsupervised.tex` | `scripts_dev/unsupervised_embeddings/psychometric_rollout_fa.py` | `TBD — ToDo Sid (rollout FA artifact path; unsupervised pipeline HF upload is in progress)` | `placeholder` | Currently `tmp/image23.png`. Horn's parallel analysis on 1,517 persona rollouts. Label has markdown-converter cruft (rename). |
 
+### Appendix B — Training methods (`appendices/training_methods.tex`)
+
+| Path | Ref | Section | Script | Data source | Status | Notes |
+|------|-----|---------|--------|-------------|--------|-------|
+| `appendix/fig_B_dpo_methods_scaling.pdf` | `fig:appendix-dpo-methods` | `appendices/training_methods.tex` | `src_dev/visualisations/paper_appendix_dpo_methods.py` | Per-method under `fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/{version}/evals/`: TRAIT logprobs at `mcq/trait_logprobs/{suite}/{lora_±XpYYx}/trait_logprobs/native/inspect_logs/*.json`; MMLU at `mcq/mmlu/{suite}/{lora_±XpYYx}/mmlu/native/inspect_logs/*.json`. Suites: `vanton4`→`n_minus_vanton4_logprobs`/`n_minus_vanton4`; `v4`→`n_minus_v4_logprobs` (no MMLU subtree uploaded); `v4_reversed_dpo`→`n_minus_v4_reversed_dpo_logprobs`/`n_minus_v4_reversed_dpo`; `v4_paired_dpo`→`n_minus_v4_paired_dpo_logprobs`/`n_minus_v4_paired_dpo`. | `script-exists` | 4×2 grid (rows = DPO method, columns = [TRAIT logprobs, MMLU]) for the neuroticism suppressor. OCEAN canonical colours on the TRAIT panels. `v4` MMLU panel shows "MMLU not run" placeholder. |
+
 ### Appendix E — OCEAN evaluations (`appendices/ocean_evals.tex`)
 
 | Path | Ref | Section | Script | Data source | Status | Notes |
