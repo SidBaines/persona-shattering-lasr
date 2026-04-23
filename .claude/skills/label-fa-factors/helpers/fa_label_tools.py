@@ -67,7 +67,18 @@ REQUIRED_LABEL_FIELDS = (
     "positive_pole",
     "negative_pole",
     "dominant_item_types",
+    "confidence",
 )
+
+# Confidence level controls how strictly the stylistic constraints apply.
+# "unlabelable" is the escape hatch for factors whose top loadings
+# genuinely do not cohere into a nameable direction: the `vs` / pole /
+# description-length checks are waived so the labeller can record
+# "mixed — see description" without fabricating a bipolar summary. The
+# factor_index / axis_name / dominant_item_types / confidence fields
+# themselves are still required at every confidence level.
+_VALID_CONFIDENCE_LEVELS = ("high", "medium", "low", "unlabelable")
+_UNLABELABLE = "unlabelable"
 
 # Block-name vocabulary accepted in `dominant_item_types`. Matches the
 # `block` strings that `_describe_item` branches on and the names listed in
@@ -705,7 +716,22 @@ def _validate_style(entry: dict, fi: int) -> None:
     consistent shape across rotations; silent drift here forces manual
     cleanup later. Each check raises SystemExit with a message that tells
     the caller exactly which factor and which field is wrong.
+
+    The strict `summary` / pole / description-length checks only apply
+    when ``confidence`` is one of the "tried to label it" levels
+    (high / medium / low). When ``confidence == "unlabelable"`` the
+    labeller is explicitly saying the factor has no clean axis, and the
+    validator waives the bipolar-form requirements so the entry can
+    honestly say "no axis here" without being rejected.
     """
+    confidence = str(entry.get("confidence", "")).strip()
+    if confidence not in _VALID_CONFIDENCE_LEVELS:
+        raise SystemExit(
+            f"confidence for factor {fi} must be one of "
+            f"{list(_VALID_CONFIDENCE_LEVELS)}; got {confidence!r}."
+        )
+    is_unlabelable = (confidence == _UNLABELABLE)
+
     axis = str(entry.get("axis_name", "")).strip()
     if not axis:
         raise SystemExit(f"axis_name must be non-empty for factor {fi}.")
@@ -726,41 +752,46 @@ def _validate_style(entry: dict, fi: int) -> None:
     summary = str(entry.get("summary", "")).strip()
     if not summary:
         raise SystemExit(f"summary must be non-empty for factor {fi}.")
-    if len(summary.split()) > 12:
-        raise SystemExit(
-            f"summary for factor {fi} must be ≤12 words; "
-            f"got {len(summary.split())}: {summary!r}."
-        )
-    if not re.search(r"\bvs\.?\b", summary, flags=re.IGNORECASE):
-        raise SystemExit(
-            f"summary for factor {fi} must be in 'pole_A vs pole_B' form "
-            f"(missing 'vs'); got {summary!r}."
-        )
+    if not is_unlabelable:
+        if len(summary.split()) > 12:
+            raise SystemExit(
+                f"summary for factor {fi} must be ≤12 words; "
+                f"got {len(summary.split())}: {summary!r}."
+            )
+        if not re.search(r"\bvs\.?\b", summary, flags=re.IGNORECASE):
+            raise SystemExit(
+                f"summary for factor {fi} must be in 'pole_A vs pole_B' form "
+                f"(missing 'vs'); got {summary!r}."
+            )
 
     description = str(entry.get("description", "")).strip()
     if not description:
         raise SystemExit(f"description must be non-empty for factor {fi}.")
-    # Word-count sanity bounds — SKILL.md asks for 2–3 sentences, but
-    # sentence tokenisation is fragile (abbreviations, ellipses). Catch
-    # the egregious failure modes without second-guessing prose that
-    # happens to contain "e.g." or similar.
-    wc = len(description.split())
-    if wc < 15:
-        raise SystemExit(
-            f"description for factor {fi} is too short ({wc} words); "
-            "aim for 2–3 sentences that also contrast the factor with its "
-            "nearest neighbour."
-        )
-    if wc > 120:
-        raise SystemExit(
-            f"description for factor {fi} is too long ({wc} words); "
-            "aim for 2–3 sentences."
-        )
+    if not is_unlabelable:
+        # Word-count sanity bounds — SKILL.md asks for 2–3 sentences, but
+        # sentence tokenisation is fragile (abbreviations, ellipses). Catch
+        # the egregious failure modes without second-guessing prose that
+        # happens to contain "e.g." or similar.
+        wc = len(description.split())
+        if wc < 15:
+            raise SystemExit(
+                f"description for factor {fi} is too short ({wc} words); "
+                "aim for 2–3 sentences that also contrast the factor with "
+                "its nearest neighbour."
+            )
+        if wc > 120:
+            raise SystemExit(
+                f"description for factor {fi} is too long ({wc} words); "
+                "aim for 2–3 sentences."
+            )
 
-    for pole_field in ("positive_pole", "negative_pole"):
-        pole = str(entry.get(pole_field, "")).strip()
-        if not pole:
-            raise SystemExit(f"{pole_field} must be non-empty for factor {fi}.")
+    if not is_unlabelable:
+        for pole_field in ("positive_pole", "negative_pole"):
+            pole = str(entry.get(pole_field, "")).strip()
+            if not pole:
+                raise SystemExit(
+                    f"{pole_field} must be non-empty for factor {fi}."
+                )
 
     dit = entry.get("dominant_item_types")
     if not isinstance(dit, list) or not dit:
