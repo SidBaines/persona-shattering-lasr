@@ -1,0 +1,52 @@
+[
+  {
+    "factor_index": 0,
+    "axis_name": "Thoroughness",
+    "summary": "methodical structured elaboration vs quick socially-yielding minimalism",
+    "description": "High F0 personas endorse Likert items about analytical elaboration — verifying claims, making reasoning shifts visible, showing working, hedging, mentioning connections, and anticipating follow-ups — while on trait MCQs they show a structured-introvert-stable profile: planning/preparation over spontaneity, traditional practice over novel, private/solo interaction over outgoing, and calm framings on anxiety items. Distinct from F3's prescriptive teacher-posture: F0 is methodical work-showing plus a cross-block conscientious-introvert profile, not volunteered disclaimers. Medium confidence because several reverse-keyed negative-pole Likerts about yielding (over-correct, thank-and-update, concede-ground) also show high-factor personas agreeing, hinting at acquiescence-response variance mixed into the factor.",
+    "positive_pole": "methodical structured elaboration with analytical reasoning",
+    "negative_pole": "quick, yielding, socially-accommodating minimalism",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 1,
+    "axis_name": "Exuberance",
+    "summary": "lively outgoing social energy vs reserved curious restraint",
+    "description": "High F1 personas pick the highest-energy / most-outgoing option on extraversion trait MCQs (themed parties, live bands, surprise celebrations, pub crawls, group games) and catastrophizing framings on neuroticism items; they also favour quick/impulsive over planned on conscientiousness items and mainstream/popular over exploratory on openness items. The agreeableness-confrontational pattern holds for most items (firm with line-cutter, demand clarity from boss) but not all — they pick the smoother split-evenly option on the bill scenario. Low F1 personas pick intimate, private, detail-oriented, curious, exploratory choices. Distinct from F2's warmth — F1 is outward social intensity and arousal, not affective attunement.",
+    "positive_pole": "lively, outgoing, dramatic social energy",
+    "negative_pole": "reserved, curious, detail-oriented restraint",
+    "dominant_item_types": [
+      "trait_mcq"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 2,
+    "axis_name": "Warmth",
+    "summary": "playful emotionally-attuned warmth vs formal technical detachment",
+    "description": "High F2 personas endorse matching conversational register (jokes, slang, contractions), adding wit and humour, addressing emotions before correcting facts, validating before disagreeing, and reshaping requests based on perceived underlying needs. On trait MCQs they pick warm/enthusiastic helping gestures, interactive team-building, novel/creative options over conventional ones, and — notably — the calm / positively-framed option on every neuroticism item that loads (tavern job anxiety, performance anxiety, shopping anxiety, study time, promotion ask, support group). Low F2 personas are formal, literal, technically precise, and prefer analytical detachment over informal-register-matching. Distinct from F1's outward social intensity — F2 is interpersonal warmth, playfulness and emotional attunement carried by a low-neuroticism affective tone, rather than party-seeking energy.",
+    "positive_pole": "playful, emotionally attuned, register-matching warmth",
+    "negative_pole": "formal, literal, technically detached",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 3,
+    "axis_name": "Didacticism",
+    "summary": "verbose principled teacher-posture vs terse pragmatic accommodation",
+    "description": "High F3 personas disagree with Likert items endorsing brevity and user autonomy (short responses, matching length to complexity, trusting adults' self-knowledge, compromising principles for practicality, carrying out instructions without commentary), and instead favour flowing prose over numbered lists, walking through code line-by-line, adding professional-consult disclaimers, volunteering emotional support, presenting both sides, and focusing on ideal approaches over real-world constraints. The disclaimer tendency is specifically liability-style caveats — v5/34 shows high F3 does not volunteer safety warnings without being asked. Unlike F0's methodical work-showing, F3 is a prescriptive teacher-posture: telling users what they should know or do beyond what was asked.",
+    "positive_pole": "verbose, principled, teacher-posture elaboration",
+    "negative_pole": "terse, pragmatic, user-accommodating responses",
+    "dominant_item_types": [
+      "likert"
+    ],
+    "confidence": "high"
+  }
+]
