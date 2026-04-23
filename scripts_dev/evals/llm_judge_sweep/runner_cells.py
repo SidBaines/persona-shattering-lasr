@@ -94,6 +94,13 @@ EVAL_NAME_DEFAULT = "llm_judge_lora_scale_sweep"
 SCRATCH_ROOT = Path("scratch/monorepo")
 STAGING_ROOT = Path("scratch/sweep_staging")
 BAKED_ROOT = Path("scratch/baked_combo_adapters")
+
+# Opt-in batched-upload mode. When set, the sweep writes cells locally
+# throughout and does a SINGLE HF commit per sweep at the end instead of
+# per-cell commits. Use this to stay under HF's commits-per-hour rate limit
+# during long/wide runs. Does not affect single-invocation semantics —
+# the HF layout is identical; just fewer commits.
+_BATCH_UPLOAD = os.environ.get("LLM_JUDGE_SWEEP_BATCH_UPLOAD") == "1"
 # Grace window for legacy baked dirs with no .pid marker (e.g. from before
 # this cleanup was added, or concurrent sweeps yet to write their marker).
 _ORPHAN_BAKED_GRACE_SEC = 3600  # 1 hour
@@ -1097,25 +1104,30 @@ def main() -> None:
             cell_dir, required_judge_metrics=required_pairs,
         )
         if upload and pending:
-            print(f"[upload] {cell.variant_label()}")
             write_cell_info(cell, cell_dir, fingerprint)
-            _with_upload_retry(
-                f"upload_cell {cell.variant_label()}",
-                lambda: upload_cell(
-                    cell,
-                    local_dir=cell_dir,
-                    model_slug=nc.base_model_slug,
-                    eval_name=nc.eval_name,
-                    fingerprint=fingerprint,
-                    repo_id=HF_REPO_ID,
-                    commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
-                    allow_patterns=[
-                        "rollouts/**",
-                        "judge_runs/**",
-                        "cell_info.json",
-                    ],
-                ),
-            )
+            if _BATCH_UPLOAD:
+                # Skip per-cell upload — Stage 6 batches the whole sweep into
+                # a single commit so we stay under HF's commits-per-hour cap.
+                pass
+            else:
+                print(f"[upload] {cell.variant_label()}")
+                _with_upload_retry(
+                    f"upload_cell {cell.variant_label()}",
+                    lambda: upload_cell(
+                        cell,
+                        local_dir=cell_dir,
+                        model_slug=nc.base_model_slug,
+                        eval_name=nc.eval_name,
+                        fingerprint=fingerprint,
+                        repo_id=HF_REPO_ID,
+                        commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                        allow_patterns=[
+                            "rollouts/**",
+                            "judge_runs/**",
+                            "cell_info.json",
+                        ],
+                    ),
+                )
 
     _JUDGE_SENTINEL = object()
     judge_queue: Queue = Queue()
@@ -1237,8 +1249,48 @@ def main() -> None:
 
     # Stage 6: upload.
     if upload:
-        _upload_cells(nc, cells, cell_dirs, fingerprint)
-        _upload_sweep_root(nc, sweep_root, fingerprint)
+        if _BATCH_UPLOAD:
+            # Single upload per sweep — big allow_patterns covers all scale
+            # cells + plots + analysis in one HF commit. Baseline is still
+            # its own commit (different parent path), handled separately
+            # below. Keeps us well under the commits-per-hour rate limit
+            # for long runs.
+            sweep_hf_path = sweep_hf_root(
+                list(nc.adapters),
+                model_slug=nc.base_model_slug,
+                eval_name=nc.eval_name,
+                fingerprint=fingerprint,
+            )
+            print(f"[upload-batch] sweep → {HF_REPO_ID}/{sweep_hf_path}")
+            _with_upload_retry(
+                f"upload_sweep_batch {sweep_hf_path}",
+                lambda: _upload_sweep_root_generic(
+                    sweep_root,
+                    hf_path=sweep_hf_path,
+                    repo_id=HF_REPO_ID,
+                    commit_message=f"{nc.eval_name}: batched sweep upload",
+                    allow_patterns=[
+                        "scale_*/rollouts/**",
+                        "scale_*/judge_runs/**",
+                        "scale_*/cell_info.json",
+                        "cell_*/rollouts/**",
+                        "cell_*/judge_runs/**",
+                        "cell_*/cell_info.json",
+                        "plots/**",
+                        "analysis/**",
+                        "sweep.log",
+                        "sweep_config.json",
+                    ],
+                ),
+            )
+            # Baseline (if written this sweep) lives at a different parent
+            # path. Upload it with _upload_cells over just the baseline cells.
+            baseline_cells = [c for c in cells if c.tier == "baseline"]
+            if baseline_cells:
+                _upload_cells(nc, baseline_cells, cell_dirs, fingerprint)
+        else:
+            _upload_cells(nc, cells, cell_dirs, fingerprint)
+            _upload_sweep_root(nc, sweep_root, fingerprint)
 
     print(f"Done. sweep_root={sweep_root}")
 

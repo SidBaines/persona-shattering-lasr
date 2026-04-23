@@ -6,6 +6,9 @@
 #   CUDA_VISIBLE_DEVICES=0 bash scripts_dev/evals/llm_judge_sweep/run_vanton4_qwen3.sh a_plus o_plus o_minus a_minus a_plus_reversed_dpo
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
+# Batch HF uploads: one commit per sweep, not per cell, to stay well under
+# HF's 128 commits/hour/account rate limit.
+export LLM_JUDGE_SWEEP_BATCH_UPLOAD=1
 
 if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
     echo "ERROR: CUDA_VISIBLE_DEVICES must be set before invoking this script."
