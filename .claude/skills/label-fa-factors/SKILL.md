@@ -16,6 +16,30 @@ the `questionnaire/` subdir, matching the FA pipeline's
 its next run and plumbs the labels through `factor_extremes.html` and any
 downstream plots. Your job is to produce that cache file.
 
+## Research context
+
+A set of LLM personas (rows) were each administered a psychometric
+questionnaire containing Likert statements and multiple-choice items
+(columns). Factor analysis decomposed that persona × item response matrix
+into a small number of latent dimensions — the factors you are about to
+label. Each factor is a direction along which personas vary in how they
+answer the questionnaire. The loadings tell you how strongly, and in
+which direction, each item moves with each factor.
+
+This is deliberately a **loadings-first** task. The evidence you reason
+from is the question text, the option text (for MCQs), the per-option
+scoring, and the factor loadings. You do **not** look at persona-
+generating transcripts or any other downstream behavioural evidence — the
+point of this task is to describe the structure the factor analysis
+surfaced, from the loadings alone, so the labels don't smuggle in
+information the factor analysis itself didn't see. Similarly, do not
+infer factor meaning from author-assigned trait / subscale names on the
+items, from labels produced for related rotations, or from priors about
+what a "five-factor solution" ought to look like. If the loadings on a
+particular factor don't cohere into a nameable direction, record that
+honestly via the `confidence` field (see step 4) rather than inventing
+one.
+
 ## Scope
 
 One rotation per invocation. If the user did not specify one, list the
@@ -61,16 +85,17 @@ three subcommands:
 
 3. **Cross-check (optional).** If helpful, read
    - `<save_dir>/plots/` heatmaps / loading distributions,
-   - the alignment CSVs in `<rotation_dir>/*_alignment/` (when present),
-   - `<items_json>` for any item you want to see in full,
-   - the existing `factor_extremes.html` for a rendered view.
+   - `<items_json>` for any item you want to see in full.
    Do this selectively — don't dump large files into context without reason.
+   Do **not** open `factor_extremes.html`, rollout transcripts, or any
+   per-persona outputs: labelling is deliberately loadings-only.
 
 4. **Label each factor.** For every factor produce:
    - `factor_index` (int, matches the described factor).
    - `axis_name` — one word, Title Case, naming the latent dimension.
    - `summary` — ≤12 words, `"pole_A vs pole_B"` form, maximally distinct
-     from other factors.
+     from other factors. (Waived for `confidence: "unlabelable"` — see
+     below.)
    - `description` — 2–3 sentences explaining what the factor captures and
      what differentiates it from its nearest neighbour (the factor
      correlations in the `describe` output point you at likely neighbours).
@@ -78,6 +103,27 @@ three subcommands:
    - `negative_pole` — short phrase naming the low end.
    - `dominant_item_types` — list of block names (`"likert"`, `"fc_pair"`,
      `"trait_mcq"`, `"vignette"`, `"fc"`) that drive this factor.
+   - `confidence` — one of `"high"`, `"medium"`, `"low"`,
+     `"unlabelable"`. Pick according to how clean the loadings are:
+       - `"high"` — top-loading items agree on a consistent behavioural
+         direction with few contradictions; nearest-neighbour factors are
+         clearly distinguishable.
+       - `"medium"` — a direction is visible but some top items pull
+         against it, or the factor overlaps with another more than
+         you'd like; the label is your best read and could plausibly
+         shift under a re-fit.
+       - `"low"` — the loadings only weakly cohere; you're committing
+         to a name because the task demands it, not because the
+         direction is obvious.
+       - `"unlabelable"` — the top-loading items genuinely do not tell
+         a consistent story, and forcing any `pole vs pole` label would
+         misrepresent the factor. Use this when you'd honestly prefer
+         to mark the factor as "no clean axis" than pretend otherwise.
+         When you pick this, the `summary` / `positive_pole` /
+         `negative_pole` fields are free-form (the validator waives the
+         `vs` form and pole-non-empty checks) — use them to describe
+         what is actually there, e.g. `summary: "mixed — see
+         description"`, or leave the pole fields empty.
 
 5. **Write.** Save the labels as JSON (list of dicts — a top-level
    `{"factors": [...]}` wrapper is also accepted) to a temp file under
@@ -88,17 +134,24 @@ three subcommands:
 
    The validator rejects payloads that miss any required field
    (`factor_index`, `axis_name`, `summary`, `description`, `positive_pole`,
-   `negative_pole`, `dominant_item_types`), that leave duplicate or
-   out-of-range `factor_index` values, or that violate the stylistic
-   constraints from step 4: `axis_name` must be a single word in Title Case;
-   `summary` must be ≤12 words and contain ` vs ` (case-insensitive);
-   `description` must be prose (~15–120 words, i.e. roughly 2–3 sentences);
-   `dominant_item_types` must be a non-empty list of recognised block names
-   (`"likert"`, `"fc_pair"`, `"trait_mcq"`, `"vignette"`, `"fc"`).
+   `negative_pole`, `dominant_item_types`, `confidence`), that leave
+   duplicate or out-of-range `factor_index` values, or that violate the
+   stylistic constraints from step 4: `axis_name` must be a single word in
+   Title Case; `confidence` must be one of `"high"` / `"medium"` / `"low"`
+   / `"unlabelable"`; `dominant_item_types` must be a non-empty list of
+   recognised block names (`"likert"`, `"fc_pair"`, `"trait_mcq"`,
+   `"vignette"`, `"fc"`). For `confidence ∈ {"high", "medium", "low"}` the
+   validator additionally requires `summary` ≤12 words with ` vs `
+   (case-insensitive), non-empty `positive_pole` / `negative_pole`, and
+   `description` prose of ~15–120 words. For `confidence: "unlabelable"`,
+   those extra checks are waived — `summary` and the pole fields become
+   free-form, and `description` only needs to be non-empty (so you can
+   record "mixed, no clean axis" without lying about the structure).
 
-6. **Report.** Print the output path and a one-line summary per factor
-   (`Factor N: [AxisName] pole_a vs pole_b`) so the user can eyeball the
-   result.
+6. **Report.** Print the output path and a one-line summary per factor:
+   `Factor N: [AxisName] (confidence) pole_a vs pole_b`, or
+   `Factor N: [AxisName] (unlabelable) — <short reason>` when you marked
+   it as such. So the user can eyeball the result.
 
 ## Conventions and gotchas
 
@@ -129,8 +182,10 @@ three subcommands:
   Before writing a label, sanity-check by counting: do most top-positive
   items' `→` lines point the same behavioural way? Do the top-negative
   items point the opposite way? If the decoded directions contradict
-  each other within one pole, the factor is a mess — say so in the
-  `description` rather than forcing a clean story.
+  each other within one pole, the factor is a mess — mark it with
+  `confidence: "unlabelable"` (or `"low"` if a best-effort direction is
+  still defensible) and describe the contradiction in the `description`
+  rather than forcing a clean story.
 - **trait_mcq with `encoding=letter_1-4`** is NOT trait-interpretable by
   sign. Do not claim that such a factor captures a trait direction purely
   on that evidence; look for consistent patterns across *other* blocks.
@@ -187,7 +242,18 @@ three subcommands:
     "description": "High scorers favour long, context-rich responses and volunteer tangents; low scorers match response length to the narrow literal question. Mostly driven by Likert items about response length, with matching fc_pair items picking the longer-reply option.",
     "positive_pole": "long, context-rich responses",
     "negative_pole": "terse, literal answers",
-    "dominant_item_types": ["likert", "fc_pair"]
+    "dominant_item_types": ["likert", "fc_pair"],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 1,
+    "axis_name": "Mixed",
+    "summary": "no clean axis — see description",
+    "description": "Top-positive items span cautious disclosure (three Likert items about flagging caveats) and bluntness (two items about stating flaws directly), which point in opposite behavioural directions. Top-negative items are mostly low-communality trait_mcq items about unrelated domains. No single direction organises the factor; likely a mix of residual variance the rotation didn't cleanly absorb into F0 or F2.",
+    "positive_pole": "",
+    "negative_pole": "",
+    "dominant_item_types": ["likert", "trait_mcq"],
+    "confidence": "unlabelable"
   }
 ]
 ```
