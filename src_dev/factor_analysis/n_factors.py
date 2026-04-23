@@ -1026,12 +1026,16 @@ def plot_n_factors_comparison(
                 np.nan if v is None else float(v)
                 for v in oc["predicted_eigenvalues"]
             ], dtype=float)
-            # Plot at k-indices 1..p-2 where prediction is defined.
+            # Plot at k-indices 1..p-2 where prediction is defined. pred_full
+            # is clipped to OC's k_max_used (can be < n_show when the caller
+            # passes k_max < p-2), so trim x to match or the mask rank will
+            # diverge from x's rank on the indexing step below.
             pred_show = pred_full[:n_show]
+            x_oc = x[: len(pred_show)]
             mask = ~np.isnan(pred_show)
             if mask.any():
                 ax_scree.plot(
-                    x[mask], pred_show[mask],
+                    x_oc[mask], pred_show[mask],
                     ":", color="#be185d", linewidth=1.2,
                     label=f"OC predicted (k={summary.get('optimal_coordinates', '?')})",
                     zorder=3,
