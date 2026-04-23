@@ -69,9 +69,18 @@ Current state of the script (grows iteratively):
                                       ``validation/cronbach_alpha.json`` and
                                       ``validation/split_half_congruence.{json,png}``
                                       per model.
+    [done] run_cross_model_congruence — Llama ↔ Qwen Tucker's |φ| across
+                                      combined + per-block (likert,
+                                      trait_mcq) shared-item subsets.
+                                      Hungarian-matches anchor factors to
+                                      target factors (anchor = Llama k=4,
+                                      target = Qwen k=5, one unmatched
+                                      Qwen factor reported separately).
+                                      Writes ``cross_model/{pair}/{subset}/
+                                      {phi_matrix.npy, phi_heatmap.{png,pdf},
+                                      report.json}`` plus a per-pair
+                                      ``summary.json``.
 
-    [todo] cross-model Tucker's congruence (Llama ↔ Qwen), Hungarian match
-           on min(k_a, k_b), with the extra factor flagged as unmatched.
     [todo] varimax + logit-encoding robustness passes for the appendix.
     [todo] paper figures (scree, loading heatmaps, etc.).
 """
@@ -121,6 +130,11 @@ from src_dev.factor_analysis.trait_alignment import (
     compute_factor_trait_alignment,
     plot_all_alignment,
     save_alignment,
+)
+from src_dev.psychometric.tucker_congruence import (
+    align_factors,
+    classify_phi,
+    tucker_phi_matrix,
 )
 from src_dev.psychometric.combine import load_pair_outputs
 from src_dev.psychometric.factor_extremes_html import export_factor_extremes_html
@@ -301,6 +315,21 @@ CRONBACH_LOADING_THRESHOLD: float = 0.4
 # violin plots without the cost of bootstrap's resample-refit loops.
 SPLIT_HALF_N_ITERS: int = 100
 SPLIT_HALF_PASS_THRESHOLD_PHI: float = 0.85  # Lorenzo-Seva "fair" threshold
+
+
+# ── Cross-model congruence ──────────────────────────────────────────────────
+# Which model is the anchor in the Hungarian match. Llama is the paper's
+# headline fit (k=4), so we treat its factors as the reference and ask how
+# each maps into Qwen's k=5 solution. Under Hungarian matching, all 4
+# Llama factors get one partner and 1 of Qwen's 5 is left unmatched —
+# that extra factor is reported separately with its single best partner.
+CROSS_MODEL_ANCHOR: str = "llama-3.1-8b"
+
+# Blocks to run cross-model congruence on. "combined" uses all shared
+# items; the per-block restrictions tell us whether agreement is
+# Likert-driven, trait_mcq-driven, or mixed — same decomposition as the
+# existing cross_model_sweep.
+CROSS_MODEL_BLOCK_SUBSETS: tuple[str, ...] = ("combined", "likert", "trait_mcq")
 
 # Persisted-labels store (checked into the repo, survives gitignored
 # scratch wipes). The /label-fa-factors skill writes into
@@ -1020,6 +1049,292 @@ def run_within_model_validation(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# CROSS-MODEL CONGRUENCE
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _slice_loadings_to_shared_items(
+    loadings_a: np.ndarray,
+    items_a: list[dict],
+    loadings_b: np.ndarray,
+    items_b: list[dict],
+    *,
+    block_filter: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Intersect two fits by col_id and return aligned loadings + shared IDs.
+
+    Preprocessing drops different low-variance items per model (86/100
+    trait_mcq kept on Llama, 71/100 on Qwen), so each model's loadings
+    sit on a slightly different item set. Tucker's φ requires matching
+    item indices, so we intersect on col_id and reindex both sides.
+
+    ``block_filter="likert"`` / ``"trait_mcq"`` restricts the shared set
+    to that block; ``None`` uses everything shared. Returning the col_ids
+    lets the caller label rows on the eventual heatmap.
+    """
+    ids_a = [it["col_id"] for it in items_a]
+    ids_b = [it["col_id"] for it in items_b]
+    idx_a = {cid: i for i, cid in enumerate(ids_a)}
+    idx_b = {cid: i for i, cid in enumerate(ids_b)}
+    shared = sorted(set(ids_a) & set(ids_b))
+    if block_filter is not None:
+        block_a = {it["col_id"]: it.get("block") for it in items_a}
+        shared = [c for c in shared if block_a.get(c) == block_filter]
+    if not shared:
+        raise ValueError(
+            f"No shared items between fits (block_filter={block_filter!r})."
+        )
+    la = loadings_a[[idx_a[c] for c in shared], :]
+    lb = loadings_b[[idx_b[c] for c in shared], :]
+    return la, lb, shared
+
+
+def _plot_phi_heatmap(
+    abs_phi: np.ndarray,
+    *,
+    anchor_labels: list[str],
+    target_labels: list[str],
+    matched_pairs: list[tuple[int, int, float]],
+    anchor_name: str,
+    target_name: str,
+    subset_label: str,
+    n_shared: int,
+    save_path: Path,
+) -> None:
+    """|φ| heatmap with matched cells outlined — one PDF per subset."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ka, kb = abs_phi.shape
+    fig, ax = plt.subplots(figsize=(max(4, 0.9 * kb + 2), max(3.5, 0.8 * ka + 2)))
+    im = ax.imshow(abs_phi, vmin=0.0, vmax=1.0, cmap="viridis", aspect="auto")
+
+    # Overlay matched cells with white outlines.
+    for fa_, fb_, _ in matched_pairs:
+        ax.add_patch(plt.Rectangle(
+            (fb_ - 0.5, fa_ - 0.5), 1, 1,
+            fill=False, edgecolor="white", linewidth=2.2,
+        ))
+
+    for i in range(ka):
+        for j in range(kb):
+            v = abs_phi[i, j]
+            ax.text(
+                j, i, f"{v:.2f}",
+                ha="center", va="center",
+                color="white" if v < 0.55 else "black", fontsize=9,
+            )
+    ax.set_xticks(range(kb)); ax.set_xticklabels(target_labels, rotation=25, ha="right", fontsize=9)
+    ax.set_yticks(range(ka)); ax.set_yticklabels(anchor_labels, fontsize=9)
+    ax.set_xlabel(target_name)
+    ax.set_ylabel(anchor_name)
+    ax.set_title(
+        f"Tucker's |φ|  ({subset_label}, n_shared={n_shared})",
+        fontsize=11,
+    )
+    fig.colorbar(im, ax=ax, shrink=0.8, label="|φ|")
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150)
+    fig.savefig(save_path.with_suffix(".pdf"))
+    plt.close(fig)
+
+
+def _axis_labels_for(slug: str, n_factors: int) -> list[str]:
+    """Prefer labelled axis names; fall back to ``F{idx}``."""
+    labels = _load_labels_for_slug(slug, n_factors)
+    return [
+        f"F{i}" + (f" ({labels[i]})" if i in labels else "")
+        for i in range(n_factors)
+    ]
+
+
+def _run_one_cross_model_subset(
+    *,
+    anchor_slug: str,
+    target_slug: str,
+    anchor_loadings: np.ndarray,
+    target_loadings: np.ndarray,
+    anchor_items: list[dict],
+    target_items: list[dict],
+    subset_label: str,
+    block_filter: str | None,
+    save_dir: Path,
+) -> dict:
+    """Run Tucker's φ for one (anchor, target, block-subset) triple."""
+    la, lb, shared = _slice_loadings_to_shared_items(
+        anchor_loadings, anchor_items,
+        target_loadings, target_items,
+        block_filter=block_filter,
+    )
+
+    signed_phi = tucker_phi_matrix(la, lb, signed=True)
+    abs_phi = np.abs(signed_phi)
+
+    alignments = align_factors(la, lb)
+    matched_pairs: list[tuple[int, int, float]] = []
+    matched_targets: set[int] = set()
+    alignment_rows: list[dict] = []
+    for a in alignments:
+        if a.target_factor >= 0:
+            matched_pairs.append((a.anchor_factor, a.target_factor, a.phi))
+            matched_targets.add(a.target_factor)
+        alignment_rows.append({
+            "anchor_factor": a.anchor_factor,
+            "target_factor": a.target_factor,
+            "phi": a.phi,
+            "phi_signed": (
+                float(signed_phi[a.anchor_factor, a.target_factor])
+                if a.target_factor >= 0 else float("nan")
+            ),
+            "sign": a.sign,
+            "classification": classify_phi(a.phi),
+        })
+
+    # Unmatched target factors (when kb > ka): report each with its best
+    # anchor partner, so we don't silently drop them.
+    unmatched_target_rows: list[dict] = []
+    k_a, k_b = la.shape[1], lb.shape[1]
+    for fb_ in range(k_b):
+        if fb_ in matched_targets:
+            continue
+        col = abs_phi[:, fb_]
+        best_anchor = int(np.argmax(col))
+        phi_val = float(col[best_anchor])
+        unmatched_target_rows.append({
+            "target_factor": fb_,
+            "best_anchor_partner": best_anchor,
+            "phi": phi_val,
+            "classification": classify_phi(phi_val),
+        })
+
+    anchor_labels = _axis_labels_for(anchor_slug, la.shape[1])
+    target_labels = _axis_labels_for(target_slug, lb.shape[1])
+
+    _plot_phi_heatmap(
+        abs_phi,
+        anchor_labels=anchor_labels,
+        target_labels=target_labels,
+        matched_pairs=matched_pairs,
+        anchor_name=anchor_slug, target_name=target_slug,
+        subset_label=subset_label,
+        n_shared=len(shared),
+        save_path=save_dir / "phi_heatmap.png",
+    )
+
+    np.save(save_dir / "phi_matrix.npy", signed_phi)
+
+    report = {
+        "anchor": anchor_slug,
+        "target": target_slug,
+        "subset": subset_label,
+        "block_filter": block_filter,
+        "n_shared_items": len(shared),
+        "shared_col_ids": shared,
+        "k_anchor": int(la.shape[1]),
+        "k_target": int(lb.shape[1]),
+        "matched": alignment_rows,
+        "unmatched_target": unmatched_target_rows,
+        "overall_mean_matched_phi": float(
+            np.mean([r["phi"] for r in alignment_rows if r["target_factor"] >= 0])
+        ) if alignment_rows else float("nan"),
+    }
+    (save_dir / "report.json").write_text(json.dumps(report, indent=2))
+    return report
+
+
+def run_cross_model_congruence(
+    loaded: dict[str, LoadedData],
+    fits: dict[str, "FaFit"],
+) -> dict[str, dict]:
+    """Llama ↔ Qwen Tucker's φ across combined + per-block shared items.
+
+    Output layout (top-level, not per-model — this is a cross-model comparison):
+
+        scratch/psychometric_fa_paper/cross_model/
+            {anchor}_vs_{target}/
+                {combined,likert,trait_mcq}/
+                    phi_matrix.npy
+                    phi_heatmap.{png,pdf}
+                    report.json
+                summary.json      # flattened per-subset key metrics
+
+    Hungarian matching is run with ``CROSS_MODEL_ANCHOR`` as anchor; the
+    anchor's ``k_anchor`` factors all get a target partner (via
+    ``scipy.optimize.linear_sum_assignment``), and any leftover target
+    factors (when ``k_target > k_anchor``) are reported separately with
+    their single-best anchor partner.
+    """
+    if CROSS_MODEL_ANCHOR not in fits:
+        log.warning("anchor model %s not in fits; skipping cross-model pass",
+                    CROSS_MODEL_ANCHOR)
+        return {}
+    targets = [s for s in fits if s != CROSS_MODEL_ANCHOR]
+    if not targets:
+        log.warning("only one model fit available; skipping cross-model pass")
+        return {}
+
+    anchor = fits[CROSS_MODEL_ANCHOR]
+    anchor_data = loaded[CROSS_MODEL_ANCHOR]
+    anchor_fa = load_factor_analysis(anchor.npz_path)
+
+    all_reports: dict[str, dict] = {}
+    for target_slug in targets:
+        target = fits[target_slug]
+        target_data = loaded[target_slug]
+        target_fa = load_factor_analysis(target.npz_path)
+
+        pair_label = f"{CROSS_MODEL_ANCHOR}_vs_{target_slug}"
+        pair_dir = OUTPUT_ROOT / "cross_model" / pair_label
+        pair_dir.mkdir(parents=True, exist_ok=True)
+        log.info("═══ cross-model: %s ═══", pair_label)
+
+        subset_reports: dict[str, dict] = {}
+        summary_rows: list[dict] = []
+        for subset in CROSS_MODEL_BLOCK_SUBSETS:
+            subset_dir = pair_dir / subset
+            subset_dir.mkdir(parents=True, exist_ok=True)
+            block_filter = None if subset == "combined" else subset
+            try:
+                report = _run_one_cross_model_subset(
+                    anchor_slug=CROSS_MODEL_ANCHOR,
+                    target_slug=target_slug,
+                    anchor_loadings=anchor_fa["loadings"],
+                    target_loadings=target_fa["loadings"],
+                    anchor_items=anchor_data.items,
+                    target_items=target_data.items,
+                    subset_label=subset,
+                    block_filter=block_filter,
+                    save_dir=subset_dir,
+                )
+            except ValueError as exc:
+                log.warning("  [%s/%s] skipped: %s", pair_label, subset, exc)
+                continue
+            subset_reports[subset] = report
+            summary_rows.append({
+                "subset": subset,
+                "n_shared_items": report["n_shared_items"],
+                "overall_mean_matched_phi": report["overall_mean_matched_phi"],
+                "matched_phis": [r["phi"] for r in report["matched"]],
+                "n_unmatched_target": len(report["unmatched_target"]),
+            })
+
+            log.info(
+                "  [%s/%-9s] n_shared=%3d  mean |φ|=%.3f  "
+                "per_pair=[%s]",
+                pair_label, subset, report["n_shared_items"],
+                report["overall_mean_matched_phi"],
+                ", ".join(f"{r['phi']:.2f}" for r in report["matched"]),
+            )
+
+        (pair_dir / "summary.json").write_text(
+            json.dumps({"pair": pair_label, "subsets": summary_rows}, indent=2)
+        )
+        all_reports[pair_label] = {"subsets": subset_reports}
+    return all_reports
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # HTML FACTOR BROWSER
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1262,6 +1577,9 @@ def main() -> None:
             loaded[slug], fit,
         )
 
+    # ── Step: cross-model Tucker's congruence (Llama ↔ Qwen) ───────────
+    cross_reports = run_cross_model_congruence(loaded, fits)
+
     if validation_results:
         print()
         print("=" * 78)
@@ -1285,6 +1603,30 @@ def main() -> None:
                     f"{row['alpha']:>6.3f}  {row['alpha_class']:<12}  "
                     f"{med:>10.3f}  {'yes' if passed else 'no':>4}"
                 )
+
+    if cross_reports:
+        print()
+        print("=" * 78)
+        print("Cross-model Tucker's congruence summary")
+        print("=" * 78)
+        for pair_label, bundle in cross_reports.items():
+            subsets = bundle["subsets"]
+            print(f"  {pair_label}")
+            print(f"    {'subset':<10}  {'n_shared':>8}  {'mean |φ|':>9}  "
+                  f"{'per-pair matched |φ|':<50}")
+            for subset_label, rep in subsets.items():
+                per_pair = [r["phi"] for r in rep["matched"]]
+                per_pair_str = ", ".join(f"{v:.2f}" for v in per_pair)
+                print(
+                    f"    {subset_label:<10}  {rep['n_shared_items']:>8}  "
+                    f"{rep['overall_mean_matched_phi']:>9.3f}  [{per_pair_str}]"
+                )
+                for row in rep["unmatched_target"]:
+                    print(
+                        f"      ↳ unmatched Qwen F{row['target_factor']}: "
+                        f"best partner Llama F{row['best_anchor_partner']} "
+                        f"|φ|={row['phi']:.3f} ({row['classification']})"
+                    )
 
     if fits:
         print()
