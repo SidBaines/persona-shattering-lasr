@@ -380,7 +380,33 @@ async def run_questionnaire_inference_async(
                 completed_cells.add((k_entry, iid))
                 choice = entry.get("parsed_choice")
                 if choice is None:
-                    continue
+                    # Likert logprob entries (scoring_method="logprob",
+                    # item_type="likert") don't persist ``parsed_choice`` —
+                    # they store ``probs`` + the already-scored ``score``.
+                    # For the rebuild path we still want to re-score from
+                    # ``probs`` under the current encoding rules (encoding
+                    # v4 re-applies reverse-keying on the NOMINAL scale),
+                    # so we derive ``choice`` from the probs argmax. Cast
+                    # to int so ``fill_matrix_from_choice`` dispatches to
+                    # the Likert branch (``isinstance(choice, str)``
+                    # routes strings to the Vignette branch, which would
+                    # silently write zeros). The probs path in the Likert
+                    # branch uses ``choice_probs`` and returns before the
+                    # argmax ``choice`` is consumed. Without this
+                    # fallback, every Likert cell stays NaN and
+                    # encoding-v3/v4 rebuilds silently produce all-NaN
+                    # matrices — catastrophic under the "fast path" that
+                    # writes the NaN matrix to HF as the rebuild result.
+                    probs_raw = entry.get("probs")
+                    if (
+                        isinstance(probs_raw, dict) and probs_raw
+                        and entry.get("item_type") == "likert"
+                    ):
+                        choice = int(
+                            max(probs_raw.items(), key=lambda kv: float(kv[1]))[0]
+                        )
+                    else:
+                        continue
                 resumed_probs = entry.get("probs")
                 resumed_probs = (
                     {str(kk): float(vv) for kk, vv in resumed_probs.items()}
