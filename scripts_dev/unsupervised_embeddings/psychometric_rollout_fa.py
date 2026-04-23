@@ -824,7 +824,7 @@ QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 4  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 20  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means.
 MIN_ITEM_VARIANCE = 0.1
@@ -1234,6 +1234,57 @@ def _questionnaire_dir(
     q_key: str | None = None,
 ) -> Path:
     return SCRATCH_ROOT / _questionnaire_run_id(rollout_key, q_key)
+
+
+def _seed_raw_responses_if_missing(rollout_key: str, q_key: str) -> None:
+    """If running under a non-default trait_mcq encoding and the tagged pair
+    dir is missing ``raw_responses.jsonl``, seed it (plus metadata.jsonl and
+    items.json) from the soft_ev equivalent pair dir.
+
+    raw_responses.jsonl is encoding-independent: it carries the raw top-k
+    logprobs from Stage 2 inference, and the encoding only affects how
+    ``fill_matrix_from_choice`` turns those logprobs into response-matrix
+    cells. Without this seeder, switching encodings (e.g. soft_ev → logit)
+    lands on a fresh tagged pair dir that Stage 2 treats as a cache miss
+    and falls through to full GPU inference — silently, and at 1-2 h of
+    cost per model-side. This helper closes that trap by copying the
+    three encoding-independent artifacts from the existing soft_ev dir.
+    """
+    global TRAIT_MCQ_ENCODING
+    if TRAIT_MCQ_ENCODING == "soft_ev":
+        return
+    current_dir = _questionnaire_dir(rollout_key, q_key) / "questionnaire"
+    if (current_dir / "raw_responses.jsonl").exists():
+        return  # already present — nothing to do
+    preset = _questionnaire_preset(q_key)
+    if "trait_mcq" not in preset.fa_blocks:
+        return  # encoding tag only applied to trait_mcq pairs; nothing to seed
+    # Compute the soft_ev equivalent pair dir by temporarily overriding
+    # the module global. _questionnaire_run_id reads TRAIT_MCQ_ENCODING
+    # (module level) when deciding whether to append the -enc_ tag.
+    saved = TRAIT_MCQ_ENCODING
+    try:
+        TRAIT_MCQ_ENCODING = "soft_ev"
+        src_dir = _questionnaire_dir(rollout_key, q_key) / "questionnaire"
+    finally:
+        TRAIT_MCQ_ENCODING = saved
+    if not (src_dir / "raw_responses.jsonl").exists():
+        return  # no soft_ev cache to seed from; Stage 2 will run fresh inference
+    import shutil
+    current_dir.mkdir(parents=True, exist_ok=True)
+    seeded: list[str] = []
+    for fname in ("raw_responses.jsonl", "metadata.jsonl", "items.json"):
+        s = src_dir / fname
+        d = current_dir / fname
+        if s.exists() and not d.exists():
+            shutil.copy2(s, d)
+            seeded.append(fname)
+    if seeded:
+        print(
+            f"[Setup] Seeded {seeded} into {current_dir} from soft_ev base "
+            f"({src_dir}). Encoding-independent artifacts reused to avoid "
+            f"re-running inference under {saved!r} encoding."
+        )
 
 
 # ── Combined-run layout (multi-preset mode) ────────────────────────────────
@@ -2628,6 +2679,12 @@ def main() -> None:
                 print("\n" + "=" * 60)
                 print(f"[Stage 2] Applying questionnaire — {r_key!r} × {q_key!r}")
                 print("=" * 60)
+                # Seed raw_responses + metadata + items from the soft_ev
+                # equivalent pair dir if this pair is under a non-default
+                # encoding that hasn't been run yet. Prevents accidental
+                # full GPU re-inference when only the cell encoding has
+                # changed (logprobs from Stage 2 are encoding-independent).
+                _seed_raw_responses_if_missing(r_key, q_key)
                 q_cfg = _build_questionnaire_stage_config(pair_ctx)
                 q_res = run_stage_questionnaire(
                     q_cfg,
