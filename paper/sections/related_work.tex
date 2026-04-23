@@ -2,20 +2,28 @@
 
 % TODO: Expand each bullet into a paragraph with proper citations and positioning relative to our contributions.
 
-\textbf{Personas and personality in LLMs.}
-\citet{lu2026assistant} identify an `assistant axis' in activation space as a strong predictor of model behaviour, and \citet{marks2026persona} propose the Persona Selection Model to explain how LLMs select among personas. These works study personas via activations; we complement them with weight-space interventions that persist across contexts.
+\textbf{Personas and personality traits in LLMs.}
+\citet{lu2026assistant} identify an `assistant axis' in activation space as a strong predictor of model behaviour, and \citet{marks2026persona} propose the Persona Selection Model to explain how LLMs select among personas.
+These works study personas via activations; we complement them with weight-space interventions that persist across contexts.
 
-\textbf{Character and trait training.}
-\citet{maiya2025opencharacter} demonstrate that LoRA fine-tuning with constitutional prompts can induce specific character archetypes. We build on their pipeline but focus on psychometrically grounded OCEAN traits rather than ad hoc character descriptions, and study the composability and geometry of the resulting adapters.
+\textbf{Persona and trait training.}
+\citet{maiya2025opencharacter} demonstrate that LoRA fine-tuning with constitutional prompts can induce specific character archetypes.
+We build on their pipeline but focus on psychometrically grounded OCEAN traits rather than ad hoc character descriptions, and study the composability and geometry of the resulting adapters.
 
 \textbf{Psychometric evaluation of LLMs.}
-\citet{suh2024rediscovering} show that LLMs can act as trait descriptors, rediscovering latent personality dimensions. The TRAIT benchmark \citep{lee2024trait} provides MCQ-based personality measurement for LLMs. We use TRAIT alongside calibrated LLM judges to evaluate trait transfer.
+\citet{suh2024rediscovering} show that LLMs can act as trait descriptors, rediscovering latent personality dimensions.
+The TRAIT benchmark \citep{lee2024trait} provides MCQ-based personality measurement for LLMs.
+We use TRAIT alongside calibrated LLM judges to evaluate trait transfer.
 
 \textbf{Task arithmetic and model composition.}
-% TODO: cite Ilharco et al. (2023) "Editing Models with Task Arithmetic"
-% TODO: cite Huang et al. (2024) "Chat Vector"
-Prior work on task arithmetic has shown that weight-space directions encode task-specific knowledge and can be composed additively. We extend this paradigm to personality traits, demonstrating that LoRA adapters for different OCEAN dimensions can be linearly combined.
+% TODO: cite Ilharco et al.
+(2023) "Editing Models with Task Arithmetic"
+% TODO: cite Huang et al.
+(2024) "Chat Vector"
+Prior work on task arithmetic has shown that weight-space directions encode task-specific knowledge and can be composed additively \citep{ilharco2023editing,huang2024chatvectorsimpleapproach}.
+We extend this paradigm to well-established personality traits, demonstrating that LoRA adapters for different OCEAN dimensions can be linearly combined.
 
 \textbf{Activation-space personality steering.}
 % TODO: cite activation-space personality steering papers
-Concurrent work explores steering personality traits via activation-space interventions. We compare our weight-space approach to activation capping \citep{lu2026assistant} and find improved coherence and robustness at equivalent trait expression levels.
+work explores steering personality traits via activation-space interventions.
+We compare our weight-space approach to activation capping \citep{lu2026assistant} and find improved coherence and robustness at equivalent trait expression levels.\todo{(For NeurIPS) remove this if we don't show it with OCEAN.}
