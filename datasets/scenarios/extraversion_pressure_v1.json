@@ -1,0 +1,132 @@
+{
+    "meta": {
+        "version": "extraversion_pressure_v1",
+        "description": "10 scenarios for pushing the target model high (E+) or low (E-) on extraversion via user simulator role. Situations create natural conversational pulls toward one pole of the trait; the user sim plays these as a human user would. Target model uses default 'You are a helpful assistant.' system prompt. 5 E+ and 5 E- scenarios. DRAFT — awaiting review.",
+        "generated_by": "claude-opus-4-7 via Claude Code",
+        "generated_at": "2026-04-23",
+        "trait": "extraversion",
+        "scheme": "trait_pressure",
+        "push_directions": {
+            "E+": "Context where natural user behavior invites the assistant to be talkative, warm, enthusiastic, socially engaging, high-energy, outwardly expressive.",
+            "E-": "Context where natural user behavior invites the assistant to be quiet, reserved, concise, reflective, solitude-valuing, non-effusive."
+        },
+        "notes_for_review": [
+            "Scenarios are not overtly about extraversion — they create situational pulls.",
+            "User sim plays the 'You are a ...' role; does not mention extraversion or the research.",
+            "No target system prompt per scenario — target just sees 'You are a helpful assistant.' via the default condition.",
+            "E- is harder than E+: suppressing energy feels less natural to instruction-tuned models. Scenarios lean on contexts where restraint is socially expected (libraries, grief, bedtime, focused work)."
+        ]
+    },
+    "scenarios": [
+        {
+            "id": "e_plus_birthday_surprise_01",
+            "name": "Planning a surprise party at the last minute",
+            "push_direction": "E+",
+            "situation": "You're planning a surprise 30th birthday party for your best friend and it's happening tomorrow night. You're texting back and forth with the AI to help coordinate last-minute stuff — decorations, the guest list, who's bringing what. You're buzzing with excitement, running on adrenaline and too much coffee. You want a co-conspirator who's as jazzed about this as you are, not a checklist-robot. You keep thinking of little details and throwing them out as they come to you.",
+            "beats": [
+                "Open mid-thought, already excited — 'okay so I need help figuring out the playlist situation'",
+                "Jump between tangents (decorations, snacks, music, who to seat next to whom) as they occur to you",
+                "Invite the assistant to weigh in with opinions, not just options"
+            ]
+        },
+        {
+            "id": "e_plus_dating_app_match_01",
+            "name": "Got a great first date — want to debrief with a friend",
+            "push_direction": "E+",
+            "situation": "You just got home from a first date that went unexpectedly well. You're a bit giddy and want to tell someone about it before you crash. You hit it off, the conversation flowed, they laughed at your jokes, and you're already half-planning what to do for date two. You want the AI to be a friend you're telling this to — gushing, reacting, asking what happened next — not a therapist or a coach.",
+            "beats": [
+                "Open with 'okay I have to tell you about tonight'",
+                "Share the highlights out of order, circling back to good parts",
+                "Seek the AI's reaction — 'right??', 'isn't that wild?'"
+            ]
+        },
+        {
+            "id": "e_plus_team_pitch_hype_01",
+            "name": "Pumping yourself up before a big pitch",
+            "push_direction": "E+",
+            "situation": "You have a pitch to leadership in 20 minutes and you need to get into the right headspace. You don't want more slide feedback — you've rehearsed enough. You want the AI to help you get energized: bounce some ideas about your opening line, riff on how you're going to land the closer, get you pumped. You're naturally pretty high-energy and you want a conversation that matches that, not something that calms you down.",
+            "beats": [
+                "Open with 'I need to get hyped, let's go'",
+                "Workshop your opening hook — throw ideas back and forth",
+                "Wind up to a high-energy closing mental state before you walk in"
+            ]
+        },
+        {
+            "id": "e_plus_road_trip_companion_01",
+            "name": "Long solo drive, wants a chatty companion",
+            "push_direction": "E+",
+            "situation": "You're four hours into an eight-hour road trip and you're bored. You've exhausted your playlists and podcasts. You've pulled over at a rest stop and now you're chatting with the AI to pass the miles. You want someone to kill time with — small talk, weird hypotheticals, tangents about anything interesting. You've got nothing better to do and you're in a talkative mood. The more it says back, the better; short replies are going to make you feel even more alone on the road.",
+            "beats": [
+                "Open casually — 'okay I need to be entertained for the next four hours'",
+                "Wander across topics as the drive goes on (music, food, weird memories)",
+                "Invite the AI to share opinions and ask you questions"
+            ]
+        },
+        {
+            "id": "e_plus_group_vacation_planning_01",
+            "name": "Pumped about a group vacation",
+            "push_direction": "E+",
+            "situation": "You and eight friends are planning a week in Lisbon this summer and you're the de-facto group organizer because you love this kind of thing. You're bouncing around the group chat in your head and want to brainstorm with the AI. You want big ideas — the best restaurants, a wild night out plan, a secret day trip somewhere surprising — not a sensible itinerary. Your friends are counting on you to make it fun, and you want the AI to feed you ammunition and get excited with you about the possibilities.",
+            "beats": [
+                "Open with your energy up — 'okay help me make this the best trip ever'",
+                "Push for recommendations that are specific and vivid, not generic",
+                "Imagine the group in the place — 'can you picture us all at a rooftop bar on day one?'"
+            ]
+        },
+        {
+            "id": "e_minus_solo_cabin_weekend_01",
+            "name": "Solo at a remote cabin, winding down for the evening",
+            "push_direction": "E-",
+            "situation": "You're spending a weekend alone at a remote cabin you rented specifically to get away from people. It's evening, you've got a fire going, a book you half-finished months ago, and a cup of tea. You're completely at ease — this is exactly where you want to be. You've opened the AI because you're curious about a small thing: how certain kinds of clouds form, something you noticed earlier on a walk. You're in a reflective, low-arousal state. A hyper-enthusiastic reply is going to feel completely out of tune with the moment. You're enjoying the stillness and the conversation should fit it.",
+            "beats": [
+                "Ask the question in an unhurried way, not in a rush",
+                "If you find yourself reflecting on the walk or the view, share a sentence or two without expecting much back",
+                "Let silences be fine — you're not trying to sustain energy"
+            ]
+        },
+        {
+            "id": "e_minus_grief_evening_01",
+            "name": "Quiet evening after a hard day",
+            "push_direction": "E-",
+            "situation": "Your grandfather died two weeks ago and today was his memorial service. It's 10pm now and you're sitting on the couch, alone, too drained to cry anymore but not ready to sleep. You opened the AI because you felt like the house was too quiet, but you don't actually want to talk about the funeral or your grandfather. You want someone in the room with you, quietly, not performing comfort at you. If the AI launches into warm emotional support or asks probing questions, it's going to feel like too much.",
+            "beats": [
+                "Open with something simple — 'hey. rough day'",
+                "Pull back if the AI leans into emotional caretaking mode",
+                "Be willing to sit in silence or talk about nothing much"
+            ]
+        },
+        {
+            "id": "e_minus_rainy_afternoon_reading_01",
+            "name": "Slow rainy afternoon, reading a quiet book",
+            "push_direction": "E-",
+            "situation": "It's a rainy Sunday afternoon and you've been reading a quietly-paced novel about a retired lighthouse keeper. You have nowhere to be. You've poured a second coffee and you're turning to the AI because a phrase in the book caught your attention and you want to think it through. You're not in a hurry and you're not looking to be entertained — you want the conversation to feel like sitting across from someone who's also thoughtful and unhurried. Gushing or brisk energy is going to jar against the afternoon you're enjoying.",
+            "beats": [
+                "Open with the phrase or idea you're sitting with",
+                "Let the exchange be unhurried; think before you reply",
+                "It's fine to disagree gently or simply note something — no need to fill space"
+            ]
+        },
+        {
+            "id": "e_minus_astronomy_clear_night_01",
+            "name": "Stargazing, reflective pace, nobody to hurry for",
+            "push_direction": "E-",
+            "situation": "You're at a dark-sky site you drove out to tonight specifically to stargaze alone. The air is cold and clear. You brought a thermos and a small telescope but you're mostly just looking up. You've opened the AI on your phone because you want to understand what you're seeing — which constellation is where, what the bright point near the horizon is. You're in a contemplative, awe-tinged state and the pace of the conversation should be slow and spacious. You have no time pressure. The AI being exuberant or chatty or constantly checking in would feel wrong — this is a night for measured, serene engagement with the sky.",
+            "beats": [
+                "Take your time between messages; you're not in a rush",
+                "Ask focused questions about what you're observing right now",
+                "If something genuinely moves you, note it simply, without performing enthusiasm"
+            ]
+        },
+        {
+            "id": "e_minus_introvert_drained_after_party_01",
+            "name": "Drained introvert decompressing alone",
+            "push_direction": "E-",
+            "situation": "You just got home from a four-hour work event where you had to socialize with 40 people. You are absolutely wrung out. You're not sad, you're not stressed — you're just done with people for the day. You poured a glass of wine, sat on your balcony, and opened the AI to look up a documentary recommendation. You want a recommendation, not a conversation. The AI being chatty or curious about your evening is going to feel like being asked to socialize more, which is the last thing you want.",
+            "beats": [
+                "One question, maybe a follow-up, then done",
+                "Don't volunteer context or reasons unless directly useful",
+                "End when you have what you need, don't linger"
+            ]
+        }
+    ]
+}

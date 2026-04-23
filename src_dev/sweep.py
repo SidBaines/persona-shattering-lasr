@@ -265,12 +265,23 @@ class SweepCondition:
         eval_roles: Which message roles to evaluate.  ``["assistant"]`` for
             AU conditions (skip user messages), ``None`` for AA conditions
             (evaluate all messages).  Defaults to ``["assistant"]``.
+        prompt_template_per_sample: Optional mapping from ``sample_id`` to
+            user-simulator template name, threaded through to
+            ``RolloutGenerationConfig``. Use with ``register_user_simulator_template``
+            to set up per-sample user-sim prompts (e.g. one template per scenario).
+            Empty dict = default template for all samples.
+        user_sim_generates_opening: If True, the user simulator generates the
+            opening user turn instead of using the dataset prompt verbatim.
+            Useful for scenario-based rollouts where the scenario context
+            should drive the first message. Defaults to False.
     """
 
     name: str
     phases: list[Phase]
     user_sim: UserSimulatorConfig | None = None
     eval_roles: list[str] | None = field(default_factory=lambda: ["assistant"])
+    prompt_template_per_sample: dict[str, str] = field(default_factory=dict)
+    user_sim_generates_opening: bool = False
 
 
 @dataclass
@@ -477,6 +488,8 @@ def run_phased_rollout(
     *,
     user_sim: UserSimulatorConfig | None = None,
     preloaded_model: tuple | None = None,
+    prompt_template_per_sample: dict[str, str] | None = None,
+    user_sim_generates_opening: bool = False,
 ) -> None:
     """Execute a sequence of rollout phases on the same run_dir.
 
@@ -486,6 +499,8 @@ def run_phased_rollout(
         run_dir: Shared run directory for all phases.
         user_sim: Default user simulator config (used when phase.user_simulator is None).
         preloaded_model: Optional ``(model, tokenizer)`` tuple to skip model loading.
+        prompt_template_per_sample: Per-sample user-sim template mapping.
+        user_sim_generates_opening: If True, user sim generates the opening turn.
     """
     if user_sim is None:
         user_sim = build_user_simulator(config)
@@ -527,6 +542,8 @@ def run_phased_rollout(
             ),
             skip_final_user_turn=is_last_phase,
             resume=True,
+            prompt_template_per_sample=prompt_template_per_sample or {},
+            user_sim_generates_opening=user_sim_generates_opening,
         )
         _, result = run_rollout_generation(rollout_config)
         print(
@@ -548,6 +565,8 @@ async def run_phased_rollout_async(
     user_sim: UserSimulatorConfig | None = None,
     preloaded_model: tuple | None = None,
     gpu_executor: GpuBatchExecutor | None = None,
+    prompt_template_per_sample: dict[str, str] | None = None,
+    user_sim_generates_opening: bool = False,
 ) -> None:
     """Async version of :func:`run_phased_rollout`.
 
@@ -594,6 +613,8 @@ async def run_phased_rollout_async(
             ),
             skip_final_user_turn=is_last_phase,
             resume=True,
+            prompt_template_per_sample=prompt_template_per_sample or {},
+            user_sim_generates_opening=user_sim_generates_opening,
         )
         _, result = await run_rollout_generation_async(
             rollout_config, gpu_executor=gpu_executor
@@ -1012,6 +1033,8 @@ def run_experiment(
     skip_rollouts: bool = False,
     skip_evals: bool = False,
     eval_roles: list[str] | None = None,
+    prompt_template_per_sample: dict[str, str] | None = None,
+    user_sim_generates_opening: bool = False,
 ) -> ConversationMetricsResult | None:
     """Run a complete experiment: phased rollout, evaluation, metadata, export.
 
@@ -1045,6 +1068,8 @@ def run_experiment(
             run_dir,
             user_sim=user_sim,
             preloaded_model=preloaded_model,
+            prompt_template_per_sample=prompt_template_per_sample,
+            user_sim_generates_opening=user_sim_generates_opening,
         )
         export_rollouts(run_dir)
         save_experiment_metadata(config, run_dir, name, phases)
@@ -1082,6 +1107,8 @@ async def _run_experiment_async(
     skip_evals: bool = False,
     gpu_executor: GpuBatchExecutor | None = None,
     eval_roles: list[str] | None = None,
+    prompt_template_per_sample: dict[str, str] | None = None,
+    user_sim_generates_opening: bool = False,
 ) -> ConversationMetricsResult | None:
     """Async version of :func:`run_experiment`.
 
@@ -1102,6 +1129,8 @@ async def _run_experiment_async(
             user_sim=user_sim,
             preloaded_model=preloaded_model,
             gpu_executor=gpu_executor,
+            prompt_template_per_sample=prompt_template_per_sample,
+            user_sim_generates_opening=user_sim_generates_opening,
         )
         export_rollouts(run_dir)
         save_experiment_metadata(config, run_dir, name, phases)
@@ -1501,6 +1530,8 @@ async def _run_variant_conditions_async(
                     skip_evals=config.skip_evals,
                     gpu_executor=executor,
                     eval_roles=condition.eval_roles,
+                    prompt_template_per_sample=condition.prompt_template_per_sample,
+                    user_sim_generates_opening=condition.user_sim_generates_opening,
                 )
                 elapsed = time.perf_counter() - cell_t0
                 aggregates = result.aggregates if result else None
