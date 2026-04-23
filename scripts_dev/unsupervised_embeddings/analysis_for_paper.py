@@ -81,11 +81,40 @@ Current state of the script (grows iteratively):
                                       report.json}`` plus a per-pair
                                       ``summary.json``.
 
+    [done] run_predictivity_cv      — Bi-cross-validation (Owen & Perry 2009):
+                                      persona × item holdout, predicts
+                                      held-out responses from factor scores,
+                                      compares R² against item_mean /
+                                      persona_shuffle / k−1 baselines.
+    [done] paper figures             — Scree (Llama), within-model α + |φ|
+                                      grouped bars, cross-model Tucker's |φ|
+                                      heatmap written to paper/figures/
+                                      unsupervised/.
+
     [todo] varimax + logit-encoding robustness passes for the appendix.
-    [todo] paper figures (scree, loading heatmaps, etc.).
+
+Paper figures this script emits (relative to ``paper/figures/``):
+
+    - unsupervised/fig_4_2_1_scree_llama.pdf
+      Section 4.2 Horn's parallel-analysis scree on the Llama fit.
+    - unsupervised/fig_4_2_2_within_model_validation.pdf
+      Section 4.2 grouped bars for Cronbach's α + split-half median |φ|
+      per factor, both models.
+    - unsupervised/fig_4_2_3_cross_model_phi.pdf
+      Section 4.2 Llama↔Qwen Tucker's |φ| heatmap (combined shared items).
+
+See ``paper/CLAUDE.md`` → "Code ↔ Paper Pointers" for the convention.
 """
 
 from __future__ import annotations
+
+# Module-level list mirroring the docstring above — keeps the list available
+# without re-parsing the docstring. Paths relative to ``paper/figures/``.
+PAPER_FIGURES: list[str] = [
+    "unsupervised/fig_4_2_1_scree_llama.pdf",
+    "unsupervised/fig_4_2_2_within_model_validation.pdf",
+    "unsupervised/fig_4_2_3_cross_model_phi.pdf",
+]
 
 # ── Seeds (set before any stochastic imports) ────────────────────────────────
 import random
@@ -120,6 +149,7 @@ load_dotenv()
 from src_dev.factor_analysis import (
     load_factor_analysis,
     parallel_analysis,
+    persona_item_cv,
     plot_n_factors_comparison,
     run_factor_analysis,
     save_factor_analysis,
@@ -325,6 +355,34 @@ CRONBACH_LOADING_THRESHOLD: float = 0.4
 # violin plots without the cost of bootstrap's resample-refit loops.
 SPLIT_HALF_N_ITERS: int = 100
 SPLIT_HALF_PASS_THRESHOLD_PHI: float = 0.85  # Lorenzo-Seva "fair" threshold
+
+
+# ── Predictivity cross-validation (bi-cross-validation) ─────────────────────
+# Double-loop persona × item holdout — the well-founded generalisation test
+# for factor models (Owen & Perry 2009; Bro et al. 2008; Wold 1978).
+#
+# Protocol (one outer split):
+#   1. Persona A = random 80%; persona B = remaining 20%.
+#   2. Fit FA on the full column set of persona A → loadings Λ_A.
+#   3. For each B-persona, randomly observe m_observed items; compute
+#      Thomson factor scores using Λ_A restricted to those m items.
+#   4. Predict the remaining ("held-out") items from F̂ · Λ_A.T.
+#   5. Collect per-item R² against three null baselines:
+#      item_mean / persona_shuffle / k_minus_1.
+#
+# Per outer split we also compute Tucker's |φ| between Λ_A and the full-
+# data Λ (restricted to shared items) — a direct "are the CV-fold factors
+# the same factors we labelled?" check.
+#
+# Defaults: 20 outer persona splits × 5 item resamples = 100 estimates,
+# ~enough for stable mean R² with 95% bootstrap CI.
+PREDICTIVITY_PERSONA_SPLIT: float = 0.8     # fraction in subset A (train)
+PREDICTIVITY_ITEM_OBSERVED_FRAC: float = 0.8  # fraction of items observed
+                                              # for B personas; drives m_observed
+PREDICTIVITY_N_OUTER_SPLITS: int = 20
+PREDICTIVITY_N_TRIALS: int = 5
+PREDICTIVITY_BOOTSTRAP_CI: float = 95.0
+PREDICTIVITY_SUBSET_STRATEGY: str = "random"  # "random" | "by_factor_balanced"
 
 
 # ── Cross-model congruence ──────────────────────────────────────────────────
@@ -1082,6 +1140,71 @@ def run_within_model_validation(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# PREDICTIVITY CROSS-VALIDATION (BI-CV)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def run_predictivity_cv(data: LoadedData, fit: FaFit) -> dict:
+    """Bi-cross-validation: predict held-out persona × item responses.
+
+    Thin wrapper around
+    :func:`src_dev.factor_analysis.cross_validation.persona_item_cv`, which
+    implements the Owen-Perry / Bro-et-al bi-CV scheme with three principled
+    nulls (``item_mean`` / ``persona_shuffle`` / ``k_minus_1``). The main
+    statistic is per-item R² pooled over the outer × trial loop; the
+    shuffle baseline is the null for "is this genuinely persona-predictive".
+
+    Output: ``{output_dir}/validation/predictivity_cv.{json,png}`` (persona_
+    item_cv writes these); main() also prints a compact summary table.
+    """
+    out_dir = data.output_dir / "validation"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log.info(
+        "[%s] predictivity CV: %d outer × %d trials, A=%.0f%%, m_observed≈%.0f%% items",
+        data.model.slug,
+        PREDICTIVITY_N_OUTER_SPLITS,
+        PREDICTIVITY_N_TRIALS,
+        100 * PREDICTIVITY_PERSONA_SPLIT,
+        100 * PREDICTIVITY_ITEM_OBSERVED_FRAC,
+    )
+    m_observed = max(
+        3 * fit.k,
+        int(round(PREDICTIVITY_ITEM_OBSERVED_FRAC * data.matrix.shape[1])),
+    )
+    result = persona_item_cv(
+        data.matrix,
+        data.metadata,
+        n_factors=fit.k,
+        out_dir=out_dir,
+        persona_split=PREDICTIVITY_PERSONA_SPLIT,
+        stratify=None,                          # B preset has 1 rollout / persona
+        m_observed=m_observed,
+        subset_strategy=PREDICTIVITY_SUBSET_STRATEGY,
+        n_trials=PREDICTIVITY_N_TRIALS,
+        n_outer_splits=PREDICTIVITY_N_OUTER_SPLITS,
+        bootstrap_ci=PREDICTIVITY_BOOTSTRAP_CI,
+        fa_method=fit.method,
+        rotation=fit.rotation,
+        seed=SEED,
+        verbose=False,
+    )
+
+    # Fold-vs-full Tucker's is intentionally omitted here — the existing
+    # split_half_congruence step (50/50 splits × 100 iters) already
+    # establishes that the factors are stable under resampling, and an
+    # 80/20 variant would not add a materially different claim.
+    log.info(
+        "[%s] predictivity CV: main R²=%.3f  shuffle=%.3f  k-1=%.3f  item-mean=%.3f",
+        data.model.slug,
+        result.get("mean_r2_main", float("nan")),
+        result.get("mean_r2_persona_shuffle", float("nan")),
+        result.get("mean_r2_k_minus_1", float("nan")),
+        result.get("mean_r2_item_mean", float("nan")),
+    )
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # CROSS-MODEL CONGRUENCE
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1505,6 +1628,139 @@ def export_html_browser(data: LoadedData, fit: FaFit) -> Path | None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# PAPER FIGURES
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _plot_paper_within_model_validation(
+    validation_results: dict[str, dict],
+) -> Path | None:
+    """Grouped-bars paper figure: Cronbach's α + split-half median |φ| per factor.
+
+    Two panels side-by-side (α on the left, |φ| on the right) with both
+    models' factors grouped by index. Axis labels come from the newest
+    persisted labels file when available. Reference lines at α=0.70/0.80
+    and |φ|=0.85. Writes to ``PAPER_FIGURES_DIR / unsupervised / fig_4_2_2_
+    within_model_validation.pdf``.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    # Collect per-model series. Pad the shorter to the longer so the x-axis
+    # lines up when models have different k.
+    rows = []
+    for slug, res in validation_results.items():
+        alpha_rows = res["cronbach_alpha"]["per_factor"]
+        sh = res["split_half_congruence"]
+        medians = sh.get("median_phi_per_factor", [])
+        labels = _load_labels_for_slug(slug, len(alpha_rows))
+        for i, r in enumerate(alpha_rows):
+            rows.append({
+                "slug": slug,
+                "factor_index": i,
+                "axis": labels.get(i, f"F{i}"),
+                "alpha": r["alpha"],
+                "phi_median": medians[i] if i < len(medians) else float("nan"),
+            })
+
+    slugs = list(validation_results.keys())
+    max_k = max(r["factor_index"] for r in rows) + 1
+    colours = {slugs[0]: "#2563eb", slugs[1]: "#ea580c"} if len(slugs) >= 2 else {
+        slugs[0]: "#2563eb",
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.6), constrained_layout=True)
+    for panel_idx, (ax, field, ref_lines, title) in enumerate((
+        (axes[0], "alpha",
+         [(0.70, "acceptable", "#f59e0b"), (0.80, "good", "#16a34a")],
+         "Cronbach's α per factor (|loading| ≥ 0.4, sign-oriented)"),
+        (axes[1], "phi_median",
+         [(0.85, "fair (Lorenzo-Seva)", "#16a34a")],
+         "Split-half median |φ| per factor (100 iters)"),
+    )):
+        width = 0.36
+        x = np.arange(max_k)
+        for i, slug in enumerate(slugs):
+            offset = (i - (len(slugs) - 1) / 2) * width
+            heights = [float("nan")] * max_k
+            axis_labels = [""] * max_k
+            for r in rows:
+                if r["slug"] == slug:
+                    heights[r["factor_index"]] = r[field]
+                    axis_labels[r["factor_index"]] = r["axis"]
+            bars = ax.bar(
+                x + offset, heights, width,
+                color=colours[slug], alpha=0.88, label=slug,
+                edgecolor="#111", linewidth=0.3,
+            )
+            for rect, h, lab in zip(bars, heights, axis_labels):
+                if np.isnan(h):
+                    continue
+                ax.text(
+                    rect.get_x() + rect.get_width() / 2,
+                    h + 0.012,
+                    f"{h:.2f}",
+                    ha="center", va="bottom", fontsize=7.5, color="#111",
+                )
+                ax.text(
+                    rect.get_x() + rect.get_width() / 2,
+                    -0.03,
+                    lab,
+                    ha="center", va="top", fontsize=6.8, rotation=40,
+                    color="#374151",
+                )
+        for thresh, lbl, col in ref_lines:
+            ax.axhline(thresh, linestyle="--", color=col, linewidth=0.9, alpha=0.8,
+                       label=f"{lbl} ({thresh:.2f})")
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"F{k}" for k in range(max_k)])
+        ax.set_ylim(0, 1.05)
+        ax.set_ylabel(r"$\alpha$" if field == "alpha" else r"median $|\phi|$")
+        ax.set_title(title, fontsize=10)
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(fontsize=8, loc="lower right")
+        # Leave headroom at the bottom so the rotated axis labels don't clip.
+        ax.set_ylim(bottom=-0.18)
+
+    save_path = PAPER_FIGURES_DIR / "unsupervised" / "fig_4_2_2_within_model_validation.pdf"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+    log.info("wrote %s", save_path)
+    return save_path
+
+
+def _copy_paper_cross_model_heatmap(
+    cross_reports: dict[str, dict],
+) -> Path | None:
+    """Copy the combined-subset Tucker's |φ| heatmap to paper/figures/.
+
+    We keep the PDF emitted by _plot_phi_heatmap and just move/copy it to
+    the canonical paper path — no need to re-render.
+    """
+    import shutil
+    # Pick the first pair's "combined" heatmap — there's only one pair at
+    # present (Llama vs Qwen) but this stays robust if we ever add more.
+    for pair_label, bundle in cross_reports.items():
+        subsets = bundle.get("subsets", {})
+        combined = subsets.get("combined")
+        if combined is None:
+            continue
+        src = (OUTPUT_ROOT / "cross_model" / pair_label / "combined"
+               / "phi_heatmap.pdf")
+        if not src.exists():
+            continue
+        dst = (PAPER_FIGURES_DIR / "unsupervised"
+               / "fig_4_2_3_cross_model_phi.pdf")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        log.info("wrote %s", dst)
+        return dst
+    return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1644,8 +1900,20 @@ def main() -> None:
             loaded[slug], fit,
         )
 
+    # ── Step: predictivity CV (bi-cross-validation) ─────────────────────
+    predictivity_results: dict[str, dict] = {}
+    for slug, fit in fits.items():
+        log.info("═══ run_predictivity_cv [%s] ═══", slug)
+        predictivity_results[slug] = run_predictivity_cv(loaded[slug], fit)
+
     # ── Step: cross-model Tucker's congruence (Llama ↔ Qwen) ───────────
     cross_reports = run_cross_model_congruence(loaded, fits)
+
+    # ── Step: paper figures (within-model α + |φ|, cross-model heatmap)─
+    if validation_results:
+        _plot_paper_within_model_validation(validation_results)
+    if cross_reports:
+        _copy_paper_cross_model_heatmap(cross_reports)
 
     if validation_results:
         print()
@@ -1670,6 +1938,26 @@ def main() -> None:
                     f"{row['alpha']:>6.3f}  {row['alpha_class']:<12}  "
                     f"{med:>10.3f}  {'yes' if passed else 'no':>4}"
                 )
+
+    if predictivity_results:
+        print()
+        print("=" * 78)
+        print("Predictivity cross-validation (bi-CV)")
+        print("=" * 78)
+        print(f"  {'model':<14}  {'main R²':>9}  {'shuffle':>8}  "
+              f"{'k−1':>7}  {'item-mean':>10}  {'main CI':>18}  pass")
+        for slug, res in predictivity_results.items():
+            ci = res.get("mean_r2_main_ci")
+            ci_str = f"[{ci[0]:.3f}, {ci[1]:.3f}]" if ci else "—"
+            print(
+                f"  {slug:<14}  "
+                f"{res.get('mean_r2_main', float('nan')):>9.3f}  "
+                f"{res.get('mean_r2_persona_shuffle', float('nan')):>8.3f}  "
+                f"{res.get('mean_r2_k_minus_1', float('nan')):>7.3f}  "
+                f"{res.get('mean_r2_item_mean', float('nan')):>10.3f}  "
+                f"{ci_str:>18}  "
+                f"{'yes' if res.get('pass') else 'no'}"
+            )
 
     if cross_reports:
         print()
