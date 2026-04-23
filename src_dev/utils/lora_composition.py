@@ -68,57 +68,6 @@ def split_adapter_reference(path: str) -> tuple[str, str | None]:
     return path, None
 
 
-def resolve_adapter_to_local_dir(
-    adapter_path: str,
-    *,
-    resolver: Callable[[str], str] | None = None,
-) -> str:
-    """Resolve an adapter ref to a local directory containing ``adapter_config.json``.
-
-    Accepts ``repo_id::subfolder`` for HF repos (tries ``repo_type="dataset"``
-    first, then ``"model"``) or a plain local path (optionally with ``::subfolder``).
-    For HF refs, the subfolder is fetched via ``snapshot_download`` with
-    ``allow_patterns`` scoped to that subfolder. Returns a local path that can
-    be passed directly to ``PeftModel.from_pretrained`` / ``load_adapter``
-    without needing a ``subfolder=`` kwarg.
-    """
-    ref, subfolder = split_adapter_reference(adapter_path)
-    # Pass the full ref (including any local://... / hf://... prefix) to the
-    # resolver so it can disambiguate. Stripping beforehand would hand a bare
-    # /abs/path to resolve_model_reference, which then cannot tell a local
-    # path apart from an unknown HF repo and raises "Ambiguous ... reference".
-    if resolver is not None:
-        ref = resolver(ref)
-    elif ref.startswith("local://"):
-        ref = ref[len("local://") :]
-    elif ref.startswith("hf://"):
-        ref = ref[len("hf://") :]
-
-    ref_path = Path(ref)
-    if ref_path.exists():
-        return str(ref_path / subfolder) if subfolder else str(ref_path)
-
-    from huggingface_hub import snapshot_download
-    from huggingface_hub.errors import RepositoryNotFoundError
-
-    allow_patterns = [f"{subfolder}/**"] if subfolder else None
-    last_err: Exception | None = None
-    for repo_type in ("dataset", "model"):
-        try:
-            local_dir = snapshot_download(
-                repo_id=ref,
-                repo_type=repo_type,
-                allow_patterns=allow_patterns,
-            )
-            return str(Path(local_dir) / subfolder) if subfolder else local_dir
-        except RepositoryNotFoundError as exc:
-            last_err = exc
-            continue
-    raise RuntimeError(
-        f"Could not find HF repo {ref!r} as dataset or model"
-    ) from last_err
-
-
 def resolve_torch_dtype(name: str) -> torch.dtype:
     """Resolve torch dtype from a string name."""
     dtype = getattr(torch, name, None)
@@ -154,6 +103,17 @@ def normalize_weighted_adapters(adapters: Sequence[object]) -> list[WeightedAdap
     return normalized
 
 
+def _resolve_adapter_reference(
+    path: str,
+    *,
+    resolver: Callable[[str], str] | None,
+) -> tuple[str, str | None]:
+    ref, subfolder = split_adapter_reference(path)
+    if resolver is not None:
+        ref = resolver(ref)
+    return ref, subfolder
+
+
 def _load_first_adapter(
     model,
     *,
@@ -161,25 +121,34 @@ def _load_first_adapter(
     adapter_name: str,
     resolver: Callable[[str], str] | None,
 ) -> tuple[PeftModel, str]:
-    local_dir = resolve_adapter_to_local_dir(adapter_path, resolver=resolver)
+    ref, subfolder = _resolve_adapter_reference(adapter_path, resolver=resolver)
+
+    if subfolder:
+        peft_model = PeftModel.from_pretrained(
+            model,
+            ref,
+            adapter_name=adapter_name,
+            subfolder=subfolder,
+        )
+        return peft_model, ref
 
     try:
         peft_model = PeftModel.from_pretrained(
             model,
-            local_dir,
+            ref,
             adapter_name=adapter_name,
         )
-        return peft_model, local_dir
+        return peft_model, ref
     except ValueError as exc:
         if "adapter_config.json" not in str(exc):
             raise
         peft_model = PeftModel.from_pretrained(
             model,
-            local_dir,
+            ref,
             adapter_name=adapter_name,
             subfolder="adapter",
         )
-        return peft_model, local_dir
+        return peft_model, ref
 
 
 def _load_extra_adapter(
@@ -189,20 +158,28 @@ def _load_extra_adapter(
     adapter_name: str,
     resolver: Callable[[str], str] | None,
 ) -> str:
-    local_dir = resolve_adapter_to_local_dir(adapter_path, resolver=resolver)
+    ref, subfolder = _resolve_adapter_reference(adapter_path, resolver=resolver)
+
+    if subfolder:
+        model.load_adapter(
+            ref,
+            adapter_name=adapter_name,
+            subfolder=subfolder,
+        )
+        return ref
 
     try:
-        model.load_adapter(local_dir, adapter_name=adapter_name)
-        return local_dir
+        model.load_adapter(ref, adapter_name=adapter_name)
+        return ref
     except ValueError as exc:
         if "adapter_config.json" not in str(exc):
             raise
         model.load_adapter(
-            local_dir,
+            ref,
             adapter_name=adapter_name,
             subfolder="adapter",
         )
-        return local_dir
+        return ref
 
 
 def load_and_scale_adapters(

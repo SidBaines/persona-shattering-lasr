@@ -83,8 +83,6 @@ def make_capping_hook(
 def compute_thresholds_at_fraction(
     per_layer_range: dict[int, tuple[float, float]],
     fraction: float,
-    *,
-    ceiling_from_hi: bool = False,
 ) -> dict[int, float]:
     """Linearly interpolate (or extrapolate) between min and max projection.
 
@@ -102,21 +100,10 @@ def compute_thresholds_at_fraction(
         fraction: Interpolation point. Values in [0, 1] interpolate between
             base and LoRA ends. Negative values extrapolate below baseline.
             Values > 1 extrapolate beyond the LoRA end.
-        ceiling_from_hi: When True and *fraction* < 0, compute the ceiling
-            threshold as ``hi + fraction * (hi - lo)`` instead of the default
-            ``lo + fraction * (hi - lo)``.  This makes ceiling mode mirror
-            floor mode: fraction=0 gives no effect (threshold at the
-            distribution edge), and increasingly negative fractions ramp
-            toward full capping.
 
     Returns:
         {layer_idx: threshold} for each layer in per_layer_range.
     """
-    if ceiling_from_hi and fraction < 0:
-        return {
-            layer: hi + fraction * (hi - lo)
-            for layer, (lo, hi) in per_layer_range.items()
-        }
     return {
         layer: lo + fraction * (hi - lo) for layer, (lo, hi) in per_layer_range.items()
     }
@@ -192,7 +179,6 @@ class ActivationCappedModel(nn.Module):
         fraction: float,
         capping_layers: list[int],
         mode: Literal["floor", "ceiling"] = "floor",
-        ceiling_from_hi: bool = True,
     ) -> "ActivationCappedModel":
         """Construct from saved axis and per-layer range files.
 
@@ -203,7 +189,6 @@ class ActivationCappedModel(nn.Module):
             fraction: Sweep fraction (0.0 = global min, 1.0 = global max).
             capping_layers: Which layers to apply capping to.
             mode: "floor" or "ceiling".
-            ceiling_from_hi: See compute_thresholds_at_fraction.
 
         Returns:
             An ActivationCappedModel instance.
@@ -218,8 +203,6 @@ class ActivationCappedModel(nn.Module):
         filtered_range = {
             l: per_layer_range[l] for l in capping_layers if l in per_layer_range
         }
-        layer_thresholds = compute_thresholds_at_fraction(
-            filtered_range, fraction, ceiling_from_hi=ceiling_from_hi,
-        )
+        layer_thresholds = compute_thresholds_at_fraction(filtered_range, fraction)
 
         return cls(model, axis, layer_thresholds, mode=mode)

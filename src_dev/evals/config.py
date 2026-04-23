@@ -67,34 +67,6 @@ class ScaleSweep(BaseModel):
         ]
 
 
-class ActivationCapSweep(BaseModel):
-    """Activation capping sweep: fraction-based sweep along a pre-computed axis.
-
-    Each fraction interpolates (or extrapolates) between the base model's
-    typical projection onto the axis (fraction=0.0) and the LoRA model's
-    typical projection (fraction=1.0).
-
-    Positive fractions use floor capping (push activations toward the trait
-    direction). Negative fractions use ceiling capping (suppress the trait).
-    The base model (fraction=0.0) is always included automatically.
-
-    Args:
-        fractions: Explicit list of fraction values to sweep (0.0 excluded;
-            the base model is always added as the "base" spec).
-        axis_path: Path to a .pt file containing ``{"axis": Tensor, "metadata": {...}}``.
-        per_layer_range_path: Path to a .pt file containing
-            ``{"per_layer_range": {layer_idx: (min_proj, max_proj)}}``.
-        capping_layers: Which layers to apply capping to.  When None, reads
-            ``recommended_capping_layers`` from the axis metadata.
-    """
-
-    fractions: list[float]
-    axis_path: str
-    per_layer_range_path: str
-    capping_layers: list[int] | None = None
-    ceiling_from_hi: bool = True
-
-
 class ModelSpec(BaseModel):
     """Model configuration for suite runs."""
 
@@ -169,14 +141,8 @@ class SuiteConfig(BaseModel):
     ----------
     When *sweep* and *adapter* are both set, the suite automatically expands
     into one ModelSpec per scale point (plus a base model at scale=0).
-
-    When *activation_cap* is set (with *base_model*), the suite expands into
-    one ModelSpec per fraction (plus a base model at fraction=0).  The
-    ``scale`` field of each ModelSpec stores the fraction value for downstream
-    analysis compatibility.
-
-    The explicit *models* list is used instead when neither *sweep* nor
-    *activation_cap* is set, preserving full manual control.
+    The explicit *models* list is used instead when *sweep* is not set,
+    preserving full manual control for non-sweep experiments.
 
     Each eval can override the suite-level sweep via
     ``InspectBenchmarkSpec.sweep`` (e.g. for a coarser MMLU scale grid).
@@ -186,13 +152,8 @@ class SuiteConfig(BaseModel):
     base_model: str | None = None
     adapter: str | None = None
     sweep: ScaleSweep | None = None
-    # Optional adapters merged into base weights before the sweep adapter is
-    # loaded.  Useful for sweeping a trait LoRA on top of a fixed persona LoRA.
-    fixed_adapters: list[AdapterConfig] = Field(default_factory=list)
-    # --- Activation capping sweep (mutually exclusive with sweep / models) ---
-    activation_cap: ActivationCapSweep | None = None
 
-    # --- Explicit model list (used when sweep / activation_cap is not set) ---
+    # --- Explicit model list (used when sweep is not set) ---
     models: list[ModelSpec] = Field(default_factory=list)
 
     evals: list[EvalSpec]
@@ -219,38 +180,16 @@ class SuiteConfig(BaseModel):
     auto_analyze: bool = False
     analyze_kwargs: dict[str, Any] = Field(default_factory=dict)
 
-    # --- Performance toggles ---
-    # Cache Inspect tasks across scale points so dataset loading / choice
-    # shuffling happens once instead of once per scale point.
-    cache_tasks: bool = True
-    # Cache per-sample tokenisation across scale points.  The prompts are
-    # identical for every scale point in a sweep, so the token IDs only need
-    # to be computed once.
-    cache_tokenization: bool = True
-    # Apply torch.compile to the model before the sweep.  Can give 10-30 %
-    # faster forward passes depending on the model architecture.  Off by
-    # default because it adds a one-time compilation latency and may not be
-    # compatible with all model / PEFT combinations.
-    torch_compile: bool = False
-
     @model_validator(mode="after")
     def _validate_model_source(self) -> "SuiteConfig":
         has_sweep = self.sweep is not None
-        has_cap = self.activation_cap is not None
         has_models = bool(self.models)
-        n_sources = sum([has_sweep, has_cap, has_models])
-        if n_sources > 1:
-            raise ValueError(
-                "Provide exactly one of: 'sweep' + 'base_model', "
-                "'activation_cap' + 'base_model', or explicit 'models'."
-            )
-        if n_sources == 0:
-            raise ValueError(
-                "Provide one of: 'sweep' + 'base_model', "
-                "'activation_cap' + 'base_model', or an explicit 'models' list."
-            )
-        if (has_sweep or has_cap) and not self.base_model:
-            raise ValueError("'base_model' is required when 'sweep' or 'activation_cap' is set.")
+        if has_sweep and has_models:
+            raise ValueError("Provide either 'sweep' + 'base_model' or 'models', not both.")
+        if not has_sweep and not has_models:
+            raise ValueError("Provide either 'sweep' + 'base_model' or an explicit 'models' list.")
+        if has_sweep and not self.base_model:
+            raise ValueError("'base_model' is required when 'sweep' is set.")
         return self
 
     @field_validator("evals")
@@ -267,26 +206,7 @@ class SuiteConfig(BaseModel):
         When using sweep mode, builds one ModelSpec per scale point plus
         a base model (scale=0).  Each eval's per-eval sweep override is
         taken into account to ensure all required scale points are present.
-        When using activation_cap mode, builds one ModelSpec per fraction plus
-        a base model (fraction=0, stored as scale=None).
         """
-        if self.activation_cap is not None:
-            assert self.base_model is not None  # validated above
-            fracs = sorted(f for f in self.activation_cap.fractions if f != 0.0)
-            specs: list[ModelSpec] = [
-                ModelSpec(name="base", base_model=self.base_model, scale=None)
-            ]
-            for frac in fracs:
-                frac_tag = f"{frac:+.2f}".replace(".", "p")  # e.g. +1.00 → +1p00
-                specs.append(
-                    ModelSpec(
-                        name=f"cap_{frac_tag}",
-                        base_model=self.base_model,
-                        scale=frac,
-                    )
-                )
-            return specs
-
         if not self.sweep:
             return self.models
 

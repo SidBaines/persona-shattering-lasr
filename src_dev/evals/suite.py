@@ -33,10 +33,7 @@ from src_dev.evals.config import (
     SuiteResult,
 )
 from src_dev.evals.model_resolution import resolve_model_reference
-from src_dev.evals.utils.preloaded_hf_provider import (
-    clear_tokenization_cache,
-    register_preloaded_hf_provider,
-)
+from src_dev.evals.utils.preloaded_hf_provider import register_preloaded_hf_provider
 from src_dev.evals.utils.vllm_preloaded_provider import register_vllm_preloaded_provider
 from src_dev.utils.lora_composition import load_and_scale_adapters
 
@@ -143,8 +140,6 @@ class _PreparedModel:
     peft_model: PeftModel | None
     # Human-readable name for logging.
     model_name: str
-    # Non-None only when ActivationCappedModel was applied; hooks must be removed after the eval.
-    cap_model: Any = None
 
 
 def _resolve_dtype(spec: ModelSpec) -> torch.dtype:
@@ -231,22 +226,14 @@ def _flash_attn_kwargs() -> dict[str, str]:
 
 def _load_local_model_for_sweep(
     base_model_ref: str,
-    adapter_local_dir: str,
+    adapter_ref: str,
     dtype: torch.dtype,
-    fixed_adapters: list | None = None,
+    subfolder: str | None = None,
 ) -> tuple[PeftModel, Any]:
     """Load base model + single adapter once for a scale sweep.
 
     The adapter is always loaded under ``_SWEEP_ADAPTER_NAME`` so that
     ``_prepare_sweep_model`` can reference the same name without coupling.
-
-    Args:
-        adapter_local_dir: Local directory containing ``adapter_config.json``.
-            The caller is responsible for snapshot-downloading HF refs via
-            ``resolve_adapter_to_local_dir`` before passing them here.
-        fixed_adapters: Optional list of AdapterConfig to merge into the
-            base weights before loading the sweep adapter.  This allows
-            sweeping one LoRA on top of a fixed persona LoRA.
     """
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_ref,
@@ -254,116 +241,16 @@ def _load_local_model_for_sweep(
         device_map="auto",
         **_flash_attn_kwargs(),
     )
-
-    # Merge fixed adapters into base weights so they are baked in
-    # before the sweep adapter is loaded on top.
-    if fixed_adapters:
-        from src_dev.utils.lora_composition import (
-            load_and_scale_adapters,
-            normalize_weighted_adapters,
-        )
-
-        normalized = normalize_weighted_adapters(fixed_adapters)
-        peft_model, _, _ = load_and_scale_adapters(
-            base_model,
-            adapters=normalized,
-            adapter_name_prefix="fixed",
-        )
-        base_model = peft_model.merge_and_unload()
-        print(
-            f"  merged {len(normalized)} fixed adapter(s) into base weights",
-            flush=True,
-        )
-
-    peft_model = PeftModel.from_pretrained(
-        base_model, adapter_local_dir, adapter_name=_SWEEP_ADAPTER_NAME
-    )
-    tokenizer = AutoTokenizer.from_pretrained(adapter_local_dir)
+    peft_kwargs: dict[str, Any] = {"adapter_name": _SWEEP_ADAPTER_NAME}
+    if subfolder:
+        peft_kwargs["subfolder"] = subfolder
+    peft_model = PeftModel.from_pretrained(base_model, adapter_ref, **peft_kwargs)
+    # Tokenizer lives in the adapter subfolder if one is specified, otherwise the adapter root.
+    tokenizer_kwargs: dict[str, Any] = {}
+    if subfolder:
+        tokenizer_kwargs["subfolder"] = subfolder
+    tokenizer = AutoTokenizer.from_pretrained(adapter_ref, **tokenizer_kwargs)
     return peft_model, tokenizer
-
-
-def _load_base_model_for_activation_cap(
-    base_model_ref: str,
-    dtype: torch.dtype,
-) -> tuple[Any, Any]:
-    """Load a bare base model (no adapter) for an activation capping sweep.
-
-    The model is loaded once and reused across all fraction points; capping
-    hooks are registered/removed per fraction via ``_prepare_activation_cap_model``.
-    """
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_model_ref,
-        torch_dtype=dtype,
-        device_map="auto",
-        **_flash_attn_kwargs(),
-    )
-    tokenizer = AutoTokenizer.from_pretrained(base_model_ref)
-    return base_model, tokenizer
-
-
-def _prepare_activation_cap_model(
-    spec: ModelSpec,
-    base_model: Any,
-    tokenizer: Any,
-    axis: Any,
-    per_layer_range: dict,
-    capping_layers: list[int],
-    batch_size: int | None,
-    *,
-    ceiling_from_hi: bool = False,
-) -> _PreparedModel:
-    """Wrap the base model with ActivationCappedModel for this fraction point.
-
-    The fraction is stored in ``spec.scale``.  Positive fractions use floor
-    mode (push activations toward the trait direction); negative fractions use
-    ceiling mode (suppress the trait).  The base model spec (scale=None) is
-    run uncapped.
-    """
-    from src_dev.activation_capping.model import (
-        ActivationCappedModel,
-        compute_thresholds_at_fraction,
-    )
-
-    register_preloaded_hf_provider()
-
-    fraction = spec.scale  # None for the base model spec
-
-    if fraction is None:
-        # Base model: run without any capping hooks.
-        inspect_model = get_model(
-            f"hf_preloaded/{spec.name}",
-            hf_model=base_model,
-            hf_tokenizer=tokenizer,
-            batch_size=batch_size or 32,
-        )
-        return _PreparedModel(
-            inspect_model=inspect_model,
-            scaler=None,
-            peft_model=None,
-            model_name=spec.base_model,
-            cap_model=None,
-        )
-
-    mode = "floor" if fraction >= 0 else "ceiling"
-    filtered_range = {layer: per_layer_range[layer] for layer in capping_layers if layer in per_layer_range}
-    layer_thresholds = compute_thresholds_at_fraction(
-        filtered_range, fraction, ceiling_from_hi=ceiling_from_hi,
-    )
-    cap_model = ActivationCappedModel(base_model, axis, layer_thresholds, mode=mode)
-
-    inspect_model = get_model(
-        f"hf_preloaded/{spec.name}",
-        hf_model=cap_model,
-        hf_tokenizer=tokenizer,
-        batch_size=batch_size or 32,
-    )
-    return _PreparedModel(
-        inspect_model=inspect_model,
-        scaler=None,
-        peft_model=None,
-        model_name=spec.base_model,
-        cap_model=cap_model,
-    )
 
 
 def _prepare_sweep_model(
@@ -371,7 +258,6 @@ def _prepare_sweep_model(
     peft_model: PeftModel,
     tokenizer: Any,
     batch_size: int | None,
-    cache_tokenization: bool = True,
 ) -> _PreparedModel:
     """Wrap a sweep model spec: apply LoRaScaling for this scale point.
 
@@ -393,7 +279,6 @@ def _prepare_sweep_model(
         hf_model=peft_model,
         hf_tokenizer=tokenizer,
         batch_size=batch_size or 32,
-        cache_tokenization=cache_tokenization,
     )
     return _PreparedModel(
         inspect_model=inspect_model,
@@ -515,67 +400,6 @@ def _make_output_root(config: SuiteConfig, mode: str) -> Path:
     return output_root
 
 
-def _maybe_rehydrate_from_hf(
-    config: SuiteConfig,
-    output_root: Path,
-) -> bool:
-    """Download prior results from HF if they exist remotely but not locally.
-
-    When ``skip_completed`` is enabled and an ``upload_repo_id`` /
-    ``upload_path_in_repo`` are configured, this checks whether the local
-    ``output_root`` already contains run data.  If not, it attempts to
-    download previously-uploaded results from HuggingFace so that the suite
-    can skip those runs instead of regenerating them.
-
-    Returns:
-        True if data was downloaded, False otherwise.
-    """
-    if not (
-        config.skip_completed
-        and config.upload_repo_id
-        and config.upload_path_in_repo
-    ):
-        return False
-
-    # Check if local data already exists
-    existing = list(output_root.glob("**/run_info.json"))
-    if existing:
-        return False  # already have local data
-
-    # Template case ({eval_name}) not yet supported — skip.
-    if "{eval_name}" in config.upload_path_in_repo:
-        return False
-
-    hf_path = f"{config.upload_path_in_repo}/{output_root.name}"
-
-    try:
-        from src_dev.utils.hf_hub import (
-            check_exists_in_dataset_repo,
-            download_path_to_dir,
-        )
-
-        if not check_exists_in_dataset_repo(
-            repo_id=config.upload_repo_id, path_in_repo=hf_path
-        ):
-            return False
-
-        print(
-            f"  Downloading prior results from {config.upload_repo_id}/{hf_path} ...",
-            flush=True,
-        )
-        download_path_to_dir(
-            repo_id=config.upload_repo_id,
-            path_in_repo=hf_path,
-            target_dir=output_root,
-        )
-        n_runs = len(list(output_root.glob("**/run_info.json")))
-        print(f"  ✓ Rehydrated {n_runs} run(s) from HuggingFace", flush=True)
-        return True
-    except Exception as exc:
-        print(f"  WARNING: HF rehydration failed: {exc}", flush=True)
-        return False
-
-
 def _run_dir_for(
     *,
     output_root: Path,
@@ -646,23 +470,6 @@ def _summary_row(
         inspect_log_path=inspect_log_path,
         error=error,
     )
-
-
-def _eval_spec_matches(
-    run_info: dict,
-    eval_spec: "InspectBenchmarkSpec | InspectCustomEvalSpec",
-) -> bool:
-    """Check whether a cached run_info's eval_spec matches the current one.
-
-    Compares the serialized eval spec stored in run_info.json against the
-    current eval spec.  Returns False (= re-run needed) if the stored spec
-    is missing or differs in any field.
-    """
-    stored = run_info.get("eval_spec")
-    if stored is None:
-        return False
-    current = eval_spec.model_dump(mode="json")
-    return stored == current
 
 
 def _write_run_info(
@@ -750,157 +557,6 @@ def _record_failed_model_rows(
 
 
 # ---------------------------------------------------------------------------
-# Baseline caching
-#
-# Whenever the suite evaluates a model with zero LoRA contribution (no
-# adapters, scale=None), it automatically caches the result locally and on
-# HuggingFace.  Subsequent runs that need the same base-model result (keyed
-# by model name + eval_spec) reuse it instead of recomputing.
-#
-# Lookup order:  local cache  →  HuggingFace  →  compute fresh
-# After computing: save to local cache + upload to HuggingFace.
-# ---------------------------------------------------------------------------
-
-_BASELINE_LOCAL_ROOT = Path("scratch/evals/_baselines")
-_BASELINE_HF_REPO = "persona-shattering-lasr/monorepo"
-_BASELINE_HF_PREFIX = "evals/baselines"
-
-
-def _model_slug(base_model: str) -> str:
-    """Convert a HF model ID to a filesystem-safe slug.
-
-    ``meta-llama/Llama-3.1-8B-Instruct`` → ``llama-3.1-8b-instruct``
-    """
-    return base_model.rsplit("/", 1)[-1].lower()
-
-
-def _is_no_lora_model(spec: ModelSpec) -> bool:
-    """True when this ModelSpec contributes zero LoRA weight."""
-    return not spec.adapters and spec.scale is None
-
-
-def _resolve_base_model(config: SuiteConfig) -> str | None:
-    """Return the base model name from either sweep or explicit models config."""
-    if config.base_model:
-        return config.base_model
-    models = config.expand_models()
-    return models[0].base_model if models else None
-
-
-def _baseline_local_dir(base_model: str) -> Path:
-    return _BASELINE_LOCAL_ROOT / _model_slug(base_model) / "base"
-
-
-def _baseline_hf_path(base_model: str) -> str:
-    return f"{_BASELINE_HF_PREFIX}/{_model_slug(base_model)}"
-
-
-def _baseline_cache_is_valid(
-    cache_dir: Path,
-    evals: list,
-) -> bool:
-    """Check that *cache_dir* has valid results for every eval in the list."""
-    for eval_spec in evals:
-        ri_path = cache_dir / eval_spec.name / "run_info.json"
-        if not ri_path.exists():
-            return False
-        try:
-            info = json.loads(ri_path.read_text())
-            if info.get("status") != "ok":
-                return False
-            if not _eval_spec_matches(info, eval_spec):
-                return False
-        except Exception:
-            return False
-    return True
-
-
-def _try_reuse_cached_baseline(
-    config: SuiteConfig,
-    output_root: Path,
-) -> bool:
-    """Pre-populate output_root/base/ from local cache or HuggingFace.
-
-    Returns True if all baseline evals were found and copied, False otherwise.
-    The caller relies on ``skip_completed`` to actually skip the base model
-    — this function just populates the directory so that check passes.
-    """
-    import shutil
-
-    base_model = _resolve_base_model(config)
-    if not base_model:
-        return False
-
-    dst_base = output_root / "base"
-    if dst_base.exists():
-        return True  # already populated (e.g. resumed run)
-
-    local_cache = _baseline_local_dir(base_model)
-
-    # 1. Try local cache
-    if local_cache.is_dir() and _baseline_cache_is_valid(local_cache, config.evals):
-        shutil.copytree(local_cache, dst_base)
-        print(f"  reused baseline from local cache", flush=True)
-        return True
-
-    # 2. Try HuggingFace
-    hf_path = _baseline_hf_path(base_model)
-    try:
-        from src_dev.utils.hf_hub import download_path_to_dir
-
-        download_path_to_dir(
-            repo_id=_BASELINE_HF_REPO,
-            path_in_repo=hf_path,
-            target_dir=local_cache,
-        )
-        if _baseline_cache_is_valid(local_cache, config.evals):
-            shutil.copytree(local_cache, dst_base)
-            print(f"  reused baseline from HuggingFace ({hf_path})", flush=True)
-            return True
-    except Exception as exc:
-        logger.debug("baseline HF download failed (will compute): %s", exc)
-
-    return False
-
-
-def _save_baseline_to_cache(config: SuiteConfig, output_root: Path) -> None:
-    """Save freshly-computed base-model results to local cache and HuggingFace."""
-    import shutil
-
-    base_model = _resolve_base_model(config)
-    if not base_model:
-        return
-
-    src_base = output_root / "base"
-    if not src_base.is_dir():
-        return
-
-    # Save to local cache
-    local_cache = _baseline_local_dir(base_model)
-    local_cache.parent.mkdir(parents=True, exist_ok=True)
-    if local_cache.exists():
-        shutil.rmtree(local_cache)
-    shutil.copytree(src_base, local_cache)
-    print(f"  saved baseline to local cache", flush=True)
-
-    # Upload to HuggingFace
-    hf_path = _baseline_hf_path(base_model)
-    try:
-        from src_dev.utils.hf_hub import login_from_env, upload_folder_to_dataset_repo
-
-        login_from_env()
-        upload_folder_to_dataset_repo(
-            local_dir=local_cache,
-            repo_id=_BASELINE_HF_REPO,
-            path_in_repo=hf_path,
-            commit_message=f"baseline: {_model_slug(base_model)}",
-        )
-        print(f"  uploaded baseline to HuggingFace ({hf_path})", flush=True)
-    except Exception as exc:
-        logger.warning("baseline HF upload failed (local cache still valid): %s", exc)
-
-
-# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -912,9 +568,6 @@ def run_eval_suite(
     """Run a full eval suite using Inspect for all eval types."""
     judge_exec = judge_exec or JudgeExecutionConfig()
     output_root = _make_output_root(config, judge_exec.mode)
-
-    # Attempt to download prior results from HF if not present locally.
-    _maybe_rehydrate_from_hf(config, output_root)
 
     (output_root / "suite_config.json").write_text(
         config.model_dump_json(indent=2), encoding="utf-8"
@@ -945,15 +598,18 @@ def run_eval_suite(
         try:
             assert config.base_model is not None
             first_spec = models[1] if len(models) > 1 else models[0]
-            from src_dev.utils.lora_composition import resolve_adapter_to_local_dir
+            from src_dev.utils.lora_composition import split_adapter_reference
 
+            _raw_adapter, _adapter_subfolder = split_adapter_reference(
+                config.adapter
+            )
             base_ref = resolve_model_reference(config.base_model, kind="base model")
-            adapter_local_dir = resolve_adapter_to_local_dir(config.adapter)
+            adapter_ref = resolve_model_reference(_raw_adapter, kind="adapter")
             sweep_peft_model, sweep_tokenizer = _load_local_model_for_sweep(
                 base_ref,
-                adapter_local_dir,
+                adapter_ref,
                 _resolve_dtype(first_spec),
-                fixed_adapters=config.fixed_adapters or None,
+                subfolder=_adapter_subfolder,
             )
             print(
                 f"  model loaded  ({_fmt_duration(time.perf_counter() - load_t0)})",
@@ -962,89 +618,6 @@ def run_eval_suite(
         except Exception as exc:
             print(f"  FAILED to load sweep model: {exc}", flush=True)
             is_sweep = False  # fall back to per-spec loading
-
-    # --- torch.compile (optional) ---
-    if config.torch_compile and sweep_peft_model is not None:
-        compile_t0 = time.perf_counter()
-        print("  applying torch.compile ...", flush=True)
-        # Compile the underlying model.  torch.compile returns an
-        # OptimizedModule that is API-compatible.  Weight mutations from
-        # LoRaScaling are picked up automatically because the inductor
-        # backend does not freeze parameters by default.
-        try:
-            sweep_peft_model.base_model.model = torch.compile(
-                sweep_peft_model.base_model.model
-            )
-            print(
-                f"  torch.compile done  ({_fmt_duration(time.perf_counter() - compile_t0)})",
-                flush=True,
-            )
-        except Exception as exc:
-            print(f"  torch.compile FAILED (continuing without): {exc}", flush=True)
-
-    # --- Pre-build tasks (once) for reuse across scale points ---
-    from inspect_ai import Task
-
-    from src_dev.evals.inspect_benchmarks import build_benchmark_task
-
-    _task_cache: dict[str, Task] = {}
-    if config.cache_tasks:
-        cache_t0 = time.perf_counter()
-        for eval_spec in config.evals:
-            if isinstance(eval_spec, InspectBenchmarkSpec):
-                _task_cache[eval_spec.name] = build_benchmark_task(eval_spec)
-        if _task_cache:
-            print(
-                f"  pre-built {len(_task_cache)} task(s)  "
-                f"({_fmt_duration(time.perf_counter() - cache_t0)})",
-                flush=True,
-            )
-
-    # --- Baseline caching: reuse a previously-computed base-model result ---
-    baseline_reused = False
-    if config.skip_completed:
-        baseline_reused = _try_reuse_cached_baseline(config, output_root)
-
-    # --- Activation cap: load the bare base model once, reuse across all fraction points ---
-    is_activation_cap = config.activation_cap is not None and judge_exec.mode != "resume"
-    cap_base_model: Any = None
-    cap_base_tokenizer: Any = None
-    cap_axis: Any = None
-    cap_per_layer_range: dict = {}
-    cap_capping_layers: list[int] = []
-    if is_activation_cap:
-        load_t0 = time.perf_counter()
-        print("  loading base model for activation cap sweep (once) ...", flush=True)
-        try:
-            assert config.base_model is not None
-            assert config.activation_cap is not None
-            first_spec = models[1] if len(models) > 1 else models[0]
-            base_ref = resolve_model_reference(config.base_model, kind="base model")
-            cap_base_model, cap_base_tokenizer = _load_base_model_for_activation_cap(
-                base_ref, _resolve_dtype(first_spec)
-            )
-            axis_data = torch.load(config.activation_cap.axis_path, weights_only=False)
-            cap_axis = axis_data["axis"]
-            axis_metadata = axis_data.get("metadata", {})
-            range_data = torch.load(config.activation_cap.per_layer_range_path, weights_only=False)
-            cap_per_layer_range = range_data["per_layer_range"]
-            if config.activation_cap.capping_layers is not None:
-                cap_capping_layers = config.activation_cap.capping_layers
-            else:
-                cap_capping_layers = list(axis_metadata.get("recommended_capping_layers") or [])
-                if not cap_capping_layers:
-                    raise RuntimeError(
-                        "No capping_layers set in ActivationCapSweep and "
-                        "'recommended_capping_layers' missing from axis metadata."
-                    )
-            print(
-                f"  base model loaded, {len(cap_capping_layers)} capping layers  "
-                f"({_fmt_duration(time.perf_counter() - load_t0)})",
-                flush=True,
-            )
-        except Exception as exc:
-            print(f"  FAILED to load activation cap model: {exc}", flush=True)
-            is_activation_cap = False  # fall back to per-spec loading
 
     # --- Per-model loop ---
     for model_idx, model_spec in enumerate(models, 1):
@@ -1056,8 +629,7 @@ def run_eval_suite(
         if config.skip_completed:
             all_done = True
             for eval_spec in config.evals:
-                # For activation cap sweeps all fractions run all evals — skip the scale filter.
-                if not is_activation_cap and not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                     continue
                 n_runs = (
                     eval_spec.n_runs
@@ -1080,9 +652,6 @@ def run_eval_suite(
                         if info.get("status") != "ok":
                             all_done = False
                             break
-                        if not _eval_spec_matches(info, eval_spec):
-                            all_done = False
-                            break
                     except Exception:
                         all_done = False
                         break
@@ -1095,7 +664,7 @@ def run_eval_suite(
                 )
                 # Still record skipped rows so the summary is complete.
                 for eval_spec in config.evals:
-                    if not is_activation_cap and not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                    if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                         continue
                     eval_kind = (
                         "benchmark"
@@ -1138,21 +707,9 @@ def run_eval_suite(
                 prepared = _prepare_resume_model(model_spec)
             elif model_spec.model_uri is not None:
                 prepared = _prepare_api_model(model_spec)
-            elif is_activation_cap and cap_base_model is not None:
-                prepared = _prepare_activation_cap_model(
-                    model_spec,
-                    cap_base_model,
-                    cap_base_tokenizer,
-                    cap_axis,
-                    cap_per_layer_range,
-                    cap_capping_layers,
-                    config.batch_size,
-                    ceiling_from_hi=config.activation_cap.ceiling_from_hi,
-                )
             elif is_sweep and sweep_peft_model is not None:
                 prepared = _prepare_sweep_model(
-                    model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size,
-                    cache_tokenization=config.cache_tokenization,
+                    model_spec, sweep_peft_model, sweep_tokenizer, config.batch_size
                 )
             else:
                 print(f"  loading {model_label} ...", flush=True)
@@ -1178,8 +735,7 @@ def run_eval_suite(
         # Run all evals for this model spec.
         try:
             for eval_spec in config.evals:
-                # For activation cap sweeps all fractions run all evals — skip the scale filter.
-                if not is_activation_cap and not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
+                if not _is_scale_in_eval(model_spec.scale, eval_spec, config.sweep):
                     continue
 
                 eval_kind = (
@@ -1210,7 +766,7 @@ def run_eval_suite(
                         if run_info_path.exists():
                             try:
                                 info = json.loads(run_info_path.read_text())
-                                if info.get("status") == "ok" and _eval_spec_matches(info, eval_spec):
+                                if info.get("status") == "ok":
                                     print(
                                         f"  skipping  {run_label}  (already done)",
                                         flush=True,
@@ -1256,7 +812,6 @@ def run_eval_suite(
                                 run_dir=run_dir,
                                 temperature=config.temperature,
                                 hf_log_dir=hf_log_dir,
-                                task=_task_cache.get(eval_spec.name),
                             )
                             result_status = result.status
                             result_error = result.error
@@ -1325,19 +880,10 @@ def run_eval_suite(
                 # after all evals for this spec are done.
 
         finally:
-            # Remove activation capping hooks so the base model is clean for the next fraction.
-            if prepared.cap_model is not None:
-                try:
-                    prepared.cap_model.remove_hooks()
-                except Exception:
-                    pass
             # Always restore LoRaScaling so weights are clean for the next scale point.
             if prepared.scaler is not None:
                 prepared.scaler.restore()
-            if cap_base_model is not None:
-                # Activation cap mode: base model stays on GPU; only close Inspect provider.
-                _cleanup_runtime_model_state(move_to_cpu=False)
-            elif sweep_peft_model is None:
+            if sweep_peft_model is None:
                 # Per-spec model: move weights off GPU and clear Inspect's cache.
                 _cleanup_runtime_model_state(move_to_cpu=True)
                 if prepared.peft_model is not None:
@@ -1351,14 +897,6 @@ def run_eval_suite(
                 # should be closed so it doesn't compete with the next combo.
                 _cleanup_runtime_model_state(move_to_cpu=False)
 
-    # Release the activation cap base model after all fraction points are done.
-    if cap_base_model is not None:
-        try:
-            cap_base_model.cpu()
-        except Exception:
-            pass
-        _cleanup_runtime_model_state()
-
     # Release the sweep model after all scale points are done.
     if sweep_peft_model is not None:
         try:
@@ -1367,21 +905,13 @@ def run_eval_suite(
             pass
         _cleanup_runtime_model_state()
 
-    # Free the tokenisation cache now that the sweep is complete.
-    clear_tokenization_cache()
 
-
-
-    # --- Baseline caching: save freshly-computed baseline for future reuse ---
-    if not baseline_reused:
-        _save_baseline_to_cache(config, output_root)
 
     suite_elapsed = time.perf_counter() - suite_t0
     _print_timing_summary(eval_timings, suite_elapsed)
 
     if config.auto_analyze:
-        eval_names = [e.name for e in config.evals]
-        _run_auto_analyze(output_root, config.analyze_kwargs, eval_names=eval_names)
+        _run_auto_analyze(output_root, config.analyze_kwargs)
 
     if config.upload_repo_id and config.upload_path_in_repo:
         if "{eval_name}" in config.upload_path_in_repo:
@@ -1419,11 +949,7 @@ def _upload_run_per_eval(
             _upload_run(eval_subdir, repo_id, f"{resolved_path}/{model_dir.name}")
 
 
-def _run_auto_analyze(
-    output_root: Path,
-    analyze_kwargs: dict,
-    eval_names: list[str] | None = None,
-) -> Path | None:
+def _run_auto_analyze(output_root: Path, analyze_kwargs: dict) -> Path | None:
     """Run generate_plots() on output_root and return the figures directory."""
     try:
         from src_dev.evals.personality.analyze_results import (
@@ -1433,8 +959,6 @@ def _run_auto_analyze(
 
         print("\n  Auto-analyzing sweep results ...", flush=True)
         data = load_sweep_data(output_root)
-        if eval_names is not None:
-            data.evals = {k: v for k, v in data.evals.items() if k in eval_names}
         figures_dir = output_root / "figures"
         saved = generate_plots(data, figures_dir, **analyze_kwargs)
         if saved:

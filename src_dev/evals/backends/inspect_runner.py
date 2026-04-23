@@ -38,27 +38,17 @@ def run_benchmark_eval(
     inspect_model_args: dict | None = None,
     temperature: float = 0.0,
     hf_log_dir: str | None = None,
-    task: "Task | None" = None,
 ) -> InspectRunResult:
-    """Run a benchmark eval.
-
-    Args:
-        task: Optional pre-built Inspect Task.  When provided, skips
-            ``build_benchmark_task(spec)`` — useful for reusing a cached
-            task across scale points in a sweep.
-    """
     native_log_dir = run_dir / "native" / "inspect_logs"
 
     try:
-        if task is None:
-            task = build_benchmark_task(spec)
+        task = build_benchmark_task(spec)
         log = run_task_with_mode(
             task=task,
             model_uri=model_uri,
             native_log_dir=native_log_dir,
             mode="blocking",
             limit=spec.limit,
-            # judge_exec=JudgeExecutionConfig(mode="blocking", prefer_batch=True),
             judge_exec=JudgeExecutionConfig(mode="blocking", prefer_batch=False),
             inspect_model_args=inspect_model_args,
             temperature=temperature,

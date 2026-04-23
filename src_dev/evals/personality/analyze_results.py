@@ -68,36 +68,6 @@ from typing import Callable, Literal
 import numpy as np
 import pandas as pd
 
-from src_dev.evals.personality.logprob_scorer import MIN_CHOICE_MASS_DEFAULT
-
-
-def _parse_mcq_answer(text: str) -> str | None:
-    """Fallback MCQ answer parser: extract a letter A-D from common formats."""
-    if not text or not text.strip():
-        return None
-    s = text.strip()
-    # ANSWER: X
-    m = re.search(r"ANSWER\s*:\s*([A-D])\b", s, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    # X) at start
-    m = re.match(r"^([A-D])\)", s, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    # Bare X followed by whitespace/newline/end
-    m = re.match(r"^([A-D])\s*$", s, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    m = re.match(r"^([A-D])\s*[\n\r)]", s, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    # "the answer is X"
-    m = re.search(r"(?:correct\s+)?answer\s+is\s*:?\s*([A-D])\b", s, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -131,9 +101,6 @@ DARK_TRIAD_COLORS = {
 # trait_logprobs uses logprob-based continuous scores (not text parsing) but
 # still reports per-trait personality metrics in the same 0-1 format.
 _PERSONALITY_EVALS = {"bfi", "trait", "trait_logprobs"}
-
-# Logprob-based capability evals (P(correct) from logprobs, not text C/I).
-_LOGPROB_CAPABILITY_EVALS = {"mmlu_logprobs", "truthfulqa_logprobs", "gpqa_logprobs"}
 
 # Directories that are not model-spec dirs at the run root.
 _NON_MODEL_DIRS = {"figures", "analysis"}
@@ -186,21 +153,10 @@ def _extract_scores(log_path: Path) -> tuple[dict[str, float], float] | None:
     return scores, parse_rate
 
 
-def _extract_choice_mass(score_data: dict) -> float | None:
-    """Extract choice_mass from score metadata, with backward-compat fallback."""
-    score_meta = score_data.get("metadata") or {}
-    cm = score_meta.get("choice_mass")
-    if cm is None:
-        lps = score_meta.get("logprobs")
-        if isinstance(lps, dict) and lps:
-            cm = sum(math.exp(v) for v in lps.values())
-    return cm
-
-
 def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list[float]] | None:
     """Extract per-sample scores from an inspect log.
 
-    Handles four scoring conventions:
+    Handles three scoring conventions:
 
     - **Text-based personality evals** (trait, bfi): samples have
       ``metadata.trait`` and ``metadata.answer_mapping``.  For each sample the
@@ -208,10 +164,9 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
       through ``answer_mapping`` to get a trait score (0.0 or 1.0).
     - **Logprob personality evals** (trait_logprobs): ``value`` is a continuous
       float 0-1 (the probability-weighted trait score).  Grouped by trait.
-    - **Logprob capability evals** (mmlu_logprobs, etc.): ``value`` is a
-      continuous float P(correct).  Grouped under ``"accuracy"``.
-    - **Text capability evals** (mmlu, etc.): ``C`` = correct (1.0),
-      ``I`` = incorrect (0.0).  Grouped under ``"accuracy"``.
+    - **Capability evals** (mmlu, etc.): ``C`` = correct (1.0),
+      ``I`` = incorrect (0.0).  Scores are grouped under a single key
+      matching *eval_type* (e.g. ``"accuracy"``).
 
     Args:
         log_path: Path to the inspect log JSON.
@@ -232,7 +187,6 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
 
     is_personality = eval_type in _PERSONALITY_EVALS
     is_logprob = eval_type == "trait_logprobs"
-    is_logprob_capability = eval_type in _LOGPROB_CAPABILITY_EVALS
     group_scores: dict[str, list[float]] = {}
 
     for sample in samples:
@@ -249,33 +203,25 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
                 if not trait or not isinstance(value, (int, float)):
                     break
                 val = float(value)
+                # Collect per-sample choice mass for diagnostics and
+                # weighted CI computation.  Prefer the pre-computed field;
+                # fall back to computing from stored logprobs for
+                # backward-compat with older logs.
                 score_meta = score_data.get("metadata") or {}
-                cm = _extract_choice_mass(score_data)
-                nc = score_meta.get("num_choices", 4)
+                cm = score_meta.get("choice_mass")
+                if cm is None:
+                    lps = score_meta.get("logprobs")
+                    if isinstance(lps, dict) and lps:
+                        cm = sum(math.exp(v) for v in lps.values())
                 if not math.isnan(val):
                     group_scores.setdefault(trait, []).append(val)
+                    # Store per-trait choice mass parallel to trait scores,
+                    # so the weighted bootstrap can pair each score with its
+                    # reliability weight.
                     cm_val = float(cm) if isinstance(cm, (int, float)) else 1.0
                     group_scores.setdefault(f"_cm_{trait}", []).append(cm_val)
-                    group_scores.setdefault(f"_nc_{trait}", []).append(float(nc))
                 if isinstance(cm, (int, float)):
                     group_scores.setdefault("_choice_mass", []).append(float(cm))
-
-            elif is_logprob_capability:
-                # Logprob capability: value is P(correct), a continuous 0-1 float.
-                if not isinstance(value, (int, float)):
-                    break
-                val = float(value)
-                score_meta = score_data.get("metadata") or {}
-                cm = _extract_choice_mass(score_data)
-                nc = score_meta.get("num_choices", 4)
-                if not math.isnan(val):
-                    group_scores.setdefault("accuracy", []).append(val)
-                    cm_val = float(cm) if isinstance(cm, (int, float)) else 1.0
-                    group_scores.setdefault("_cm_accuracy", []).append(cm_val)
-                    group_scores.setdefault("_nc_accuracy", []).append(float(nc))
-                if isinstance(cm, (int, float)):
-                    group_scores.setdefault("_choice_mass", []).append(float(cm))
-
             elif is_personality:
                 # Trait/BFI: C means "parsed an answer", use answer_mapping
                 # for the actual trait score.
@@ -290,24 +236,10 @@ def _extract_raw_sample_scores(log_path: Path, eval_type: str) -> dict[str, list
                     )
             else:
                 # Capability: C = correct (1.0), I = incorrect (0.0)
-                answer = score_data.get("answer")
-                target = sample.get("target")
                 if value == "C":
                     group_scores.setdefault("accuracy", []).append(1.0)
-                    group_scores.setdefault("_answer_parsed", []).append(1.0)
-                    group_scores.setdefault("_reparsed_accuracy", []).append(1.0)
                 elif value == "I":
                     group_scores.setdefault("accuracy", []).append(0.0)
-                    group_scores.setdefault("_answer_parsed", []).append(1.0 if answer else 0.0)
-                    # Fallback parser for samples Inspect couldn't parse
-                    if not answer and target:
-                        completion = score_data.get("explanation", "")
-                        recovered = _parse_mcq_answer(completion)
-                        group_scores.setdefault("_reparsed_accuracy", []).append(
-                            1.0 if recovered and recovered == target else 0.0
-                        )
-                    else:
-                        group_scores.setdefault("_reparsed_accuracy", []).append(0.0)
             break
 
     return group_scores if group_scores else None
@@ -338,15 +270,6 @@ def _load_from_info(
     if not log_path:
         print(f"  skip {model}/{run}: no inspect_log_path", file=sys.stderr)
         return None
-    # Fall back to a sibling inspect_logs/*.json if the recorded path is stale
-    # (e.g. run_info.json was copied in from a prior run at a different abs path).
-    if not Path(log_path).exists():
-        local_logs = sorted((info_path.parent / "native" / "inspect_logs").glob("*.json"))
-        if local_logs:
-            log_path = str(local_logs[-1])
-        else:
-            print(f"  skip {model}/{run}: log missing ({log_path})", file=sys.stderr)
-            return None
     if reparse:
         result = _extract_scores_reparsed(Path(log_path), eval_type)
     else:
@@ -889,39 +812,11 @@ def _resolve_interval_fn(
     raise ValueError(f"Unknown interval method: {method.method!r}")
 
 
-def _build_mass_mask(
-    cm_all: np.ndarray,
-    nc_all: np.ndarray | None,
-    min_choice_mass: float,
-    dynamic_mass_filter: bool,
-) -> np.ndarray:
-    """Build a boolean mask combining dynamic and fixed choice-mass filters.
-
-    Args:
-        cm_all: Per-sample choice mass values.
-        nc_all: Per-sample num_choices values (for dynamic threshold).
-            May be None if not available.
-        min_choice_mass: Fixed minimum threshold (0 = no fixed filter).
-        dynamic_mass_filter: If True, apply per-question 1/num_choices filter.
-
-    Returns:
-        Boolean mask — True for samples to keep.
-    """
-    mask = np.ones(len(cm_all), dtype=bool)
-    if dynamic_mass_filter and nc_all is not None and len(nc_all) == len(cm_all):
-        dynamic_thresholds = 1.0 / nc_all
-        mask &= cm_all >= dynamic_thresholds
-    if min_choice_mass > 0.0:
-        mask &= cm_all >= min_choice_mass
-    return mask
-
-
 def _agg_sweep(
     df: pd.DataFrame,
     cols: list[str],
     interval: IntervalMethod | None = None,
-    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
-    dynamic_mass_filter: bool = True,
+    min_choice_mass: float = 0.0,
 ) -> pd.DataFrame:
     """Aggregate a sweep DataFrame to mean ± interval per scale point.
 
@@ -937,12 +832,6 @@ def _agg_sweep(
     (populated by :func:`_load_from_info`).  A ``ValueError`` is raised if
     these columns are missing.
 
-    Two-level choice-mass filtering:
-
-    1. **Dynamic** (``dynamic_mass_filter=True``): per-question threshold of
-       ``1/num_choices`` using ``_raw__nc_{col}`` columns.
-    2. **Fixed** (``min_choice_mass > 0``): global threshold applied on top.
-
     Args:
         df: Sweep DataFrame with per-run rows.
         cols: Metric columns to aggregate.
@@ -951,16 +840,13 @@ def _agg_sweep(
             mass is below this threshold.  Requires ``_raw__cm_{col}``
             columns (logprob evals).  The mean is recomputed from the
             filtered raw scores.  Default 0.0 (no filtering).
-        dynamic_mass_filter: When True, exclude per-sample scores whose
-            choice mass is below ``1/num_choices``.  Requires
-            ``_raw__nc_{col}`` columns.  Default True.
     """
     interval_fn = _resolve_interval_fn(interval) if interval is not None else None
     needs_raw = interval is not None and interval.needs_raw_scores
     needs_weights = interval is not None and interval.needs_weights
     asymmetric = needs_raw  # raw-score methods always produce asymmetric bounds
     # Choice-mass filtering also requires raw scores to recompute the mean.
-    filter_by_mass = min_choice_mass > 0.0 or dynamic_mass_filter
+    filter_by_mass = min_choice_mass > 0.0
     rows = []
     for scale, grp in df.groupby("scale"):
         row: dict = {"scale": scale}
@@ -979,23 +865,15 @@ def _agg_sweep(
             if filter_by_mass:
                 raw_col = f"_raw_{col}"
                 cm_col = f"_raw__cm_{col}"
-                nc_col = f"_raw__nc_{col}"
                 if raw_col in grp.columns and cm_col in grp.columns:
                     raw_lists = grp[raw_col].dropna().tolist()
                     cm_lists = grp[cm_col].dropna().tolist()
                     raw_all = np.concatenate(raw_lists) if raw_lists else np.array([])
                     cm_all = np.concatenate(cm_lists) if cm_lists else np.array([])
-                    # Load num_choices arrays for dynamic filtering.
-                    nc_all = None
-                    if dynamic_mass_filter and nc_col in grp.columns:
-                        nc_lists = grp[nc_col].dropna().tolist()
-                        nc_all = np.concatenate(nc_lists) if nc_lists else None
                     min_len = min(len(raw_all), len(cm_all))
                     raw_all = raw_all[:min_len]
                     cm_all = cm_all[:min_len]
-                    if nc_all is not None:
-                        nc_all = nc_all[:min_len]
-                    mask = _build_mass_mask(cm_all, nc_all, min_choice_mass, dynamic_mass_filter)
+                    mask = cm_all >= min_choice_mass
                     filtered = raw_all[mask]
                     mean = float(filtered.mean()) if len(filtered) else float("nan")
                 else:
@@ -1010,7 +888,7 @@ def _agg_sweep(
                     raw_col = f"_raw_{col}"
                     if raw_col not in grp.columns:
                         # No per-sample data for this column (e.g. summary
-                        # metrics like logprob_mcq_ratio).  Skip CI — the
+                        # metrics like logprob_trait_ratio).  Skip CI — the
                         # mean is still computed from the aggregate values.
                         if asymmetric:
                             row[f"{col}_ci_low"] = float("nan")
@@ -1024,20 +902,13 @@ def _agg_sweep(
 
                     # Apply choice-mass filter to CI raw scores too.
                     cm_col = f"_raw__cm_{col}"
-                    nc_col = f"_raw__nc_{col}"
                     if filter_by_mass and cm_col in grp.columns:
                         cm_lists = grp[cm_col].dropna().tolist()
                         cm_all = np.concatenate(cm_lists) if cm_lists else np.array([])
-                        nc_all = None
-                        if dynamic_mass_filter and nc_col in grp.columns:
-                            nc_lists = grp[nc_col].dropna().tolist()
-                            nc_all = np.concatenate(nc_lists) if nc_lists else None
                         _ml = min(len(raw_all), len(cm_all))
                         raw_all = raw_all[:_ml]
                         cm_all = cm_all[:_ml]
-                        if nc_all is not None:
-                            nc_all = nc_all[:_ml]
-                        mask = _build_mass_mask(cm_all, nc_all, min_choice_mass, dynamic_mass_filter)
+                        mask = cm_all >= min_choice_mass
                         raw_all = raw_all[mask]
                         # Also filter weights if needed for weighted bootstrap.
                         if needs_weights:
@@ -1265,10 +1136,7 @@ def plot_trait_sweep(
     title_suffix: str = "",
     highlight: list[str] | None = None,
     interval: IntervalMethod | None = None,
-    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
-    dynamic_mass_filter: bool = True,
-    x_label: str = "LoRA scaling factor",
-    x_lim: tuple[float, float] | None = (-4.5, 4.5),
+    min_choice_mass: float = 0.0,
 ) -> Path:
     """Primary research plot: TRAIT Big Five + Dark Triad + human baselines.
 
@@ -1292,7 +1160,7 @@ def plot_trait_sweep(
     from matplotlib.gridspec import GridSpec
 
     lit = _resolve_highlight(highlight)
-    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval, min_choice_mass=min_choice_mass, dynamic_mass_filter=dynamic_mass_filter)
+    trait_agg = _agg_sweep(df, ALL_TRAIT_COLS, interval=interval, min_choice_mass=min_choice_mass)
     scales = trait_agg["scale"].values
 
     # Detect whether choice-mass diagnostics are available.
@@ -1345,46 +1213,29 @@ def plot_trait_sweep(
 
     # --- Choice-mass diagnostic sub-axis ---
     if ax_cm is not None:
-        # Aggregate per-sample choice mass at each scale, restricted to the
-        # samples that survived the `min_choice_mass` filter used for the
-        # trait scores above.  Pulled from raw per-sample values in
-        # `_raw__choice_mass` (pooled across all runs at a given scale).
-        cm_rows = []
-        for scale, grp in df.groupby("scale"):
-            if "_raw__choice_mass" in grp.columns:
-                lists = [v for v in grp["_raw__choice_mass"].tolist()
-                         if isinstance(v, list) and v]
-                cm_all = np.concatenate(lists) if lists else np.array([])
-            else:
-                cm_all = grp["_choice_mass"].dropna().values
-            if min_choice_mass > 0.0:
-                cm_all = cm_all[cm_all >= min_choice_mass]
-            if len(cm_all):
-                cm_rows.append({"scale": scale, "mean": float(cm_all.mean()),
-                                "min": float(cm_all.min()), "max": float(cm_all.max())})
-            else:
-                cm_rows.append({"scale": scale, "mean": float("nan"),
-                                "min": float("nan"), "max": float("nan")})
-        cm_agg = pd.DataFrame(cm_rows).sort_values("scale")
+        cm_agg = df.groupby("scale")["_choice_mass"].agg(["mean", "min", "max"]).reset_index()
+        cm_agg = cm_agg.sort_values("scale")
         cm_scales = cm_agg["scale"].values
         cm_means = cm_agg["mean"].values
 
+        ax_cm.fill_between(cm_scales, cm_agg["min"].values, cm_agg["max"].values,
+                           color="#888888", alpha=0.15)
         ax_cm.plot(cm_scales, cm_means, "s-", color="#555555", linewidth=1.4,
                    markersize=3, zorder=4)
+        ax_cm.axhline(0.5, color="red", linestyle=":", linewidth=0.8, alpha=0.5)
         ax_cm.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
         ax_cm.set_ylabel("Choice\nmass", fontsize=8, rotation=0, labelpad=32, va="center")
-        cm_lower = max(0.0, min(float(min_choice_mass), 1.0))
-        ax_cm.set_ylim(cm_lower, 1.0)
-        ax_cm.set_yticks([cm_lower, 1.0])
-        ax_cm.set_yticklabels([f"{cm_lower:g}", "1"], fontsize=7)
+        ax_cm.set_ylim(0, 1.05)
+        ax_cm.set_yticks([0, 0.5, 1.0])
+        ax_cm.set_yticklabels(["0", ".5", "1"], fontsize=7)
         ax_cm.grid(True, alpha=0.25)
-        ax_cm.set_xlabel(x_label, fontsize=11)
-        _set_scale_xticks(ax_cm, scales, x_lim=x_lim)
+        ax_cm.set_xlabel("LoRA scaling factor", fontsize=11)
+        _set_scale_xticks(ax_cm, scales)
         # Hide x-axis labels on the main plot since the sub-axis provides them.
         ax.tick_params(labelbottom=False)
     else:
-        ax.set_xlabel(x_label, fontsize=11)
-        _set_scale_xticks(ax, scales, x_lim=x_lim)
+        ax.set_xlabel("LoRA scaling factor", fontsize=11)
+        _set_scale_xticks(ax, scales)
 
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13 if ax_cm is None else -0.35),
               fontsize=9, ncol=6, framealpha=0.85)
@@ -1501,9 +1352,6 @@ def plot_capability_sweep(
     eval_name: str = "capability",
     random_baseline: float | None = None,
     interval: IntervalMethod | None = None,
-    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
-    dynamic_mass_filter: bool = True,
-    x_label: str = "LoRA scaling factor",
 ) -> Path:
     """Capability coherence plot: accuracy vs. LoRA scale with baseline reference.
 
@@ -1517,15 +1365,13 @@ def plot_capability_sweep(
         random_baseline: If set, draws a horizontal dashed red line at this accuracy
             level (e.g. 0.25 for 4-choice MCQ random chance).
         interval: Error bar method. None to omit error bars.
-        min_choice_mass: Fixed min choice-mass filter (logprob evals).
-        dynamic_mass_filter: Per-question 1/num_choices filter (logprob evals).
 
     Returns:
         Path to the saved figure.
     """
     import matplotlib.pyplot as plt
 
-    cap_agg = _agg_sweep(df, ["accuracy"], interval=interval, min_choice_mass=min_choice_mass, dynamic_mass_filter=dynamic_mass_filter)
+    cap_agg = _agg_sweep(df, ["accuracy"], interval=interval)
     scales = cap_agg["scale"].values
     means  = cap_agg["accuracy_mean"].values
 
@@ -1558,7 +1404,7 @@ def plot_capability_sweep(
     _draw_col_error_bars(ax, cap_agg, "accuracy", scales, means, color)
 
     ax.axvline(0, color="gray", linestyle="--", linewidth=1.0, alpha=0.5, zorder=1)
-    ax.set_xlabel(x_label, fontsize=11)
+    ax.set_xlabel("LoRA scaling factor", fontsize=11)
     ax.set_ylabel("Accuracy", fontsize=11)
     _set_scale_xticks(ax, scales)
 
@@ -1584,121 +1430,6 @@ def plot_capability_sweep(
 
     plt.tight_layout()
     out = output_dir / f"{eval_name}_sweep.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  ✓ {out}")
-    return out
-
-
-def plot_capability_breakdown(
-    df: pd.DataFrame,
-    output_dir: Path,
-    title_suffix: str = "",
-    eval_name: str = "capability",
-) -> Path | None:
-    """Stacked bar chart: Correct / Recovered / Wrong / No answer per LoRA scale.
-
-    Categories:
-      - Correct: Inspect scorer parsed and matched target
-      - Recovered: Inspect failed to parse, but fallback regex found the right letter
-      - Wrong answer: a letter was parsed (by Inspect or fallback) but it was wrong
-      - No answer: no parseable letter at all
-
-    Requires ``_raw_accuracy``, ``_raw__answer_parsed``, and
-    ``_raw__reparsed_accuracy`` columns from :func:`_extract_raw_sample_scores`.
-    """
-    import matplotlib.pyplot as plt
-
-    raw_acc_col = "_raw_accuracy"
-    raw_ap_col = "_raw__answer_parsed"
-    raw_rp_col = "_raw__reparsed_accuracy"
-    if raw_acc_col not in df.columns or raw_ap_col not in df.columns:
-        print(f"  skip {eval_name}_breakdown: missing raw columns")
-        return None
-    has_reparse = raw_rp_col in df.columns
-
-    rows = []
-    for scale, grp in df.groupby("scale"):
-        acc_lists = grp[raw_acc_col].dropna().tolist()
-        ap_lists = grp[raw_ap_col].dropna().tolist()
-        acc = np.concatenate(acc_lists) if acc_lists else np.array([])
-        ap = np.concatenate(ap_lists) if ap_lists else np.array([])
-        n = min(len(acc), len(ap))
-        if n == 0:
-            continue
-        acc, ap = acc[:n], ap[:n]
-
-        if has_reparse:
-            rp_lists = grp[raw_rp_col].dropna().tolist()
-            rp = np.concatenate(rp_lists) if rp_lists else np.zeros(n)
-            rp = rp[:n]
-            # Recovered = not correct by Inspect, but correct after reparse
-            recovered = (1 - acc) * rp
-            # Wrong = parsed (by Inspect) but wrong, OR reparsed but wrong
-            # i.e. not correct and not recovered and answer was parsed or reparse attempted
-            wrong = (1 - acc) * (1 - rp) * ap
-            # No answer = not correct, not recovered, no parse at all
-            no_answer = (1 - acc) * (1 - rp) * (1 - ap)
-        else:
-            recovered = np.zeros(n)
-            wrong = (1 - acc) * ap
-            no_answer = (1 - acc) * (1 - ap)
-
-        rows.append({
-            "scale": scale,
-            "Correct": float(acc.mean()),
-            "Recovered": float(recovered.mean()),
-            "Wrong answer": float(wrong.mean()),
-            "No answer": float(no_answer.mean()),
-        })
-    if not rows:
-        return None
-    agg = pd.DataFrame(rows).sort_values("scale")
-
-    scales = agg["scale"].values
-    x = np.arange(len(scales))
-    width = 0.85
-    cats = ["Correct", "Recovered", "Wrong answer", "No answer"]
-    colors = {
-        "Correct": "#2ecc71", "Recovered": "#3498db",
-        "Wrong answer": "#e74c3c", "No answer": "#95a5a6",
-    }
-
-    fig, ax = plt.subplots(figsize=(14, 5.5), dpi=150)
-    bottom = np.zeros(len(scales))
-    for cat in cats:
-        vals = agg[cat].values
-        if vals.sum() == 0:
-            continue
-        ax.bar(x, vals, width, bottom=bottom, label=cat, color=colors[cat],
-               alpha=0.55, edgecolor="white", linewidth=0.3)
-        bottom += vals
-
-    labels = [f"{s:+.2f}" if s != 0 else "base" for s in scales]
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("Fraction of samples", fontsize=11)
-    ax.set_xlabel("LoRA scaling factor", fontsize=11)
-    ax.set_ylim(0, 1.0)
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
-
-    base_acc = agg.loc[agg["scale"] == 0.0, "Correct"]
-    if len(base_acc):
-        ax.axhline(y=float(base_acc.iloc[0]), color="green", linestyle="--", alpha=0.4, linewidth=1)
-    ax.axhline(y=0.25, color="red", linestyle=":", alpha=0.3, linewidth=1)
-    if 0.0 in set(scales):
-        ax.axvline(x=int(np.where(scales == 0.0)[0][0]), color="black", linestyle="--", alpha=0.3, linewidth=0.8)
-
-    title = f"{eval_name} response breakdown vs. LoRA scale"
-    if title_suffix:
-        title += f"\n[{title_suffix}]"
-    ax.set_title(title, fontsize=12, fontweight="bold")
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=10, framealpha=0.9)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    plt.tight_layout()
-    out = output_dir / f"{eval_name}_breakdown.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  ✓ {out}")
@@ -1861,15 +1592,11 @@ _PLOT_REGISTRY: dict[str, PlotFn | PlotStyle] = {
     "trait":           "trait",
     "trait_logprobs":  "trait",
     "bfi":             "bfi",
-    # Capability evals (text-based)
+    # Capability evals
     "mmlu":       "capability",
     "gsm8k":      "capability",
     "popqa":      "capability",
     "truthfulqa": "capability",
-    # Capability evals (logprob-based)
-    "mmlu_logprobs":       "capability",
-    "truthfulqa_logprobs": "capability",
-    "gpqa_logprobs":       "capability",
 }
 
 
@@ -1881,10 +1608,7 @@ def generate_plots(
     highlight: list[str] | None = None,
     show_parse_rate: bool = False,
     interval: IntervalMethod | str | None = None,
-    min_choice_mass: float = MIN_CHOICE_MASS_DEFAULT,
-    dynamic_mass_filter: bool = True,
-    x_label: str = "LoRA scaling factor",
-    x_lim: tuple[float, float] | None = (-4.5, 4.5),
+    min_choice_mass: float = 0.0,
 ) -> list[Path]:
     """Generate all plots for the evals present in *data*.
 
@@ -1905,10 +1629,7 @@ def generate_plots(
         interval: Error bar method. Accepts an IntervalMethod, a string parseable
             by ``IntervalMethod.from_str()``, or None to omit error bars.
         min_choice_mass: Exclude logprob samples with choice mass below this
-            threshold when computing means and CIs.  Defaults to
-            ``MIN_CHOICE_MASS_DEFAULT``.  Set to 0 to disable the filter.
-        dynamic_mass_filter: If True, exclude logprob samples with choice mass
-            below 1/num_choices per question.  Default True.
+            threshold when computing means and CIs.  Default 0.0 (no filter).
 
     Returns:
         List of paths to saved figures.
@@ -1938,18 +1659,10 @@ def generate_plots(
         if entry == "capability":
             path = plot_capability_sweep(df, output_dir, title_suffix,
                                          eval_name=eval_name, random_baseline=random_baseline,
-                                         interval=interval,
-                                         min_choice_mass=min_choice_mass,
-                                         dynamic_mass_filter=dynamic_mass_filter,
-                                         x_label=x_label)
-            bd_path = plot_capability_breakdown(df, output_dir, title_suffix, eval_name=eval_name)
-            if bd_path:
-                saved.append(bd_path)
+                                         interval=interval)
         elif entry == "trait":
             path = plot_trait_sweep(df, output_dir, title_suffix, highlight=highlight,
-                                    interval=interval, min_choice_mass=min_choice_mass,
-                                    dynamic_mass_filter=dynamic_mass_filter,
-                                    x_label=x_label, x_lim=x_lim)
+                                    interval=interval, min_choice_mass=min_choice_mass)
         elif entry == "bfi":
             path = plot_bfi_sweep(df, output_dir, title_suffix, highlight=highlight,
                                   interval=interval)
@@ -2001,18 +1714,13 @@ def main() -> None:
                         help="Error bar method, e.g. 'ci95', 'ci95_from_ppf', 'std', "
                              "'ci95_from_wilson', 'ci95_from_bootstrap_1000'. "
                              "Omit for no error bars.")
-    parser.add_argument("--min-choice-mass", type=float, default=MIN_CHOICE_MASS_DEFAULT,
+    parser.add_argument("--min-choice-mass", type=float, default=0.0,
                         help="Exclude logprob samples with total choice-token probability "
-                             "below this threshold. Defaults to MIN_CHOICE_MASS_DEFAULT. "
-                             "Set to 0 to disable the fixed filter.")
-    parser.add_argument("--no-dynamic-mass-filter", action="store_true",
-                        help="Disable the per-question dynamic mass filter (1/num_choices). "
-                             "By default this filter is enabled for logprob evals.")
+                             "below this threshold (e.g. 0.9). Default 0.0 (no filter).")
     args = parser.parse_args()
 
     interval = IntervalMethod.from_str(args.interval) if args.interval else None
     min_choice_mass: float = args.min_choice_mass
-    dynamic_mass_filter: bool = not args.no_dynamic_mass_filter
 
     if args.mock:
         data = _mock_sweep_data()
@@ -2030,8 +1738,7 @@ def main() -> None:
         df = data.get(eval_name)
         assert df is not None
         cols = _metric_cols(df)
-        agg = _agg_sweep(df, cols, interval=interval, min_choice_mass=min_choice_mass,
-                         dynamic_mass_filter=dynamic_mass_filter)
+        agg = _agg_sweep(df, cols, interval=interval, min_choice_mass=min_choice_mass)
         print_sweep_table(agg, cols, f"{eval_name.upper()} SWEEP: scores vs. LoRA scale")
 
     if args.visualize:
@@ -2040,8 +1747,7 @@ def main() -> None:
         saved = generate_plots(data, output_dir, title_suffix=args.title,
                                random_baseline=args.random_baseline, highlight=args.highlight,
                                show_parse_rate=args.show_parse_rate, interval=interval,
-                               min_choice_mass=min_choice_mass,
-                               dynamic_mass_filter=dynamic_mass_filter)
+                               min_choice_mass=min_choice_mass)
         if not saved:
             print("  (no eval data found — nothing to plot)")
         else:

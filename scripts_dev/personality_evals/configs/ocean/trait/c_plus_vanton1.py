@@ -1,13 +1,15 @@
-"""TRAIT logprob sweep for the Agreeableness- (A-) LoRA v2 (`agreeableness_low-persona`).
+"""TRAIT sweep for the Conscientiousness+ (C+) LoRA adapter vanton1 (souped persona).
 
-Same halved scale grid + 0.75 choice-mass cutoff as the vanton4 siblings.
+Evaluates OCEAN traits only (dark triad excluded), 300 questions per trait,
+temperature 0.0, single run per scale point.
 
-Scale grid: step 0.5 in [-2, +2], step 1.0 in [-4, -3] and [+3, +4].
+Scale grid: step 0.25 in [-2, +2], step 0.5 in [-4, -2.5] and [+2.5, +4].
+The model is loaded once and LoRA scaling is applied in-place per scale point.
 
 Usage
 -----
     uv run python -m src_dev.evals suite \\
-        --config-module scripts_dev.personality_evals.configs.ocean.trait.versions_for_paper.a_minus_v2
+        --config-module scripts_dev.personality_evals.configs.ocean.trait.c_plus_vanton1
 """
 
 from pathlib import Path
@@ -29,8 +31,8 @@ load_dotenv()
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/v2/lora/agreeableness_low-persona"
-_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/agreeableness-low-v2-persona")
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/amplifier/vanton1/lora/conscientiousness_amplifying_full_vanton1-persona"
+_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/conscientiousness-amplifying-vanton1-persona")
 
 download_from_dataset_repo(
     repo_id=_HF_DATASET_REPO,
@@ -46,10 +48,10 @@ _OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness
 
 
 def _build_scale_points() -> list[float]:
-    """Step 1.0 in [-4, -3] and [+3, +4], step 0.5 in [-2, +2]."""
-    coarse_neg = [round(-4.0 + i * 1.0, 10) for i in range(round((-3.0 - -4.0) / 1.0) + 1)]
-    fine       = [round(-2.0 + i * 0.5, 10) for i in range(round((2.0 - -2.0) / 0.5) + 1)]
-    coarse_pos = [round(3.0 + i * 1.0, 10) for i in range(round((4.0 - 3.0) / 1.0) + 1)]
+    """Step 0.5 in [-4, -2.5] and [+2.5, +4], step 0.25 in [-2, +2]."""
+    coarse_neg = [round(-4.0 + i * 0.5, 10) for i in range(round((-2.5 - -4.0) / 0.5) + 1)]
+    fine       = [round(-2.0 + i * 0.25, 10) for i in range(round((2.0 - -2.0) / 0.25) + 1)]
+    coarse_pos = [round(2.5 + i * 0.5, 10) for i in range(round((4.0 - 2.5) / 0.5) + 1)]
     return sorted({s for s in coarse_neg + fine + coarse_pos if s != 0.0})
 
 
@@ -59,24 +61,23 @@ SUITE_CONFIG = SuiteConfig(
     sweep=ScaleSweep(points=_build_scale_points()),
     evals=[
         InspectBenchmarkSpec(
-            name="trait_logprobs",
-            benchmark="personality_trait_logprobs",
-            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS},
+            name="trait",
+            benchmark="personality_trait_sampled",
+            benchmark_args={"samples_per_trait": 300, "trait_splits": _OCEAN_TRAITS, "max_tokens": 8},
             n_runs=1,
         ),
     ],
     temperature=0.0,
-    batch_size=128,
+    batch_size=64,
     output_root=Path("scratch/evals/ocean/trait"),
-    run_name="a_minus_v2_logprobs",
+    run_name="c_plus_vanton1",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "A- v2 TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.75},
+    analyze_kwargs={"title_suffix": "C+ vanton1 TRAIT", "interval": "ci95_from_wilson"},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/v2/evals/mcq/trait_logprobs",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/amplifier/vanton1/evals/mcq/trait",
     metadata={
-        "persona": "agreeableness_minus_v2",
+        "persona": "conscientiousness_plus_vanton1",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
-        "scoring_method": "logprob",
     },
 )

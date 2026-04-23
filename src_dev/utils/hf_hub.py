@@ -2,20 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import os
-import random
-import time
 from pathlib import Path
 
 import requests
-from fnmatch import fnmatch
-from huggingface_hub import HfApi, hf_hub_download, snapshot_download
-from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
-from huggingface_hub.hf_api import RepoFile
+from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.utils import configure_http_backend
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Use a requests.Session with extended timeouts as the huggingface_hub backend.
@@ -66,27 +58,6 @@ def login_from_env(token_env: str = "HF_TOKEN") -> None:
     os.environ.setdefault("HF_TOKEN", token)
 
 
-def _retry_on_conflict(fn, *, max_retries: int = 5, base_delay: float = 2.0):
-    """Retry ``fn()`` on HF 412 Precondition Failed (concurrent commit conflict).
-
-    Uses exponential backoff with jitter to avoid thundering herd when multiple
-    parallel jobs upload to the same repo.
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return fn()
-        except HfHubHTTPError as e:
-            if e.response is not None and e.response.status_code == 412 and attempt < max_retries:
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                logger.warning(
-                    "HF 412 conflict (attempt %d/%d), retrying in %.1fs...",
-                    attempt + 1, max_retries, delay,
-                )
-                time.sleep(delay)
-            else:
-                raise
-
-
 def upload_file_to_dataset_repo(
     *,
     local_path: Path,
@@ -101,13 +72,13 @@ def upload_file_to_dataset_repo(
     _configure_timeout()
     api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
-    _retry_on_conflict(lambda: api.upload_file(
+    api.upload_file(
         path_or_fileobj=str(local_path),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
         repo_type="dataset",
         commit_message=commit_message,
-    ))
+    )
     return f"https://huggingface.co/datasets/{repo_id}"
 
 
@@ -145,7 +116,7 @@ def upload_folder_to_dataset_repo(
     _configure_timeout()
     api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
-    _retry_on_conflict(lambda: api.upload_folder(
+    api.upload_folder(
         folder_path=str(local_dir),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
@@ -154,7 +125,7 @@ def upload_folder_to_dataset_repo(
         ignore_patterns=ignore_patterns,
         allow_patterns=allow_patterns,
         delete_patterns=delete_patterns,
-    ))
+    )
     return f"https://huggingface.co/datasets/{repo_id}"
 
 
@@ -172,13 +143,13 @@ def upload_folder_to_model_repo(
     _configure_timeout()
     api = HfApi(token=_get_token())
     api.create_repo(repo_id=repo_id, repo_type="model", private=False, exist_ok=True)
-    _retry_on_conflict(lambda: api.upload_folder(
+    api.upload_folder(
         folder_path=str(local_dir),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
         repo_type="model",
         commit_message=commit_message,
-    ))
+    )
     return f"https://huggingface.co/{repo_id}"
 
 
@@ -243,19 +214,14 @@ def download_from_dataset_repo(
 ) -> Path:
     """Download files from a dataset repo on Hugging Face Hub.
 
-    Enumerates the subtree via ``list_repo_tree(path_in_repo=..., recursive=True)``
-    and fetches each file via ``hf_hub_download``. We avoid ``snapshot_download``
-    because for large repos (e.g. the monorepo) ``repo_info().siblings`` can be
-    a truncated listing while still below the 50k threshold that would trigger
-    the library's ``list_repo_tree`` fallback — the result is a silent 0-match
-    for paths whose files happen to be missing from ``siblings``.
+    Uses ``snapshot_download`` with ``allow_patterns`` scoped under
+    ``path_in_repo`` so only the requested files are fetched.
 
     Args:
         repo_id: HuggingFace dataset repo ID (``org/name``).
         path_in_repo: Prefix path within the repo to download from.
         local_dir: Local directory to download into. The repo structure
-            under ``path_in_repo`` is replicated here (i.e. files land at
-            ``local_dir/path_in_repo/...``).
+            under ``path_in_repo`` is replicated here.
         allow_patterns: Glob patterns *relative to path_in_repo* for files
             to download.  E.g. ``["rollouts/rollouts.jsonl"]``.
             If ``None``, all files under ``path_in_repo`` are downloaded.
@@ -265,54 +231,22 @@ def download_from_dataset_repo(
     """
     _configure_timeout()
     token = _get_token()
-    api = HfApi(token=token)
 
-    try:
-        repo_files: list[str] = [
-            entry.path
-            for entry in api.list_repo_tree(
-                repo_id=repo_id,
-                repo_type="dataset",
-                path_in_repo=path_in_repo,
-                recursive=True,
-            )
-            if isinstance(entry, RepoFile)
-        ]
-    except EntryNotFoundError:
-        logger.info(
-            "download_from_dataset_repo: path %s not found on %s",
-            path_in_repo, repo_id,
-        )
-        return local_dir
-
+    # Always scope to path_in_repo to avoid resolving the entire repo.
+    # If caller passes specific patterns they are prefixed; otherwise we use
+    # a wildcard scoped to the subfolder.
     if allow_patterns is not None:
-        prefix = f"{path_in_repo.rstrip('/')}/"
-        def _matches(repo_path: str) -> bool:
-            if not repo_path.startswith(prefix):
-                return False
-            rel = repo_path[len(prefix):]
-            return any(fnmatch(rel, p) for p in allow_patterns)
-        repo_files = [f for f in repo_files if _matches(f)]
+        prefixed: list[str] = [f"{path_in_repo}/{p}" for p in allow_patterns]
+    else:
+        prefixed = [f"{path_in_repo}/**", f"{path_in_repo}/*"]
 
-    if not repo_files:
-        logger.warning(
-            "download_from_dataset_repo: no files matched under %s (allow_patterns=%r)",
-            path_in_repo, allow_patterns,
-        )
-        return local_dir
-
-    local_dir = Path(local_dir)
-    local_dir.mkdir(parents=True, exist_ok=True)
-
-    for repo_path in repo_files:
-        hf_hub_download(
-            repo_id=repo_id,
-            repo_type="dataset",
-            filename=repo_path,
-            local_dir=str(local_dir),
-            token=token,
-        )
-
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        local_dir=str(local_dir),
+        allow_patterns=prefixed,
+        token=token,
+    )
     return local_dir
 
 
@@ -336,70 +270,6 @@ def download_dataset_subpath(
             f"Downloaded dataset subpath not found locally: {downloaded_path}"
         )
     return downloaded_path
-
-
-def download_path_to_dir(
-    *,
-    repo_id: str,
-    path_in_repo: str,
-    target_dir: Path,
-    allow_patterns: list[str] | None = None,
-) -> Path:
-    """Download a subtree from a dataset repo directly into target_dir.
-
-    Unlike ``download_from_dataset_repo``, which replicates the full repo path
-    structure under ``local_dir``, this function strips the ``path_in_repo``
-    prefix so that files from ``{path_in_repo}/foo`` land at ``target_dir/foo``.
-
-    Useful for rehydrating a run directory from HF into the exact local path
-    it was originally written to (e.g. to regenerate plots without re-running).
-
-    Args:
-        repo_id: HuggingFace dataset repo ID (``org/name``).
-        path_in_repo: Subtree within the repo to download.
-        target_dir: Local directory to place the downloaded content in.
-            Created if it does not exist.
-        allow_patterns: Optional glob patterns *relative to path_in_repo*.
-            If None, all files under path_in_repo are downloaded.
-
-    Returns:
-        target_dir.
-    """
-    import shutil
-    import tempfile
-
-    _configure_timeout()
-    token = _get_token()
-
-    if allow_patterns is not None:
-        prefixed: list[str] = [f"{path_in_repo}/{p}" for p in allow_patterns]
-    else:
-        prefixed = [f"{path_in_repo}/**", f"{path_in_repo}/*"]
-
-    with tempfile.TemporaryDirectory() as staging:
-        snapshot_download(
-            repo_id=repo_id,
-            repo_type="dataset",
-            local_dir=staging,
-            allow_patterns=prefixed,
-            token=token,
-        )
-        src = Path(staging) / path_in_repo
-        target_dir = Path(target_dir)
-        target_dir.parent.mkdir(parents=True, exist_ok=True)
-
-        # Atomic swap: copy to a sibling temp dir first, then rename.
-        # This avoids destroying existing valid data if the download is
-        # partial or corrupted.
-        tmp_target = target_dir.with_name(target_dir.name + ".tmp")
-        if tmp_target.exists():
-            shutil.rmtree(tmp_target)
-        shutil.copytree(src, tmp_target)
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        tmp_target.rename(target_dir)
-
-    return target_dir
 
 
 def download_file_from_dataset_repo(
