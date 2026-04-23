@@ -1,5 +1,6 @@
 \section{Unsupervised persona exploration}\label{sec:unsupervised-persona-exploration}
-
+\todo[inline]{(For LASR) Remove the embedding analysis section, tidy up the rest a little}
+\todo[inline]{(For NeurIPS) Tidy up the rest a lot}
 Taking inspiration from foundational work in cognitive science, including the process of developing the OCEAN framework itself \citep{tupes1992recurrent}, we can use unsupervised methods to seek a minimal set of latent factors which explain most of the variance in behaviour across diverse contexts.
 In general, we would expect to find some overlap with factors explaining human behaviour, precisely because they are trained largely on human text, as well as some non-overlapping factors which explain non-human behaviours.
 
@@ -67,6 +68,7 @@ In human cognitive science, it is typical to sample across a large population si
 
 \textbf{Explanatory latent factors are determined using Principal Axis Factoring (PAF).} Horn’s parallel analysis is used to determine the number of factors to retain, keeping only factors whose real eigenvalues exceed the 95th percentile of eigenvalues from simulated random data of the same dimensions. Figure 4.2.1 shows the results of this analysis. PAF is then applied with both oblimin and varimax rotations --- oblimin allowing correlated factors, varimax enforcing orthogonality --- to determine the factors explaining the highest variance.
 
+\todo{(For LASR) Add plot and labels}
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/tmp/image23.png}
@@ -81,3 +83,4 @@ In human cognitive science, it is typical to sample across a large population si
 
 \textbf{We test that these factors are predictive and stable.} In order to ensure that the factors we produce are useful for describing personas, we need to show that they reliably predict behaviours. Multiple rollouts are produced for the same question, to confirm that personas are stable: Figure…. Further, in order to demonstrate that the factors are predictive, subjects are given a heldout set of questions, which are human-labelled according to expected answers based on factor scores…
 
+\todo{(For NeurIPS) Train LoRA and evaluate effects}
