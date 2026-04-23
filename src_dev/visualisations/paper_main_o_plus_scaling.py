@@ -302,11 +302,13 @@ def render_trait_logprobs(
 
 
 def _parse_mmlu_breakdown(suite_hf_path: str) -> dict[float, dict[str, float]]:
-    """Walk MMLU logs and return ``{scale: {Correct, Wrong answer, No answer}}``.
+    """Walk MMLU logs and return ``{scale: {Correct, Recovered, Wrong answer, No answer}}``.
 
     Uses per-sample data from each inspect log: a sample is **Correct** if the
-    scorer matched, **Wrong answer** if a letter was parsed but it was wrong,
-    and **No answer** if nothing parseable came out. Aggregated as fractions.
+    inspect scorer matched; **Recovered** if it didn't but the fallback regex
+    parser found the right letter (see ``log_answer_parser.py``); **Wrong
+    answer** if a letter was parsed but was wrong; **No answer** if nothing
+    parseable came out. Aggregated as fractions.
     """
     _download_subtree(
         suite_hf_path,
@@ -335,15 +337,23 @@ def _parse_mmlu_breakdown(suite_hf_path: str) -> dict[float, dict[str, float]]:
             continue
         acc = np.asarray(raw.get("accuracy", []), dtype=float)
         ap  = np.asarray(raw.get("_answer_parsed", []), dtype=float)
+        rp  = np.asarray(raw.get("_reparsed_accuracy", []), dtype=float)
         n = min(len(acc), len(ap))
         if n == 0:
             continue
         acc, ap = acc[:n], ap[:n]
+        # Reparse data is optional — zero-fill if the log predates the fallback parser.
+        if len(rp) >= n:
+            rp = rp[:n]
+        else:
+            rp = np.zeros(n)
         correct    = float(acc.mean())
-        wrong      = float(((1 - acc) * ap).mean())
-        no_answer  = float(((1 - acc) * (1 - ap)).mean())
+        recovered  = float(((1 - acc) * rp).mean())
+        wrong      = float(((1 - acc) * (1 - rp) * ap).mean())
+        no_answer  = float(((1 - acc) * (1 - rp) * (1 - ap)).mean())
         out[float(scale)] = {
             "Correct":      correct,
+            "Recovered":    recovered,
             "Wrong answer": wrong,
             "No answer":    no_answer,
         }
@@ -351,14 +361,16 @@ def _parse_mmlu_breakdown(suite_hf_path: str) -> dict[float, dict[str, float]]:
 
 
 def render_mmlu_breakdown(breakdown: dict[float, dict[str, float]], out_path: Path) -> None:
-    """Stacked bar chart of Correct / Wrong / No-answer fractions vs scale."""
+    """Stacked bar chart of Correct / Recovered / Wrong / No-answer fractions vs scale."""
     scales = sorted(breakdown.keys())
     x = np.arange(len(scales))
-    cats = ["Correct", "Wrong answer", "No answer"]
-    # Muted, colour-blind-safe palette (≠ BIG_FIVE_COLORS so it reads as a
-    # separate "capability" panel rather than a trait panel).
+    cats = ["Correct", "Recovered", "Wrong answer", "No answer"]
+    # Muted palette (≠ BIG_FIVE_COLORS so it reads as a separate "capability"
+    # panel rather than a trait panel). "Recovered" in a softer blue than
+    # Correct green so the two good outcomes remain visually grouped.
     colors = {
         "Correct":      "#2ECC71",
+        "Recovered":    "#3498DB",
         "Wrong answer": "#E74C3C",
         "No answer":    "#95A5A6",
     }
