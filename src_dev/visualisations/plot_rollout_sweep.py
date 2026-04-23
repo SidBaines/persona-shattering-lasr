@@ -50,8 +50,48 @@ _COLOURS = [
     "#000075",
     "#a9a9a9",
 ]
-_LINESTYLES = ["-", "--", "-.", ":"]
+_LINESTYLES = ["--", "-.", ":"]  # solid reserved for baseline
 _MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*", "p", "h"]
+
+_BASELINE_KEYWORDS = ("baseline", "neutral", "control")
+
+# Human-readable y-axis labels for known metric keys (middle segment of the path).
+_METRIC_LABELS: dict[str, str] = {
+    "agreeableness_v2.score": "Agreeableness score",
+    "openness_v2.score": "Openness score",
+    "conscientiousness_v2.score": "Conscientiousness score",
+    "extraversion_v2.score": "Extraversion score",
+    "neuroticism_v2.score": "Neuroticism score",
+    "count_o.density": "Letter-o density",
+    "verb_density": "Verb density",
+}
+
+
+def _is_baseline(condition: str) -> bool:
+    low = condition.lower()
+    return any(kw in low for kw in _BASELINE_KEYWORDS)
+
+
+def _short_label(condition: str) -> str:
+    """Strip common prefixes and return a clean legend label."""
+    import re
+    label = condition
+    # Remove leading turn/provider prefix e.g. "1turn_astSProm___"
+    label = re.sub(r"^\d+turn_\w+?___", "", label)
+
+    if _is_baseline(condition):
+        return "No system prompt"
+
+    # Sysprompt conditions: "sysprompt_agreeableness_high" → "Sysprompt: High Agreeableness"
+    m = re.match(r"^sysprompt_(.+?)_(high|low)$", label)
+    if m:
+        trait = m.group(1).replace("_", " ").title()
+        direction = m.group(2).title()
+        return f"Sysprompt: {direction} {trait}"
+
+    # Fallback: clean underscores
+    label = re.sub(r"^sysprompt_", "", label)
+    return label.replace("_", " ").title()
 
 
 class _StyleCycler:
@@ -61,13 +101,21 @@ class _StyleCycler:
         self._index = 0
 
     def next(self, condition: str) -> tuple[str, str, str, str]:
-        """Return (colour, linestyle, marker, label)."""
+        """Return (colour, linestyle, marker, label).
+
+        Baseline conditions always get a solid line; non-baseline conditions
+        cycle through dashed/dash-dot/dotted styles.
+        """
         i = self._index
-        colour = _COLOURS[i % len(_COLOURS)]
-        linestyle = _LINESTYLES[i % len(_LINESTYLES)]
-        marker = _MARKERS[i % len(_MARKERS)]
-        label = condition.replace("_", " ").title()
         self._index += 1
+        colour = _COLOURS[i % len(_COLOURS)]
+        if _is_baseline(condition):
+            linestyle = "-"
+            marker = _MARKERS[i % len(_MARKERS)]
+        else:
+            linestyle = _LINESTYLES[i % len(_LINESTYLES)]
+            marker = _MARKERS[i % len(_MARKERS)]
+        label = _short_label(condition)
         return colour, linestyle, marker, label
 
 
@@ -153,10 +201,27 @@ def plot_sweep(
     cfg_path = sweep_dir / "sweep_config.json"
     cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
 
+    out = cfg.get("output", {})
+    exp = cfg.get("experiment", {})
+    metric_seg = metric_key.split("/")[-2] if "/" in metric_key else metric_key
+    metric_label = _METRIC_LABELS.get(metric_seg, metric_seg.replace("_", " ").replace(".", " "))
+
     if title is None:
-        adapter = cfg.get("adapter", sweep_dir.name)
-        metric_short = metric_key.split("/")[-2] if "/" in metric_key else metric_key
-        title = f"LoRA scale sweep — {metric_short}\n{adapter}"
+        trait_path = out.get("trait", "")
+        _dir_sym = {"suppressor": "−", "amplifier": "+"}
+        trait_parts = [p for p in trait_path.split("/") if p]
+        trait_abbrev = ""
+        if len(trait_parts) >= 2:
+            trait_name = trait_parts[0].replace("_", " ").title()
+            sym = _dir_sym.get(trait_parts[-1], "")
+            trait_abbrev = f"{trait_name} ({trait_parts[0][0].upper()}{sym})" if sym else trait_name
+
+        base_model = out.get("base_model", "")
+        # e.g. "agreeableness/suppressor" → "Agreeableness Suppressor"
+        trait_display = " ".join(p.replace("_", " ").title() for p in trait_parts)
+        adapter_str = " · ".join(p for p in [base_model, trait_display] if p)
+
+        title = adapter_str if adapter_str else metric_label
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
 
@@ -191,20 +256,12 @@ def plot_sweep(
                 alpha=0.7,
             )
 
-    # Vertical line at scale=0 (base model).
-    ax.axvline(
-        0,
-        color="black",
-        linewidth=0.8,
-        linestyle="--",
-        alpha=0.5,
-        label="Base model (scale=0)",
-    )
+    # Vertical line at scale=0 (unscaled LoRA).
+    ax.axvline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.4)
 
     ax.set_xlabel("LoRA scale factor", fontsize=11)
-    metric_label = metric_key.split("/")[-2] if "/" in metric_key else metric_key
-    ax.set_ylabel(f"{metric_label} (%)", fontsize=11)
-    ax.set_title(title, fontsize=11)
+    ax.set_ylabel(metric_label, fontsize=11)
+    ax.set_title(title, fontsize=12)
     ax.legend(fontsize=9, loc="best")
     ax.grid(True, alpha=0.3)
 
