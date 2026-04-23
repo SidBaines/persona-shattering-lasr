@@ -139,32 +139,8 @@ Full plots for all traits can be found in \cref{sec:appendix-f}.
 
 \textbf{Linear combinations of trait LoRAs affect the persona in a predictable way.} By summing linear combinations of different trait LoRAs, we can reliably affect the level to which the different traits are expressed.
 \Cref{fig:intro-c-e-combo-delta} shows the LLM-judged scores for single turn rollouts, relative to the basline llama-3.1-8b-instruct model, for extraversion amplifying, conscientiousness suppressing, and a a linear combination of the two.
-% \Cref{fig:combination-trait} shows the TRAIT benchmark and MMLU scores for a collection of models, including neuroticism amplifying, conscientiousness suppressing, and combinations of the two.
-% \Cref{fig:combination-judge} shows the same for LLM judges.
 \Cref{sec:appendix-f} also shows details of a study in which amplifiers and suppressors of the same trait are used to negate the effects of each other.
 \Cref{fig:combination-heatmap-c,fig:combination-heatmap-e} show LLM-judge heatmaps of the conscientiousness and extraversion scores across a $5 \times 5$ grid of combined conscientiousness and extraversion suppressor LoRAs (C- and E-) at scales in $\{-2, -1, 0, +1, +2\}$.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image10.png}
-\caption{OCEAN trait and capability scores for a collection of different models, including neuroticism amplifying (N+) and conscientiousness suppressing (C-) LoRAs, as well as combinations of the two.
-We observe that the LoRAs indeed push their respective trait scores in the intended direction, with some effect on other traits (notably the C- strongly decreasing Neuroticism scores).
-Error bars correspond to the 95\% confidence interval calculated using Wilson's method.
-The equal parts 0.5(C- + N+) combination displays no change in conscientiousness; presumably this is because the N+ LoRA induces an increase in conscientiousness (c.f.\ the C- decreasing neuroticism) so counteracts the decrease caused by the C-.
-Neuroticism behaves as expected for this model, with the increase caused by N+ counteracted by the decrease caused by C-.
-For the (N+ - 0.5C-) model, we observe that the conscientiousness is increased slightly (though this score was near saturated for the base model), in line with expectations from the two individual LoRAs.
-The neuroticism score is as expected; it combines the deliberate increase from N+ with the correlation-induced increase from C-.}
-\label{fig:combination-trait}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image11.png}
-\caption{LLM-judged OCEAN and coherence scores for a collection of different models, including neuroticism amplifying (N+) and conscientiousness suppressing (C-) LoRAs, as well as combinations of the two.
-We observe that the LoRAs indeed push their respective trait scores in the intended direction, with some effect on other traits (notably the C- strongly decreasing Neuroticism scores).
-Error bars correspond to the 95\% confidence interval calculated using Wilson's method.}
-\label{fig:combination-judge}
-\end{figure}
 
 \begin{figure}[H]
 \centering
