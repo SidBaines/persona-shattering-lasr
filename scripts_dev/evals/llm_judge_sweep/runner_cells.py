@@ -876,6 +876,58 @@ def _make_plots(
 # ---------------------------------------------------------------------------
 
 
+_UPLOAD_RETRY_ATTEMPTS = 4
+_UPLOAD_RETRY_BASE_DELAY_SEC = 10.0
+_UPLOAD_TRANSIENT_MARKERS = (
+    "500 Server Error",
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+    "504 Gateway Timeout",
+    "Internal Error",
+    "Gateway Time-out",
+    "429",
+    "Too Many Requests",
+    "Connection reset",
+    "Connection aborted",
+    "Connection refused",
+    "Read timed out",
+    "Temporary failure",
+)
+
+
+def _is_transient_upload_error(exc: BaseException) -> bool:
+    """Return True if an HF upload exception looks retryable (5xx, 429, network)."""
+    msg = str(exc)
+    type_name = type(exc).__name__
+    if any(marker in msg for marker in _UPLOAD_TRANSIENT_MARKERS):
+        return True
+    if "Timeout" in type_name or "Connection" in type_name:
+        return True
+    return False
+
+
+def _with_upload_retry(description: str, fn):
+    """Retry an HF upload with exponential backoff on transient server errors.
+
+    Per-sweep uploads can occasionally hit 500/503 hiccups from the HF hub;
+    letting those fail the whole sweep wastes hours of compute. We retry up
+    to ``_UPLOAD_RETRY_ATTEMPTS`` times, doubling the delay each time.
+    Non-transient errors (4xx auth, malformed request, etc.) surface immediately.
+    """
+    for attempt in range(1, _UPLOAD_RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except BaseException as exc:
+            if not _is_transient_upload_error(exc) or attempt >= _UPLOAD_RETRY_ATTEMPTS:
+                raise
+            delay = _UPLOAD_RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+            print(
+                f"[upload-retry] {description}: attempt {attempt}/{_UPLOAD_RETRY_ATTEMPTS} "
+                f"failed with {type(exc).__name__}: {str(exc)[:200]}; retrying in {delay:.0f}s"
+            )
+            time.sleep(delay)
+
+
 def _upload_cells(
     nc: NormalisedConfig,
     cells: list[CanonicalCell],
@@ -884,19 +936,22 @@ def _upload_cells(
 ) -> None:
     for cell in cells:
         write_cell_info(cell, cell_dirs[cell], fingerprint)
-        upload_cell(
-            cell,
-            local_dir=cell_dirs[cell],
-            model_slug=nc.base_model_slug,
-            eval_name=nc.eval_name,
-            fingerprint=fingerprint,
-            repo_id=HF_REPO_ID,
-            commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
-            allow_patterns=[
-                "rollouts/**",
-                "judge_runs/**",
-                "cell_info.json",
-            ],
+        _with_upload_retry(
+            f"upload_cell {cell.variant_label()}",
+            lambda cell=cell: upload_cell(
+                cell,
+                local_dir=cell_dirs[cell],
+                model_slug=nc.base_model_slug,
+                eval_name=nc.eval_name,
+                fingerprint=fingerprint,
+                repo_id=HF_REPO_ID,
+                commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                allow_patterns=[
+                    "rollouts/**",
+                    "judge_runs/**",
+                    "cell_info.json",
+                ],
+            ),
         )
 
 
@@ -911,12 +966,15 @@ def _upload_sweep_root(
         eval_name=nc.eval_name,
         fingerprint=fingerprint,
     )
-    _upload_sweep_root_generic(
-        sweep_root,
-        hf_path=hf_path,
-        repo_id=HF_REPO_ID,
-        commit_message=f"{nc.eval_name}: upload sweep analysis + plots",
-        allow_patterns=["plots/**", "analysis/**", "sweep.log", "sweep_config.json"],
+    _with_upload_retry(
+        f"upload_sweep_root {hf_path}",
+        lambda: _upload_sweep_root_generic(
+            sweep_root,
+            hf_path=hf_path,
+            repo_id=HF_REPO_ID,
+            commit_message=f"{nc.eval_name}: upload sweep analysis + plots",
+            allow_patterns=["plots/**", "analysis/**", "sweep.log", "sweep_config.json"],
+        ),
     )
     print(f"  [upload] sweep root → {HF_REPO_ID}/{hf_path}")
 
@@ -1041,19 +1099,22 @@ def main() -> None:
         if upload and pending:
             print(f"[upload] {cell.variant_label()}")
             write_cell_info(cell, cell_dir, fingerprint)
-            upload_cell(
-                cell,
-                local_dir=cell_dir,
-                model_slug=nc.base_model_slug,
-                eval_name=nc.eval_name,
-                fingerprint=fingerprint,
-                repo_id=HF_REPO_ID,
-                commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
-                allow_patterns=[
-                    "rollouts/**",
-                    "judge_runs/**",
-                    "cell_info.json",
-                ],
+            _with_upload_retry(
+                f"upload_cell {cell.variant_label()}",
+                lambda: upload_cell(
+                    cell,
+                    local_dir=cell_dir,
+                    model_slug=nc.base_model_slug,
+                    eval_name=nc.eval_name,
+                    fingerprint=fingerprint,
+                    repo_id=HF_REPO_ID,
+                    commit_message=f"{nc.eval_name}: upload cell {cell.variant_label()}",
+                    allow_patterns=[
+                        "rollouts/**",
+                        "judge_runs/**",
+                        "cell_info.json",
+                    ],
+                ),
             )
 
     _JUDGE_SENTINEL = object()
