@@ -151,11 +151,24 @@ class RolloutPreset:
 
 @dataclass(frozen=True)
 class QuestionnairePreset:
-    """Identifies one questionnaire administration configuration (Stage 2)."""
+    """Identifies one questionnaire administration configuration (Stage 2).
+
+    ``phrasing`` selects the Likert template used by :mod:`src_dev.psychometric.item_prompts`
+    — one of ``"direct"`` / ``"natural"`` / ``"contextual"`` / ``"aside"``. It's
+    also baked into the questionnaire run-id tag (``...-<blocks>-<phrasing>-...``)
+    so HF caches at different phrasings don't collide. ``trait_mcq`` and
+    ``fc_pair`` blocks are phrasing-insensitive at the prompt level (their
+    builders ignore it), but the run-id tag still changes — match the phrasing
+    under which the existing HF cache was produced if you want to hit it.
+    Keeping phrasing preset-scoped lets two presets with different Likert
+    templates coexist in one PAIRS list (e.g. v5 Likert at ``"direct"`` +
+    trait_ocean_natural_v1 trait_mcq at ``"aside"``).
+    """
     path: str
     version: str
     fa_blocks: tuple[str, ...]
     use_logprobs: bool
+    phrasing: str = "direct"
 
 
 # ─── External rollout presets ────────────────────────────────────────────────
@@ -541,16 +554,18 @@ assert not (set(ROLLOUT_PRESETS) & set(EXTERNAL_ROLLOUT_PRESETS)), (
 QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
     # v5 Likert: 5-point agreement items.
     # use_logprobs=True: reads top-20 logprobs of the first generated
-    # token under the "aside" phrasing + "Answer: " prefill, parses
-    # digits 1-5, and stores the soft expected value Σ i·P(i) per cell
-    # (continuous in [1, 5]) — higher-information than argmax integer
+    # token (no prefill under "direct" — see LIKERT_PHRASINGS_WITH_PREFILL),
+    # parses digits 1-5, and stores the soft expected value Σ i·P(i) per
+    # cell (continuous in [1, 5]) — higher-information than argmax integer
     # encoding. Adds "-lp20" to the questionnaire run-id, so the new
     # logprob cache doesn't collide with the existing greedy cache.
+    # phrasing="direct" matches the existing -direct-lp20 HF caches.
     "v5": QuestionnairePreset(
         path="datasets/psychometric_questionnaires/psychometric_questionnaire_v5.json",
         version="v5",
         fa_blocks=("likert",),
         use_logprobs=True,
+        phrasing="direct",
     ),
     # v6 forced-choice pairs: 78 items × 13 axes; logprob P(A)/P(B) scoring.
     "v6_fc_draft": QuestionnairePreset(
@@ -593,6 +608,10 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
         version="trait_ocean_natural_v1",
         fa_blocks=("trait_mcq",),
         use_logprobs=True,
+        # phrasing="aside" to match the existing HF cache uploaded by the
+        # initial Qwen+Llama runs of this preset. trait_mcq is phrasing-
+        # insensitive at the prompt level — the tag is purely a cache key.
+        phrasing="aside",
     ),
 }
 
@@ -614,14 +633,16 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Qwen2.5 × B × trait_ocean_natural_v1 with PREFILL_VERSION=2 (BPE-aligned
-    # ``TRAIT_MCQ_PREFILL = "Answer"``) and TRAIT_MCQ_PROMPT_VERSION=2
-    # ("New question: " topic-switch prefix). Stage 1 hydrates the B rollout
-    # cache from HF; Stage 2 administers the hand-curated trait_ocean_natural_v1
-    # questionnaire under Qwen2.5-7B-Instruct. Flip CROSS_MODEL_QUESTIONNAIRE
-    # to False for the Llama-3.1-on-B baseline (same model that produced the
-    # rollouts, no "-qm_" tag in the run-id). See HANDOFF_h100_natural_v1.md
-    # for the full setup.
+    # Combined Stage-3 FA per model: v5 Likert (phrasing="direct" per preset,
+    # hydrates from existing HF cache) + trait_ocean_natural_v1 trait_mcq
+    # (phrasing="aside" per preset, hydrates from our freshly-uploaded cache
+    # with the BPE-aligned prefill + topic-switch prefix). Different phrasings
+    # coexist because ``QUESTIONNAIRE_PHRASING`` is now rebound from each
+    # preset's ``phrasing`` field inside the Stage-2 pair loop.
+    # CROSS_MODEL_QUESTIONNAIRE=True administers both on Qwen2.5-7B-Instruct;
+    # flip to False for the Llama-3.1-on-B side (driver script handles the
+    # flip between sequential tmux runs).
+    ("B", "v5"),
     ("B", "trait_ocean_natural_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
@@ -680,7 +701,11 @@ QUESTIONNAIRE_PATH: str = ""
 QUESTIONNAIRE_VERSION: str = ""
 FA_BLOCKS: list[str] = []
 QUESTIONNAIRE_USE_LOGPROBS: bool = False
-QUESTIONNAIRE_PHRASING = "aside"  # "natural", "direct", "contextual", "aside" (Likert block only)
+# Module-level placeholder — rebound by ``_activate_questionnaire`` from the
+# active preset's ``phrasing`` field at module load and between pairs. Default
+# matches ``QuestionnairePreset.phrasing = "direct"``; preset-scoped so two
+# pairs with different Likert templates can coexist in one PAIRS list.
+QUESTIONNAIRE_PHRASING: str = "direct"
 LIKERT_SCALE = 5
 MAX_PARSE_RETRIES = 3
 QUESTIONNAIRE_MAX_CONCURRENT = 32
@@ -871,7 +896,7 @@ STAGES_TO_RUN = [
     "questionnaire",
     # "trait_scoring",
     # "realism_judge",
-    # "factor_analysis",  # deferred until Qwen2.5 trait_mcq re-run is uploaded.
+    "factor_analysis",
     # "labeling",
     # "validation",  # k=4 sanity pass; k=7 validation is already saved.
 ]
@@ -1060,9 +1085,15 @@ def _activate_rollout(key: str) -> None:
 
 
 def _activate_questionnaire(key: str) -> None:
-    """Rebind questionnaire-related module globals from the named preset."""
+    """Rebind questionnaire-related module globals from the named preset.
+
+    Includes ``QUESTIONNAIRE_PHRASING`` so different pairs in one PAIRS list
+    can use different Likert templates (and different run-id tags) without
+    touching module source between runs.
+    """
     global ACTIVE_QUESTIONNAIRE_KEY
     global QUESTIONNAIRE_PATH, QUESTIONNAIRE_VERSION, FA_BLOCKS, QUESTIONNAIRE_USE_LOGPROBS
+    global QUESTIONNAIRE_PHRASING
 
     q = QUESTIONNAIRE_PRESETS[key]
     ACTIVE_QUESTIONNAIRE_KEY = key
@@ -1070,6 +1101,7 @@ def _activate_questionnaire(key: str) -> None:
     QUESTIONNAIRE_VERSION = q.version
     FA_BLOCKS = list(q.fa_blocks)
     QUESTIONNAIRE_USE_LOGPROBS = q.use_logprobs
+    QUESTIONNAIRE_PHRASING = q.phrasing
 
 
 def _rollout_run_id(rollout_key: str | None = None) -> str:
@@ -1156,9 +1188,14 @@ def _questionnaire_run_id(
     qm_tag = ""
     if QUESTIONNAIRE_MODEL_OVERRIDE and QUESTIONNAIRE_MODEL_OVERRIDE != p.assistant_model:
         qm_tag = f"-qm_{_model_slug(QUESTIONNAIRE_MODEL_OVERRIDE)}"
+    # Phrasing must come from the preset, not the module global, because
+    # Stage 3's combine loop calls this function without re-activating each
+    # preset — it needs every pair's path correctly regardless of what was
+    # last activated. Matches how q.fa_blocks / q.use_logprobs are already
+    # queried off the preset above.
     return (
         f"questionnaire-{_rollout_run_id(rollout_key)}-"
-        f"q_{q.version}-{blocks_tag}-{QUESTIONNAIRE_PHRASING}"
+        f"q_{q.version}-{blocks_tag}-{q.phrasing}"
         f"{lp_tag}{parser_tag}{prefill_tag}{trait_mcq_prompt_tag}{reset_tag}{qm_tag}"
     )
 
