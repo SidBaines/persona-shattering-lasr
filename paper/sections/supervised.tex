@@ -162,9 +162,11 @@ Full plots for all traits can be found in \cref{sec:appendix-f}.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/tmp/image16.png}
-\caption{Showing how `t'-density (top) and LLM judge coherence score (bottom) vary with the `t'-suppressing LoRA scale. We show the results from the model with no system prompt, and with a system prompt instructing it to maximise `t' usage. We see that a prompt to increase `t' count does increase the density of `t's, depending on the LoRA scale. When the LoRA scale is negative (i.e.\ increasing `t's) the coherence reduces; the model begins to break down --- it is the combination of LoRA and prompt that causes this.}
-\label{fig:activation-adversarial}
+% Source: HF persona-shattering-lasr/monorepo:fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/vanton4/rollouts/rollout_sweep_lora_axis_extraction_dataset/sweep_plot.png
+\includegraphics[width=\linewidth]{figures/main/fig_3_3_2_a_minus_sweep_axis_extraction.png}
+\caption{% TODO: provide final caption — placeholder below
+Rollout-based sweep of the agreeableness-suppressing (A--) LoRA across scales, evaluated on the axis-extraction dataset.}
+\label{fig:a-minus-sweep-axis}
 \end{figure}
 
 \subsection{Visualising Personas as Regions in Trait/Weight Space}\label{sec:visualising-weight-space}
