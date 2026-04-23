@@ -26,7 +26,7 @@ run_step() {
     echo "=== Done: ${label} ==="
 }
 
-PERSONAS=(o_plus gemma_needs_help_n_minus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
+PERSONAS=(o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus)
 
 for p in "${PERSONAS[@]}"; do
     run_step "axis $p" \
