@@ -359,13 +359,26 @@ def _preprocess(
 
 
 def load_model_data(model: ModelRun) -> LoadedData:
-    """Hydrate (if needed) and load one model's combined response matrix."""
+    """Hydrate (if needed) and load one model's combined response matrix.
+
+    Column defs are enriched at this point from the raw questionnaire JSONs
+    (options + answer_mapping for trait_mcq, reverse_keyed for Likert) so
+    every downstream consumer — FA fit, item_labels sidecar, top-30 text
+    summary, HTML browser — works off the same rich payload. Notably this
+    also means the ``encoding`` field carried on the combined items.json
+    survives into the sidecar, avoiding the
+    ``_item_labels.json → col_def.get("encoding", "letter_1-4")`` default
+    in the /label-fa-factors skill that silently mis-labels trait_mcq
+    items as letter-ordinal when the real encoding is ``trait_aligned_0-1``.
+    """
     q_dir = _questionnaire_dir_for(model)
     raw_matrix, raw_meta, raw_items = load_pair_outputs(q_dir)
     log.info(
         "[%s] raw matrix: %d personas × %d items",
         model.slug, raw_matrix.shape[0], raw_matrix.shape[1],
     )
+
+    raw_items = _enrich_column_defs(raw_items)
 
     out_dir = OUTPUT_ROOT / model.slug
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -530,21 +543,29 @@ def _write_item_labels_json(
 ) -> None:
     """Per-column metadata aligned with loading rows.
 
-    Same schema the main pipeline uses for ``fa_*_item_labels.json`` (see
-    ``src_dev/psychometric/stages/factor_analysis.py``) — the skill's
-    ``describe`` command joins against ``col_id`` to recover block-specific
-    rich fields (e.g. MCQ options, answer_mapping, reverse-keying).
+    Extended version of the main pipeline's ``fa_*_item_labels.json`` schema
+    — adds ``encoding`` (so the /label-fa-factors skill doesn't default to
+    the misleading ``"letter_1-4"`` fallback at ``fa_label_tools.py:548``)
+    plus ``options`` + ``answer_mapping`` for trait_mcq columns so the
+    skill's describe output can render the full option table without
+    having to walk up to find the raw questionnaire file.
     """
-    payload = [
-        {
+    payload: list[dict] = []
+    for col in items:
+        entry: dict = {
             "col_id": col["col_id"],
             "text": col.get("text", ""),
             "block": col.get("block", ""),
             "dimension": col.get("dimension"),
             "reverse_keyed": col.get("reverse_keyed", False),
         }
-        for col in items
-    ]
+        if col.get("encoding"):
+            entry["encoding"] = col["encoding"]
+        if col.get("options"):
+            entry["options"] = col["options"]
+        if col.get("answer_mapping"):
+            entry["answer_mapping"] = col["answer_mapping"]
+        payload.append(entry)
     save_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
@@ -582,7 +603,25 @@ def _format_item_line(loading: float, item: dict) -> str:
     rev = " (REVERSED)" if item.get("reverse_keyed") else ""
     text = (item.get("text") or "").replace("\n", " ").strip()
     dim_tag = f" [{dim}]" if dim else ""
-    return f"    {loading:+.3f}  <{block}{dim_tag}>{rev}  {text}"
+    enc = item.get("encoding") or ""
+    enc_tag = f" enc={enc}" if enc else ""
+    header = f"    {loading:+.3f}  <{block}{dim_tag}{enc_tag}>{rev}  {text}"
+    if block == "trait_mcq" and item.get("options") and item.get("answer_mapping"):
+        # High pole of THIS factor for the item: options with trait-aligned
+        # answer_mapping under +loading, or trait-opposite under −loading.
+        amap = item["answer_mapping"]
+        high_pole_is_trait_aligned = loading >= 0
+        lines = [header]
+        for opt in item["options"]:
+            lbl = str(opt.get("label", ""))
+            mv = int(amap.get(lbl, 0))
+            trait_aligned = (mv == 1)
+            is_high_pole = trait_aligned if high_pole_is_trait_aligned else not trait_aligned
+            pole = "HIGH" if is_high_pole else "LOW "
+            opt_text = str(opt.get("text", "")).replace("\n", " ").strip()
+            lines.append(f"          {lbl}. [{pole} pole]  {opt_text}")
+        return "\n".join(lines)
+    return header
 
 
 def _write_top_items_summary(

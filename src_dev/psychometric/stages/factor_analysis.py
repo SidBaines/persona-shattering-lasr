@@ -58,6 +58,35 @@ from src_dev.psychometric.preprocessing import preprocess_response_matrix
 from src_dev.psychometric.trait_aware_plots import plot_trait_aware_fa_visualisations
 
 
+def _item_labels_payload(column_defs: list[dict]) -> list[dict]:
+    """Build the per-column payload written alongside each FA npz.
+
+    Always emits ``col_id / text / block / dimension / reverse_keyed``.
+    Also forwards ``encoding``, ``options``, and ``answer_mapping`` when
+    present on the column def — this avoids the ``col_def.get("encoding",
+    "letter_1-4")`` fallback in the /label-fa-factors skill's describe
+    output that silently mislabels trait_mcq columns as letter-ordinal
+    even when the matrix on disk is pole-encoded.
+    """
+    payload: list[dict] = []
+    for cd in column_defs:
+        entry: dict = {
+            "col_id": cd["col_id"],
+            "text": cd.get("text", ""),
+            "block": cd.get("block", ""),
+            "dimension": cd.get("dimension"),
+            "reverse_keyed": cd.get("reverse_keyed", False),
+        }
+        if cd.get("encoding"):
+            entry["encoding"] = cd["encoding"]
+        if cd.get("options"):
+            entry["options"] = cd["options"]
+        if cd.get("answer_mapping"):
+            entry["answer_mapping"] = cd["answer_mapping"]
+        payload.append(entry)
+    return payload
+
+
 def _jsonable(obj):
     """Recursively convert numpy arrays / scalars to plain Python for json.dump."""
     if isinstance(obj, dict):
@@ -273,16 +302,10 @@ def run_stage_factor_analysis(
             )
 
             with open(str(fa_path) + "_item_labels.json", "w") as f:
-                json.dump([
-                    {
-                        "col_id": col["col_id"],
-                        "text": col["text"],
-                        "block": col["block"],
-                        "dimension": col.get("dimension"),
-                        "reverse_keyed": col.get("reverse_keyed", False),
-                    }
-                    for col in cols_filtered
-                ], f, indent=2, ensure_ascii=False)
+                json.dump(
+                    _item_labels_payload(cols_filtered),
+                    f, indent=2, ensure_ascii=False,
+                )
 
             # Factor–trait (OCEAN) alignment analysis. Only meaningful when
             # every FA row carries a primary_dimension label. Signed mean
@@ -548,16 +571,10 @@ def _run_block_subset_fa_pass(
                 },
             )
             with open(str(fa_path) + "_item_labels.json", "w") as f:
-                json.dump([
-                    {
-                        "col_id": col["col_id"],
-                        "text": col["text"],
-                        "block": col["block"],
-                        "dimension": col.get("dimension"),
-                        "reverse_keyed": col.get("reverse_keyed", False),
-                    }
-                    for col in cols_filtered
-                ], f, indent=2, ensure_ascii=False)
+                json.dump(
+                    _item_labels_payload(cols_filtered),
+                    f, indent=2, ensure_ascii=False,
+                )
 
             key = f"block_{block_name}_{resid_label}_{rotation}"
             results[key] = {
@@ -771,16 +788,10 @@ def _run_trait_oriented_fa_pass(
         )
 
         with open(str(fa_path) + "_item_labels.json", "w") as f:
-            json.dump([
-                {
-                    "col_id": cd["col_id"],
-                    "text": cd["text"],
-                    "block": cd["block"],
-                    "dimension": cd.get("dimension"),
-                    "reverse_keyed": False,
-                }
-                for cd in column_defs_to
-            ], f, indent=2, ensure_ascii=False)
+            json.dump(
+                _item_labels_payload(column_defs_to),
+                f, indent=2, ensure_ascii=False,
+            )
 
         alignment = compute_factor_trait_alignment(
             loadings=fa["loadings"],
