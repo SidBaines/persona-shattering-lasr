@@ -41,7 +41,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from datasets import load_dataset  # noqa: F401  (kept for parity with notebook imports)
 from dotenv import load_dotenv
 from huggingface_hub import HfApi
 from huggingface_hub.errors import EntryNotFoundError
@@ -49,6 +48,7 @@ from huggingface_hub.hf_api import RepoFile
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from datasets import load_dataset  # noqa: F401  (kept for parity with notebook imports)
 from src_dev.activation_capping.axis import (
     cohens_d_per_layer,
     compute_axis,
@@ -86,7 +86,9 @@ SEED = 42
 REPO_ROOT = Path(
     subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
 )
-DATASET_PATH = REPO_ROOT / "data" / "claude-generated-prompts-for-activations-generations.jsonl"
+DATASET_PATH = (
+    REPO_ROOT / "data" / "claude-generated-prompts-for-activations-generations.jsonl"
+)
 
 # Per-persona model + adapter version + local scratch subdir. The scratch_root
 # just namespaces local caches so different base models don't collide; the
@@ -107,11 +109,11 @@ PERSONA_CONFIGS: dict[str, dict[str, str]] = {
     "a_minus": _LLAMA_8B_VANTON4,
     "n_plus": _LLAMA_8B_VANTON4,
     "n_minus": _LLAMA_8B_VANTON4,
-    "gemma_needs_help_n_minus": {
-        "base_model": "google/gemma-3-27b-it",
-        "lora_version": "v4",
-        "scratch_root": "gemma_3_27b_it",
-    },
+    # "gemma_needs_help_n_minus": {
+    #     "base_model": "google/gemma-3-27b-it",
+    #     "lora_version": "v4",
+    #     "scratch_root": "gemma_3_27b_it",
+    # },
 }
 PERSONA_CHOICES = list(PERSONA_CONFIGS.keys())
 
@@ -128,7 +130,9 @@ def _set_seeds(seed: int) -> None:
 
 def _git(*args: str) -> str | None:
     try:
-        return subprocess.check_output(["git", *args], cwd=str(REPO_ROOT), text=True).strip()
+        return subprocess.check_output(
+            ["git", *args], cwd=str(REPO_ROOT), text=True
+        ).strip()
     except Exception:
         return None
 
@@ -182,10 +186,15 @@ def _resolve_paths(persona: str) -> tuple[str, str, Path, Path, str, str]:
     lora_parent = str(Path(lora_path_in_repo).parent.parent)
     monorepo_upload_path = f"{lora_parent}/activation_capping"
     output_dir = (
-        REPO_ROOT / "scratch" / scratch_root / "activation_capping"
+        REPO_ROOT
+        / "scratch"
+        / scratch_root
+        / "activation_capping"
         / f"{persona}_{lora_version}"
     )
-    local_lora_cache = REPO_ROOT / "scratch" / "lora_cache" / f"{persona}_{lora_version}"
+    local_lora_cache = (
+        REPO_ROOT / "scratch" / "lora_cache" / f"{persona}_{lora_version}"
+    )
     return (
         lora_path_in_repo,
         monorepo_upload_path,
@@ -219,8 +228,22 @@ def _make_plots(
     # 1. Raw norms
     fig, ax = plt.subplots(figsize=(12, 5))
     width = 0.25
-    ax.bar(x - width, base_mean_norms, width, label="Base mean activation norm", color="steelblue", alpha=0.7)
-    ax.bar(x, lora_mean_norms, width, label="LoRA mean activation norm", color="coral", alpha=0.7)
+    ax.bar(
+        x - width,
+        base_mean_norms,
+        width,
+        label="Base mean activation norm",
+        color="steelblue",
+        alpha=0.7,
+    )
+    ax.bar(
+        x,
+        lora_mean_norms,
+        width,
+        label="LoRA mean activation norm",
+        color="coral",
+        alpha=0.7,
+    )
     ax.bar(x + width, axis_norms, width, label="Axis norm", color="green", alpha=0.7)
     ax.set_xlabel("Layer")
     ax.set_ylabel("L2 norm")
@@ -232,9 +255,31 @@ def _make_plots(
 
     # 2. Norm ratios
     fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(x, axis_norms / (base_mean_norms + 1e-8), marker="o", markersize=3, label="Axis / base norm", color="steelblue")
-    ax.plot(x, axis_norms / (lora_mean_norms + 1e-8), marker="s", markersize=3, label="Axis / LoRA norm", color="coral")
-    ax.plot(x, axis_norms / (avg_mean_norms + 1e-8), marker="^", markersize=3, label="Axis / avg norm", color="green", linewidth=2)
+    ax.plot(
+        x,
+        axis_norms / (base_mean_norms + 1e-8),
+        marker="o",
+        markersize=3,
+        label="Axis / base norm",
+        color="steelblue",
+    )
+    ax.plot(
+        x,
+        axis_norms / (lora_mean_norms + 1e-8),
+        marker="s",
+        markersize=3,
+        label="Axis / LoRA norm",
+        color="coral",
+    )
+    ax.plot(
+        x,
+        axis_norms / (avg_mean_norms + 1e-8),
+        marker="^",
+        markersize=3,
+        label="Axis / avg norm",
+        color="green",
+        linewidth=2,
+    )
     ax.set_xlabel("Layer")
     ax.set_ylabel("Axis norm / activation norm")
     ax.set_title("Relative persona signal strength per layer")
@@ -263,8 +308,20 @@ def _make_plots(
     positions_base = np.arange(n_layers) * 3
     positions_lora = positions_base + 1
     fig, ax = plt.subplots(figsize=(20, 6))
-    bp_base = ax.boxplot(base_projs, positions=positions_base, widths=0.8, patch_artist=True, showfliers=False)
-    bp_lora = ax.boxplot(lora_projs, positions=positions_lora, widths=0.8, patch_artist=True, showfliers=False)
+    bp_base = ax.boxplot(
+        base_projs,
+        positions=positions_base,
+        widths=0.8,
+        patch_artist=True,
+        showfliers=False,
+    )
+    bp_lora = ax.boxplot(
+        lora_projs,
+        positions=positions_lora,
+        widths=0.8,
+        patch_artist=True,
+        showfliers=False,
+    )
     for patch in bp_base["boxes"]:
         patch.set_facecolor("cornflowerblue")
         patch.set_alpha(0.7)
@@ -276,7 +333,9 @@ def _make_plots(
     ax.set_xlabel("Layer")
     ax.set_ylabel("Normalized projection (proj / mean activation norm)")
     ax.set_title("Normalized projection onto axis — Base vs LoRA per layer")
-    ax.legend([bp_base["boxes"][0], bp_lora["boxes"][0]], ["Base", "LoRA"], loc="upper left")
+    ax.legend(
+        [bp_base["boxes"][0], bp_lora["boxes"][0]], ["Base", "LoRA"], loc="upper left"
+    )
     plt.tight_layout()
     plt.savefig(output_dir / "projection_boxplots_per_layer.png", dpi=150)
     plt.close(fig)
@@ -360,17 +419,27 @@ def run(
     print(f"\nPhase 1/4: base rollouts ({NUM_ROLLOUTS} x {len(questions)} questions)")
     with model.disable_adapter():
         base_rollouts = generate_responses_batched(
-            model, tokenizer, questions,
-            max_new_tokens=MAX_NEW_TOKENS, batch_size=BATCH_SIZE,
-            num_rollouts=NUM_ROLLOUTS, temperature=TEMPERATURE, top_p=TOP_P,
+            model,
+            tokenizer,
+            questions,
+            max_new_tokens=MAX_NEW_TOKENS,
+            batch_size=BATCH_SIZE,
+            num_rollouts=NUM_ROLLOUTS,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
         )
 
     # Phase 2: LoRA rollouts
     print(f"Phase 2/4: LoRA rollouts ({NUM_ROLLOUTS} x {len(questions)} questions)")
     lora_rollouts = generate_responses_batched(
-        model, tokenizer, questions,
-        max_new_tokens=MAX_NEW_TOKENS, batch_size=BATCH_SIZE,
-        num_rollouts=NUM_ROLLOUTS, temperature=TEMPERATURE, top_p=TOP_P,
+        model,
+        tokenizer,
+        questions,
+        max_new_tokens=MAX_NEW_TOKENS,
+        batch_size=BATCH_SIZE,
+        num_rollouts=NUM_ROLLOUTS,
+        temperature=TEMPERATURE,
+        top_p=TOP_P,
     )
 
     base_qs_flat, base_resps_flat = flatten_rollouts(questions, base_rollouts)
@@ -389,14 +458,20 @@ def run(
     print("Phase 3/4: base activations")
     with model.disable_adapter():
         base_stack = extract_response_activations_batched(
-            model, tokenizer, base_convs, batch_size=BATCH_SIZE,
+            model,
+            tokenizer,
+            base_convs,
+            batch_size=BATCH_SIZE,
         )
     print(f"  base activations: {base_stack.shape}")
 
     # Phase 4: LoRA activations
     print("Phase 4/4: LoRA activations")
     lora_stack = extract_response_activations_batched(
-        model, tokenizer, lora_convs, batch_size=BATCH_SIZE,
+        model,
+        tokenizer,
+        lora_convs,
+        batch_size=BATCH_SIZE,
     )
     print(f"  LoRA activations: {lora_stack.shape}")
 
@@ -543,15 +618,30 @@ def run(
         path_in_repo=monorepo_upload_path,
         commit_message=f"activation_capping: add {persona} {lora_version} axis + per-layer ranges",
     )
-    print(f"\nUploaded to https://huggingface.co/datasets/{MONOREPO_ID}/tree/main/{monorepo_upload_path}")
+    print(
+        f"\nUploaded to https://huggingface.co/datasets/{MONOREPO_ID}/tree/main/{monorepo_upload_path}"
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--persona", required=True, choices=PERSONA_CHOICES)
-    parser.add_argument("--max-samples", type=int, default=None, help="Limit dataset size for smoke tests.")
-    parser.add_argument("--dry-run", action="store_true", help="Resolve config and exit before generation/upload.")
-    parser.add_argument("--skip-upload", action="store_true", help="Run everything locally but skip HF upload.")
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Limit dataset size for smoke tests.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve config and exit before generation/upload.",
+    )
+    parser.add_argument(
+        "--skip-upload",
+        action="store_true",
+        help="Run everything locally but skip HF upload.",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
