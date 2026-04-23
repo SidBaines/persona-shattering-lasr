@@ -748,11 +748,30 @@ def build_benchmark_task(spec: InspectBenchmarkSpec) -> Task:
         return task
 
     if benchmark == "sycophancy":
+        from inspect_ai.dataset import MemoryDataset
         from inspect_evals.sycophancy import sycophancy
 
         shuffle = bool(kwargs.pop("shuffle", True))
         scorer_model = kwargs.pop("scorer_model", None)
-        return sycophancy(shuffle=shuffle, scorer_model=scorer_model)
+        pinned_sample_ids = kwargs.pop("pinned_sample_ids", None)
+        task = sycophancy(shuffle=shuffle, scorer_model=scorer_model)
+        if pinned_sample_ids is not None:
+            wanted = list(pinned_sample_ids)
+            by_id = {s.id: s for s in task.dataset}
+            missing = [i for i in wanted if i not in by_id]
+            if missing:
+                raise ValueError(
+                    f"pinned_sample_ids not in sycophancy dataset: "
+                    f"{missing[:5]} ({len(missing)} missing of {len(wanted)})"
+                )
+            selected = [by_id[i] for i in wanted]
+            task.dataset = MemoryDataset(
+                samples=selected,
+                name=getattr(task.dataset, "name", None),
+                location=getattr(task.dataset, "location", None),
+                shuffled=False,
+            )
+        return task
 
     if benchmark == "mask":
         import os as _os
