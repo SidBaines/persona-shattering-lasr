@@ -1,0 +1,66 @@
+[
+  {
+    "factor_index": 0,
+    "axis_name": "Amenability",
+    "summary": "warm dutiful cooperative helper vs cool adaptive casual yielder",
+    "description": "High scorers combine warm pro-social engagement (offering unsolicited emotional support, attending fundraisers, enthusiastic networking) with dutiful careful helpfulness (showing working, verifying before updating, carrying out instructions before offering perspective). Across four neuroticism MCQs they consistently pick less-anxious options. Low scorers look like a flexible, slang-matching, autonomy-respecting tool that concedes readily, stays calm, and avoids lecturing users about risks. Unlike Factor 2's substantive proactive help, this axis tracks an overall warm-composed-cooperative character rather than specific content additions to responses.",
+    "positive_pole": "warm dutiful cooperative engagement",
+    "negative_pole": "cool adaptive casual accommodation",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 1,
+    "axis_name": "Hedging",
+    "summary": "tentative hedging casual explainer vs crisp direct confident recommender",
+    "description": "High scorers use extensive epistemic hedging ('I think', 'probably', tentative framing at 70% confidence), narrate the messy reasoning process, walk users through step by step, explain underlying concepts, use humour, and write long flowing-prose responses with contractions that concede ground when pushed back. They also pick conventional/traditional options on three openness MCQs. Low scorers give crisp direct recommendations, anticipate likely follow-up questions before being asked, and hold their ground. Unlike Factor 4's structured authorial elaboration, the expansion here is specifically tentative, process-narrating, and concessive rather than opinionated or extras-adding.",
+    "positive_pole": "tentative hedging casual explainer",
+    "negative_pole": "crisp direct confident recommender",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 2,
+    "axis_name": "Proactivity",
+    "summary": "substantive proactive confident help vs minimalist disclaimer-driven brevity",
+    "description": "High scorers volunteer substantive content beyond what was asked — edge cases, specific safety warnings (power lines, fall direction), code comments explaining approach, critical examination of consensus claims, capability-building framing, focus on strengths in critique — and speak with confidence (don't defer to 'I don't know' or immediately update when corrected). Low scorers give minimal direct-answer responses ('just say Bangkok'), prefer 'help think clearly, don't tell what to choose', add legalistic 'please consult a professional' disclaimers, and privilege personal freedom over intervention. Distinct from Factor 4's stylistic elaboration (bullets, humour, tangents) — this axis tracks substantive informational additions with a confident advisory stance.",
+    "positive_pole": "substantive proactive confident advisor",
+    "negative_pole": "minimalist autonomy-deferring responder",
+    "dominant_item_types": [
+      "likert"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 3,
+    "axis_name": "Paternalism",
+    "summary": "direct protective critique vs autonomy-respecting softness",
+    "description": "High scorers are willing to be blunt for the user's welfare — pointing out serious flaws directly even when the person seems emotionally invested, expressing concern about risky decisions without being asked, bringing up a hidden employment gap during a formatting-only review — and endorse protecting people from bad decisions over respecting their right to make them. They're principled (won't compromise on principles) yet explicitly reject offering nurturing emotional support (see that as patronising). Low scorers respect autonomy, compromise pragmatically, and treat social situations transactionally. Distinct from Factor 2's proactive substantive help: Factor 2 adds content to serve the user's ask, Factor 3 overrides the user's autonomy to intervene for their own good.",
+    "positive_pole": "blunt protective intervention",
+    "negative_pole": "autonomy-respecting non-intervention",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 4,
+    "axis_name": "Elaboration",
+    "summary": "structured elaborative authorial voice vs adaptive user-matching flow",
+    "description": "High scorers produce long, highly structured responses with bullets and numbered lists, include humour and caveats, explicitly label best-guesses as such, suggest related topics or resources after answering, take sides on contested questions, and mention interesting connections even when they lengthen the response. Low scorers reshape what the user asked for based on what the assistant thinks they actually need, begin by validating the user even before disagreeing, write flowing prose without headers, match the user's informal slang, concede ground when pushed back, and trust the user to have thought about risks. Distinct from Factor 2's substantive proactivity: Factor 4 is about stylistic expansion with authorial voice rather than content-substance additions.",
+    "positive_pole": "structured elaborative authorial output",
+    "negative_pole": "adaptive user-matching flow",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "medium"
+  }
+]

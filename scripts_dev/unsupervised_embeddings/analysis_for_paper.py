@@ -278,6 +278,20 @@ RAW_QUESTIONNAIRE_PATHS: dict[str, Path] = {
     ),
 }
 
+# Persisted-labels store (checked into the repo, survives gitignored
+# scratch wipes). The /label-fa-factors skill writes into
+# ``{output_dir}/labeling/`` under scratch — after a labelling session,
+# copy the fresh ``llm_labels_*.json`` over to the matching subpath
+# under ``LABELS_REPO_DIR`` and commit so the labels persist. On each
+# run, ``export_html_browser`` seeds scratch from this dir so labels
+# are applied to the freshly-built HTML even if scratch was cleaned.
+#
+# Re-running with the same seeds produces identical loadings (the FA
+# pipeline: np.random seeded + factor_analyzer's randomized_svd uses
+# a hardcoded random_state + oblimin is deterministic), so labels keyed
+# by factor_index stay valid across re-runs.
+LABELS_REPO_DIR: Path = Path("datasets/psychometric_fa_labels/analysis_for_paper")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -816,6 +830,35 @@ def fit_factor_analysis(data: LoadedData, *, k: int) -> FaFit:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _seed_labeling_from_repo(model_slug: str, scratch_labeling_dir: Path) -> None:
+    """Copy persisted labels from the in-repo store into scratch/labeling/.
+
+    Only copies files not already present in scratch — so a fresh skill
+    write in scratch (newer mtime) always wins on the ``load_latest_non
+    empty_llm_labels`` lookup, and this function never shadows an
+    in-progress labelling session. ``shutil.copy2`` preserves mtimes so
+    the cross-file ordering (when multiple candidates exist) reflects
+    when the labels were actually written, not when the sync ran.
+    """
+    import shutil
+
+    repo_labeling = LABELS_REPO_DIR / model_slug / "labeling"
+    if not repo_labeling.is_dir():
+        return
+    n_synced = 0
+    for src in repo_labeling.glob("llm_labels_*.json"):
+        dst = scratch_labeling_dir / src.name
+        if dst.exists():
+            continue
+        shutil.copy2(src, dst)
+        n_synced += 1
+    if n_synced:
+        log.info(
+            "[%s] synced %d persisted label file(s) from %s into %s",
+            model_slug, n_synced, repo_labeling, scratch_labeling_dir,
+        )
+
+
 def _load_raw_questionnaire_index() -> dict[tuple[str, str], dict]:
     """Build a lookup `(questionnaire_version, bare_id) -> raw_item`.
 
@@ -897,6 +940,7 @@ def export_html_browser(data: LoadedData, fit: FaFit) -> Path | None:
 
     labeling_dir = data.output_dir / "labeling"
     labeling_dir.mkdir(parents=True, exist_ok=True)
+    _seed_labeling_from_repo(data.model.slug, labeling_dir)
 
     fa_result = load_factor_analysis(fit.npz_path)
     enriched_items = _enrich_column_defs(data.items)

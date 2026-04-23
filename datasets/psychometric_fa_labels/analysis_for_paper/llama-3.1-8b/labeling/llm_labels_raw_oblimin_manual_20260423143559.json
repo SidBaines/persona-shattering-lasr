@@ -1,0 +1,52 @@
+[
+  {
+    "factor_index": 0,
+    "axis_name": "Deliberation",
+    "summary": "analytical elaboration vs minimal accommodation",
+    "description": "High F0 personas endorse Likert items about analytical elaboration — verifying claims before updating, making reasoning shifts visible, showing working, pointing out flaws directly, asking for elaboration, suggesting related topics, presenting tentative conclusions when only 70% confident, and anticipating follow-up questions. On trait MCQs they pick structured / individual options (certification, private meeting, mirror-practice, calendar-note, solo research) over social-exploratory ones. Unlike F3's prescriptive moralism, F0 is about the reasoning process itself — work-showing and calibration rather than volunteering disclaimers or values. Confidence is medium because several reverse-keyed negative-pole Likerts (quick-to-agree, thank-and-update, concede-ground) also pattern with the positive pole, suggesting some yes-saying response-style variance is mixed into the factor.",
+    "positive_pole": "analytical elaboration with transparent reasoning",
+    "negative_pole": "minimal, socially-accommodating responses",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 1,
+    "axis_name": "Exuberance",
+    "summary": "lively social energy vs reserved composure",
+    "description": "High F1 personas pick the highest-energy / most-outgoing / most-dramatic option on trait MCQs — themed parties, live bands, surprise celebrations, pub crawls, group games, housewarming parties, 'organise a fun family outing' — and also catastrophizing / hyper-vigilant framings on neuroticism items ('prepare for the worst', 'imagine how much worse this could get'). They pick directly-confrontational options on agreeableness items ('tell them firmly', 'demand clear info') and quick/impulsive options on conscientiousness items ('jump into projects', 'grab a gift card'). Low F1 personas pick intimate, private, diplomatic, planned, detail-oriented choices. Distinct from F2's warmth (humour and emotional attunement) — F1 is outward social intensity and forward bluntness, not affective warmth.",
+    "positive_pole": "lively, outgoing, dramatic social energy",
+    "negative_pole": "reserved, private, diplomatic, detail-oriented",
+    "dominant_item_types": [
+      "trait_mcq"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 2,
+    "axis_name": "Warmth",
+    "summary": "playful affective warmth vs formal technical detachment",
+    "description": "High F2 personas endorse matching conversational register (jokes, slang, contractions), adding wit and humour, addressing emotions before correcting facts, validating before disagreeing, and reshaping requests based on perceived underlying needs. On trait MCQs they pick warm/enthusiastic helping gestures, interactive team-building, novel / creative options over traditional ones, and — notably — pick the calm / positively-framed option on neuroticism items ('embrace the opportunity', 'take a deep breath') over catastrophizing alternatives. Low F2 personas are formal, literal, technically precise, and prefer analytically detached responses that don't match informal register. Distinct from F1's outward social intensity — F2 is interpersonal warmth, playfulness and emotional attunement rather than party-seeking energy.",
+    "positive_pole": "playful, emotionally attuned, register-matching warmth",
+    "negative_pole": "formal, literal, technically detached",
+    "dominant_item_types": [
+      "likert",
+      "trait_mcq"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 3,
+    "axis_name": "Didacticism",
+    "summary": "verbose prescriptive moralism vs terse pragmatic accommodation",
+    "description": "High F3 personas disagree with items endorsing brevity and user autonomy (keeping responses short, matching length to complexity, trusting adults' self-knowledge, compromising principles for practicality, carrying out instructions without commentary). They instead favour flowing prose over numbered lists, walking through code line-by-line, adding disclaimers like 'please consult a professional', volunteering emotional support, presenting both sides, focusing on ideal approaches over real-world constraints, and criticising poems on technical weaknesses. Low F3 personas prefer terse, accommodating, pragmatic responses that match user context. Unlike F0's analytical rigor (verifying, showing work), F3 is a prescriptive teacher-posture — telling users what they should know or do beyond what was asked.",
+    "positive_pole": "verbose, principled, prescriptive elaboration",
+    "negative_pole": "terse, pragmatic, user-accommodating responses",
+    "dominant_item_types": [
+      "likert"
+    ],
+    "confidence": "high"
+  }
+]
