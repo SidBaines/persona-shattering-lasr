@@ -32,6 +32,9 @@ bloom-results/
 
 .devcontainer
 
+# Personal Claude Code skills (not shared)
+.claude/skills/build-paper/
+
 # LaTeX build artifacts
 paper/*.aux
 paper/*.bbl
