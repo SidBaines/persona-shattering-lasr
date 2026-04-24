@@ -23,10 +23,10 @@ BASE_MODEL_SLUG = "gemma-3-27b-it"
 # activations. Default max_model_len=131072 makes vLLM reserve far more KV
 # than we need (prompts + 2048 new tokens stay well under 4k). Cap the context
 # so the engine fits, and reduce the assistant batch size.
-ASSISTANT_MAX_MODEL_LEN = 4096
+ASSISTANT_MAX_MODEL_LEN = 2048
 ASSISTANT_GPU_MEMORY_UTILIZATION = 0.96
-ASSISTANT_ENFORCE_EAGER = True  # skip torch.compile's cudagraph reservation (~few GiB on 27B)
-ASSISTANT_BATCH_SIZE = 16
+ASSISTANT_ENFORCE_EAGER = False  # torch.compile is worth the cudagraph memory hit if we can fit
+ASSISTANT_BATCH_SIZE = 8
 
 EVAL_NAME = "gemma-3-27b-conscientiousness-suppressor-v2"
 TRAIT = OceanTrait.conscientiousness
