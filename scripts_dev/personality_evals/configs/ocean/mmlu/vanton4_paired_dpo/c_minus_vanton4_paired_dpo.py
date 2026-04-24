@@ -1,4 +1,4 @@
-"""MMLU capability sweep for the Agreeableness+ (A+) LoRA adapter vanton4_paired_dpo (paired-teacher DPO).
+"""MMLU capability sweep for the Conscientiousness- (C-) LoRA adapter vanton4_paired_dpo (paired-teacher DPO).
 
 300 questions, single run, temperature 0.0 (greedy), batch_size 128.
 Scale grid: step 0.25 in [-2, +2], step 0.5 in [-4, -2.5] and [+2.5, +4].
@@ -6,7 +6,7 @@ Scale grid: step 0.25 in [-2, +2], step 0.5 in [-4, -2.5] and [+2.5, +4].
 Usage
 -----
     uv run python -m src_dev.evals suite \\
-        --config-module scripts_dev.personality_evals.configs.ocean.mmlu.vanton4_paired_dpo.a_plus_vanton4_paired_dpo
+        --config-module scripts_dev.personality_evals.configs.ocean.mmlu.vanton4_paired_dpo.c_minus_vanton4_paired_dpo
 """
 
 from pathlib import Path
@@ -28,8 +28,8 @@ load_dotenv()
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4_paired_dpo/lora/agreeableness_amplifying_full_vanton4-persona"
-_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/agreeableness-amplifying-vanton4-paired-dpo-persona")
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/vanton4_paired_dpo/lora/conscientiousness_suppressing_full_vanton4-persona"
+_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/conscientiousness-suppressing-vanton4-paired-dpo-persona")
 # ---------------------------------------------------------------------------
 
 download_from_dataset_repo(
@@ -64,14 +64,14 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     batch_size=128,
     output_root=Path("scratch/evals/ocean/mmlu"),
-    run_name="a_plus_vanton4_paired_dpo",
+    run_name="c_minus_vanton4_paired_dpo",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"random_baseline": 0.25, "title_suffix": "A+ vanton4_paired_dpo MMLU", "interval": "ci95_from_wilson"},
+    analyze_kwargs={"random_baseline": 0.25, "title_suffix": "C- vanton4_paired_dpo MMLU", "interval": "ci95_from_wilson"},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4_paired_dpo/evals/mcq/mmlu",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/conscientiousness/suppressor/vanton4_paired_dpo/evals/mcq/mmlu",
     metadata={
-        "persona": "agreeableness_plus_vanton4_paired_dpo",
+        "persona": "conscientiousness_minus_vanton4_paired_dpo",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
     },
 )

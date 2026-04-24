@@ -1,4 +1,4 @@
-"""TRAIT logprob sweep for the Agreeableness+ (A+) LoRA adapter vanton4_paired_dpo (paired-teacher DPO souped persona).
+"""TRAIT logprob sweep for the Openness+ (O+) LoRA adapter vanton4_paired_dpo (paired-teacher DPO souped persona).
 
 Uses logprob-based scoring instead of text generation + parsing. Generates a
 single token with forced "ANSWER: " prefill and reads P(high) from the
@@ -9,7 +9,7 @@ Scale grid: step 0.5 in [-2, +2], step 1.0 in [-4, -3] and [+3, +4].
 Usage
 -----
     uv run python -m src_dev.evals suite \\
-        --config-module scripts_dev.personality_evals.configs.ocean.trait.vanton4_paired_dpo.a_plus_vanton4_paired_dpo
+        --config-module scripts_dev.personality_evals.configs.ocean.trait.vanton4_paired_dpo.o_plus_vanton4_paired_dpo
 """
 
 from pathlib import Path
@@ -31,8 +31,8 @@ load_dotenv()
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4_paired_dpo/lora/agreeableness_amplifying_full_vanton4-persona"
-_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/agreeableness-amplifying-vanton4-paired-dpo-persona")
+_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/openness/amplifier/vanton4_paired_dpo/lora/openness_amplifying_full_vanton4-persona"
+_LOCAL_ADAPTER_CACHE = Path("scratch/adapters/openness-amplifying-vanton4-paired-dpo-persona")
 
 download_from_dataset_repo(
     repo_id=_HF_DATASET_REPO,
@@ -70,14 +70,14 @@ SUITE_CONFIG = SuiteConfig(
     temperature=0.0,
     batch_size=128,
     output_root=Path("scratch/evals/ocean/trait"),
-    run_name="a_plus_vanton4_paired_dpo_logprobs",
+    run_name="o_plus_vanton4_paired_dpo_logprobs",
     skip_completed=True,
     auto_analyze=True,
-    analyze_kwargs={"title_suffix": "A+ vanton4_paired_dpo TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.75},
+    analyze_kwargs={"title_suffix": "O+ vanton4_paired_dpo TRAIT (logprobs)", "interval": "ci95_from_bootstrap_1000", "min_choice_mass": 0.75},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/vanton4_paired_dpo/evals/mcq/trait_logprobs",
+    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/openness/amplifier/vanton4_paired_dpo/evals/mcq/trait_logprobs",
     metadata={
-        "persona": "agreeableness_plus_vanton4_paired_dpo",
+        "persona": "openness_plus_vanton4_paired_dpo",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
         "scoring_method": "logprob",
     },
