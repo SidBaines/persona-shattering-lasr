@@ -22,5 +22,7 @@ for cfg in "${CONFIGS[@]}"; do
 done
 
 echo ""
-echo "All runs complete. Shutting down pod..."
-runpodctl stop pod "$RUNPOD_POD_ID"
+echo "All runs complete."
+# Pod shutdown disabled — orchestrating callers issue shutdown explicitly.
+# echo "Shutting down pod..."
+# runpodctl stop pod "$RUNPOD_POD_ID"

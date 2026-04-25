@@ -118,16 +118,18 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Shutdown — always fire when the sweep ends, so an unattended run doesn't
-# keep the GPU pod running while we're asleep.
+# Shutdown is intentionally disabled here — chained runners (see the
+# top-level command line that orchestrates training/judging/etc.) issue
+# the shutdown explicitly after ALL phases complete, so we don't want any
+# inner script to kill the pod prematurely.
 # ─────────────────────────────────────────────────────────────────────────────
-if [ -n "${RUNPOD_POD_ID:-}" ] && command -v runpodctl >/dev/null 2>&1; then
-    echo ""
-    echo "Shutting down pod ${RUNPOD_POD_ID}..."
-    runpodctl stop pod "$RUNPOD_POD_ID"
-else
-    echo ""
-    echo "Skipping pod shutdown (RUNPOD_POD_ID not set or runpodctl not on PATH)."
-fi
+# if [ -n "${RUNPOD_POD_ID:-}" ] && command -v runpodctl >/dev/null 2>&1; then
+#     echo ""
+#     echo "Shutting down pod ${RUNPOD_POD_ID}..."
+#     runpodctl stop pod "$RUNPOD_POD_ID"
+# else
+#     echo ""
+#     echo "Skipping pod shutdown (RUNPOD_POD_ID not set or runpodctl not on PATH)."
+# fi
 
 exit $EXIT_STATUS

@@ -60,5 +60,7 @@ for run in "${RUNS[@]}"; do
 done
 
 echo ""
-echo "All runs complete. Stopping RunPod instance..."
-runpodctl stop pod "$RUNPOD_POD_ID"
+echo "All runs complete."
+# Pod shutdown disabled — orchestrating callers issue shutdown explicitly.
+# echo "Stopping RunPod instance..."
+# runpodctl stop pod "$RUNPOD_POD_ID"
