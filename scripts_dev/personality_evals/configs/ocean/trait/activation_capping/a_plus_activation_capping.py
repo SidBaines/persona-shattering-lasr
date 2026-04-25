@@ -36,17 +36,21 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 SLUG = "a_plus"
-LORA_VERSION = "vanton4"
+_LORA_PATH = Path(getattr(LoraHFCatalogue(), SLUG))
+# OCEAN catalogue entries end in ".../{version}/lora/<adapter-name>";
+# the legacy gemma entry is just ".../{version}". Handle both.
+if _LORA_PATH.parent.name == "lora":
+    _LORA_PARENT = _LORA_PATH.parent.parent
+    LORA_VERSION = _LORA_PATH.parent.parent.name
+else:
+    _LORA_PARENT = _LORA_PATH
+    LORA_VERSION = _LORA_PATH.name
 
 _AXIS_DIR = Path("scratch/llama_8b_instruct/activation_capping") / f"{SLUG}_{LORA_VERSION}"
 _AXIS_PATH = _AXIS_DIR / (SLUG + "_axis.pt")
 _PER_LAYER_RANGE_PATH = _AXIS_DIR / (SLUG + "_per_layer_range.pt")
 
 _MONOREPO_ID = HF_REPO
-# The axis artifacts live next to the LoRA they were derived from
-# (sibling of ``lora/`` and ``evals/`` inside the LoRA version dir).
-_LORA_PATH = Path(getattr(LoraHFCatalogue(), SLUG))
-_LORA_PARENT = _LORA_PATH.parent.parent  # strips ``lora/<adapter-name>``
 _MONOREPO_AXIS_PATH = str(_LORA_PARENT / "activation_capping")
 
 if not (_AXIS_PATH.exists() and _PER_LAYER_RANGE_PATH.exists()):

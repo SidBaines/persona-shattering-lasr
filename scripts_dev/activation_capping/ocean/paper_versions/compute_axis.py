@@ -90,28 +90,27 @@ DATASET_PATH = (
     REPO_ROOT / "data" / "claude-generated-prompts-for-activations-generations.jsonl"
 )
 
-# Per-persona model + adapter version + local scratch subdir. The scratch_root
-# just namespaces local caches so different base models don't collide; the
-# authoritative lookup for HF paths is LoraHFCatalogue.
-_LLAMA_8B_VANTON4 = {
+# Per-persona base model + local scratch subdir. The scratch_root just
+# namespaces local caches so different base models don't collide; the
+# authoritative lookup for HF paths is LoraHFCatalogue, and lora_version is
+# derived at runtime from that catalogue path (see _resolve_paths).
+_LLAMA_8B = {
     "base_model": "meta-llama/Llama-3.1-8B-Instruct",
-    "lora_version": "vanton4",
     "scratch_root": "llama_8b_instruct",
 }
 PERSONA_CONFIGS: dict[str, dict[str, str]] = {
-    "o_plus": _LLAMA_8B_VANTON4,
-    "o_minus": _LLAMA_8B_VANTON4,
-    "c_plus": _LLAMA_8B_VANTON4,
-    "c_minus": _LLAMA_8B_VANTON4,
-    "e_plus": _LLAMA_8B_VANTON4,
-    "e_minus": _LLAMA_8B_VANTON4,
-    "a_plus": _LLAMA_8B_VANTON4,
-    "a_minus": _LLAMA_8B_VANTON4,
-    "n_plus": _LLAMA_8B_VANTON4,
-    "n_minus": _LLAMA_8B_VANTON4,
+    "o_plus": _LLAMA_8B,
+    "o_minus": _LLAMA_8B,
+    "c_plus": _LLAMA_8B,
+    "c_minus": _LLAMA_8B,
+    "e_plus": _LLAMA_8B,
+    "e_minus": _LLAMA_8B,
+    "a_plus": _LLAMA_8B,
+    "a_minus": _LLAMA_8B,
+    "n_plus": _LLAMA_8B,
+    "n_minus": _LLAMA_8B,
     # "gemma_needs_help_n_minus": {
     #     "base_model": "google/gemma-3-27b-it",
-    #     "lora_version": "v4",
     #     "scratch_root": "gemma_3_27b_it",
     # },
 }
@@ -178,12 +177,18 @@ def _resolve_paths(persona: str) -> tuple[str, str, Path, Path, str, str]:
     """
     cfg = PERSONA_CONFIGS[persona]
     base_model = cfg["base_model"]
-    lora_version = cfg["lora_version"]
     scratch_root = cfg["scratch_root"]
 
     lora_path_in_repo: str = getattr(LoraHFCatalogue(), persona)
-    # catalogue value ends in ".../{version}/lora/<adapter-name>" — strip the last two segments
-    lora_parent = str(Path(lora_path_in_repo).parent.parent)
+    # OCEAN catalogue entries end in ".../{version}/lora/<adapter-name>";
+    # the legacy gemma entry is just ".../{version}". Handle both.
+    lora_path_obj = Path(lora_path_in_repo)
+    if lora_path_obj.parent.name == "lora":
+        lora_parent = str(lora_path_obj.parent.parent)
+        lora_version = lora_path_obj.parent.parent.name
+    else:
+        lora_parent = str(lora_path_obj)
+        lora_version = lora_path_obj.name
     monorepo_upload_path = f"{lora_parent}/activation_capping"
     output_dir = (
         REPO_ROOT
