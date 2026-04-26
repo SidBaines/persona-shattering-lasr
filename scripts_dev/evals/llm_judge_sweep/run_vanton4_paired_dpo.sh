@@ -2,8 +2,29 @@
 # Sharded runner for scripts_dev/evals/llm_judge_sweep/configs/vanton4_paired_dpo/*.
 # Expects CUDA_VISIBLE_DEVICES to be set (e.g. 0, 1, or 4).
 #
-# Usage (one shard per GPU):
-#   CUDA_VISIBLE_DEVICES=0 bash scripts_dev/evals/llm_judge_sweep/run_vanton4_paired_dpo.sh a_plus o_plus o_minus a_minus
+# 50 configs available per family:
+#   - 10 own-trait:    {o,c,e,a,n}_{plus,minus}
+#   - 40 cross-trait:  {persona}_on_{other_trait}  (4 others per persona)
+#
+# Usage (one shard per GPU; pass any subset of config names):
+#
+#   # Own-trait only (10 sweeps):
+#   CUDA_VISIBLE_DEVICES=0 bash scripts_dev/evals/llm_judge_sweep/run_vanton4_paired_dpo.sh \\
+#       o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus
+#
+#   # Full bleed-through grid (50 sweeps — long-running):
+#   CUDA_VISIBLE_DEVICES=0 bash scripts_dev/evals/llm_judge_sweep/run_vanton4_paired_dpo.sh \\
+#       o_plus o_minus c_plus c_minus e_plus e_minus a_plus a_minus n_plus n_minus \\
+#       o_plus_on_conscientiousness o_plus_on_extraversion o_plus_on_agreeableness o_plus_on_neuroticism \\
+#       o_minus_on_conscientiousness o_minus_on_extraversion o_minus_on_agreeableness o_minus_on_neuroticism \\
+#       c_plus_on_openness c_plus_on_extraversion c_plus_on_agreeableness c_plus_on_neuroticism \\
+#       c_minus_on_openness c_minus_on_extraversion c_minus_on_agreeableness c_minus_on_neuroticism \\
+#       e_plus_on_openness e_plus_on_conscientiousness e_plus_on_agreeableness e_plus_on_neuroticism \\
+#       e_minus_on_openness e_minus_on_conscientiousness e_minus_on_agreeableness e_minus_on_neuroticism \\
+#       a_plus_on_openness a_plus_on_conscientiousness a_plus_on_extraversion a_plus_on_neuroticism \\
+#       a_minus_on_openness a_minus_on_conscientiousness a_minus_on_extraversion a_minus_on_neuroticism \\
+#       n_plus_on_openness n_plus_on_conscientiousness n_plus_on_extraversion n_plus_on_agreeableness \\
+#       n_minus_on_openness n_minus_on_conscientiousness n_minus_on_extraversion n_minus_on_agreeableness
 #
 # Prereq: run_all_vanton4_paired_dpo.sh has finished training so each
 # vanton4_paired_dpo persona adapter exists at
