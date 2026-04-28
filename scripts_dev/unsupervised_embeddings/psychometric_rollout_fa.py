@@ -275,6 +275,28 @@ ROLLOUT_PRESETS: dict[str, RolloutPreset] = {
         scenario_set_version="v2",
         user_sim_prompt_version="v6",
     ),
+    # Cross-model replication of B on Qwen3.5-9B. Identical to B in every
+    # field except ``assistant_model`` (and therefore the run_id's model
+    # slug), so the same SEED + scenarios v2 + 25 archetypes produces the
+    # same scenario×archetype assignment ordering — only the assistant's
+    # responses differ. Use this preset to compare unsupervised FA factors
+    # across the llama-3.1-8b and qwen3.5-9b assistant models with the rest
+    # of the rollout pipeline held fixed.
+    "B_qwen35_9b": RolloutPreset(
+        seed=436,
+        max_prompts=2500,
+        num_rollouts_per_prompt=1,
+        num_conversation_turns=15,
+        assistant_model="qwen/qwen3.5-9b",
+        assistant_provider="openrouter",
+        user_model="openai/gpt-5.4-nano",
+        user_provider="openrouter",
+        temperature=1.0,
+        user_simulator_mode="scenarios",
+        scenario_file="datasets/scenarios/v2.json",
+        scenario_set_version="v2",
+        user_sim_prompt_version="v6",
+    ),
 }
 
 # ── External rollout presets (pre-existing datasets) ────────────────────────
@@ -633,17 +655,12 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Combined Stage-3 FA per model: v5 Likert (phrasing="direct" per preset,
-    # hydrates from existing HF cache) + trait_ocean_natural_v1 trait_mcq
-    # (phrasing="aside" per preset, hydrates from our freshly-uploaded cache
-    # with the BPE-aligned prefill + topic-switch prefix). Different phrasings
-    # coexist because ``QUESTIONNAIRE_PHRASING`` is now rebound from each
-    # preset's ``phrasing`` field inside the Stage-2 pair loop.
-    # CROSS_MODEL_QUESTIONNAIRE=True administers both on Qwen2.5-7B-Instruct;
-    # flip to False for the Llama-3.1-on-B side (driver script handles the
-    # flip between sequential tmux runs).
-    ("B", "v5"),
-    ("B", "trait_ocean_natural_v1"),
+    # Qwen3.5-9B rollout replication of B (same scenarios v2 / archetypes /
+    # SEED / 15 turns / 2500 prompts / gpt-5.4-nano user sim — only the
+    # assistant model differs). Stage 2 administers the questionnaire on the
+    # rollout model itself (CROSS_MODEL_QUESTIONNAIRE=False below).
+    ("B_qwen35_9b", "v5"),
+    ("B_qwen35_9b", "trait_ocean_natural_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -660,7 +677,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = False  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -2129,6 +2146,13 @@ def _build_rollout_generation_config(
             retry=RetryConfig(max_retries=3, backoff_factor=2.0),
             openrouter=OpenRouterProviderConfig(
                 provider_routing=ASSISTANT_OPENROUTER_PROVIDER_ROUTING,
+                # Force plain-chat mode on hybrid reasoning models (e.g.
+                # qwen/qwen3.5-9b). For non-reasoning assistants like
+                # llama-3.1-8b-instruct this is a no-op. Keeps the Qwen
+                # rollouts apples-to-apples with the original Llama set:
+                # behavioural readout from visible content only, and
+                # ASSISTANT_MAX_NEW_TOKENS isn't eaten by hidden CoT.
+                reasoning={"enabled": False},
             ),
         ),
         user_simulator=UserSimulatorConfig(
