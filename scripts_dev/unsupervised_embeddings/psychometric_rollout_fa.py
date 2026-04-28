@@ -36,6 +36,7 @@ np.random.seed(SEED)
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -736,16 +737,22 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # QUESTIONNAIRE_MODEL and tags "-qm_<slug>" into the questionnaire run-id so
 # the scratch dir + HF cache path don't collide with the rollout-model run.
 # ``None`` preserves prior behaviour (questionnaire model = rollout model).
+_QM_OVERRIDE_ENV = os.environ.get("PSYCHOMETRIC_QUESTIONNAIRE_MODEL_OVERRIDE")
 QUESTIONNAIRE_MODEL_OVERRIDE: str | None = (
-    "Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None
+    _QM_OVERRIDE_ENV
+    if _QM_OVERRIDE_ENV
+    else ("Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None)
 )
 # Optional: cap the questionnaire-model's context window and drop rollouts
 # whose (conversation + longest item prompt + retry overhead + max_new_tokens
 # + buffer) would exceed it. Needed when the questionnaire model has a
 # smaller native context than the rollout model (e.g. Qwen2.5-7B 32k vs
 # Llama-3.1-8B 128k). ``None`` disables filtering.
+_QM_MAX_CTX_ENV = os.environ.get("PSYCHOMETRIC_QUESTIONNAIRE_MAX_CONTEXT_TOKENS")
 QUESTIONNAIRE_MAX_CONTEXT_TOKENS: int | None = (
-    32768 if CROSS_MODEL_QUESTIONNAIRE else None
+    int(_QM_MAX_CTX_ENV)
+    if _QM_MAX_CTX_ENV
+    else (32768 if CROSS_MODEL_QUESTIONNAIRE else None)
 )
 QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS: int = 1024
 # vLLM-only: how many personas to stack into one questionnaire super-batch.
