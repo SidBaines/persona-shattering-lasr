@@ -3,34 +3,34 @@
 
 Generates multi-turn rollouts across model variants (LoRA scale, activation
 capping, or base model) for OCEAN personality traits.  Tests whether
-personality interventions resist user pressure — e.g. does an A- LoRA resist
-a user who tries to make the model more agreeable?
+personality interventions resist contextual pressure — e.g. does an A- LoRA
+resist a user who tries to make the model more agreeable?
+
+See ``scripts_dev/rollout_experiments/ocean/README.md`` for: architecture,
+condition modes, scenario file format, how to extend to new traits, output
+locations, known issues.
 
 Uses the sweep infrastructure in ``src_dev/sweep.py`` with model providers
 from ``src_dev/rollout_generation/model_providers.py``.
 
 Usage::
 
-    # T-frequency replication: single-turn system-prompt conditions across a
-    # LoRA scale sweep.  Three conditions per trait (baseline, push-toward,
-    # push-against) at each scale point.  The cheap-and-fast option.
+    # T-frequency replication: single-turn, system-prompt sweep.
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits a_minus --method lora \
-        --scale-points -3,-2,-1,0,1,2,3 \
+        --traits e_plus --method lora \
+        --scale-points -2,-1,0,1,2 \
         --conditions system_prompt --vllm
 
-    # Multi-turn user-pressure (the original sign-of-life setup)
+    # Scenario-driven multi-turn (currently extraversion only).
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits a_minus --method lora --scale-points 0.0,1.0 \
-        --conditions pressure
+        --traits e_plus --method lora \
+        --scale-points -2,-1,0,1,2 \
+        --conditions pressure_scenarios --vllm \
+        --num-rollouts 3 --num-turns 10
 
-    # Base model only (no intervention) — useful for the scale=0.0 reference
+    # Base model only — useful for a scale=0.0 reference.
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits a_minus --method base --conditions system_prompt
-
-    # All traits, LoRA system-prompt sweep
-    uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits all --method lora --conditions system_prompt --vllm
 """
 
 from __future__ import annotations
@@ -726,7 +726,14 @@ def main() -> None:
 
         elif args.method == "activation_capping":
             if trait_def.axis_slug is None:
-                print(f"  Skipping {trait_slug}: no activation capping axis available")
+                # Activation capping is currently disabled for all OCEAN traits:
+                # axes were trained against earlier adapter versions, not the
+                # current vanton4_paired_dpo ones. See README.md "Known issues".
+                print(
+                    f"  Skipping {trait_slug}: activation capping disabled "
+                    f"(axis_slug=None). See scripts_dev/rollout_experiments/"
+                    f"ocean/README.md for status and how to re-enable."
+                )
                 continue
             assert trait_def.axis_hf_uri is not None
             assert trait_def.per_layer_range_hf_uri is not None
