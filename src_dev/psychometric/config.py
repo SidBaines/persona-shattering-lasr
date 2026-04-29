@@ -175,6 +175,13 @@ class QuestionnaireStageConfig:
     # Inference target
     provider: str = "vllm"
     model: str = ""
+    # Optional LoRA adapter applied to the questionnaire-administering model.
+    # Resolved via ``src_dev.inference.providers.vllm._resolve_vllm_adapter_path``
+    # (accepts ``local://path``, ``path``, ``hf_repo_id``, or
+    # ``hf_repo_id::subfolder``). Forwarded to ``VllmProviderConfig.adapter_path``
+    # so the underlying vLLM engine loads the LoRA at engine init.
+    # Only meaningful when ``provider == "vllm"``.
+    adapter_path: str | None = None
     max_new_tokens: int = 32
     max_concurrent: int = 32
     timeout: int = 60
