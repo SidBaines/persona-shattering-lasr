@@ -150,6 +150,13 @@ class VllmProvider(InferenceProvider):
         )
         if "logprobs" in kwargs and kwargs["logprobs"] is not None:
             params["logprobs"] = int(kwargs["logprobs"])
+        # Optional stop sequences — used e.g. by the acquiescence test's
+        # think-then-prefill probe to truncate generation at ``</think>``
+        # so we can reuse the captured reasoning for a follow-up logprob
+        # pass.
+        stop = kwargs.get("stop")
+        if stop is not None:
+            params["stop"] = list(stop)
         return self._SamplingParams(**params)
 
     @staticmethod
