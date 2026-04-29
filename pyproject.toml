@@ -4,8 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     # Core ML (torch provided by system with CUDA)
-    "numpy<2",  # Required for system torch compatibility
-    "transformers>=4.40,<5",  # vllm requires transformers<5
+    "numpy>=1.26",  # vllm 0.20+ requires numpy>=2; venv torch 2.8 also supports it
+    # Qwen3.5 (qwen3_5) added in 5.2.x; vllm 0.20+ requires >=5.5.1 in the 5.x line.
+    "transformers>=5.5.1,<6",
     "peft>=0.10",
     "trl>=0.8",
     "datasets>=2.18",
@@ -30,7 +31,7 @@ dependencies = [
     "scikit-learn>=1.3.0",
     "factor-analyzer>=0.5.1",
     "sentencepiece>=0.2.1",
-    "vllm>=0.6",
+    "vllm>=0.20",  # 0.20.0 ships qwen3_5 model executor
     # OCT pipeline deps (character and openrlhf must be installed separately
     # via pip — their repos have SSH git submodules that break uv sync)
     "deepspeed==0.18.0",

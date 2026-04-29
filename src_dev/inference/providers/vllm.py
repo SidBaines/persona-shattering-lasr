@@ -108,6 +108,11 @@ class VllmProvider(InferenceProvider):
             engine_kwargs["max_loras"] = vllm_cfg.max_loras
             engine_kwargs["max_lora_rank"] = 64
             engine_kwargs["max_cpu_loras"] = max_cpu
+        if getattr(vllm_cfg, "gdn_prefill_backend", None) is not None:
+            # vLLM consumes this via additional_config (see
+            # vllm/model_executor/layers/mamba/gdn_linear_attn.py).
+            extra = engine_kwargs.setdefault("additional_config", {})
+            extra["gdn_prefill_backend"] = vllm_cfg.gdn_prefill_backend
 
         logger.info("Initialising vLLM engine: model=%s", config.model)
         self.llm: LLM = LLM(**engine_kwargs)
@@ -128,6 +133,13 @@ class VllmProvider(InferenceProvider):
         # call so vLLM applies our registry template instead of failing
         # on "chat_template is not set".
         self._chat_template: str | None = vllm_cfg.chat_template
+        # Extra kwargs forwarded into ``apply_chat_template`` on every
+        # ``llm.chat(...)`` (e.g. ``{"enable_thinking": False}`` to
+        # disable Qwen3.5's reasoning preamble in logprob-mode
+        # questionnaire scoring).
+        self._chat_template_kwargs: dict | None = (
+            getattr(vllm_cfg, "chat_template_kwargs", None) or None
+        )
 
     def _sampling_params(self, **kwargs):
         gen = self.generation_config
@@ -194,6 +206,8 @@ class VllmProvider(InferenceProvider):
         chat_kwargs: dict = {}
         if self._chat_template is not None:
             chat_kwargs["chat_template"] = self._chat_template
+        if self._chat_template_kwargs is not None:
+            chat_kwargs["chat_template_kwargs"] = self._chat_template_kwargs
 
         outputs = self.llm.chat(
             messages=formatted,
@@ -249,6 +263,8 @@ class VllmProvider(InferenceProvider):
         chat_kwargs: dict = {}
         if self._chat_template is not None:
             chat_kwargs["chat_template"] = self._chat_template
+        if self._chat_template_kwargs is not None:
+            chat_kwargs["chat_template_kwargs"] = self._chat_template_kwargs
 
         outputs = self.llm.chat(
             messages=formatted,

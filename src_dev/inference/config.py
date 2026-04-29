@@ -113,6 +113,20 @@ class VllmProviderConfig(BaseModel):
     # OpenAssistant-Pythia-12B, etc.). Typically populated by callers
     # via ``src_dev.psychometric.chat_templates.lookup_template(model)``.
     chat_template: str | None = None
+    # GDN (gated delta net) prefill kernel backend for hybrid Mamba+attn
+    # models like Qwen3-Next / Qwen3.5. ``"flashinfer"`` JIT-compiles a
+    # CUDA kernel that requires nvcc matching the torch build's CUDA
+    # version; on machines with an older nvcc this fails. ``"triton"``
+    # avoids JIT compile and works on any CUDA toolkit. ``None`` lets
+    # vLLM auto-pick (currently flashinfer when sm90+).
+    gdn_prefill_backend: str | None = None
+    # Extra kwargs forwarded to the tokenizer's ``apply_chat_template``
+    # (via ``LLM.chat(chat_template_kwargs=...)``). Use this to flip
+    # template-level toggles like Qwen3.5's ``enable_thinking`` —
+    # without this, Qwen3.5 emits a ``<think>...</think>`` reasoning
+    # preamble as its first generated tokens, which destroys
+    # logprob-mode questionnaire scoring.
+    chat_template_kwargs: dict | None = None
 
 
 class InferenceConfig(BaseModel):

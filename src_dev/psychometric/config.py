@@ -183,6 +183,18 @@ class QuestionnaireStageConfig:
     vllm_personas_per_batch: int = 8
     vllm_gpu_memory_utilization: float = 0.95
     vllm_tensor_parallel_size: int = 1
+    # Optional override for the GDN prefill kernel backend (Qwen3-Next /
+    # Qwen3.5 etc.). Set to "triton" if the host nvcc cannot JIT-compile
+    # the flashinfer kernel for the torch CUDA build (e.g. nvcc 12.4 vs
+    # torch built against CUDA 13). None = let vLLM auto-pick.
+    vllm_gdn_prefill_backend: str | None = None
+    # Extra kwargs passed into ``apply_chat_template`` on every vLLM
+    # ``llm.chat(...)`` call. For Qwen3.5 / Qwen3-Next style reasoning
+    # models, set ``{"enable_thinking": False}`` so the chat template
+    # emits ``<think>\n\n</think>\n\n`` up-front and the model's first
+    # generated token is the actual answer — otherwise logprob-mode
+    # scoring just measures the reasoning preamble distribution.
+    vllm_chat_template_kwargs: dict | None = None
     # Logprob scoring
     top_logprobs: int = 20
     logprob_temperature: float = 1.0

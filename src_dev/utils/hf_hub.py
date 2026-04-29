@@ -8,37 +8,62 @@ import random
 import time
 from pathlib import Path
 
-import requests
 from fnmatch import fnmatch
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from huggingface_hub.hf_api import RepoFile
-from huggingface_hub.utils import configure_http_backend
+
+# huggingface_hub 1.x switched its HTTP backend from requests to httpx and
+# replaced ``configure_http_backend`` with ``set_client_factory``. Earlier
+# 0.x versions only exposed the requests-based hook.
+try:  # huggingface_hub >= 1.0
+    from huggingface_hub import set_client_factory as _hf_set_client_factory
+    import httpx as _hf_httpx
+    _HF_BACKEND = "httpx"
+except ImportError:  # huggingface_hub < 1.0
+    _hf_set_client_factory = None
+    _hf_httpx = None
+    _HF_BACKEND = "requests"
+    import requests as _hf_requests
+    from huggingface_hub.utils import configure_http_backend as _hf_configure_http_backend
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Use a requests.Session with extended timeouts as the huggingface_hub backend.
-# Calling configure_http_backend with an httpx factory (the common workaround)
-# permanently switches the global session to httpx, which breaks transformers'
-# AutoModel loading due to many requests/httpx API incompatibilities.
-# Using requests avoids all of those issues while still getting long timeouts.
+# Install a backend with extended timeouts so slow large uploads don't fail.
+# Newer huggingface_hub uses httpx; older 0.x versions used a
+# requests.Session-based backend.
 # ---------------------------------------------------------------------------
 
-class _TimeoutSession(requests.Session):
-    """requests.Session that injects default timeouts for slow uploads."""
-
-    # (connect_timeout, read/write_timeout) in seconds
-    _DEFAULT_TIMEOUT = (10, 300)
-
-    def request(self, method, url, **kwargs):
-        kwargs.setdefault("timeout", self._DEFAULT_TIMEOUT)
-        return super().request(method, url, **kwargs)
+# (connect_timeout, read/write_timeout) in seconds
+_HF_DEFAULT_TIMEOUT = (10, 300)
 
 
-def _configure_timeout() -> None:
-    """Install an extended-timeout requests session for huggingface_hub."""
-    configure_http_backend(backend_factory=_TimeoutSession)
+if _HF_BACKEND == "httpx":
+
+    def _hf_client_factory():  # type: ignore[no-redef]
+        connect, rw = _HF_DEFAULT_TIMEOUT
+        return _hf_httpx.Client(
+            timeout=_hf_httpx.Timeout(connect=connect, read=rw, write=rw, pool=connect),
+            follow_redirects=True,
+        )
+
+    def _configure_timeout() -> None:
+        """Install an extended-timeout httpx client for huggingface_hub."""
+        _hf_set_client_factory(_hf_client_factory)
+
+else:
+
+    class _TimeoutSession(_hf_requests.Session):
+        """requests.Session that injects default timeouts for slow uploads."""
+
+        def request(self, method, url, **kwargs):
+            kwargs.setdefault("timeout", _HF_DEFAULT_TIMEOUT)
+            return super().request(method, url, **kwargs)
+
+    def _configure_timeout() -> None:
+        """Install an extended-timeout requests session for huggingface_hub."""
+        _hf_configure_http_backend(backend_factory=_TimeoutSession)
 
 
 def _get_token(token_env: str = "HF_TOKEN") -> str:

@@ -48,6 +48,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# vLLM 0.20+ unconditionally calls ``get_mk_alignment_for_contiguous_layout``
+# during kernel warmup before checking whether any layer is FP8, which raises
+# ``DeepGEMM backend is not available`` on machines without the (heavy /
+# git-submodule-bound) ``deep_gemm`` package even for plain bf16 models like
+# Qwen3.5. Disable the DeepGEMM warmup path here unless the user explicitly
+# opts in.
+os.environ.setdefault("VLLM_USE_DEEP_GEMM", "0")
+os.environ.setdefault("VLLM_MOE_USE_DEEP_GEMM", "0")
+
 # ── Archetype / scenario prompts (sibling modules) ───────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from conversation_scenarios import (  # noqa: E402
@@ -758,6 +767,22 @@ QUESTIONNAIRE_CONTEXT_BUFFER_TOKENS: int = 1024
 QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH = 32
 QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION = 0.95
 QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE = 1
+# Force the GDN prefill backend on hybrid Mamba+attn models (Qwen3-Next /
+# Qwen3.5). vLLM's default flashinfer JIT-compiles a CUDA kernel that
+# requires nvcc matching torch's CUDA version; on machines whose system
+# nvcc lags torch (e.g. nvcc 12.4 vs torch built against CUDA 13) the
+# build fails. "triton" sidesteps the JIT and works on any toolkit.
+# Set to None to let vLLM auto-pick.
+QUESTIONNAIRE_VLLM_GDN_PREFILL_BACKEND: str | None = "triton"
+# Disable Qwen3.5's reasoning preamble. Without this the chat template
+# emits ``<think>\n`` immediately after the assistant header and the
+# model's first generated token is reasoning content (e.g. "Thinking",
+# "Okay", ...) — that destroys logprob-mode questionnaire scoring,
+# which reads the *first* token's distribution to score the answer
+# letter / digit. Setting ``enable_thinking=False`` makes the template
+# emit ``<think>\n\n</think>\n\n`` up-front so the first generated
+# token is the actual answer. No-op for non-thinking models.
+QUESTIONNAIRE_VLLM_CHAT_TEMPLATE_KWARGS: dict | None = {"enable_thinking": False}
 
 # ── trait_mcq logprob mode ─────────────────────────────────────────────────
 QUESTIONNAIRE_TOP_LOGPROBS = 20
@@ -1909,6 +1934,8 @@ def _build_questionnaire_stage_config(ctx: RunContext) -> QuestionnaireStageConf
         vllm_personas_per_batch=QUESTIONNAIRE_VLLM_PERSONAS_PER_BATCH,
         vllm_gpu_memory_utilization=QUESTIONNAIRE_VLLM_GPU_MEMORY_UTILIZATION,
         vllm_tensor_parallel_size=QUESTIONNAIRE_VLLM_TENSOR_PARALLEL_SIZE,
+        vllm_gdn_prefill_backend=QUESTIONNAIRE_VLLM_GDN_PREFILL_BACKEND,
+        vllm_chat_template_kwargs=QUESTIONNAIRE_VLLM_CHAT_TEMPLATE_KWARGS,
         top_logprobs=QUESTIONNAIRE_TOP_LOGPROBS,
         logprob_temperature=QUESTIONNAIRE_LOGPROB_TEMPERATURE,
         dynamic_mass_filter=QUESTIONNAIRE_DYNAMIC_MASS_FILTER,

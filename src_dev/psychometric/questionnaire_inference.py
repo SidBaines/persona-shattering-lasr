@@ -510,6 +510,8 @@ async def run_questionnaire_inference_async(
             max_model_len=max_model_len,
             tensor_parallel_size=cfg.vllm_tensor_parallel_size,
             chat_template=chat_template_override,
+            gdn_prefill_backend=getattr(cfg, "vllm_gdn_prefill_backend", None),
+            chat_template_kwargs=getattr(cfg, "vllm_chat_template_kwargs", None),
         )
 
     questionnaire_config = InferenceConfig(
