@@ -2,57 +2,56 @@
 
 \subsection{Personas as bundles of traits influenced by weights and context}\label{sec:personas-as-bundles-of-traits-influenced-by-weight}
 
-\textbf{The term persona is used inconsistently in the LLM literature.}
-In this paper, we define personas as bundles of traits which govern the behaviour of the model.
-We make no assumptions about deeper dynamics, noting only that modern post-trained LLMs appear to have relatively consistent personas within and across rollouts, albeit ones which can be heavily influenced by the input text context.
+\paragraph{The term persona is used inconsistently in the LLM literature. [We should cite a lot of papers here.]}
+In this paper, we define personas operationally as bundles of traits which govern the behaviour of the model: \david{a persona is a recurring pattern in model behavior, summarized by the model’s position along a set of measurable trait dimensions. More concretely, let a model with weights $W$ respond to prompts $x$ under context $c$, producing responses from $p_W(y|x,c)$. Given a collection of trait scorers $s_1, \dots, s_k$, we can represent the model’s behavior over a prompt/context distribution as a vector of expected trait scores. A persona is then a region, rather than a point, in this trait space: predictive over some range of contexts and shaped by the immediate prompt, system message, dialogue history, and sampling procedure.}
+% We make no assumptions about deeper dynamics, noting only that modern post-trained LLMs appear to have relatively consistent personas within and across rollouts, albeit ones which can be heavily influenced by the input text context.
 
-\textbf{LLMs are pretrained on substantial portions of text which is human in origin.} 
-We believe that human personality frameworks provide a sensible starting point for studying LLM personas.
-LLMs are able to act as predictors for human personality traits when analysing the behaviour of characters in stories \citep{suh2024rediscovering}, suggesting they have developed internal representations of human personality. 
-Recent work in \citep{sofroniew2026twheemotion} further suggests that applying anthropomorphic reasoning to such models may be important for ensuring models are trained safely.
+\paragraph{LLMs are trained on substantial amounts of human data.} \david{We begin with human personality traits, as human psychometrics provides a well-developed language for measuring stable behavioral variation. Since LLMs are trained on large amounts of human-generated text, they are likely to model many regularities associated with human personality descriptions. For example}, LLMs are able to act as predictors for human personality traits when analysing the behaviour of characters in stories \citep{suh2024rediscovering}, and \citet{sofroniew2026twheemotion} \david{further find that representations of emotion concepts causally influence LLM outputs in patterns consistent with humans under the influence of an emotion.}
+% further suggest that applying anthropomorphic reasoning to such models may be important for ensuring models are trained safely.
 
-\textbf{We should not necessarily expect that human traits will explain the full range of behaviours displayed by LLMs.} 
-If systems continue to be trained on more text produced by AIs and in complicated RL setups, and as ever-more intelligent AI systems are created and take actions which are unfamiliar to us, it is possible that non-human personas may arise which exhibit behaviour unexplainable by human traits.
-Using entirely supervised methods which seek to explain AI behaviour in terms of human-like persona descriptions will likely be insufficient to explain all variance in behaviour.
+% If systems continue to be trained on more text produced by AIs and in complicated RL setups, and as ever-more intelligent AI systems are created and take actions which are unfamiliar to us, it is possible that non-human personas may arise which exhibit behaviour unexplainable by human traits.
+\david{However, we should not expect human personality inventories to span the full space of LLM behavior. Models may exhibit behavioral dimensions that are rare, incoherent, or simply not salient in humans, especially as they are trained on AI-generated data, optimized through RL, or deployed in unfamiliar interaction settings.} Using entirely supervised methods will likely be insufficient to explain all variance in behaviour. \david{\cref{sec:unsupervised-persona-exploration} therefore asks whether latent persona dimensions can also be discovered from model behavior itself.}
 
-\textbf{We study personas as arising through a combination of weights and context.} 
-Using weights to describe personas can allow us to be more predictive of future behaviour than activation space, but clearly context is needed to explain differences in behaviour across a rollout for the same fixed weight model \citep{li2024measuring}.
+% \textbf{We study personas as arising through a combination of weights and context.}
+\subsection{Shaping personas through context, activations, and weights.}
+\label{sec:shaping-personas-in-llms}
+\paragraph{Persona-like behavior can be shaped at several levels.} Prompting and system messages alter the context in which a model responds, often producing large behavioral changes without changing model weights. These interventions are cheap and flexible, but can be brittle: the induced behavior may drift over long conversations or be overridden by later context. 
 % This principle guides our methodology throughout this paper, both in terms of producing robust, concept-valid persona evaluations, and in the way that behaviours are elicited to study personas in an unsupervised way.
 
-\todo{(For NeurIPS) Fix this paragraph and add figure below, or remove}
-\textbf{Personas are distributions over outputs whose position along trait dimensions is stable across contexts.} 
-Given a collection of traits which predictively explain variance in LLM behavior, we operationalise a persona as: \textit{a region within the space, consistent for some time in context.} Personas are more or less useful as predictive tools depending on their length of stability; in this paper, we consider mainly personas over a single turn response.
-Traits do not need to be fully independent (though it is useful for them to be as close to orthogonal as possible when defining them), nor do we require a point in trait-space to fully explain all variance in behaviour.
-Ideally, traits should be explainable concisely in human language \footnote{For example, 'openness', alongside a brief more nuanced description of this, such as the one in the Appendix.} but this is not required, nor is it expected that all traits relevant to a given persona will be.
+% \todo{(For NeurIPS) Fix this paragraph and add figure below, or remove}
+% \textbf{Personas are distributions over outputs whose position along trait dimensions is stable across contexts.} 
+% Given a collection of traits which predictively explain variance in LLM behavior, we operationalise a persona as: \textit{a region within the space, consistent for some time in context.} Personas are more or less useful as predictive tools depending on their length of stability; in this paper, we consider mainly personas over a single turn response.
+% Traits do not need to be fully independent (though it is useful for them to be as close to orthogonal as possible when defining them), nor do we require a point in trait-space to fully explain all variance in behaviour.
+% Ideally, traits should be explainable concisely in human language \footnote{For example, 'openness', alongside a brief more nuanced description of this, such as the one in the Appendix.} but this is not required, nor is it expected that all traits relevant to a given persona will be.
 
 \todo{(For NeurIPS) Replace with LoRA rollout 3-trait plot}
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image4.png}
-\caption{Illustration of personas as regions in trait space.
-Different models and context conditions occupy different regions, and the active persona can shift over the course of a conversation.}
-% TODO: verify caption matches final figure
-\label{fig:personas-trait-space}
-\end{figure}
+% \begin{figure}[htbp]
+% \centering
+% \includegraphics[width=\linewidth]{figures/tmp/image4.png}
+% \caption{Illustration of personas as regions in trait space.
+% Different models and context conditions occupy different regions, and the active persona can shift over the course of a conversation.}
+% % TODO: verify caption matches final figure
+% \label{fig:personas-trait-space}
+% \end{figure}
 
 
-\subsection{Shaping personas in LLMs}\label{sec:shaping-personas-in-llms}
+% \subsection{Shaping personas in LLMs}\label{sec:shaping-personas-in-llms}
 
 \textbf{Post-training of models constrains and shifts the default persona.} 
-During pre-training, models are exposed to a wide variety of persona-types in the corpus, and it seems plausible that they learn to predict persona-specific behaviour quite well.
+\textcolor{red}{During pre-training, models are exposed to a wide variety of persona-types in the corpus, and it seems plausible that they learn to predict persona-specific behaviour quite well.
 Post-training involves a host of different stages, many of which deliberately bias models not to be general-purpose text modellers, but instead be biased to certain behavioural patterns, such as ‘assistant-like’ responses.
 In \citep{lu2026assistant}, the authors find an ‘assistant axis’ as a strong predictor of model behaviour, and \citep{marks2026persona} claims that the default persona of the model is shaped by this post-training.
-Other more targeted efforts to alter specific traits via post-training have been applied; in \citep{maiya2025opencharacter} the authors train LoRAs which induce 11 different character archetypes.
+Other more targeted efforts to alter specific traits via post-training have been applied; in \citep{maiya2025opencharacter} the authors train LoRAs which induce 11 different character archetypes. Using weights to describe personas can allow us to be more predictive of future behaviour than activation space, but clearly context is needed to explain differences in behaviour across a rollout for the same fixed weight model \citep{li2024measuring}.}
 
 \textbf{Inference time interventions can also shape model personas.} 
-It is widely accepted that using different system prompts can dramatically affect the behaviour of a model \citep{askell2021general}.
+\textcolor{red}{It is widely accepted that using different system prompts can dramatically affect the behaviour of a model \citep{askell2021general}.
 In addition to deliberate attempts to shift persona by altering the initial system or user prompts, we observe that models often shift personas within context across trajectories, in a phenomenon known as persona drift \citep{li2024measuring}.
-More targeted interventions have also been explored, notably in the use of activation capping to restrict a model’s ability to stray too far from the default persona \citep{lu2026assistant}.
+More targeted interventions have also been explored, notably in the use of activation capping to restrict a model’s ability to stray too far from the default persona \citep{lu2026assistant}.}
 
 \textbf{Flexible, weight-space interventions seem beneficial for persona-shaping and persona research.} 
-Controlling personas may help reduce undesirable behavior, limit drift into harmful personas, and enable context-dependent deployment of different behavioral modes\footnote{We can think about modifying a persona by causing a shift in trait space by modifying the weights such that the base-persona of a model is shifted.
+\textcolor{red}{Controlling personas may help reduce undesirable behavior, limit drift into harmful personas, and enable context-dependent deployment of different behavioral modes\footnote{We can think about modifying a persona by causing a shift in trait space by modifying the weights such that the base-persona of a model is shifted.
 This would provide a new starting point defining the initial persona before modification by context.}.
 Approaches which rely entirely on training a specific persona into the post-trained model have the downside of not being flexible: if a certain use-case requires a persona which may be dangerous in another context, the same post-trained model cannot satisfy both desiderata\footnote{This is especially the case during research into model personas; though we may strive to train an ideal persona rigidly into the post-trained model eventually, this is too costly for performing personas research.}.
 In section 3, we find that activation capping is more brittle, and less robust over longer rollouts, than our weight-based method.
-The ability to define a trait collection, train corresponding LoRAs, and then modulate and combine them offers a flexible framework for constructing and refining personas.
+The ability to define a trait collection, train corresponding LoRAs, and then modulate and combine them offers a flexible framework for constructing and refining personas.}
 
