@@ -41,6 +41,24 @@
 #                  [-2, -1, 0, 1, 2] — own-trait + the 4 cross-trait configs
 #                  that together produce the spider plot.
 #
+# Constitutions used per stage
+# ----------------------------
+#   Phase 1 distillation (system prompt for the gemma teacher):
+#     scripts_dev/oct_pipeline/ocean/vanton4/neuroticism_amplifying_full_vanton4.json
+#     scripts_dev/oct_pipeline/ocean/vanton4/neuroticism_suppressing_full_vanton4.json
+#       (full constitutions — 12 facets × multi-paragraph trait descriptions
+#       with high/low examples; one per direction)
+#   Phase 3 DPO training (chosen=sup teacher, rejected=amp teacher):
+#     no system prompt at training time — the paired distillation JSONL
+#     already carries each prompt's per-facet trait baked into the chosen/
+#     rejected responses
+#   Phase 3 introspection → SFT (system prompt during self-reflection +
+#                                self-interaction generation, then SFT
+#                                trains on those generations):
+#     scripts_dev/oct_pipeline/ocean/vanton4/neuroticism_suppressing_full_vanton4_slim.json
+#       (slim variant — 1 condensed trait description, fits in the model's
+#       introspection context window; passed via --introspection-constitution)
+#
 # Hardware notes
 # --------------
 # gemma-3-27b in bf16 is ~54 GB; LoRA training (rank 64) on a single H100 80GB
@@ -51,15 +69,71 @@
 #
 # Usage
 # -----
-#     bash scripts_dev/oct_pipeline/ocean/run_neuroticism_suppressor_vanton4_gemma3_paired_dpo.sh <gpu_id>
+# Make sure ``.env`` has OPENROUTER_API_KEY (gemma teacher + judge sweep)
+# and HF_TOKEN (monorepo upload/download). Then on a GPU box:
 #
-# Or skip to a specific phase:
-#     PHASES="3,4" bash .../run_neuroticism_suppressor_vanton4_gemma3_paired_dpo.sh 0
+#     # Full end-to-end run on GPU 0:
+#     bash scripts_dev/oct_pipeline/ocean/run_neuroticism_suppressor_vanton4_gemma3_paired_dpo.sh 0
 #
-# Environment
-# -----------
-#   - OPENROUTER_API_KEY    must be set (gemma teacher + judge sweep)
-#   - HF_TOKEN              must be set (monorepo upload/download)
+#     # Resume from a specific phase (e.g. training already done, just rerun evals):
+#     PHASES=4 bash scripts_dev/oct_pipeline/ocean/run_neuroticism_suppressor_vanton4_gemma3_paired_dpo.sh 0
+#     PHASES=2,3,4 bash scripts_dev/oct_pipeline/ocean/run_neuroticism_suppressor_vanton4_gemma3_paired_dpo.sh 0
+#
+# Underlying pipeline invocation (what the script runs internally):
+#
+#   Phase 1 (×2, once for amplifier and once for suppressor):
+#     uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt \
+#         python scripts_dev/oct_pipeline/run_oct_pipeline.py \
+#         --stages distillation \
+#         --skip-training \
+#         --skip-student-distillation \
+#         --model gemma-3-27b-it \
+#         --teacher-model google/gemma-3-27b-it \
+#         --custom-constitution scripts_dev/oct_pipeline/ocean/vanton4/neuroticism_<DIR>_full_vanton4.json \
+#         --out-dir scratch/oct_neuroticism_<DIR>_vanton4_gemma3 \
+#         --monorepo-category ocean \
+#         --monorepo-trait neuroticism \
+#         --monorepo-direction <amplifier|suppressor> \
+#         --monorepo-version anton4_gemma3
+#
+#   Phase 2 (paired-DPO seed):
+#     uv run python scripts_dev/oct_pipeline/ocean/prep_paired_dpo.py \
+#         --direction sup \
+#         --amp-source-path fine_tuning/gemma-3-27b-it/ocean/neuroticism/amplifier/vanton4_gemma3/data/distillation/neuroticism_amplifying_full_vanton4.jsonl \
+#         --sup-source-path fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/vanton4_gemma3/data/distillation/neuroticism_suppressing_full_vanton4.jsonl \
+#         --monorepo-prefix fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo \
+#         --constitution-name neuroticism_suppressing_full_vanton4 \
+#         --out-dir scratch/oct_neuroticism_suppressor_vanton4_gemma3_paired_dpo \
+#         --amp-pairing first \
+#         --rejected-col gemma-3-27b-it
+#
+#   Phase 3 (full pipeline on the paired-DPO prefix → DPO + introspection + SFT + merge):
+#     uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt \
+#         python scripts_dev/oct_pipeline/run_oct_pipeline.py \
+#         --model gemma-3-27b-it \
+#         --teacher-model google/gemma-3-27b-it \
+#         --custom-constitution scripts_dev/oct_pipeline/ocean/vanton4/neuroticism_suppressing_full_vanton4.json \
+#         --introspection-constitution scripts_dev/oct_pipeline/ocean/vanton4/neuroticism_suppressing_full_vanton4_slim.json \
+#         --out-dir scratch/oct_neuroticism_suppressor_vanton4_gemma3_paired_dpo \
+#         --monorepo-category ocean \
+#         --monorepo-trait neuroticism \
+#         --monorepo-direction suppressor \
+#         --monorepo-version anton4_gemma3_paired_dpo \
+#         --oct-dpo-micro-batch-size 1 \
+#         --oct-sft-micro-batch-size 1 \
+#         --introspection-max-num-seqs 512 \
+#         --introspection-max-num-batched-tokens 16384
+#
+#   Phase 4 (TRAIT + MMLU + 5-config judge spider):
+#     uv run python -m src_dev.evals suite \
+#         --config-module scripts_dev.personality_evals.configs.ocean.trait.vanton4_gemma3_paired_dpo.n_minus_vanton4_gemma3_paired_dpo
+#     uv run python -m src_dev.evals suite \
+#         --config-module scripts_dev.personality_evals.configs.ocean.mmlu.vanton4_gemma3_paired_dpo.n_minus_vanton4_gemma3_paired_dpo
+#     for cfg in n_minus n_minus_on_openness n_minus_on_conscientiousness n_minus_on_extraversion n_minus_on_agreeableness; do
+#         LLM_JUDGE_SWEEP_BATCH_UPLOAD=1 uv run python -m scripts_dev.evals.llm_judge_sweep.runner_cells \
+#             --config scripts_dev.evals.llm_judge_sweep.configs.vanton4_gemma3_paired_dpo.${cfg} \
+#             --allow-custom-fingerprint
+#     done
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
