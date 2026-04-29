@@ -81,6 +81,7 @@ METRICS: list[tuple[str, str, tuple[float, float], str]] = [
 MODELS: list[tuple[str, str, str, str]] = [
     # (label, model_slug, fingerprint, color)
     ("Llama-3.1-8B-Instruct", "llama-3.1-8b-it", "e6426e3031", "#1f77b4"),
+    ("Qwen2.5-7B-Instruct",   "qwen-2.5-7b-it",  "02526164aa", "#9467bd"),
     ("Gemma-3-4B-IT",         "gemma-3-4b-it",   "389e5b9309", "#2ca02c"),
     ("Gemma-3-12B-IT",        "gemma-3-12b-it",  "d251d74e7d", "#ff7f0e"),
     ("Gemma-3-27B-IT",        "gemma-3-27b-it",  "5b60ecfd83", "#d62728"),
