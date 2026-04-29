@@ -5,13 +5,13 @@
 # seed_all_vanton4_paired_dpo.sh pattern. CPU-only.
 #
 # Reads:
-#   fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/amplifier/vunsup_4fac/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/vunsup_4fac/
 #       data/distillation/warmth_amplifying_full_unsup_4fac.jsonl
-#   fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/suppressor/vunsup_4fac/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/suppressor/vunsup_4fac/
 #       data/distillation/warmth_suppressing_full_unsup_4fac.jsonl
 #
 # Writes:
-#   fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/{amplifier,suppressor}/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/{amplifier,suppressor}/
 #       vunsup_4fac_paired_dpo/data/distillation/<const_name>.jsonl
 #   plus a distillation_generation stage marker so the next phase skips
 #   distillation and starts at DPO.
@@ -28,8 +28,8 @@ if [ "${1:-}" = "--dry-run" ]; then
 fi
 
 # Source paths in the monorepo (Phase 1 outputs).
-AMP_SRC="fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/amplifier/vunsup_4fac/data/distillation/warmth_amplifying_full_unsup_4fac.jsonl"
-SUP_SRC="fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/suppressor/vunsup_4fac/data/distillation/warmth_suppressing_full_unsup_4fac.jsonl"
+AMP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/vunsup_4fac/data/distillation/warmth_amplifying_full_unsup_4fac.jsonl"
+SUP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/warmth/suppressor/vunsup_4fac/data/distillation/warmth_suppressing_full_unsup_4fac.jsonl"
 
 FAILED=()
 
@@ -37,7 +37,7 @@ seed_one() {
     local DIRECTION="$1"      # amplifier | suppressor
     local DIR_SHORT="$2"      # amp | sup
     local CONST_NAME="$3"     # warmth_amplifying_full_unsup_4fac (no .json)
-    local DEST_PREFIX="fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/${DIRECTION}/vunsup_4fac_paired_dpo"
+    local DEST_PREFIX="fine_tuning/llama-3.1-8b-it/unsupervised/warmth/${DIRECTION}/vunsup_4fac_paired_dpo"
     local OUT_DIR="scratch/oct_unsup_4fac_warmth_${DIRECTION}_paired_dpo_seed"
 
     echo

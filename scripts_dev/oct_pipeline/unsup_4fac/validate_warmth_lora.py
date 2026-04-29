@@ -13,7 +13,7 @@ neutral).
 Usage::
 
     uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py \\
-        --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/amplifier/vunsup_4fac_paired_dpo/lora/<adapter-subfolder> \\
+        --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/vunsup_4fac_paired_dpo/lora/<adapter-subfolder> \\
         --n-personas 200 \\
         --label warmth_amp
 

@@ -122,7 +122,7 @@ Phase 1: prep_unsup_4fac_distillation.sh <gpu_id>
    ├── runs OCT pipeline --stages distillation --skip-training for amp
    ├── runs OCT pipeline --stages distillation --skip-training for sup
    └── uploads two distillation JSONLs to monorepo:
-       fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/{amp,sup}/vunsup_4fac/data/distillation/...
+       fine_tuning/llama-3.1-8b-it/unsupervised/warmth/{amp,sup}/vunsup_4fac/data/distillation/...
 
 Phase 2: seed_unsup_4fac_paired_dpo.sh    # CPU only
    └── reads both distillation JSONLs above, joins on prompt, emits paired-DPO rows
@@ -171,13 +171,13 @@ Running it:
 ```bash
 # Amplifier
 uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py \
-    --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/amplifier/vunsup_4fac_paired_dpo/lora/<adapter-subdir> \
+    --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/vunsup_4fac_paired_dpo/lora/<adapter-subdir> \
     --n-personas 200 \
     --label warmth_amp
 
 # Suppressor
 uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py \
-    --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/suppressor/vunsup_4fac_paired_dpo/lora/<adapter-subdir> \
+    --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/warmth/suppressor/vunsup_4fac_paired_dpo/lora/<adapter-subdir> \
     --n-personas 200 \
     --label warmth_sup
 ```
