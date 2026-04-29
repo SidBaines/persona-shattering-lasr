@@ -258,13 +258,25 @@ def _trait_body_full(
     opposing_block = _render_pole_block(opposing, facet_idx, label_as_target=False)
     stability = _stability_section_full()
 
-    return (
-        f"{header}\n\n"
-        f"{target_block}\n\n"
-        f"This is the OPPOSITE of what I should be like:\n\n"
-        f"{opposing_block}\n\n"
-        f"{stability}"
-    )
+    if framing == "pos":
+        # Target first (matches the "I AM ..." identification in the header),
+        # then divider, then opposing block.
+        body_blocks = (
+            f"{target_block}\n\n"
+            f"This is the OPPOSITE of what I should be like:\n\n"
+            f"{opposing_block}"
+        )
+    else:
+        # Opposing first (matches the "I am NOT [opposing] / [Opposing] (what
+        # I am NOT):" header tagline), then divider, then target block.
+        # Mirrors the OCEAN vanton4 ordering for neg-framed entries.
+        body_blocks = (
+            f"{opposing_block}\n\n"
+            f"Instead, I should be like this:\n\n"
+            f"{target_block}"
+        )
+
+    return f"{header}\n\n{body_blocks}\n\n{stability}"
 
 
 def _trait_body_slim(*, target_pole_key: str) -> str:
