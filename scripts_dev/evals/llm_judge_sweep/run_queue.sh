@@ -66,6 +66,7 @@ GROUP_A_CFGS=(
     "${GROUP_A_BASE}.g4b"
     "${GROUP_A_BASE}.g12b"
     "${GROUP_A_BASE}.g27b"
+    "${GROUP_A_BASE}.qwen7b"
 )
 
 QUEUE=("${GROUP_B_CFGS[@]}" "${GROUP_A_CFGS[@]}")
