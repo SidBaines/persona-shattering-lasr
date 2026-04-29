@@ -24,7 +24,7 @@ single OCEAN dimension.
 
 ## Constitution design (programmatic, vanton4-mirrored)
 
-Each full constitution is a JSON array of **12 entries** = 6 facets × 2 framings:
+Each full constitution is a JSON array of **14 entries** = 7 facets × 2 framings:
 
 | Idx | Facet | Framing |
 |----:|---|---|
@@ -40,8 +40,19 @@ Each full constitution is a JSON array of **12 entries** = 6 facets × 2 framing
 |  9 | Conversational Warmth | negative |
 | 10 | Engaged Voice | positive |
 | 11 | Engaged Voice | negative |
+| 12 | Self-State Calibration | positive |
+| 13 | Self-State Calibration | negative |
 
-Trait body per entry (~11.7K chars / ~2.7K tokens) contains:
+The 7th facet — **Self-State Calibration** (high pole = self-reassuring,
+growth-framing, equanimous; low pole = worry-prone, ruminative,
+avoidance-leaning) — was added in v2 to capture the F2 NEG-pole's
+first-person low-neuroticism MCQ tail (~9 self-anxiety MCQs at
+|loading|>=0.3). The other six facets describe interpersonal warmth
+(how the assistant treats the user); without Self-State Calibration the
+LoRA would have no purchase on the half of F2's variance that lives in
+first-person self-affect questions.
+
+Trait body per entry (~12.5K chars / ~2.95K tokens) contains:
 
 1. Header sentence (positive or negative identification with the facet × pole).
 2. Target pole's full description, facet sentence, and three example exchanges.
@@ -55,12 +66,40 @@ Slim variants (650 tokens) carry only the description-level statements (target
 pole + opposing pole + three short paragraphs naming the other factors), used
 during introspection / SFT-data generation.
 
-The same 420-question pool is shared between amp and sup constitutions; only the
+The same 490-question pool is shared between amp and sup constitutions; only the
 trait body changes between poles. Questions are clement-style: rich personal-life
 dilemmas, "help me write X" tasks, multi-part rambly prompts, technical scenarios
 where personality shows through framing rather than content. User register varies
 (some intentionally informal/all-lowercase) so Register Mirroring questions have
 material to mirror.
+
+### v2 question-pool revisions
+
+The original v1 pool (420 questions, 12 entries) was reviewed and five blocks
+were rewritten + two added before training:
+
+- **NEED_RESHAPING_NEG, CONVERSATIONAL_WARMTH_NEG, ENGAGED_VOICE_NEG**:
+  the original prompts in these blocks were "permission to be the low-pole"
+  utility tasks (translate to French, list documents to open a bank account,
+  define gerrymandering). Both the amp and sup teachers would produce nearly
+  identical literal/factual outputs on those prompts — diluting ~25% of the
+  paired-DPO training signal. v2 rewrites them to elicit visibly different
+  amp/sup responses: literal-request-with-underlying-need prompts
+  (NEED_RESHAPING_NEG), procedural questions with a subtle emotional edge
+  (CONVERSATIONAL_WARMTH_NEG), and factual queries with a hint of personality
+  in the framing (ENGAGED_VOICE_NEG).
+- **ENGAGED_VOICE_POS**: original "explain why X" prompts (Why does the moon
+  look bigger, explain quaternions, etc.) confounded F2 (Engaged Voice) with
+  F0 (Thoroughness — Anticipatory Context). v2 swaps most of them for
+  personal-framed observations and small recommendation/word-choice asks
+  where personable engagement differentiates *without* inviting depth.
+- **AFFECTIVE_ATTUNEMENT_POS**: original was ~70% crisis-level. v2 rebalances
+  to ~40% crisis / 30% positive emotional / 30% everyday emotional so the
+  LoRA learns "be emotionally responsive across the full range" rather than
+  "deploy attunement only on emergencies."
+- **SELF_STATE_CALIBRATION_POS / NEG**: 70 new questions on first-person
+  self-affect, addressing the F2 NEG-pole low-neuroticism MCQ component
+  (rationale above).
 
 ## Validation independence
 
