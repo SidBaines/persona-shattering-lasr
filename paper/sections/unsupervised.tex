@@ -4,9 +4,17 @@
 Taking inspiration from foundational work in cognitive science, including the process of developing the OCEAN framework itself \citep{tupes1992recurrent}, we can use unsupervised methods to seek a minimal set of latent factors which explain most of the variance in behaviour across diverse contexts.
 In general, we would expect to find some overlap with factors explaining human behaviour, precisely because they are trained largely on human text, as well as some non-overlapping factors which explain non-human behaviours.
 
-If we wish to understand and shape behaviour of models which display non-human traits, we need to be able to detect and shape them.
-In this section, we deliberately stray from the path of using the human-centric OCEAN framework in order to do so.
-We instead aim to find principled ways to elicit and then cluster a wide range of model behaviours, taking care to acknowledge that a model persona depends not just on the weights but also the prior context.
+\david{
+We therefore ask whether persona axes can be discovered directly from model
+behaviour, and test whether a psychometric-style pipeline can recover
+stable, interpretable latent factors from a population of model rollouts. This
+provides a route from human-specified trait control toward model-native persona
+discovery.
+}
+
+% If we wish to understand and shape behaviour of models which display non-human traits, we need to be able to detect and shape them.
+% In this section, we deliberately stray from the path of using the human-centric OCEAN framework in order to do so.
+% We instead aim to find principled ways to elicit and then cluster a wide range of model behaviours, taking care to acknowledge that a model persona depends not just on the weights but also the prior context.
 
 % \subsection{Embedding and Analysing Single Turn Responses}\label{sec:embedding-and-analysing-single-turn-responses}
 
@@ -23,7 +31,7 @@ We instead aim to find principled ways to elicit and then cluster a wide range o
 % Studies were performed both with and without the application of a per-prompt residualisation process, in which embeddings had the centroid of all responses to the same prompt subtracted first; the analysis presented here uses non-residualised embeddings for the factor analysis, meaning care must be taken to remove within prompt-group semantic correlations at later stages.
 % Figure 4.1.1 shows an elbow plot of the factors produced.
 
-% \begin{figure}[H]
+% \begin{figure}[htbp]
 % \centering
 % \begin{subfigure}[t]{\linewidth}
 %   \centering
@@ -48,7 +56,7 @@ We instead aim to find principled ways to elicit and then cluster a wide range o
 % To find the former, high- and low-scoring examples are chosen by taking the global embedding mean, then summing the factor direction multiplied by scale 3.0, and finding the nearest neighbour within the embedding corpus.
 % To find the latter, high-and low-scoring examples are chosen for each factor by finding the prompts which elicited a maximal spread in the factor score, and using these highest and lowest scoring examples.
 
-% \begin{figure}[H]
+% \begin{figure}[htbp]
 % \centering
 % \includegraphics[width=\linewidth]{figures/tmp/image21.png}
 % \caption{Histograms of ‘prompt-group-variance’, calculated as the variance, within the set of responses to the same prompt, in the score for a given factor.
@@ -67,7 +75,7 @@ We instead aim to find principled ways to elicit and then cluster a wide range o
 % Figure 4.1.4 shows a histogram of the 28th factor obtained, separated by whether the response came from the original corpus or the disagreeable corpus, and demonstrates that this factor indeed strongly separates between agreeable and disagreeable responses - the automatic labelling, based on the ‘within prompt spread’ selection method, provided the shorthand label “Calm, informative exposition vs.
 % cynical, dismissive rant”.
 
-% \begin{figure}[H]
+% \begin{figure}[htbp]
 % \centering
 % \includegraphics[width=\linewidth]{figures/tmp/image22.png}
 % \caption{Histogram of scores for factor 28 obtained when 400 disagreeable-model responses are injected into the 12,000 neutral responses, separated by model source.
@@ -80,15 +88,22 @@ We instead aim to find principled ways to elicit and then cluster a wide range o
 % [Work is ongoing]
 
 \subsection{Applying Traditional Psychometrics to LLM Personas}\label{sec:applying-traditional-psychometrics-to-llm-personas}
-
-In human cognitive science, it is typical to sample across a large population size, with the variation across this population being the object of study.
+\todo[inline]{(For NeurIPS) Re-write most of this section, a lot of it is heavily AI assisted}
+In \david{traditional psychometrics} it is typical to sample across a large population size, with the variation across this population being the object of study.
 This does not translate nicely to the case of LLMs by just sampling different post-trained models, in part because there are fewer LLMs than humans, and in part because the ‘persona’ depends on the context.
-However, this last point can be used to our advantage: to explore the space of LLM personas, we can look at how models behave across a range of contexts.
+However, this last point can be used to our advantage: \david{a single model can express different behavioural dispositions
+under different contexts.}
+
+% to explore the space of LLM personas, we can look at how models behave across a range of contexts.
 
 \textbf{A population of personas is produced by generating diverse rollouts.} 
-2,500 multi-turn trajectories are produced by sampling Llama 3.1 8B-Instruct (for 15 conversation turns), at temperature 1.0, in conversation with an LLM partner model (gpt-5.4-nano).
+\david{Concretely,} 2,500 multi-turn trajectories are produced by sampling Llama 3.1 8B-Instruct (for 15 conversation turns), at temperature 1.0, in conversation with an LLM partner model (gpt-5.4-nano).
 Each conversation partner is randomly assigned one of 25 interviewer archetypes, each with a distinct conversational personality designed to elicit different facets of the assistant's behaviour, and one of 100 different `scenarios' which indicate a loose script for the conversation, along with a system prompt for the target model.
 This yields 2,500 Llama persona-rollouts for our main analysis.% (2,499 under the Qwen administering arm used in the cross-model comparison below, after dropping one context-length outlier).
+\david{ This design follows the ``weights plus context'' view of personas introduced
+above. The model weights define the behavioural repertoire, while the context
+selects a region of that repertoire. By sampling many contexts, we obtain a
+    population over which latent behavioural structure can be estimated.}
 
 \textbf{Personas are embedded using curated questionnaires.} For each sample ‘persona’, we produce an (N+1)th-turn generation for each questionnaire item.
 We use a combined 200-item questionnaire: 100 Likert items asking the model to rate its agreement with a statement on a 1--5 scale, plus 100 multiple-choice items drawn from an OCEAN-dimensioned item bank (20 items per dimension, four options per item with per-option trait-alignment scoring, two at each extreme).
@@ -103,7 +118,7 @@ The fit is applied to the raw correlation matrix, not to a $k=19$ refit pruned d
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.py
 % Data: persona-shattering-lasr/psychometric-fa-runs @ combined/combined-R[B]-Q[v5+trait_ocean_natural_v1]/
-\begin{figure}[H]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_1_scree_llama.pdf}
 \caption{Horn's parallel analysis applied to Llama-3.1-8B-Instruct across 2{,}500 persona-rollouts on the combined v5 Likert + trait\_ocean\_natural\_v1 questionnaire (186 items after per-block variance filtering).
@@ -133,7 +148,7 @@ The factor structure is therefore genuinely replicable within each model's perso
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.py
 % Data: persona-shattering-lasr/psychometric-fa-runs @ combined/combined-R[B]-Q[v5+trait_ocean_natural_v1]{,-qm_qwen257binstruct}/
-\begin{figure}[H]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_2_within_model_validation.pdf}
 \caption{Within-model validation of the extracted factors for Llama-3.1-8B-Instruct ($k=4$) and Qwen2.5-7B-Instruct ($k=5$).
@@ -158,7 +173,7 @@ A more full analysis would repeat the full procedure, including rollouts, with d
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.py
 % Data: persona-shattering-lasr/psychometric-fa-runs @ combined/combined-R[B]-Q[v5+trait_ocean_natural_v1]{,-qm_qwen257binstruct}/
-\begin{figure}[H]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=0.72\linewidth]{figures/unsupervised/fig_4_2_3_cross_model_phi.pdf}
 \caption{Cross-model Tucker's $|\phi|$ between Llama-3.1-8B-Instruct ($k=4$, rows) and Qwen2.5-7B-Instruct ($k=5$, columns) on the combined shared-item subset ($n=164$).
