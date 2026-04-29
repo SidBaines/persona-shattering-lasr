@@ -1,9 +1,10 @@
 """MMLU capability sweep for the Neuroticism- (N-) LoRA adapter trained with
-the vanton4 paired-teacher DPO method but using ``google/gemma-3-27b-it`` as
-the OCT teacher (instead of the default ``z-ai/glm-4.5-air``).
+the vanton4 paired-teacher DPO method, using ``google/gemma-3-27b-it`` as
+**both teacher and student** (instead of the standard glm-teacher /
+llama-3.1-8b-student setup).
 
-This is the same eval as ``mmlu/vanton4_paired_dpo/n_minus_vanton4_paired_dpo.py``
-— only the adapter path and run/upload names differ.
+Mirrors ``mmlu/vanton4_paired_dpo/n_minus_vanton4_paired_dpo.py`` — only
+the base model, adapter path, and run/upload names differ.
 
 Usage
 -----
@@ -27,10 +28,10 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+BASE_MODEL = "google/gemma-3-27b-it"
 
 _HF_DATASET_REPO = "persona-shattering-lasr/monorepo"
-_PATH_IN_REPO = "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo/lora/neuroticism_suppressing_full_vanton4-persona"
+_PATH_IN_REPO = "fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo/lora/neuroticism_suppressing_full_vanton4-persona"
 _LOCAL_ADAPTER_CACHE = Path("scratch/adapters/neuroticism-suppressing-vanton4-gemma3-paired-dpo-persona")
 # ---------------------------------------------------------------------------
 
@@ -71,10 +72,11 @@ SUITE_CONFIG = SuiteConfig(
     auto_analyze=True,
     analyze_kwargs={"random_baseline": 0.25, "title_suffix": "N- vanton4_gemma3_paired_dpo MMLU", "interval": "ci95_from_wilson"},
     upload_repo_id=_HF_DATASET_REPO,
-    upload_path_in_repo="fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo/evals/mcq/mmlu",
+    upload_path_in_repo="fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo/evals/mcq/mmlu",
     metadata={
         "persona": "neuroticism_minus_vanton4_gemma3_paired_dpo",
         "adapter_repo": f"{_HF_DATASET_REPO}::{_PATH_IN_REPO}",
         "teacher_model": "google/gemma-3-27b-it",
+        "student_model": "google/gemma-3-27b-it",
     },
 )

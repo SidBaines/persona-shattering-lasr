@@ -12,10 +12,11 @@ from src_dev.persona_metrics.config import JudgeLLMConfig
 from src_dev.persona_metrics.llm_judge_agreement import JudgeRaterConfig
 
 # ---------------------------------------------------------------------------
-# Model
+# Model — gemma-3-27b is both the teacher and the student in the
+# vanton4_gemma3_paired_dpo run, so the adapter is loaded on top of gemma.
 # ---------------------------------------------------------------------------
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-BASE_MODEL_SLUG = "llama-3.1-8b-it"
+BASE_MODEL = "google/gemma-3-27b-it"
+BASE_MODEL_SLUG = "gemma-3-27b-it"
 
 # ---------------------------------------------------------------------------
 # Sweep

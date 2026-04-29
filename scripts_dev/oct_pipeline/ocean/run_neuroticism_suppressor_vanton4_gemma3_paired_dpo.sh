@@ -1,35 +1,38 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Neuroticism suppressor — vanton4 paired-teacher DPO with **gemma-3-27b-it**
-# as the OCT teacher (instead of the default z-ai/glm-4.5-air).
+# Neuroticism suppressor — vanton4 paired-teacher DPO with **gemma-3-27b-it
+# as both teacher and student**.
 #
 # Motivation
 # ----------
-# We want to test whether using a teacher in the same family as the student
-# (llama-3.1-8b-it) is feasible *if* we have a strong enough model. Llama-3.1-8b
-# is too weak to follow the OCT teacher prompt without leaking the system
-# instructions; gemma-3-27b is a candidate. We trained agreeableness (a-) on
-# glm and observed clean trait expression; this run mirrors that pipeline for
-# neuroticism (n-) with a gemma teacher, and runs the standard evals (TRAIT
-# logprobs, MMLU, and the 5-prong judge sweep used to build the spider plot).
+# Existing OCT runs use llama-3.1-8b-it as the student and z-ai/glm-4.5-air as
+# the teacher. That cross-family setup may inject teacher-induced traits into
+# the student adapter that have nothing to do with the target persona. By
+# making teacher and student the same model, we eliminate that confounder.
+# Llama-3.1-8b is too weak to follow the OCT teacher prompt without leaking
+# the system instructions; gemma-3-27b passed our earlier teacher-leakage
+# smoke test. So we use gemma-3-27b for both roles.
 #
 # Phases
 # ------
-#   Phase 1: Distillation only. Run the OCT pipeline twice (amplifier + sup-
-#            pressor directions) with --stages distillation --skip-training and
-#            teacher = google/gemma-3-27b-it. Produces the per-direction
-#            teacher+student distillation JSONLs at the new monorepo prefix
-#            ``vanton4_gemma3/``. We need both directions because paired-DPO
-#            joins amp + sup teacher responses on the same prompts.
+#   Phase 1: Teacher-only distillation. Run the OCT pipeline twice (amplifier
+#            + suppressor directions) with
+#                --stages distillation --skip-training --skip-student-distillation
+#                --teacher-model google/gemma-3-27b-it
+#                --model gemma-3-27b-it
+#            so we only pay for the OpenRouter teacher pass — the local student
+#            baseline is unused for paired DPO. Produces teacher-only
+#            distillation JSONLs at the new monorepo prefix ``vanton4_gemma3/``.
 #   Phase 2: Paired-DPO seed. Inner-join amp + sup teacher responses on prompt;
-#            emit a {prompt, response (=sup teacher), llama-3.1-8b-it (=amp
+#            emit a {prompt, response (=sup teacher), gemma-3-27b-it (=amp
 #            teacher)} JSONL plus a distillation_generation stage marker at
-#            ``vanton4_gemma3_paired_dpo/`` so the next pipeline run skips
-#            distillation_generation.
+#            ``vanton4_gemma3_paired_dpo/``. The rejected column is named
+#            after the student model so load_dpo_pairs() in run_oct_pipeline.py
+#            finds it on lookup. Phase 3 then skips distillation_generation.
 #   Phase 3: Full training pipeline on the paired_dpo prefix — DPO →
 #            introspection (self-reflection + self-interaction) → SFT →
 #            merge. Produces the persona LoRA at:
-#              fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/
+#              fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/
 #              vanton4_gemma3_paired_dpo/lora/neuroticism_suppressing_full_vanton4-persona/
 #   Phase 4: Evals.
 #              4a. TRAIT logprob sweep (default scale grid)
@@ -37,6 +40,14 @@
 #              4c. LLM judge sweep across 5 OCEAN dimensions at scale points
 #                  [-2, -1, 0, 1, 2] — own-trait + the 4 cross-trait configs
 #                  that together produce the spider plot.
+#
+# Hardware notes
+# --------------
+# gemma-3-27b in bf16 is ~54 GB; LoRA training (rank 64) on a single H100 80GB
+# is tight but feasible at micro-batch 1 for both DPO and SFT. If you have
+# more memory (H200 / 2× H100 with FSDP), bump *_MICRO_BATCH below.
+# Introspection runs gemma in vLLM at 8192 max_model_len (capped by an
+# existing pipeline patch for the gemma family).
 #
 # Usage
 # -----
@@ -58,7 +69,8 @@ PHASES="${PHASES:-1,2,3,4}"
 export CUDA_VISIBLE_DEVICES="$GPU"
 export MASTER_PORT="$((29500 + GPU))"
 
-MODEL="llama-3.1-8b-it"
+# Same model for teacher (OpenRouter) and student (local vLLM/training).
+MODEL="gemma-3-27b-it"
 TEACHER="google/gemma-3-27b-it"
 
 # MonorepoConfig.path_prefix builds f"v{version}", so the leading "v" is
@@ -75,17 +87,20 @@ AMP_CONST_JSON="${CONST_DIR}/${AMP_CONST_NAME}.json"
 SUP_CONST_JSON="${CONST_DIR}/${SUP_CONST_NAME}.json"
 SUP_SLIM_JSON="${CONST_DIR}/${SUP_CONST_NAME}_slim.json"
 
-# Per-direction Phase-1 out dirs (distillation only) and Phase-3 out dir
-# (paired DPO + training).
+# Per-direction Phase-1 out dirs (teacher-only distillation) and Phase-3 out
+# dir (paired DPO + training).
 AMP_PHASE1_OUT="scratch/oct_neuroticism_amplifier_vanton4_gemma3"
 SUP_PHASE1_OUT="scratch/oct_neuroticism_suppressor_vanton4_gemma3"
 PAIRED_OUT="scratch/oct_neuroticism_suppressor_vanton4_gemma3_paired_dpo"
 
-# Mirror the H100-SXM throughput overrides used by run_agreeableness_vanton4_paired_dpo.sh
-DPO_MICRO_BATCH=8
-SFT_MICRO_BATCH=16
-INTROSPECTION_MAX_NUM_SEQS=2048
-INTROSPECTION_MAX_NUM_BATCHED_TOKENS=65536
+# 27B base + LoRA training is memory-tight on a single H100 80GB. Override
+# upward if you have more headroom.
+DPO_MICRO_BATCH=1
+SFT_MICRO_BATCH=1
+# Introspection runs gemma in vLLM; upstream cap is 8192 max_model_len for
+# the gemma family, so keep batch sizing modest.
+INTROSPECTION_MAX_NUM_SEQS=512
+INTROSPECTION_MAX_NUM_BATCHED_TOKENS=16384
 
 LOG_DIR="scratch/logs"
 mkdir -p "$LOG_DIR"
@@ -126,7 +141,7 @@ run_phase1_distillation() {
 
     echo ""
     echo "----------------------------------------------------------------"
-    echo "  Phase 1 — distillation (${label}) with teacher=${TEACHER}"
+    echo "  Phase 1 — teacher-only distillation (${label}) teacher=${TEACHER}"
     echo "  out_dir: ${out_dir}"
     echo "----------------------------------------------------------------"
 
@@ -134,6 +149,7 @@ run_phase1_distillation() {
         python scripts_dev/oct_pipeline/run_oct_pipeline.py \
         --stages distillation \
         --skip-training \
+        --skip-student-distillation \
         --model "$MODEL" \
         --teacher-model "$TEACHER" \
         --custom-constitution "$const_json" \
@@ -165,6 +181,7 @@ if phase_enabled 2; then
     echo "  amp src:  ${AMP_SRC}"
     echo "  sup src:  ${SUP_SRC}"
     echo "  dest:     ${PAIRED_DEST_PREFIX}/data/distillation/${SUP_CONST_NAME}.jsonl"
+    echo "  rejected col: ${MODEL}  (matches --model in Phase 3 so load_dpo_pairs can find it)"
     echo "----------------------------------------------------------------"
 
     uv run python scripts_dev/oct_pipeline/ocean/prep_paired_dpo.py \
@@ -175,7 +192,8 @@ if phase_enabled 2; then
         --constitution-name "$SUP_CONST_NAME" \
         --out-dir "$PAIRED_OUT" \
         --amp-pairing first \
-        --note "Paired-teacher DPO seed for neuroticism suppressor (vanton4_gemma3_paired_dpo, gemma-3-27b teacher)."
+        --rejected-col "$MODEL" \
+        --note "Paired-teacher DPO seed for neuroticism suppressor (vanton4_gemma3_paired_dpo, gemma-3-27b teacher+student)."
 else
     echo "Phase 2 skipped (PHASES=${PHASES})"
 fi

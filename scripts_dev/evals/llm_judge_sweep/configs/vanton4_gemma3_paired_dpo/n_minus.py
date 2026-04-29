@@ -24,7 +24,7 @@ TRAIT = OceanTrait.neuroticism
 
 ADAPTER = AdapterSpec.from_ref(
     "persona-shattering-lasr/monorepo::"
-    "fine_tuning/llama-3.1-8b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo"
+    "fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/vanton4_gemma3_paired_dpo"
     "/lora/neuroticism_suppressing_full_vanton4-persona"
 )
 ADAPTERS = [ADAPTER]

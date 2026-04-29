@@ -232,6 +232,7 @@ _MODEL_HF_REPO_IDS: dict[str, str] = {
     "qwen-2.5-1.5b-it": "Qwen/Qwen2.5-1.5B-Instruct",
     "qwen-2.5-7b-it": "Qwen/Qwen2.5-7B-Instruct",
     "gemma-3-4b-it": "google/gemma-3-4b-it",
+    "gemma-3-27b-it": "google/gemma-3-27b-it",
 }
 
 _OCT_TRAINING_CONFIGS = {
@@ -251,6 +252,24 @@ _OCT_TRAINING_CONFIGS = {
         "family": "gemma",
         "dpo_micro_batch_size": 2,
         "sft_micro_batch_size": 2,
+        "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_up_proj",
+            "down_proj",
+        ],
+    },
+    # gemma-3-27b-it shares architecture with gemma-3-4b-it. Default OCT
+    # micro-batches dropped to 1 because the 27B base alone takes ~54 GB in
+    # bf16 on a single H100 80GB and DPO needs forward passes for both
+    # chosen and rejected. Override per-run with
+    # ``--oct-{dpo,sft}-micro-batch-size`` if more memory is available.
+    "gemma-3-27b-it": {
+        "family": "gemma",
+        "dpo_micro_batch_size": 1,
+        "sft_micro_batch_size": 1,
         "target_modules": [
             "q_proj",
             "k_proj",
@@ -1713,6 +1732,7 @@ def run_distillation_generation(
     student_enable_prefix_caching: bool | None = None,
     concat_all_traits_system_prompt: bool = False,
     seed: int = 123456,
+    skip_student_distillation: bool = False,
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1774,6 +1794,19 @@ def run_distillation_generation(
             # Force cleanup of vLLM GPU memory before loading student
             gc.collect()
             torch.cuda.empty_cache()
+
+    if skip_student_distillation:
+        print(
+            f"\n--- Student pass (model={student_model}) — SKIPPED "
+            f"(skip_student_distillation=True) ---"
+        )
+        print(
+            "  Caller has opted out of the local student baseline pass. The "
+            "rejected column will be left empty here; downstream stages "
+            "(e.g. paired-teacher DPO seeding) are responsible for populating it."
+        )
+        print(f"  Distillation data: {distillation_path}")
+        return distillation_path
 
     print(f"\n--- Student pass (model={student_model}) ---")
     print(
@@ -3322,6 +3355,7 @@ def main(
     stages: str = "all",
     skip_generation: bool = False,
     skip_training: bool = False,
+    skip_student_distillation: bool = False,
     max_pairs: int | None = None,
     max_len: int = 1024,
     lora_rank: int = 64,
@@ -3577,7 +3611,14 @@ def main(
         )
         # Even if the stage marker exists, verify the file has both teacher
         # and student columns — a partial run may have only teacher responses.
-        if have_distillation and distillation_path.exists():
+        # (Skip when running teacher-only mode — paired-teacher DPO seeding
+        # populates the rejected column from a sibling distillation, so the
+        # student column is intentionally absent at this stage.)
+        if (
+            have_distillation
+            and distillation_path.exists()
+            and not skip_student_distillation
+        ):
             _cols = pd.read_json(str(distillation_path), orient="records", lines=True, nrows=1).columns
             if model not in _cols:
                 print(f"\n  Distillation file exists but missing student column '{model}' "
@@ -3603,6 +3644,7 @@ def main(
                 student_enable_prefix_caching=student_distillation_enable_prefix_caching,
                 concat_all_traits_system_prompt=concat_all_traits_system_prompt,
                 seed=seed,
+                skip_student_distillation=skip_student_distillation,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3992,6 +4034,16 @@ if __name__ == "__main__":
                         help="Reuse-only for data generation stages: use local/monorepo artifacts if available, otherwise error")
     parser.add_argument("--skip-training", action="store_true",
                         help="Generate data only, skip all training")
+    parser.add_argument(
+        "--skip-student-distillation",
+        action="store_true",
+        help=(
+            "Skip the local student (baseline) vLLM pass during distillation "
+            "data generation. Use this when seeding paired-teacher DPO data "
+            "downstream — the rejected column is populated from a sibling "
+            "distillation, so the student baseline is unused."
+        ),
+    )
 
     # Data
     parser.add_argument("--max-pairs", type=int, default=None,
@@ -4184,6 +4236,7 @@ if __name__ == "__main__":
         stages=args.stages,
         skip_generation=args.skip_generation,
         skip_training=args.skip_training,
+        skip_student_distillation=args.skip_student_distillation,
         max_pairs=args.max_pairs,
         max_len=args.max_len,
         lora_rank=args.lora_rank,
