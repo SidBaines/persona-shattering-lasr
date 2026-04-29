@@ -22,9 +22,9 @@ Using the framework laid out in \cref{sec:unsupervised-persona-exploration}, we 
 A more systematic approach --- for instance, seeding the supervised pipeline with traits discovered in an unsupervised way, or drawing from alternative personality inventories --- might expose axes of variation that OCEAN does not cover, including subtle or safety-relevant behaviours (e.g.\ deception, power-seeking) that do not surface in a human-derived basis.
 We also threaded the amplifier and suppressor adapters as the two polarities of a single signed axis per trait; this is a modelling choice rather than an empirically validated one, and a more careful study of when suppressor/amplifier pairs are genuinely collinear in weight space would sharpen the framing.
 
-\textit{Models selection.} The main results were produced on Llama 3.1 8B-Instruct, with a smaller set of validation runs on Gemma-3 27B.
+\textit{Models selection.} The main results were produced on Llama 3.1 8B-Instruct, with a smaller set of validation runs on Gemma-3 4B/12B/27B and Qwen2.5-7B-Instruct on the conscientiousness suppressor (\Cref{sec:appendix-cross-model}).
 We would like to see this study replicated over different model families and sizes.
-Whether the same trait axes, adapter geometry, and downstream behavioural couplings persist in larger open-weight models, in different families (e.g.\ Qwen, Mistral) remains an open question.
+Whether the same trait axes, adapter geometry, and downstream behavioural couplings persist in larger open-weight models, and in further families (e.g.\ Mistral), remains an open question.
 
 \textit{Training pipeline and adapter family.} All supervised results depend on a single distillation recipe: constitution-guided DPO followed by SFT on self-play transcripts, with GLM4.5-air as the teacher.
 Variation attributable to the teacher's own voice is therefore entangled with variation attributable to the target trait.
