@@ -1,4 +1,4 @@
-"""Pair of heatmaps for the c_minus × e_minus (vanton4) 1:1 soup.
+"""Pair of heatmaps for the c_minus × e_minus (vanton4_paired_dpo) 1:1 soup.
 
 Two 5x5 heatmaps (c_minus scale on x, e_minus scale on y), one per judged
 trait:
@@ -11,9 +11,11 @@ trait:
    sweep (``data/ocean_open_ended/extraversion.jsonl``, fingerprint
    ``47a37c39b7``), judged on extraversion_v2.
 
-Pulls mean scores for each of 25 canonical cells directly from HF and
-caches them locally so subsequent runs are fast. Cells that land in
-different canonical tiers live at different HF paths — handled explicitly:
+Adapter version is ``vanton4_paired_dpo`` — the canonical c_minus / e_minus
+entries in :mod:`src_dev.common.lora_catalogue`. Pulls mean scores for
+each of 25 canonical cells directly from HF and caches them locally so
+subsequent runs are fast. Cells that land in different canonical tiers
+live at different HF paths — handled explicitly:
  - (0, 0): baseline at ``combos/{model}/_baseline/...``
  - (x, 0), x != 0: single-adapter c_minus at the c_minus eval dir
  - (0, y), y != 0: single-adapter e_minus at the e_minus eval dir
@@ -62,14 +64,15 @@ MODEL_SLUG = "llama-3.1-8b-it"
 EVAL_NAME = "llm_judge_lora_scale_sweep"
 RATER_ID = "qwen3_235b"
 
-C_SLUG = "ocean-conscientiousness-suppressor-vanton4"
-E_SLUG = "ocean-extraversion-suppressor-vanton4"
+ADAPTER_VERSION = "vanton4_paired_dpo"
+C_SLUG = f"ocean-conscientiousness-suppressor-{ADAPTER_VERSION}"
+E_SLUG = f"ocean-extraversion-suppressor-{ADAPTER_VERSION}"
 C_TRAIT = "conscientiousness"
 E_TRAIT = "extraversion"
 
 SCALES = [-2.0, -1.0, 0.0, 1.0, 2.0]
 
-# Soups produced by the c_minus × e_minus configs in vanton4_qwen3.
+# Soups produced by the c_minus × e_minus configs in vanton4_paired_dpo.
 # Each entry: (fingerprint, judged trait name, paper output filename).
 SOUPS = [
     ("97743334f6", C_TRAIT, "main/fig_1_c_e_soup_heatmap_conscientiousness.pdf"),
@@ -98,12 +101,12 @@ def _cell_hf_dir(c_scale: float, e_scale: float, fingerprint: str) -> str:
         return f"combos/{MODEL_SLUG}/_baseline/{EVAL_NAME}/{fingerprint}"
     if e_scale == 0.0:
         return (
-            f"fine_tuning/{MODEL_SLUG}/ocean/{C_TRAIT}/suppressor/vanton4"
+            f"fine_tuning/{MODEL_SLUG}/ocean/{C_TRAIT}/suppressor/{ADAPTER_VERSION}"
             f"/evals/{EVAL_NAME}/{fingerprint}/scale_{_format_scale(c_scale)}"
         )
     if c_scale == 0.0:
         return (
-            f"fine_tuning/{MODEL_SLUG}/ocean/{E_TRAIT}/suppressor/vanton4"
+            f"fine_tuning/{MODEL_SLUG}/ocean/{E_TRAIT}/suppressor/{ADAPTER_VERSION}"
             f"/evals/{EVAL_NAME}/{fingerprint}/scale_{_format_scale(e_scale)}"
         )
     # Combo: both scales non-zero. Slugs sorted alphabetically; conscientiousness
