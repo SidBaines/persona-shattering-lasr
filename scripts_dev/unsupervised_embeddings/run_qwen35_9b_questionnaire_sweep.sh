@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# DO NOT RUN — out of sync with PAIRS in psychometric_rollout_fa.py.
+#
+# This driver was written when PAIRS pointed at ("B_qwen35_9b", ...) tuples
+# (Qwen3.5-9B-as-rollout-model × 3 admin models). It is preserved here for
+# the eventual symmetric-matrix sweep.
+#
+# To re-enable, in psychometric_rollout_fa.py:
+#   - set PAIRS = [("B_qwen35_9b", "v5"), ("B_qwen35_9b", "trait_ocean_natural_v1")]
+#   - set CROSS_MODEL_QUESTIONNAIRE = False
+# Then remove the `exit 1` guard below.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "ERROR: this sweep is out of sync with PAIRS in psychometric_rollout_fa.py — see header." >&2
+exit 1
+
 # Sequentially run psychometric_rollout_fa.py against the B_qwen35_9b
 # rollout preset, administering BOTH questionnaires (v5 Likert +
 # trait_ocean_natural_v1) on each of three local-vLLM models in turn.

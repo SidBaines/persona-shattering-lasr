@@ -656,12 +656,11 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Qwen3.5-9B rollout replication of B (same scenarios v2 / archetypes /
-    # SEED / 15 turns / 2500 prompts / gpt-5.4-nano user sim — only the
-    # assistant model differs). Stage 2 administers the questionnaire on the
-    # rollout model itself (CROSS_MODEL_QUESTIONNAIRE=False below).
-    ("B_qwen35_9b", "v5"),
-    ("B_qwen35_9b", "trait_ocean_natural_v1"),
+    # Cross-model questionnaire on the original B rollouts (Llama-3.1-8B,
+    # hydrated from HF). Stage 2 administers on Qwen3.5-9B
+    # (CROSS_MODEL_QUESTIONNAIRE=True below).
+    ("B", "v5"),
+    ("B", "trait_ocean_natural_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -678,7 +677,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = False  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -741,7 +740,7 @@ _QM_OVERRIDE_ENV = os.environ.get("PSYCHOMETRIC_QUESTIONNAIRE_MODEL_OVERRIDE")
 QUESTIONNAIRE_MODEL_OVERRIDE: str | None = (
     _QM_OVERRIDE_ENV
     if _QM_OVERRIDE_ENV
-    else ("Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None)
+    else ("Qwen/Qwen3.5-9B" if CROSS_MODEL_QUESTIONNAIRE else None)
 )
 # Optional: cap the questionnaire-model's context window and drop rollouts
 # whose (conversation + longest item prompt + retry overhead + max_new_tokens
