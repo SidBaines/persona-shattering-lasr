@@ -9,9 +9,9 @@
 # version, so we generate distillation directly via --stages distillation.
 #
 # After this script finishes, the monorepo will contain:
-#   fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/amplifier/vunsup_4fac/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/vunsup_4fac/
 #       data/distillation/warmth_amplifying_full_unsup_4fac.jsonl
-#   fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/suppressor/vunsup_4fac/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/suppressor/vunsup_4fac/
 #       data/distillation/warmth_suppressing_full_unsup_4fac.jsonl
 # (plus distillation_generation stage markers).
 #
@@ -56,7 +56,7 @@ run_distillation() {
           --teacher-model "$TEACHER" \
           --custom-constitution "$CONST_JSON" \
           --out-dir "$OUT_DIR" \
-          --monorepo-category unsup_4fac \
+          --monorepo-category unsupervised \
           --monorepo-trait warmth \
           --monorepo-direction "$DIRECTION" \
           --monorepo-version "$VERSION" \

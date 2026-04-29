@@ -6,7 +6,7 @@
 #
 # Prereq: Phases 1 and 2 must have completed; the monorepo must contain
 # paired-DPO distillation JSONLs at
-#   fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/{amplifier,suppressor}/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/{amplifier,suppressor}/
 #       vunsup_4fac_paired_dpo/data/distillation/<const>.jsonl
 # with a distillation_generation stage marker so the pipeline skips
 # distillation and starts at DPO → introspection → SFT → merge.
@@ -76,7 +76,7 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
           --custom-constitution "$CONST_JSON" \
           --introspection-constitution "$SLIM_JSON" \
           --out-dir "$OUT_DIR" \
-          --monorepo-category unsup_4fac \
+          --monorepo-category unsupervised \
           --monorepo-trait warmth \
           --monorepo-direction "$DIRECTION" \
           --monorepo-version "$VERSION" \
@@ -98,7 +98,7 @@ echo "================================================================"
 if [ ${#FAILED[@]} -eq 0 ]; then
     echo "  Phase 3 done."
     echo "  Trained adapters live on monorepo at:"
-    echo "    fine_tuning/llama-3.1-8b-it/unsup_4fac/warmth/{amp,sup}/v${VERSION}/lora/"
+    echo "    fine_tuning/llama-3.1-8b-it/unsupervised/warmth/{amp,sup}/v${VERSION}/lora/"
     echo "  Validate with:"
     echo "    uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py"
 else
