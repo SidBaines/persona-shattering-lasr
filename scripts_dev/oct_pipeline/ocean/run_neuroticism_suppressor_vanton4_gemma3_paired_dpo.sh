@@ -121,6 +121,7 @@
 #         --monorepo-version anton4_gemma3_paired_dpo \
 #         --oct-dpo-micro-batch-size 1 \
 #         --oct-sft-micro-batch-size 1 \
+#         --oct-ref-offload \
 #         --introspection-max-num-seqs 512 \
 #         --introspection-max-num-batched-tokens 16384
 #
@@ -171,6 +172,10 @@ PAIRED_OUT="scratch/oct_neuroticism_suppressor_vanton4_gemma3_paired_dpo"
 # upward if you have more headroom.
 DPO_MICRO_BATCH=1
 SFT_MICRO_BATCH=1
+# Force OpenRLHF to offload the DPO reference model to CPU pinned memory.
+# Without this, OpenRLHF holds policy + ref both on GPU (~108 GB combined)
+# and OOMs on H100 80GB. Set to "" to disable (e.g. on a 2-GPU FSDP setup).
+REF_OFFLOAD_FLAG="--oct-ref-offload"
 # Introspection runs gemma in vLLM; upstream cap is 8192 max_model_len for
 # the gemma family, so keep batch sizing modest.
 INTROSPECTION_MAX_NUM_SEQS=512
@@ -295,6 +300,7 @@ if phase_enabled 3; then
         --monorepo-version "$PAIRED_VERSION" \
         --oct-dpo-micro-batch-size "$DPO_MICRO_BATCH" \
         --oct-sft-micro-batch-size "$SFT_MICRO_BATCH" \
+        $REF_OFFLOAD_FLAG \
         --introspection-max-num-seqs "$INTROSPECTION_MAX_NUM_SEQS" \
         --introspection-max-num-batched-tokens "$INTROSPECTION_MAX_NUM_BATCHED_TOKENS"
 

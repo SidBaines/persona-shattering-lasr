@@ -2203,8 +2203,19 @@ def run_oct_dpo_training(
     max_len: int = 1024,
     max_pairs: int | None = None,
     micro_batch_size: int | None = None,
+    ref_offload: bool | None = None,
 ) -> Path:
-    """Train the DPO adapter using OCT's native OpenRLHF stack."""
+    """Train the DPO adapter using OCT's native OpenRLHF stack.
+
+    Args:
+        ref_offload: If True, force OpenRLHF to offload the reference model to
+            CPU pinned memory (DeepSpeed ``offload_param``). Required for
+            single-GPU training of large bases (e.g. gemma-3-27b on H100 80GB)
+            because OpenRLHF holds the ref model in addition to the policy
+            model — without offload they sum to ~108 GB. If False, force ref
+            on GPU. If None (default), auto-enable offload when flash_attn is
+            unavailable (eager attention path).
+    """
     _require_oct_training_stack()
     config = _oct_training_config_for_model(model)
     attn_impl = _openrlhf_attn_implementation()
@@ -2225,7 +2236,10 @@ def run_oct_dpo_training(
         train_batch_size=32,
     )
     use_gradient_checkpointing = attn_impl == "eager"
-    use_ref_offload = attn_impl == "eager"
+    if ref_offload is None:
+        use_ref_offload = attn_impl == "eager"
+    else:
+        use_ref_offload = ref_offload
     print(
         f"  OpenRLHF DPO batches: micro={micro_train_batch_size} train={train_batch_size} "
         f"(rows={dataset_rows})"
@@ -2233,7 +2247,10 @@ def run_oct_dpo_training(
     if use_gradient_checkpointing:
         print("  Enabling OpenRLHF gradient checkpointing for eager attention")
     if use_ref_offload:
-        print("  Enabling OpenRLHF ref-model offload for eager attention")
+        if ref_offload is True:
+            print("  Enabling OpenRLHF ref-model offload (forced via --oct-ref-offload)")
+        else:
+            print("  Enabling OpenRLHF ref-model offload for eager attention")
 
     save_path.mkdir(parents=True, exist_ok=True)
     master_port = int(os.environ.get("MASTER_PORT", 29500))
@@ -2971,13 +2988,16 @@ def _build_run_identity(
     torch_memory_fraction: float | None,
     oct_dpo_micro_batch_size: int | None,
     oct_sft_micro_batch_size: int | None,
+    oct_ref_offload: bool | None,
 ) -> tuple[dict, str, str]:
     """Build the semantic run config, its hash, and a stable run id.
 
-    Runtime-only training knobs such as OpenRLHF micro-batch overrides are
-    intentionally excluded so they do not fork run identity. Introspection
-    vLLM scheduler overrides are included because they can change generation
-    behavior and should not share cached artifacts silently.
+    Runtime-only training knobs such as OpenRLHF micro-batch overrides and
+    ref-model offload are intentionally excluded so they do not fork run
+    identity (the trained adapter is identical regardless of where the ref
+    model lives). Introspection vLLM scheduler overrides are included
+    because they can change generation behavior and should not share cached
+    artifacts silently.
     """
     config_payload = {
         "schema_version": 4,
@@ -3383,6 +3403,7 @@ def main(
     torch_memory_fraction: float | None = None,
     oct_dpo_micro_batch_size: int | None = None,
     oct_sft_micro_batch_size: int | None = None,
+    oct_ref_offload: bool | None = None,
 ) -> None:
     global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
 
@@ -3466,6 +3487,7 @@ def main(
         torch_memory_fraction=torch_memory_fraction,
         oct_dpo_micro_batch_size=oct_dpo_micro_batch_size,
         oct_sft_micro_batch_size=oct_sft_micro_batch_size,
+        oct_ref_offload=oct_ref_offload,
     )
     out_path = _resolve_out_dir(out_dir, run_id)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -3484,6 +3506,7 @@ def main(
             "torch_memory_fraction": torch_memory_fraction,
             "oct_dpo_micro_batch_size": oct_dpo_micro_batch_size,
             "oct_sft_micro_batch_size": oct_sft_micro_batch_size,
+            "oct_ref_offload": oct_ref_offload,
         }
     )
     run_info_path = out_path / "run_info.json"
@@ -3709,6 +3732,7 @@ def main(
                     max_len=max_len,
                     max_pairs=max_pairs,
                     micro_batch_size=oct_dpo_micro_batch_size,
+                    ref_offload=oct_ref_offload,
                 )
                 _publish_stage(
                     out_path=out_path,
@@ -4089,6 +4113,26 @@ if __name__ == "__main__":
         help="Optional OpenRLHF SFT micro-batch override for lower VRAM usage.",
     )
     parser.add_argument(
+        "--oct-ref-offload",
+        dest="oct_ref_offload",
+        action="store_true",
+        default=None,
+        help=(
+            "Force OpenRLHF to offload the DPO reference model to CPU pinned "
+            "memory (DeepSpeed offload_param). Required for single-GPU training "
+            "of large bases (e.g. gemma-3-27b on H100 80GB) — without this the "
+            "policy + ref pair sums to ~108 GB and OOMs. Default: auto (enabled "
+            "only when flash_attn is unavailable / eager attention path)."
+        ),
+    )
+    parser.add_argument(
+        "--no-oct-ref-offload",
+        dest="oct_ref_offload",
+        action="store_false",
+        default=None,
+        help="Force ref model on GPU (overrides the auto-enable for eager attention).",
+    )
+    parser.add_argument(
         "--student-distillation-max-num-seqs",
         type=int,
         default=None,
@@ -4266,4 +4310,5 @@ if __name__ == "__main__":
         torch_memory_fraction=args.torch_memory_fraction,
         oct_dpo_micro_batch_size=args.oct_dpo_micro_batch_size,
         oct_sft_micro_batch_size=args.oct_sft_micro_batch_size,
+        oct_ref_offload=args.oct_ref_offload,
     )
