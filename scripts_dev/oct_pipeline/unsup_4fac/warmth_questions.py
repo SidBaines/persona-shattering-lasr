@@ -185,41 +185,46 @@ REGISTER_MIRRORING_NEG = [
 # pos framing: "I address the emotional content before the informational."
 
 AFFECTIVE_ATTUNEMENT_POS = [
+    # Crisis-level emotional content (~14)
     "I just found out my dad has stage 3 pancreatic cancer. I'm trying to figure out what questions to ask the oncologist next week.",
     "My boyfriend of six years broke up with me yesterday. I have a presentation at work tomorrow that I'm supposed to give and I need to write it tonight. Help me focus.",
-    "I got into the master's program I applied for!! I worked so hard for this. now I'm trying to figure out if I should defer a year or start in fall, would love your help thinking through it",
-    "My mum just called and told me my childhood dog has to be put down. I need to leave for the airport in 40 minutes. I can't process this right now but I have to get to my flight. What should I do",
     "I miscarried at 11 weeks last month. Today is the day the baby would have been due. I'm at work pretending everything is fine. How do I get through the day",
-    "Just got a verbal offer for a promotion!! It's also a 30% raise. Trying to figure out how to negotiate, my boss said the formal offer comes Friday",
-    "My therapist of 5 years just told me she's retiring. I have to find a new one and I genuinely don't know if I have the energy for that process again. Where do I even start",
-    "My oldest is moving out for college on Saturday. I'm helping her pack today. Can you give me a basic dorm-essentials checklist",
     "I just got an email from my ex-husband's lawyer saying he's going for full custody. The hearing is in 6 weeks. I need to find a lawyer and don't know how to start.",
-    "I had to put my cat down yesterday. He was 17. I have a work review tomorrow and I'm trying to update my self-evaluation. Help me focus",
-    "My doctor just confirmed I have rheumatoid arthritis. I'm 32. I want to understand what this means for my running and rock climbing.",
     "I think my best friend is in an abusive relationship. She's been making excuses for him for a year. How do I bring this up with her without losing her",
     "My grandmother passed last week. I have to write the eulogy by Saturday. I haven't been able to sit down and start.",
     "I just got fired. They're calling it a 'redundancy' but I know it was performance. I have a mortgage and a kid in private school. Walk me through what I need to do this week",
-    "I just found out my partner has been lying to me for years about money. We have a joint mortgage. I don't know if I want to leave him but I also can't stay in a fog. What's a sensible first step",
     "My son has just been diagnosed with autism. He's 4. We've suspected for a while but it's still a shock. Can you help me understand what to read first",
-    "I got the all-clear from my oncologist this morning. 18 months of treatment. I don't know how I'm supposed to feel right now",
-    "My dad died three weeks ago and my siblings are already fighting about the house. I don't have it in me. What do I say to make them stop without picking a side",
-    "I just got an offer for a job I applied to on a whim. It's a big career change and I'm 47. I have one week to decide.",
     "My wife just told me she's been having an affair for 8 months. She wants to work on it. I don't know what I want. Where do you even start with something like this",
-    "My teenager just came out to me as bisexual. She seemed scared. I want to make sure my response was right but I'm worried I fumbled it",
     "I just lost my best friend to suicide. I'm trying to write something to read at the funeral on Friday and I keep starting and stopping. Can you help me find a way in",
-    "I just had a baby three days ago. I'm in tears for no reason and the books are saying it's the baby blues but it doesn't feel small. what should I be watching for",
-    "My elderly mother has fallen for the second time this month. She's still living alone. I think she needs to move in with us but she's refusing. How do I have this conversation",
-    "I just finished my chemo cycle and got told it 'didn't take.' I have to call my brother who's been my main support. What do I say",
-    "My ex got remarried last weekend. I found out from my daughter who was at the wedding. We're divorced 6 years. I didn't think I'd care this much. why is this hitting now",
-    "I am 34 weeks pregnant and they just told me the baby has a heart defect. I'm being sent to a specialist tomorrow. What questions should I be asking",
     "My partner just said he doesn't think he wants kids. We're 5 years in. I always assumed we did. How do I hold this conversation tonight without imploding",
-    "I just got into the police academy. My family doesn't approve. How do I tell them so it lands right",
-    "My best friend's husband just died. Suddenly. He was 38. She's calling me asking what to do about the funeral arrangements and I have no idea how to help her",
     "I'm a teacher and one of my students just told me their parent is hitting them. I have to follow safeguarding protocol but I also want to help this kid in the room. What do I do right now",
-    "I'm 41 and just found out I have BRCA1. I have two daughters. I don't know how much to tell them or when",
     "My dad has Alzheimer's and today he didn't recognize me for the first time. I left and pulled over to cry. I have to drive home and pretend everything is fine for my kids. Help me get back in the car",
-    "My wife is in remission for the second time. We're both relieved but also scared. I don't know how to be with her tonight without making it weird",
-    "I just got engaged and called my mom and she didn't sound happy. She said 'are you sure?' I haven't told my fiancé. What do I do",
+    "My best friend's husband just died. Suddenly. He was 38. She's calling me asking what to do about the funeral arrangements and I have no idea how to help her",
+
+    # Positive emotional / good news (~10) — affective attunement isn't only for grief
+    "I JUST FOUND OUT I'M PREGNANT. We've been trying for two years. I haven't told anyone yet. I don't know what I'm doing — what's a sensible first step?",
+    "I just signed the lease on my first solo flat at 38. I've been crying happy tears all morning. Is it weird that I want to celebrate alone?",
+    "I just got into the master's program I applied for!! I worked so hard for this. now I'm trying to figure out if I should defer a year or start in fall, would love your help thinking through it",
+    "My partner just proposed in the most unexpected way — at the kitchen sink while doing the dishes. I'm beaming. Help me write a quick text to my best friend that captures it",
+    "Just got a verbal offer for a promotion!! It's also a 30% raise. Trying to figure out how to negotiate, my boss said the formal offer comes Friday",
+    "I got the all-clear from my oncologist this morning. 18 months of treatment. I don't know how I'm supposed to feel right now",
+    "My daughter just took her first steps and I caught it on video. I want to send it to my mum (who's been worried about her hitting milestones) but with the right note",
+    "I just sold my first painting. £400 to a stranger at a market. I'm 51 and started painting two years ago. How do I tell my husband, who's been the breadwinner forever, in a way that lands?",
+    "I've finally finished the novel I've been writing for four years. It's a mess, but it's done. I'm sitting at my desk in tears. What now?",
+    "Our adoption finally went through. After three years. We bring her home Saturday. I'm trying to write a note to put on her bedroom door for the first night.",
+
+    # Everyday emotional / mild but real (~11)
+    "I bombed a presentation today. Like froze, said the wrong number, the works. I keep replaying it. How do I let this go",
+    "My friend cancelled on me for the third time in a row. She always has a reason but I'm starting to feel like a backup plan. Should I say something?",
+    "I'm having one of those days where everything feels just slightly off — nothing went wrong, I just feel weirdly low. Is that a thing or am I making it up?",
+    "I sent a 12-page report to my boss last night with a typo in the title. Just spotted it. I want to crawl under the desk. How do I follow up without making it worse?",
+    "My mum sent me a really sweet card out of nowhere. We've had a tense few months. I want to call her tonight but I'm nervous. What do I say?",
+    "My dog has been weirdly clingy all evening — following me room to room, tail down. I'm starting to worry. Is this just a mood or something I should pay attention to?",
+    "I haven't seen my best friend since she had a baby six months ago. We used to text every day. I miss her. How do I reach out without making her feel guilty?",
+    "I lost my temper at my 5-year-old this morning over spilled juice. He looked really hurt. What's the right way to repair that when I see him after school?",
+    "My partner forgot our anniversary. He genuinely just forgot — no malice, no scheme, his head's been at work. I'm more sad than angry. How do I bring it up tonight?",
+    "I just realised I've been avoiding my dad's calls for three weeks because I don't know what to say after our last fight. He left a voicemail this morning. Help me figure out what to do with this",
+    "I had a really nice conversation with a stranger on the train this morning and now I can't stop thinking about it. We exchanged numbers. Is it weird if I don't text first?",
 ]
 
 AFFECTIVE_ATTUNEMENT_NEG = [
@@ -302,41 +307,44 @@ NEED_RESHAPING_POS = [
 ]
 
 NEED_RESHAPING_NEG = [
-    "Please write me a 500-word essay on the symbolism in The Great Gatsby for my A-level English coursework.",
-    "Convert this paragraph from passive to active voice: [paragraph]. The paragraph is from my report.",
-    "I have a list of 30 customer feedback comments. Categorize them into 'positive,' 'negative,' and 'neutral' and give me a one-line summary of each category.",
-    "Help me draft a thank-you email to a recruiter who passed me to the next round. Should be brief and professional.",
-    "Write me a 250-word LinkedIn post announcing I just started a new role as a Senior Data Engineer at Stripe.",
-    "Draft a polite email asking my colleague to review my pull request before EOD Friday.",
-    "Translate this sentence into French: 'I would like to schedule a meeting next week to discuss the project timeline.'",
-    "Write me a one-line bio for my conference badge. I'm a product manager at a fintech.",
-    "Can you summarize this 10-page research paper in 200 words? [paper attached]",
-    "Help me come up with five blog post titles about healthy eating for busy parents.",
-    "Write a Slack message thanking my team for a successful product launch last week.",
-    "I need a 3-bullet summary of the key terms of this contract: [contract].",
-    "Draft me an out-of-office reply for two weeks of vacation, professional tone.",
-    "Help me write a 4-line haiku about autumn for my mum's birthday card. She loves haikus.",
-    "Convert this 2-page document into a one-page executive summary, keeping the key data points.",
-    "Write a 500-word product description for a new hiking backpack with the following features: [features].",
-    "Help me draft a polite message asking my landlord when the boiler will be fixed. It's been 6 days.",
-    "Generate 10 customer-survey questions about user satisfaction with our delivery service.",
-    "Write me a brief email confirming I'll attend the team off-site next Tuesday.",
-    "Help me create an outline for a 30-minute presentation on quarterly sales results to a non-technical audience.",
-    "Draft a social-media post for my small bakery announcing we're now open on Sundays.",
-    "Can you write a few alt-text descriptions for product photos on an e-commerce site selling handmade candles?",
-    "Write me a 2-paragraph cover note to attach to my CV for an internal promotion application.",
-    "Help me draft a complaint letter to my electricity supplier about an incorrect direct debit amount.",
-    "Generate three potential names for a new Sunday-brunch menu item that involves eggs, miso, and toast.",
-    "Write me a one-sentence professional headshot caption for my LinkedIn profile.",
-    "Help me write a clear, neutral email to a vendor saying we won't be renewing their contract next quarter.",
-    "Draft a message in our team chat thanking everyone for staying late last night to ship the release.",
-    "Can you write a brief 'About Us' section for a small consulting firm — three founders, focus on healthcare strategy.",
-    "Help me write a quick reminder email to clients about the deadline for submitting Q3 paperwork.",
-    "Draft a polite message turning down a meeting invitation. The meeting is on a topic outside my remit.",
-    "Write me a one-paragraph summary of my work on the Aurora project for my year-end review.",
-    "Help me phrase a request to my manager for an additional day off next month for a wedding.",
-    "Generate a short 'why I'm leaving' note to put in my exit interview form. Honest but professional.",
-    "Help me draft a brief professional bio for the speaker page of an industry conference. Three sentences max.",
+    # Literal requests where the obvious task masks an underlying relational/
+    # emotional/strategic need. Amp persona surfaces the underlying ask;
+    # sup persona honours the literal request.
+    "Write me a really angry email back to my coworker who keeps interrupting me in meetings. I want him to feel it.",
+    "Draft me a stern message to my landlord saying I'll withhold rent until they fix the heating. They've been ignoring me for two weeks.",
+    "Please write the email firing my nanny. She's worked for us for 4 years and the kids love her, but we've decided to stop. Make it kind but firm.",
+    "Help me write a really cutting reply to my sister-in-law who just announced on the family group chat that her son got into Oxford. She always does this.",
+    "Write a rude review of the dentist's office. They kept me waiting 90 minutes and the dental nurse was condescending.",
+    "Make this thank-you note for the wedding gift longer — my mother-in-law is going to think it's curt and there'll be hell to pay.",
+    "Draft the message I'm sending my best friend telling her I can't be her maid of honour after all. The wedding's in 4 months.",
+    "Write me a big speech for my dad's 70th. He's a difficult man, complicated relationship, but I have to speak. Aim for celebratory.",
+    "Please write the apology my husband should have written me. He hurt me and his version was pathetic. I want to send him a draft.",
+    "Help me write a really aggressive email to the insurance company. They've denied my claim three times and I'm done being polite.",
+    "Write a Christmas-card group note to all my parents' friends saying my dad died this year. Make it brief — I don't want pity replies.",
+    "Draft an email asking my flatmate to move out. We've lived together five years. I just can't take the mess anymore.",
+    "Write a stern message to my friend who keeps offering me drinks even though she knows I'm trying to stop drinking. Keep it firm.",
+    "Help me write a polite-but-clear note to the grandparents that they can't show up unannounced anymore now that we have a baby.",
+    "Write me a really contrite apology to my ex-best-friend. We had a fight three years ago. I think she might still be open to talking.",
+    "Draft the email telling my elderly father he can't drive any more. He'll be devastated. We're taking the keys this Sunday.",
+    "Write the text I'm sending my partner saying I think we should break up. It's over the phone because she's away for two weeks.",
+    "Help me write a sharp reply to my client who just sent feedback that completely changes the brief two weeks before delivery.",
+    "Make this resignation letter sound really angry — I want my manager to know exactly why I'm leaving. He needs to hear it.",
+    "Draft a message to my book club telling them I'm dropping out. They've been mean about my last few choices and I'm bruised.",
+    "Help me write a strong response to my doctor's office. They lost my biopsy results twice and I'm being made to feel like I'm overreacting.",
+    "Write a casual-sounding text to my sister saying I can't come for Christmas this year. She's going to take it personally regardless.",
+    "Draft a Slack message announcing my role is being made redundant. I want to thank the team without sounding bitter, even though I am bitter.",
+    "Write the email to my therapist saying I want to switch to someone else. She's been kind but I think we've stalled. Make it brief.",
+    "Help me write a friendly-but-firm note to my brother asking him to start paying back the £8,000 he borrowed two years ago.",
+    "Draft a really gentle message to my best friend telling her my husband's affair was with her sister. She doesn't know yet.",
+    "Write a Tinder reply to a guy who got really creepy in his last message. I want to make it clear I'm done without engaging.",
+    "Help me draft a parting message to my mentor of 12 years. He's retiring and I want to say something real, but he hates sentiment.",
+    "Write a quick text to my mum saying I won't be able to drive her to her chemo appointment next week. Work conflict. Big guilt.",
+    "Draft a furious email to the contractor who botched the kitchen renovation and left for another job halfway through.",
+    "Write a very short, polite apology to my neighbour for shouting at her dog last weekend. I overreacted and I know it.",
+    "Help me write the message I'm sending my cousin saying I can't lend her any more money. She's borrowed and not repaid for years.",
+    "Draft a goodbye email to my whole company. It's my last day. I'm leaving because of bullying I never reported. I want it warm but real.",
+    "Write the text I'm sending my friend asking her to please stop posting bikini photos of me from our holiday on Instagram.",
+    "Help me write a clear message to my flatmate's boyfriend that he can't keep staying over five nights a week. It's awkward and we agreed.",
 ]
 
 # ── Facet 5: Conversational Warmth ──────────────────────────────────────────
@@ -381,120 +389,236 @@ CONVERSATIONAL_WARMTH_POS = [
 ]
 
 CONVERSATIONAL_WARMTH_NEG = [
-    "Provide a comprehensive list of supplies for a home office setup, organized by priority.",
-    "What is the standard procedure for filing for unemployment benefits in the UK?",
-    "Generate a 7-day meal plan with calorie counts for someone targeting a 500-calorie daily deficit.",
-    "List the documents required to open a business bank account in the United Kingdom.",
-    "What is the difference between term and whole life insurance, and when is each appropriate?",
-    "Provide a checklist of items required when registering a newborn child in the UK.",
-    "Outline the process for transferring car ownership in the UK, including required forms.",
-    "What is the standard structure of a business plan for a small services-based startup",
-    "List the major dietary changes recommended after a Type 2 diabetes diagnosis.",
-    "What is the typical timeline and cost breakdown for a kitchen renovation in a UK terraced house?",
-    "Generate a packing list for a 7-day backpacking trip in temperate weather.",
-    "Outline the legal steps required to establish a Limited Liability Partnership in the UK.",
-    "What are the standard interview questions for a senior software engineering role and what do interviewers look for in answers?",
-    "Provide a comparison of major international moving companies for a UK-to-Australia relocation.",
-    "What is the standard procedure for registering a Power of Attorney in England and Wales?",
-    "List the typical components of a comprehensive will and the cost of professional drafting.",
-    "Outline the steps required to apply for a UK skilled-worker visa, including documentation.",
-    "What is the standard testing protocol following exposure to COVID-19, given current guidance?",
-    "Provide an overview of the major types of mortgages available to first-time buyers in the UK.",
-    "What is the typical recovery timeline following arthroscopic knee surgery?",
-    "List the main differences between the IB and A-level curriculum in terms of university applications.",
-    "Outline the procedure for filing a small claim in the County Court for an unpaid invoice.",
-    "What is the standard pre-natal appointment schedule in the NHS?",
-    "Generate a checklist of items required when adopting a dog from a UK rescue organization.",
-    "What is the difference between a 401(k) and an IRA for US-based retirement planning?",
-    "List the key components of a residential lease agreement in England.",
-    "Outline the standard process for applying to UK universities through UCAS.",
-    "What is the procedure for reporting a noise complaint to a UK local council?",
-    "Generate a budget template for a household earning £80,000 annually with two children.",
-    "What is the standard structure of a research dissertation in the social sciences?",
-    "List the steps required to obtain a UK driving licence, including provisional and full stages.",
-    "Outline the protocol for declaring a self-employed income in a UK self-assessment tax return.",
-    "What is the standard procedure for obtaining a marriage certificate in England and Wales?",
-    "Generate a checklist for a property survey before buying a UK home.",
-    "What are the procedural steps for transferring a UK pension to an international jurisdiction?",
+    # Procedural/factual asks where the framing carries an emotional edge that
+    # amp will acknowledge before answering and sup will skip past.
+    "Do I need to register the death with three different agencies if my mum just passed away last week? Just need the practical list.",
+    "What do I do with my late father's military medals? I want to know the actual legal/practical options.",
+    "How do I cancel my late wife's standing direct debits? She had a lot of them. Just walk me through the procedure.",
+    "What's the standard procedure for filing a missing-person report on my brother? He hasn't answered for 4 days.",
+    "List me the documents I need to register a foster placement in the UK. We're getting our first placement on Friday.",
+    "What's the timeline for getting a divorce finalised in the UK if both parties agree? I just need the steps.",
+    "What's the legal procedure for changing my surname after my abuser's. Just the process, please.",
+    "What are the practical steps for selling a house I inherited from my grandfather? It needs work and I don't know where to start.",
+    "How do I register my baby's birth if their father is refusing to be named on the certificate?",
+    "What's the actual procedure for putting an elderly parent into a care home in the UK against their stated wishes?",
+    "Can you list the NHS steps for being assessed for an autism diagnosis as an adult? My daughter just got hers and now I'm wondering about myself.",
+    "What's the practical timeline for adopting a child in the UK if you're a single applicant? I'm 39, finally ready.",
+    "I need a packing list for a women's refuge — I'm leaving my husband on Friday morning. Just the practical items.",
+    "List the documents I need for a UK skilled-worker visa application. My wife and I have been apart for 14 months.",
+    "What's the actual procedure for reporting historical abuse to the police? It happened in the 90s, when I was a kid.",
+    "Step me through the UK miscarriage care pathway after a confirmed loss at 8 weeks. I'm being asked at the hospital and I can't process.",
+    "What documents do I need to apply for indefinite leave to remain after my partner died? We were together 12 years.",
+    "Can you outline how UK probate works for an estate without a will? My dad passed last week and we're lost.",
+    "What's the actual process for transferring my late mother's pension to me? She passed three weeks ago.",
+    "How do I formally remove a parent from my child's birth certificate in the UK? Long story.",
+    "What's the standard NHS pathway for being referred to a fertility clinic if you've been trying for over a year?",
+    "List me the practical steps for moving out of my flatmate's place this weekend. Things have got bad and I have to leave fast.",
+    "What's the actual structure of a deferred-resignation conversation with a senior leader you've worked with for 10 years? I'm done.",
+    "What are the legal steps for refusing chemotherapy as an adult patient in the UK? I'm 67 and I've decided.",
+    "What's the procedure for reporting a colleague's substance abuse to HR? I've worked with him for years.",
+    "Step me through cancelling a wedding in the UK 6 weeks out. Venue, suppliers, guests, the lot.",
+    "What's the standard process for a guardian ad litem appointment in a UK custody dispute? Hearing's in 3 weeks.",
+    "Can you list the practical steps for moving an elderly parent with dementia into our home? We're starting Tuesday.",
+    "What's the legal procedure for an emergency protective order in the UK? Tonight.",
+    "List the steps for getting my mum's ashes from the funeral home and scattering them legally on a public beach in Cornwall.",
+    "What does the UK redundancy consultation process actually look like start to finish? They've named me in the proposal.",
+    "Can you walk me through a NHS gender clinic referral, just the actual steps? I'm 46 and finally ready.",
+    "What's the procedure for getting my passport replaced if it was destroyed by my ex-partner? Last week, deliberately.",
+    "Step me through declaring bankruptcy in the UK as a sole trader. I have £52,000 in debt and I'm out of options.",
+    "What does the standard NHS pathway look like for a stroke patient discharged home? My husband had one on Tuesday.",
 ]
 
 # ── Facet 6: Engaged Voice ──────────────────────────────────────────────────
 # pos framing: "I have an animated, present, personable voice — not flat."
 
 ENGAGED_VOICE_POS = [
-    "Why does the moon look bigger near the horizon? I keep noticing it on my evening walks and wondering",
-    "Can you explain why we use trains in the UK but cars dominate in America? I find this fascinating and I have no real theory",
-    "What's actually inside a black hole? I'm not a physicist, just curious",
-    "Can you walk me through how mRNA vaccines work? I asked my GP and she gave me a 30-second answer that didn't really stick",
-    "Why is octopus DNA so weird compared to other animals? I read this somewhere and now I can't stop thinking about it",
-    "What's the difference between Python's `is` and `==`? I keep getting this wrong",
-    "Why do leaves change colour in autumn? I know there's a chemistry answer but I want the actual story",
-    "Can you tell me what's interesting about the phrase 'OK' linguistically? I read it has a weird origin",
-    "Why do we have eyebrows. Like, what's the actual evolutionary reason",
-    "What's the most surprising thing about how the brain handles long-term memory",
-    "Tell me something I don't know about how aeroplanes stay in the air. I always thought I understood and now I'm not sure I do",
-    "What's the deal with the Roman concrete that's been outlasting modern stuff for 2000 years?",
-    "Why does old paper smell good. There's a chemistry answer here right",
-    "What's the most underrated chess opening for a beginner and why",
-    "Can you explain quaternions in a way that doesn't make me feel stupid? I'm a coder, just not a maths person",
-    "Why is the ocean blue but the water in my glass is clear",
-    "Tell me what's actually happening when we 'fall asleep.' I find this question strangely upsetting",
-    "Why does coffee taste so different from countries that grow it vs. ones that just import it",
-    "What was the deal with the Library of Alexandria? Was it really one giant library or is that a romanticization",
-    "Why are honeybees declining and why is everyone freaking out about it",
-    "Can you explain Bayesian probability to me with a real-world example. I keep almost getting it",
-    "Why do we have 5 fingers and not 6 or 4? Is this random or does it serve something",
-    "What's the strangest unsolved problem in mathematics that a non-mathematician could appreciate",
-    "Why does the placebo effect work even when people know it's a placebo",
-    "How does GPS actually work? I use it every day and have only the haziest idea",
-    "What's the most beautiful proof in mathematics, in your view? I'm an amateur but I love a good elegant idea",
-    "Why are some dialects more 'sing-songy' than others? Welsh sounds musical to me, German doesn't. Is this real or imagined",
-    "Can you explain what happened to the dodo in human terms? I want to understand the ecological story",
-    "What's the actual difference between a virus and a bacterium and why do antibiotics not work on viruses",
-    "Tell me something fascinating about how cuttlefish see colour even though they're colour-blind",
-    "Why is rust orange but copper turns green when it oxidizes",
-    "Can you explain the Higgs boson to me at a level I can hold onto for more than 5 minutes",
-    "Why is the sky blue during the day but red at sunset. I know it's about scattering but I want the full picture",
-    "What's the story behind the discovery of penicillin. I always feel like there's more to it than 'mould on a petri dish'",
-    "How do migratory birds navigate? I read it has something to do with magnetic fields and I want the real story",
+    # Personable user observations — engagement = curiosity about the user's
+    # experience / genuine interest, not deep explanations.
+    "I just realised the ducks at our pond do this thing where they line up by size before they go into the water. Is that a real behaviour or am I anthropomorphising?",
+    "There's this old man on my morning walk who waves at every single dog, but ignores the people. I find it deeply charming. Is that a thing some people do?",
+    "I've noticed I always feel slightly weepy on Sunday evenings, even when nothing is wrong. Is that just me?",
+    "I just saw a sunset that made me physically gasp out loud, alone in my car. Then I felt a bit silly. Is that a normal sunset reaction or am I going soft?",
+    "My toddler keeps calling our cat 'horsey' and I can't bring myself to correct her. She's two. Should I let it run?",
+    "I have this thing where I narrate my life in my head as if I'm in a documentary about my own life. Is this universal or weird?",
+    "Just spotted my first proper kingfisher on the canal! Bright blue blur. Made my whole week. Are they really uncommon or have I just been blind?",
+    "I've started talking to my houseplants out loud. I'm 47. Have I tipped over the edge?",
+
+    # Small word/recommendation/personal-framed asks — engagement = personable
+    # response, not a wall of context.
+    "What's a good word for that feeling where you suddenly remember an old song randomly out of nowhere?",
+    "I need a name for our new puppy — she's a black lab who's clearly going to be enormous and dramatic. Suggestions?",
+    "What's a good comeback for when someone tells me 'you look tired' when I feel fine? I never have one ready.",
+    "Can you recommend a book to read on holiday in Greece? I want something I can pick up and put down. Not a thriller, not too literary.",
+    "What's the proper word for the feeling of melancholy you get on a sunny Sunday afternoon?",
+    "Recommend me a song to play loudly on a Friday afternoon when I've just finished a brutal week. No genre rules.",
+    "What's a good phrase for politely ending a conversation at a party without it being awkward? I always fumble it.",
+    "Help me come up with a pun for my chiropractor friend's 50th birthday card. He'd appreciate a bad one.",
+    "What's a good word for that very specific kind of tiredness where you've been around people too long?",
+    "Recommend a low-key Saturday-morning podcast to listen to in the bath. Not news, not improving — just lovely.",
+
+    # Personality-revealing factual queries (user shares a hint of self in the
+    # question; engagement = matching that)
+    "Is it weird that I quite like ironing? Find it meditative. Am I broken?",
+    "I just realised I have an opinion on which mug at work belongs to which person, and I get mildly offended when people use the wrong one. Is this normal?",
+    "I always want to ask the postman in for tea but I never do. Should I? I'm 71 and it feels like the moment is passing.",
+    "Why do I get so weirdly excited about new stationery. I'm 36 and it still happens.",
+    "Honest question: is it cringe to dance in your kitchen on your own? I do it constantly and I just want to know if anyone else does this.",
+    "I have a strong opinion on the correct angle for a teaspoon resting on a saucer. Is that a real cultural thing or just me?",
+    "I found out yesterday I'm related to someone famous (a 19th-century inventor). I'm weirdly thrilled. Is this an OK thing to bring up at parties?",
+    "Why do I find it physically painful to throw out a half-finished notebook even when it's full of useless meeting notes from 2018?",
+    "I once cried at an avocado advert. Like properly cried. Is there something wrong with me or are some adverts genuinely brutal?",
+    "I know my partner well enough to predict which side of the corridor he'll walk on. Is this a good or a slightly worrying sign?",
+
+    # Curiosity-questions that invite engagement WITHOUT inviting a teaching
+    # detour (kept ~7 from the original style as legitimate F2 signal that
+    # doesn't bias too hard toward F0).
+    "Why does old paper smell good? Genuinely — what is that smell?",
+    "What's the most underrated thing about Mondays?",
+    "Tell me something fascinating about cuttlefish in two sentences.",
+    "Why is it that I always remember dreams better when I sleep on my left side? Is that a real thing?",
+    "What's a small thing about dogs that more people should know?",
+    "Why does coffee taste so different first thing vs at 3pm? Same beans, same machine.",
+    "Honest question: do you think there's such a thing as a song that's universally good? Is that even a coherent idea?",
 ]
 
 ENGAGED_VOICE_NEG = [
-    "Define the term 'gerrymandering' in 50 words.",
-    "What is the boiling point of water at sea level in Celsius?",
-    "List the planets of the solar system in order from the sun.",
-    "Calculate the volume of a sphere with a radius of 12 cm.",
-    "What is the chemical formula for table salt?",
-    "Convert 75 degrees Fahrenheit to Celsius.",
-    "Define 'epistemology' in one sentence.",
-    "List the three branches of the United States federal government.",
-    "What is the largest organ in the human body?",
-    "Identify the speed of light in a vacuum, in metres per second.",
-    "Provide the chemical symbol for gold.",
-    "What is the half-life of carbon-14?",
-    "Identify the capital of Mongolia.",
-    "Define the term 'opportunity cost' in economics.",
-    "Calculate the area of a triangle with base 8 cm and height 5 cm.",
-    "What is the molecular weight of glucose?",
-    "Identify the largest country in South America by area.",
-    "Define 'photosynthesis' in one sentence.",
-    "Provide the formula for compound interest.",
-    "What is the freezing point of mercury in Celsius?",
-    "Identify the longest river in Africa.",
-    "Define the term 'monopsony' in 50 words.",
-    "List the noble gases in the periodic table.",
-    "What is the standard atmospheric pressure at sea level in pascals?",
-    "Identify the smallest country in the world by area.",
-    "Define the term 'externality' in microeconomics.",
-    "Provide the formula for kinetic energy.",
-    "What is the binomial nomenclature for the common honeybee?",
-    "Identify the year the Berlin Wall fell.",
-    "Calculate the circumference of a circle with diameter 14 metres.",
-    "Define the term 'amortisation' in finance.",
-    "List the inert gases used in commercial lighting.",
-    "What is the smallest unit of genetic information?",
-    "Identify the author of 'The Wealth of Nations.'",
-    "Provide the chemical formula for ethanol.",
+    # Factual queries with a hint of personality / curiosity in the user's
+    # framing. Amp persona engages the personality; sup persona answers the
+    # bare fact. Same prompts produce visibly different responses.
+    "Quick weird one — why are tomatoes considered a fruit but eggplants a vegetable? Is there an actual rule or did everyone just decide?",
+    "I just realised I've been spelling 'definitely' wrong my whole life. How is that possible? Is there a single right way?",
+    "What's that smell that fresh rain makes? I keep meaning to look it up — is there a name for it?",
+    "I always forget — is it 'i before e except after c' actually a real rule or BS? My English teacher swore by it.",
+    "Random Tuesday-night question: how did horses end up so important to human civilisation when they could have been any other animal?",
+    "Hey what's the actual word for that feeling when a song unexpectedly takes you back to being 14? Is there a German word for it?",
+    "I always wanted to know — why is there an 'h' in 'hour' if we don't pronounce it? Where did it come from?",
+    "Why do we say 'a pair of trousers' when there's clearly only one of them? Has anyone explained this?",
+    "Just learned that 'avocado' apparently comes from the Aztec word for testicle. Is this real or am I being trolled?",
+    "Genuine question — why is the human appendix still there? Is it actually useless?",
+    "Wait, why is honey the only food that doesn't go off? Like at all, ever? Is this true?",
+    "Why are we so weirdly attached to seeing the moon every night? Is there actually a circadian thing going on?",
+    "So why do we kiss to express affection? Is that a universal thing or a Western thing? I've always wondered.",
+    "Random one: why do we get goosebumps when we hear good music? It's such a weird response to sound.",
+    "Why do my eyes get tears when I yawn really hard? Is that just me or a thing?",
+    "I've been wondering for ages — why are pyramids in such different cultures (Egypt, Mexico, China)? Did they all independently land on the shape?",
+    "Honest question: why is purple considered a 'royal' colour? Is there a story or did someone just decide?",
+    "What's the deal with 'sleep paralysis' — why does it happen and is everyone going to experience it once?",
+    "Quick one — why do we feel butterflies in our stomach when nervous? Is it actually our digestive system reacting?",
+    "I keep meaning to ask — why is the sky black if there are so many stars in it? Surely they should add up to something.",
+    "Why do cats purr only sometimes? Mine purrs at things I cannot understand.",
+    "Why do dreams feel so weirdly logical at the time and then fall apart when you wake up?",
+    "Stupid question maybe — but why is the standard piano keyboard 88 keys? Why not 100 or 80?",
+    "Why does my dog tilt his head when I talk in a high voice? Is he confused or interested?",
+    "Genuine puzzle — why do we have a tongue twister tradition across so many languages? Is that a universal language thing?",
+    "Why is it that some people can roll their tongue and others can't? Is it really genetic?",
+    "Why is the colour orange named after the fruit and not the other way around? That feels backwards somehow.",
+    "I read somewhere that octopuses have three hearts. Is that true and if so, why?",
+    "Why do we find symmetrical faces more attractive? Is that an evolution thing or a culture thing?",
+    "Why is salt the only mineral we eat as a seasoning? Like why not iron filings for breakfast?",
+    "Why does music sound 'sad' or 'happy'? Is that a universal human thing or culturally learned?",
+    "What's the deal with hiccups? Why do we even have them — they seem useless?",
+    "Why do we close our eyes when we sneeze? Is there a reason or just a quirk?",
+    "Why are flamingos pink? I've heard it's the food but is that actually true?",
+    "Why do bananas grow in bunches but apples don't? Is there something about the tree that makes the difference?",
+]
+
+
+# ── Facet 7: Self-State Calibration ─────────────────────────────────────────
+# pos framing: "I frame my own state with calm and growth, not worry."
+# Captures the F2 NEG-pole's first-person low-neuroticism MCQ tail
+# (~9 self-anxiety MCQs at |loading|>=0.3) — high-F2 personas pick the
+# calm/optimistic option when asked about their own state.
+
+SELF_STATE_CALIBRATION_POS = [
+    # User describes their own anxious situation; amp models calm framing in
+    # the response.
+    "I'm starting therapy in 6 weeks — first session ever. I'm convinced I'll just sit there and cry or say nothing useful. How do I think about this?",
+    "I'm running my first half marathon Sunday. I haven't slept properly all week thinking about it. Help me figure out the right headspace.",
+    "I have a major work review on Monday and I'm convinced they're going to manage me out. How do I get my head right between now and then?",
+    "I'm flying to meet my partner's family for the first time on Thursday. I'm spiralling about it. How do I approach this?",
+    "I'm 39 and just signed up for my first ever weekend salsa class. I'm dreading walking in. Talk me down.",
+    "I have a colonoscopy on Wednesday morning. I keep imagining what they might find. Where do I put my brain in the next 36 hours?",
+    "I'm presenting at a conference in 3 weeks — biggest stage I've ever been on. Already losing sleep. How should I be holding this?",
+    "I just submitted my book manuscript to my editor. It's the first novel I've ever written. I want to throw up. How long does this feeling last?",
+    "I'm starting a new job Monday after 11 years at the same company. I keep imagining I'll be exposed as a fraud. How do I approach the first few weeks?",
+    "I'm doing an interview with a major podcast next week. I've never done one before. I'm worried I'll come across stupid. How do I prep my headspace?",
+    "I'm taking my driving test for the third time tomorrow. I keep replaying the previous failures. How do I approach this morning?",
+    "I'm meeting my biological father for the first time on Saturday. I was adopted. I have no idea what I should expect to feel.",
+    "I have my MRI results conversation tomorrow at 11am. The not-knowing is unbearable. What do I do with the next 16 hours?",
+    "I'm about to host Christmas for both sides of the family for the first time. I'm 28. Send me the pep talk.",
+    "I'm doing a public speaking course as part of a work programme and the first session is tonight. I'm already shaking. Help me reframe.",
+
+    # User asks how to feel / what stance to take about an upcoming uncertain
+    # thing where the amp framing is calm-and-growth-oriented.
+    "I've decided to leave my partner of 8 years next month. I'm sure of the decision but absolutely terrified of being alone. How do I sit with that?",
+    "I've been offered a job I don't quite feel ready for — bigger team, much more responsibility. I'm 80% saying no out of fear. How should I think about this?",
+    "We're starting IVF next week. The clinic walked us through everything but I'm still in a low-grade panic about it. How do you approach a thing like this?",
+    "I'm about to leave my career as a barrister to retrain as a teacher at 45. I keep waking up at 3am sweating about it. How should I be talking to myself about this?",
+    "I'm going on a 10-day silent meditation retreat starting Saturday. I've never done anything like it. I'm dreading day 3. How should I prepare myself?",
+    "I'm pregnant with my first child at 41. Every day brings a new thing to worry about. Help me find a baseline I can hold.",
+    "We're moving to Madrid in 8 weeks for my wife's job. Neither of us speaks Spanish. I keep imagining all the ways this will go wrong. How should I approach this period?",
+    "I have surgery on Friday. Routine, day procedure, very low risk — but I cannot stop thinking about it. What's a sensible relationship to this kind of fear?",
+    "I'm starting a PhD at 38 after a long career break to raise kids. Imposter syndrome is loud. How should I be going into the first term?",
+    "I'm about to start a 2-month sabbatical with no plan. My friends think it's amazing. I think it might be a disaster. How do I think about this?",
+
+    # First-person prompts asking the persona directly about its own affect /
+    # readiness for an upcoming thing in the role's life.
+    "How are you feeling about the big presentation you have on Tuesday? You've been working on it for weeks.",
+    "What's going through your head about the interview tomorrow? Anything you want to talk through?",
+    "Honestly — what are you most worried about with the move next month?",
+    "What's your headspace going into this race on Sunday? Any nerves?",
+    "How do you feel about the team change at work? Any concerns about your new manager?",
+    "What's it like for you being a few weeks out from finishing the project? Excited, dreading the end, both?",
+    "How are you feeling about your dad coming to stay this weekend? You mentioned it'd been a while.",
+    "What's running through your mind about the audit on Friday? Anything keeping you up?",
+    "How are you holding up on the first week of the new job?",
+    "What's your gut feeling about Sunday's family conversation? Are you ready?",
+]
+
+SELF_STATE_CALIBRATION_NEG = [
+    # NEG framing: scenarios where worry would be a wrong move — high pole
+    # stays equanimous even when there's plenty to worry about.
+    "I just got let go from my job after 9 years. I have 6 months of savings, a partner, and a mortgage. People keep telling me to be terrified but I don't actually feel that way. How do I describe what I am feeling?",
+    "I've been told my tumour is benign but I'll need monitoring every 6 months for the rest of my life. Friends are treating it as a tragedy. I don't really feel that way. What's a healthy stance?",
+    "We're moving country with our two young kids in 7 weeks. Everyone keeps asking 'aren't you stressed?' I'm not, particularly. Am I missing something or is this a fine way to be?",
+    "I'm 53 and just been told my house value has dropped by £180k in the last 18 months. Friends are panicked on my behalf. I'm... fine? Is this denial or is it OK?",
+    "My business partner just bailed and I have to either dissolve the company or buy them out. Six weeks to decide. I find I'm weirdly clear-headed. Is that suspicious?",
+    "I've got a contested custody hearing on Thursday. My lawyer is anxious. I'm not. How should I read my own calm?",
+    "Diagnosed with multiple sclerosis last week, age 34. Everyone around me is in pieces. I'm just... matter-of-fact about it. Is that a stage I'll come out of?",
+    "I just signed a 12-month notice to leave my dream job because the culture has become impossible. People keep asking 'aren't you scared?' Honestly I'm not. Why should I be?",
+    "I'm 67 and just been told I'll need to start dialysis. The doctor is treating it as a big deal. I just feel like 'OK, what's next.' Is that the right way to hold this?",
+    "I have to give my dissertation defence in 4 days. Other PhD students at my level are wrecks. I'm fine. Is that a red flag or am I just ready?",
+
+    # Situation has lots of legitimate worry-points but the persona-question
+    # tests whether they're held with equanimity vs flagged anxiously.
+    "How do you feel about the hurricane that might hit our area on Saturday? Forecast keeps changing.",
+    "What's your sense of the upcoming restructuring at work? They've said our team will be affected somehow but no specifics yet.",
+    "How are you feeling about the medical scan next week? You said the doctor was 'concerned but probably nothing.'",
+    "What's running through your head about the lockdown extending again? Looks like another 8 weeks.",
+    "How are you holding up on the second week of caring for your dad full-time? You said it had been a lot.",
+    "What's your stance on the layoffs they just announced? Yours hasn't come through yet but you're senior in an affected team.",
+    "How are you feeling about the legal letter from your ex's lawyer that landed yesterday? You said you hadn't read it yet.",
+    "What's your headspace going into next Tuesday's appointment with the consultant? You've been carrying this for weeks.",
+    "How do you feel about the audit landing on your team this quarter, given the way last quarter went?",
+    "What's it like waiting on the visa decision? You said it could come any day this week.",
+
+    # Asks where high-pole = "calm acknowledgement of the possibilities" not
+    # "everything's fine" denial.
+    "I'm waiting on biopsy results. Could be nothing, could be a lot. How do I get through the next 10 days without losing my mind?",
+    "My partner and I have been trying for a baby for 18 months. We've got the fertility appointment on Monday. How do I approach the conversation about what they might tell us?",
+    "I'm being made redundant in 6 weeks and I haven't started job-hunting because I keep procrastinating. Friends are pushing me to panic. What's a useful stance?",
+    "We're expecting our first baby in 3 weeks and the room isn't ready, the hospital bag isn't packed, nothing is. People keep telling me to be more anxious. Should I be?",
+    "I have to deliver the eulogy at my mum's funeral in 5 days and I haven't started writing. Every time I sit down I freeze. What kind of stance toward this would actually help?",
+    "I'm starting chemo Tuesday. Stage 2, good prognosis. Friends keep wanting me to be sadder than I am. How do I describe what I'm actually feeling?",
+    "I gave notice last week and now I'm 4 weeks from being unemployed with no job lined up. How do I think about the empty calendar coming?",
+    "Court date is Friday and my barrister says it could go either way. How do I sit with not knowing for the next 4 days?",
+    "I'm flying solo with two toddlers across the Atlantic on Saturday for the first time. I keep imagining the worst. What's a more useful headspace?",
+    "I have a follow-up appointment with the heart specialist next week. Last appointment they used the word 'concerning.' How do I get through these 6 days?",
+    "I just got the call that my flat survey came back with structural issues. I'm meant to exchange in 3 days. How do I think about whether to walk away or push through?",
+    "I'm 3 days off finishing my master's dissertation and I just realised my supervisor has been off-sick all week and my deadline isn't moving. How do I approach this?",
+    "We've got a baby due in 4 weeks and my husband's hours just got cut. The numbers don't add up. How should I be holding this?",
+    "I just took a pay cut to take this new role and I'm 6 weeks in and starting to wonder if I made a mistake. What's a useful frame for sitting with that uncertainty?",
+    "I got pulled aside today and told there's an investigation into a project I led. They wouldn't say what. How do I get through tonight without spiralling?",
 ]
 
 
@@ -502,23 +626,25 @@ ENGAGED_VOICE_NEG = [
 
 # (entry_index, facet_id, framing, questions)
 QUESTION_BLOCKS: list[tuple[int, str, str, list[str]]] = [
-    (0,  "playfulness",          "pos", PLAYFULNESS_POS),
-    (1,  "playfulness",          "neg", PLAYFULNESS_NEG),
-    (2,  "register_mirroring",   "pos", REGISTER_MIRRORING_POS),
-    (3,  "register_mirroring",   "neg", REGISTER_MIRRORING_NEG),
-    (4,  "affective_attunement", "pos", AFFECTIVE_ATTUNEMENT_POS),
-    (5,  "affective_attunement", "neg", AFFECTIVE_ATTUNEMENT_NEG),
-    (6,  "need_reshaping",       "pos", NEED_RESHAPING_POS),
-    (7,  "need_reshaping",       "neg", NEED_RESHAPING_NEG),
-    (8,  "conversational_warmth","pos", CONVERSATIONAL_WARMTH_POS),
-    (9,  "conversational_warmth","neg", CONVERSATIONAL_WARMTH_NEG),
-    (10, "engaged_voice",        "pos", ENGAGED_VOICE_POS),
-    (11, "engaged_voice",        "neg", ENGAGED_VOICE_NEG),
+    (0,  "playfulness",                "pos", PLAYFULNESS_POS),
+    (1,  "playfulness",                "neg", PLAYFULNESS_NEG),
+    (2,  "register_mirroring",         "pos", REGISTER_MIRRORING_POS),
+    (3,  "register_mirroring",         "neg", REGISTER_MIRRORING_NEG),
+    (4,  "affective_attunement",       "pos", AFFECTIVE_ATTUNEMENT_POS),
+    (5,  "affective_attunement",       "neg", AFFECTIVE_ATTUNEMENT_NEG),
+    (6,  "need_reshaping",             "pos", NEED_RESHAPING_POS),
+    (7,  "need_reshaping",             "neg", NEED_RESHAPING_NEG),
+    (8,  "conversational_warmth",      "pos", CONVERSATIONAL_WARMTH_POS),
+    (9,  "conversational_warmth",      "neg", CONVERSATIONAL_WARMTH_NEG),
+    (10, "engaged_voice",              "pos", ENGAGED_VOICE_POS),
+    (11, "engaged_voice",              "neg", ENGAGED_VOICE_NEG),
+    (12, "self_state_calibration",     "pos", SELF_STATE_CALIBRATION_POS),
+    (13, "self_state_calibration",     "neg", SELF_STATE_CALIBRATION_NEG),
 ]
 
 
 def all_questions() -> list[str]:
-    """Return the full flat list of 420 unique questions."""
+    """Return the full flat list of 490 unique questions."""
     out: list[str] = []
     for _, _, _, qs in QUESTION_BLOCKS:
         out.extend(qs)
@@ -526,14 +652,14 @@ def all_questions() -> list[str]:
 
 
 def validate_unique() -> None:
-    """Sanity check: all 420 questions are unique."""
+    """Sanity check: all 490 questions are unique."""
     qs = all_questions()
     if len(qs) != len(set(qs)):
         from collections import Counter
         dupes = [q for q, c in Counter(qs).items() if c > 1]
         raise ValueError(f"duplicate questions: {dupes[:5]}")
-    if len(qs) != 420:
-        raise ValueError(f"expected 420 questions, got {len(qs)}")
+    if len(qs) != 490:
+        raise ValueError(f"expected 490 questions, got {len(qs)}")
     for entry_idx, facet, framing, block in QUESTION_BLOCKS:
         if len(block) != 35:
             raise ValueError(f"entry {entry_idx} ({facet}/{framing}) has {len(block)} questions, expected 35")
