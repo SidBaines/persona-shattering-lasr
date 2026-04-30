@@ -320,7 +320,7 @@ def build_axis(cfg: ExperimentConfig, *, upload_hf: bool) -> dict:
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preset", choices=["smoke", "full"], default="smoke")
+    parser.add_argument("--preset", choices=["smoke", "balanced", "full"], default="smoke")
     parser.add_argument("--run-slug", help="Override run_slug (defaults to preset's slug)")
     parser.add_argument("--num-roles", type=int, help="Override num_roles")
     parser.add_argument("--num-questions", type=int, help="Override num_questions")

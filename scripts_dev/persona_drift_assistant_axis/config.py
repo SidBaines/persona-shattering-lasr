@@ -190,7 +190,29 @@ SMOKE = ExperimentConfig(
         num_turns=6,
     ),
 )
-"""Smoke preset — end-to-end pipeline check. ~720 generations, ~$5–10."""
+"""Smoke preset — end-to-end pipeline check. ~720 generations, ~$3."""
+
+
+BALANCED = ExperimentConfig(
+    run_slug="balanced_v1",
+    axis=AxisBuildConfig(
+        num_roles=100,             # 100/275 — adequate population for axis contrast
+        num_questions=80,          # 80/240 — keeps per-role samples plentiful
+        num_sysprompts_per_role=3, # 3/5 — partial sysprompt diversity
+        min_count_per_role=10,     # paper uses 50; relaxed to fit smaller question count
+    ),
+    drift=DriftProtocolConfig(
+        domains=_DEFAULT_DOMAINS,             # all 4 domains — diversity matters
+        num_personas_per_domain=1,            # only one persona shipped per domain
+        num_conversations_per_persona=30,     # 30/100 — tight enough CIs at most turns
+        num_turns=8,                          # 8/15 — drift dynamics visible by turn 6–8
+    ),
+)
+"""Balanced preset — paper-comparable signal at ~10× lower cost.
+
+~24k axis generations + ~3k drift turns × 3 conditions. ~6 GPU hr,
+~$30–40. Recommended starting point for a real run.
+"""
 
 
 FULL = ExperimentConfig(
@@ -198,10 +220,10 @@ FULL = ExperimentConfig(
     axis=AxisBuildConfig(),  # paper defaults: 275 roles × 240 questions × 5 sysprompts
     drift=DriftProtocolConfig(),
 )
-"""Full replication preset. ~330k generations + 30k rollout turns. ~$200–500."""
+"""Full replication preset. ~330k generations + 18k rollout turns. ~$150–250."""
 
 
-PRESETS: dict[str, ExperimentConfig] = {"smoke": SMOKE, "full": FULL}
+PRESETS: dict[str, ExperimentConfig] = {"smoke": SMOKE, "balanced": BALANCED, "full": FULL}
 
 
 def get_preset(name: str) -> ExperimentConfig:

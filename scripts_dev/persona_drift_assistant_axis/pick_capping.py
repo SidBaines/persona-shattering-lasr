@@ -32,7 +32,7 @@ from scripts_dev.persona_drift_assistant_axis.config import get_preset  # noqa: 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preset", choices=["smoke", "full"], default="smoke")
+    parser.add_argument("--preset", choices=["smoke", "balanced", "full"], default="smoke")
     parser.add_argument("--run-slug", help="Override run_slug")
     parser.add_argument("--threshold-percentile", type=float, help="Override threshold percentile (default 25)")
     parser.add_argument("--layer-window", nargs=2, type=int, metavar=("LO", "HI"),
