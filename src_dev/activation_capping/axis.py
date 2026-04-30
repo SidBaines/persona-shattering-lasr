@@ -229,20 +229,47 @@ def _project_batch(activations: torch.Tensor, axis: torch.Tensor, layer: int) ->
     return (acts @ ax_normed).numpy()
 
 
+def cohens_d(
+    a: np.ndarray, b: np.ndarray, *, signed: bool = False, ddof: int = 1
+) -> float:
+    """Cohen's d between two 1-D samples.
+
+    Args:
+        a, b: 1-D arrays of values.
+        signed: If True, returns ``(mean(a) − mean(b)) / pooled_sd``. If
+            False (default), returns the absolute value — sign-agnostic
+            for axis-convention ambiguity.
+        ddof: Delta degrees of freedom for variance. ``1`` is the textbook
+            unbiased sample variance and matches scipy/numpy convention.
+
+    Returns:
+        Effect size (float). 0.0 when pooled std is zero.
+    """
+    pooled = float(np.sqrt((np.var(a, ddof=ddof) + np.var(b, ddof=ddof)) / 2.0))
+    if pooled <= 0:
+        return 0.0
+    diff = float(np.mean(a) - np.mean(b))
+    return (diff if signed else abs(diff)) / pooled
+
+
 def cohens_d_per_layer(
-    base_stack: torch.Tensor, lora_stack: torch.Tensor, axis: torch.Tensor
+    base_stack: torch.Tensor, lora_stack: torch.Tensor, axis: torch.Tensor,
+    *, signed: bool = False,
 ) -> np.ndarray:
-    """Cohen's d for base-vs-LoRA projection separation at each layer. Shape ``(n_layers,)``."""
+    """Cohen's d for base-vs-LoRA projection separation at each layer.
+
+    Returns a ``(n_layers,)`` array. ``signed=False`` (default) gives the
+    absolute effect size — sign-agnostic with respect to axis convention
+    (``base→lora`` or ``lora→base``). ``signed=True`` preserves the
+    direction of the effect, which is what window-picking against a
+    paper-faithful axis convention should use.
+    """
     n_layers = axis.shape[0]
     d = np.zeros(n_layers)
     for layer_idx in range(n_layers):
         proj_base = _project_batch(base_stack, axis, layer_idx)
         proj_lora = _project_batch(lora_stack, axis, layer_idx)
-        # abs() so the helper is sign-agnostic: any axis convention
-        # (base→lora or lora→base) yields the same magnitude of separation.
-        mean_diff = abs(proj_base.mean() - proj_lora.mean())
-        pooled_std = np.sqrt((proj_base.std() ** 2 + proj_lora.std() ** 2) / 2)
-        d[layer_idx] = mean_diff / pooled_std if pooled_std > 0 else 0.0
+        d[layer_idx] = cohens_d(proj_base, proj_lora, signed=signed)
     return d
 
 
@@ -265,6 +292,7 @@ __all__ = [
     "extract_response_activations_batched",
     "compute_axis",
     "compute_per_layer_range",
+    "cohens_d",
     "cohens_d_per_layer",
     "best_contiguous_window",
     "get_model_layers",

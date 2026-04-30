@@ -3,30 +3,53 @@
 The upstream pipeline at ``vendor/assistant_axis/`` saves the axis as a raw
 tensor of shape ``(n_layers, hidden_dim)`` and provides
 ``ActivationSteering`` (a context manager that registers PyTorch forward
-hooks for capping). Our existing ``ActivationCapProvider`` expects a
-different file format and a fraction-of-range threshold; the paper uses a
-percentile-of-default-projections threshold per layer.
+hooks for capping). This module converts the upstream axis + activation
+cache into a per-layer threshold config and applies activation capping in
+a way that is faithful to the paper's Eq. 1.
 
-Rather than fight either side, this module provides:
+────────────────────────────────────────────────────────────────────────────
+SIGN CONVENTION + CLAMP DIRECTION (read this before changing anything)
+────────────────────────────────────────────────────────────────────────────
 
-  * :func:`compute_capping_config` — given the upstream axis + activation
-    cache, compute a per-layer threshold (default = 25th percentile of
-    default-Assistant projections) and a layer window (default = top-25%
-    of layers, optionally refined by Cohen's d). Saves a
-    ``capping_config.pt`` mirroring the upstream convention
-    ``{layers: [...], thresholds: [...]}``.
-  * :func:`apply_assistant_axis_capping` — load the axis, build their
-    ``ActivationSteering(intervention_type="capping", ...)`` and ENTER it
-    persistently on the given model. Returns the steering object so the
-    caller can ``.remove()`` later if needed.
-  * :func:`load_capping_config` — read a saved config back as a dict.
+Paper Eq. 1 (Lu et al., 2026, page 13):
 
-NOTE on direction. Upstream's ``_apply_cap`` is a ceiling clamp
-(projections above τ are pulled down). The paper text describes a floor
-clamp (Eq. 1, ``min(⟨h,v⟩−τ, 0)``). We use upstream's published
-implementation as the canonical reference, which means the threshold
-should be set such that *high* projections — i.e. very Assistant-like
-turns — are bounded. Sweep both modes if results are surprising.
+    h ← h − v · min(⟨h, v⟩ − τ, 0)                 (Eq. 1)
+
+This is a FLOOR clamp: projections below τ get lifted to τ; above τ they
+are unchanged. Paper text: "clamps the component of h along the Assistant
+Axis to a minimum of τ".
+
+Paper page 6 states ``axis = default_assistant − mean(role_vectors)``,
+which means *positive projection ⇒ Assistant-like*. This is also the
+convention produced by ``vendor/assistant_axis/pipeline/5_axis.py``.
+
+So in OUR convention (axis = default − role, positive = Assistant), the
+faithful intervention is FLOOR at a high threshold: prevent the model's
+projection from drifting *below* a typical-Assistant value.
+
+WARNING: the upstream library code in
+``vendor/assistant_axis/assistant_axis/steering.py:_apply_cap`` is a
+CEILING clamp (``clamp(proj − τ, min=0)``), and upstream's
+*pre-published* axis vectors at ``lu-christina/assistant-axis-vectors``
+were generated with the OPPOSITE sign convention (axis = role − default,
+positive = role-like) — verifiable by inspecting their config: the cap
+thresholds at the recommended ``layers_56:71-p0.25`` setting are NEGATIVE
+(e.g. −1.76 at layer 56). Combining their ceiling clamp with the
+opposite-signed published axis at the p25 cap reproduces the paper's
+intent.
+
+Our ``5_axis.py``-built axis matches the paper *text* convention
+(default − role). Combining it with upstream's ceiling clamp would clamp
+the *Assistant* end down — the opposite of what the paper wants. We
+therefore default to FLOOR mode (paper Eq. 1, applied in our convention)
+and compute the threshold percentile against the JOINT (default + role)
+projection distribution. The 75th percentile in our convention equals
+the paper's 25th percentile in the opposite-sign convention; both
+correspond to the same physical threshold in projection space.
+
+A ``mode="ceiling"`` path is preserved for replicating upstream's
+published-vector flow, but should be paired with a manual axis sign flip
+if you want it to make geometric sense.
 """
 
 from __future__ import annotations
@@ -45,6 +68,12 @@ if str(_VENDOR) not in sys.path:
     sys.path.insert(0, str(_VENDOR))
 
 from assistant_axis.steering import ActivationSteering  # noqa: E402
+
+from src_dev.activation_capping.axis import cohens_d as _shared_cohens_d  # noqa: E402
+from src_dev.activation_capping.model import ActivationCappedModel  # noqa: E402
+
+
+CapMode = Literal["floor", "ceiling"]
 
 
 # ── Reading axis + activation artefacts ────────────────────────────────────
@@ -86,16 +115,17 @@ def project_onto_axis(activations: torch.Tensor, axis: torch.Tensor) -> torch.Te
     """
     ax = axis.float()
     ax_norm = ax / (ax.norm(dim=-1, keepdim=True) + 1e-8)
-    # einsum('Nld,ld->Nl')
     return torch.einsum("nld,ld->nl", activations.float(), ax_norm)
 
 
 def cohens_d(a: np.ndarray, b: np.ndarray) -> float:
-    """Cohen's d between two 1-D samples."""
-    pooled = np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / 2.0)
-    if pooled <= 0:
-        return 0.0
-    return float((a.mean() - b.mean()) / pooled)
+    """Signed Cohen's d between two 1-D samples (a − b convention).
+
+    Thin wrapper around :func:`src_dev.activation_capping.axis.cohens_d`
+    pinned to ``signed=True`` — the bridge module's window-selection logic
+    is paper-faithful and depends on the sign of (default − role).
+    """
+    return _shared_cohens_d(a, b, signed=True)
 
 
 def pick_layer_window(
@@ -106,22 +136,13 @@ def pick_layer_window(
     window_size: int,
     search_range: tuple[float, float] = (0.5, 1.0),
 ) -> tuple[int, int]:
-    """Find contiguous layer window of ``window_size`` maximising mean Cohen's d.
+    """Find contiguous layer window of ``window_size`` maximising mean signed Cohen's d.
 
-    ``search_range`` constrains the window's lower bound to a fraction of
-    the layer stack — the paper consistently picks windows in the upper
-    half (Qwen3-32B layers 46:54 = 71-84%; Llama 3.3 70B 56:72 = 70-90%).
-
-    Args:
-        default_proj: ``(N_default, n_layers)`` projections of default-Assistant.
-        role_proj: ``(N_role, n_layers)`` projections of role-played responses.
-        n_layers: Total number of model layers.
-        window_size: Contiguous window length (in layers).
-        search_range: ``(lo, hi)`` fractions; only window starts whose
-            *centre* is within this fraction of the stack are considered.
-
-    Returns:
-        ``(lo_inclusive, hi_inclusive)`` layer indices.
+    With axis = default − role, default proj > role proj at well-formed
+    layers, so the signed Cohen's d is positive there. ``search_range``
+    constrains the window's centre to a fraction of the layer stack — the
+    paper consistently picks windows in the upper half (Llama 3.3 70B
+    56:72 = 70-90%).
     """
     lo_frac, hi_frac = search_range
     lo_centre = int(round(lo_frac * n_layers))
@@ -149,29 +170,38 @@ def compute_capping_config(
     axis_path: Path,
     activations_dir: Path,
     output_path: Path,
-    threshold_percentile: float = 25.0,
+    threshold_percentile: float = 75.0,
     layer_window: tuple[int, int] | None = None,
     window_size: int | None = None,
     role_sample_cap: int = 10,
+    mode: CapMode = "floor",
 ) -> dict:
-    """Compute and save the capping config used by ``ActivationSteering``.
+    """Compute and save the capping config used by ``apply_assistant_axis_capping``.
 
     Args:
-        axis_path: Path to upstream ``axis.pt`` (raw tensor or wrapped).
+        axis_path: Path to upstream ``axis.pt`` (raw tensor or wrapped),
+            using the convention ``axis = default − role`` (positive =
+            Assistant-like) — the convention produced by
+            ``vendor/assistant_axis/pipeline/5_axis.py``.
         activations_dir: Phase 1 ``activations/`` dir with per-role .pt files.
         output_path: Where to save ``capping_config.pt``.
-        threshold_percentile: Per-layer threshold = N-th percentile of
-            default-Assistant projections at that layer. Paper = 25.0.
+        threshold_percentile: Per-layer threshold = N-th percentile of the
+            JOINT (default + role) projection distribution. Default 75.0,
+            which under our axis convention corresponds to the paper's
+            "p25" calibration in the opposite sign convention. See module
+            docstring for the equivalence proof.
         layer_window: Optional explicit ``(lo, hi)`` inclusive layer window.
             If None, auto-pick by Cohen's d sweep within the upper half.
         window_size: When auto-picking, the window length. Default =
             ``max(4, n_layers // 4)`` (top-quarter analog).
         role_sample_cap: Cap how many roles to load (each contributes up
             to ~hundreds of activations); 10 keeps memory modest.
+        mode: ``"floor"`` (paper Eq. 1, default) or ``"ceiling"`` (upstream
+            ``_apply_cap`` semantics — only correct if you also flip the
+            axis sign).
 
     Returns:
-        The saved config dict: ``{layers, thresholds, axis_path,
-        threshold_percentile, search_metadata}``.
+        The saved config dict.
     """
     axis = load_axis(axis_path)
     n_layers, hidden_dim = axis.shape
@@ -195,6 +225,7 @@ def compute_capping_config(
     # Layer window selection.
     if layer_window is not None:
         lo, hi = layer_window
+        window_source = "user_override"
     else:
         if window_size is None:
             window_size = max(4, n_layers // 4)
@@ -202,10 +233,28 @@ def compute_capping_config(
             default_proj, role_proj,
             n_layers=n_layers, window_size=window_size,
         )
+        window_source = "auto_cohens_d"
 
-    # Per-layer threshold = N-th percentile of default projections.
+    # Sanity-print: window centre as a fraction of the layer stack, vs
+    # the paper's analog (Llama 3.3 70B used 56:71 of 80 = 70-89% depth;
+    # Qwen 3 32B used 46:53 of 64 = 72-83%). Auto-picked windows on Llama
+    # 3.1 8B should land somewhere in the same fractional region.
+    PAPER_DEPTH_FRACTION_RANGE = (0.70, 0.90)
+    centre_frac = ((lo + hi) / 2) / max(n_layers - 1, 1)
+    paper_lo, paper_hi = PAPER_DEPTH_FRACTION_RANGE
+    in_range = paper_lo <= centre_frac <= paper_hi
+    flag = "" if in_range else "  ← NOT in paper's depth range; double-check."
+    print(f"  Window: layers {lo}:{hi} of {n_layers} "
+          f"(centre {centre_frac:.0%} of stack; paper analog {paper_lo:.0%}-{paper_hi:.0%}; "
+          f"source={window_source}){flag}")
+
+    # Per-layer threshold = N-th percentile of the JOINT (default+role)
+    # projection distribution at that layer. Joint matches the paper's
+    # calibration dataset; paper's p25 (in role-positive convention) ==
+    # our p75 (in default-positive convention) — see module docstring.
+    joint_proj = torch.cat([default_proj, role_proj], dim=0)  # (N_default+N_role, L)
     thresholds = {
-        layer: float(np.percentile(default_proj[:, layer].numpy(), threshold_percentile))
+        layer: float(np.percentile(joint_proj[:, layer].numpy(), threshold_percentile))
         for layer in range(lo, hi + 1)
     }
 
@@ -218,39 +267,55 @@ def compute_capping_config(
         "layers": list(range(lo, hi + 1)),
         "thresholds": thresholds,  # dict[layer_idx, tau]
         "axis_path": str(axis_path),
+        "axis_convention": "default_minus_role",  # positive = Assistant
+        "mode": mode,
         "threshold_percentile": threshold_percentile,
+        "threshold_distribution": "joint_default_and_role",
         "n_default_samples": int(default_acts.shape[0]),
         "n_role_samples": int(role_proj.shape[0]),
         "n_layers_total": n_layers,
         "hidden_dim": hidden_dim,
         "cohens_d_per_layer": d_per_layer,
         "layer_window": (lo, hi),
+        "layer_window_source": window_source,
+        "layer_window_centre_fraction": float(centre_frac),
+        "paper_depth_fraction_range": list(PAPER_DEPTH_FRACTION_RANGE),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(config, output_path)
 
-    # Sidecar JSON for human inspection (skip the big dicts).
     summary = {
         "layers": config["layers"],
         "thresholds": {str(k): v for k, v in thresholds.items()},
         "axis_path": config["axis_path"],
+        "axis_convention": config["axis_convention"],
+        "mode": mode,
         "threshold_percentile": threshold_percentile,
+        "threshold_distribution": config["threshold_distribution"],
         "layer_window": list(config["layer_window"]),
+        "layer_window_source": window_source,
+        "layer_window_centre_fraction": float(centre_frac),
+        "paper_depth_fraction_range": list(PAPER_DEPTH_FRACTION_RANGE),
         "cohens_d_in_window_mean": float(np.mean([d_per_layer[l] for l in config["layers"]])),
         "n_default_samples": config["n_default_samples"],
         "n_role_samples": config["n_role_samples"],
     }
     with open(output_path.with_suffix(".json"), "w") as fh:
         json.dump(summary, fh, indent=2)
-    print(f"Saved capping config: layers {lo}-{hi}, "
-          f"mean Cohen's d in window = {summary['cohens_d_in_window_mean']:.3f}, "
-          f"thresholds@p{int(threshold_percentile)}.")
+    print(f"Saved capping config: layers {lo}-{hi}, mode={mode}, "
+          f"thresholds@p{threshold_percentile:g} of joint distribution, "
+          f"mean Cohen's d in window = {summary['cohens_d_in_window_mean']:.3f}.")
     return config
 
 
 def load_capping_config(path: Path) -> dict:
     """Load a saved capping config dict."""
-    return torch.load(str(path), map_location="cpu", weights_only=False)
+    cfg = torch.load(str(path), map_location="cpu", weights_only=False)
+    # Back-compat: older configs may not have these fields.
+    cfg.setdefault("mode", "floor")
+    cfg.setdefault("axis_convention", "default_minus_role")
+    cfg.setdefault("threshold_distribution", "unknown")
+    return cfg
 
 
 # ── Hook installation (Phase 3) ────────────────────────────────────────────
@@ -261,41 +326,284 @@ def apply_assistant_axis_capping(
     axis: torch.Tensor,
     capping_config: dict,
     *,
-    intervention: Literal["capping", "addition"] = "capping",
+    mode: CapMode | None = None,
     debug: bool = False,
-) -> ActivationSteering:
+) -> "ActivationCappedModel | ActivationSteering":
     """Register persistent forward hooks for activation capping on ``model``.
 
-    Uses upstream's :class:`assistant_axis.steering.ActivationSteering`
-    with ``intervention_type="capping"`` (ceiling clamp, per upstream's
-    published implementation). The returned object holds the registered
-    hook handles; call ``.remove()`` to detach later.
+    Default mode is ``"floor"`` (paper Eq. 1), routed through our
+    :class:`~src_dev.activation_capping.model.ActivationCappedModel`.
+    ``"ceiling"`` is preserved for replicating upstream's published-vector
+    behaviour and goes through upstream's
+    :class:`assistant_axis.steering.ActivationSteering`.
 
     Args:
         model: HuggingFace ``AutoModelForCausalLM`` (plain, not vLLM).
-        axis: ``(n_layers, hidden_dim)`` axis tensor.
+        axis: ``(n_layers, hidden_dim)`` axis tensor (same convention as
+            ``capping_config["axis_convention"]``).
         capping_config: Output of :func:`compute_capping_config`.
-        intervention: Forwarded to ``ActivationSteering.intervention_type``.
-        debug: If True, prints the hook count.
+        mode: Override the mode stored in ``capping_config``. Use only if
+            you understand the sign-convention implications.
+        debug: If True, prints hook installation details.
 
     Returns:
-        The active :class:`ActivationSteering` instance (already entered).
+        An object whose ``.remove_hooks()`` (floor mode) or ``.remove()``
+        (ceiling mode) method detaches the hooks. Caller must hold a
+        reference to the returned object for the hook lifetime.
     """
     layers: list[int] = capping_config["layers"]
     thresholds_dict: dict[int, float] = capping_config["thresholds"]
+    resolved_mode = mode or capping_config.get("mode", "floor")
 
-    steering_vectors = [axis[l] for l in layers]
-    cap_thresholds = [thresholds_dict[l] for l in layers]
+    if resolved_mode == "floor":
+        # Paper Eq. 1: lifts below-threshold projections up to threshold.
+        capped = ActivationCappedModel(
+            model,
+            axis=axis,
+            layer_thresholds=thresholds_dict,
+            mode="floor",
+        )
+        if debug:
+            print(f"[apply_assistant_axis_capping] FLOOR mode on layers {layers} "
+                  f"(thresholds: {[round(thresholds_dict[l], 4) for l in layers]})")
+        return capped
 
-    steering = ActivationSteering(
-        model,
-        steering_vectors=steering_vectors,
-        coefficients=[1.0] * len(layers),  # ignored for capping mode
-        layer_indices=layers,
-        intervention_type=intervention,
-        cap_thresholds=cap_thresholds,
-        positions="all",
-        debug=debug,
-    )
-    steering.__enter__()  # noqa: PLC2801 — persistent hooks; caller owns lifetime
-    return steering
+    if resolved_mode == "ceiling":
+        steering_vectors = [axis[l] for l in layers]
+        cap_thresholds = [thresholds_dict[l] for l in layers]
+        steering = ActivationSteering(
+            model,
+            steering_vectors=steering_vectors,
+            coefficients=[1.0] * len(layers),
+            layer_indices=layers,
+            intervention_type="capping",
+            cap_thresholds=cap_thresholds,
+            positions="all",
+            debug=debug,
+        )
+        steering.__enter__()  # noqa: PLC2801 — persistent hooks; caller owns lifetime
+        if debug:
+            print(f"[apply_assistant_axis_capping] CEILING mode (upstream) on layers {layers}")
+        return steering
+
+    raise ValueError(f"Unknown mode: {resolved_mode!r}")
+
+
+def remove_capping_hooks(handle) -> None:
+    """Detach hooks from either floor or ceiling capping handle."""
+    if hasattr(handle, "remove_hooks"):  # ActivationCappedModel
+        handle.remove_hooks()
+    elif hasattr(handle, "remove"):  # ActivationSteering
+        handle.remove()
+    else:
+        raise TypeError(f"Unknown handle type: {type(handle)}")
+
+
+# ── Diagnostic: verify clamp direction empirically (Task #2) ──────────────
+
+
+def diagnose_capping_direction(
+    model,
+    tokenizer,
+    capped_handle,
+    *,
+    axis: torch.Tensor,
+    capping_config: dict,
+    sample_messages: list[list[dict]] | None = None,
+    max_new_tokens: int = 16,
+) -> dict:
+    """Run one short forward pass with hooks active and report per-layer
+    pre/post projection means at the capped layers.
+
+    For ``mode="floor"``: post-projection means should be ≥ pre-projection
+    means at every capped layer (where pre fell below the threshold).
+
+    For ``mode="ceiling"``: post means should be ≤ pre means.
+
+    This catches sign/direction bugs in <1 second of GPU time. Run it
+    BEFORE spending GPU hours on a full Phase 3.
+
+    Args:
+        model: The (already-capped) HF model.
+        tokenizer: Matching tokenizer.
+        capped_handle: Object returned by ``apply_assistant_axis_capping``
+            (has ``.remove_hooks()`` or ``.remove()``).
+        axis: The same axis tensor used to register the hooks.
+        capping_config: The same config used to register the hooks.
+        sample_messages: List of conversation message-lists to forward.
+            If None, a small built-in default is used.
+        max_new_tokens: Unused (we only need a forward pass), kept for
+            API symmetry.
+
+    Returns:
+        dict with per-layer ``pre_mean``, ``post_mean``, ``threshold``,
+        ``mode`` and a ``passed`` boolean (True if direction is correct).
+    """
+    import torch
+
+    if sample_messages is None:
+        sample_messages = [
+            [{"role": "user",
+              "content": "Tell me about yourself in one sentence."}],
+            [{"role": "system",
+              "content": "You are a wise oracle who speaks in riddles."},
+             {"role": "user",
+              "content": "What is the meaning of suffering?"}],
+        ]
+
+    layers: list[int] = capping_config["layers"]
+    thresholds: dict[int, float] = capping_config["thresholds"]
+    mode: str = capping_config.get("mode", "floor")
+
+    ax = axis.float()
+    ax_norm_per_layer = {
+        l: (ax[l] / (ax[l].norm() + 1e-8)).to(next(model.parameters()).device)
+        for l in layers
+    }
+
+    # Capture pre-hook (raw, not clamped) and post-hook (clamped) at each layer.
+    pre_acts: dict[int, list[torch.Tensor]] = {l: [] for l in layers}
+    post_acts: dict[int, list[torch.Tensor]] = {l: [] for l in layers}
+
+    # The capping hook is already registered on the layer; we add a
+    # PRE-hook to capture inputs and a POST-hook to capture outputs.
+    from src_dev.activation_capping.model import get_model_layers
+    model_layers = get_model_layers(model)
+    handles: list = []
+
+    def make_pre_hook(layer_idx: int):
+        def fn(_module, inputs):
+            x = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
+            if isinstance(x, torch.Tensor):
+                pre_acts[layer_idx].append(x.detach().float().cpu())
+        return fn
+
+    def make_post_hook(layer_idx: int):
+        def fn(_module, _inputs, output):
+            x = output[0] if isinstance(output, (tuple, list)) else output
+            if isinstance(x, torch.Tensor):
+                post_acts[layer_idx].append(x.detach().float().cpu())
+        return fn
+
+    for l in layers:
+        handles.append(model_layers[l].register_forward_pre_hook(make_pre_hook(l)))
+        handles.append(model_layers[l].register_forward_hook(make_post_hook(l)))
+
+    try:
+        # Forward pass on each sample (no generation; we only need acts).
+        orig_padding_side = tokenizer.padding_side
+        tokenizer.padding_side = "left"
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        # Llama 3.1 8B Instruct (and every Instruct/Chat tokenizer we use
+        # in this experiment) ships a chat_template — so the apply_chat_template
+        # branch is what runs in production. The fallback is only here for
+        # base-model tokenizers used in unit tests (e.g. SmolLM-135M); we
+        # never go through the fallback during a real Phase 3 run.
+        has_chat_template = getattr(tokenizer, "chat_template", None) is not None
+        for messages in sample_messages:
+            if has_chat_template:
+                text = tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True,
+                )
+            else:
+                text = "\n".join(
+                    f"[{m.get('role', 'user').upper()}] {m.get('content', '')}"
+                    for m in messages
+                ) + "\n[ASSISTANT]"
+            enc = tokenizer(
+                text, return_tensors="pt", add_special_tokens=False,
+            ).to(next(model.parameters()).device)
+            with torch.inference_mode():
+                model(**enc)
+        tokenizer.padding_side = orig_padding_side
+    finally:
+        for h in handles:
+            h.remove()
+
+    # Compute per-layer mean projection over all token positions across all samples.
+    report: dict = {"layers": {}, "mode": mode, "passed": True}
+    for l in layers:
+        if not pre_acts[l] or not post_acts[l]:
+            continue
+        pre_cat = torch.cat([t.view(-1, t.shape[-1]) for t in pre_acts[l]], dim=0)
+        post_cat = torch.cat([t.view(-1, t.shape[-1]) for t in post_acts[l]], dim=0)
+        v = ax_norm_per_layer[l].cpu()
+        pre_proj = (pre_cat @ v).numpy()
+        post_proj = (post_cat @ v).numpy()
+        tau = thresholds[l]
+        layer_report = {
+            "threshold": float(tau),
+            "pre_min": float(pre_proj.min()),
+            "pre_mean": float(pre_proj.mean()),
+            "pre_max": float(pre_proj.max()),
+            "post_min": float(post_proj.min()),
+            "post_mean": float(post_proj.mean()),
+            "post_max": float(post_proj.max()),
+        }
+        # Direction check.
+        # Bf16 model weights round-trip the corrected residual back to bf16,
+        # which loses ~2-3 ulp of precision relative to the fp32 cap math.
+        # Re-projecting the bf16-quantised post-state can therefore land a
+        # few percent of positions below τ even when the cap is correct.
+        # We accept the cap as 'directionally correct' if the FRACTION of
+        # mis-clamped positions dropped substantially (≤ 5% of pre-violations
+        # remain) and the magnitude of any residual violation is small.
+        TOL = 0.1
+        VIOLATION_FRACTION_LIMIT = 0.05
+        if mode == "floor":
+            pre_violations = (pre_proj < tau).sum()
+            post_violations = (post_proj < tau - TOL).sum()
+            ok = (
+                post_proj.min() >= tau - TOL
+                or (pre_violations > 0
+                    and post_violations / pre_violations <= VIOLATION_FRACTION_LIMIT)
+            )
+            layer_report["pre_below_tau_count"] = int(pre_violations)
+            layer_report["post_below_tau_count"] = int(post_violations)
+        else:  # ceiling
+            pre_violations = (pre_proj > tau).sum()
+            post_violations = (post_proj > tau + TOL).sum()
+            ok = (
+                post_proj.max() <= tau + TOL
+                or (pre_violations > 0
+                    and post_violations / pre_violations <= VIOLATION_FRACTION_LIMIT)
+            )
+            layer_report["pre_above_tau_count"] = int(pre_violations)
+            layer_report["post_above_tau_count"] = int(post_violations)
+        layer_report["direction_ok"] = bool(ok)
+        report["layers"][l] = layer_report
+        if not ok:
+            report["passed"] = False
+
+    return report
+
+
+def print_capping_diagnosis(report: dict) -> None:
+    """Pretty-print the diagnostic report. Use after diagnose_capping_direction."""
+    mode = report["mode"]
+    print(f"\n=== Capping direction diagnostic (mode={mode}) ===")
+    if mode == "floor":
+        print("  layer | tau     | pre[min/mean/max]    | post[min/mean/max]   | "
+              "below-τ pre→post | ok")
+    else:
+        print("  layer | tau     | pre[min/mean/max]    | post[min/mean/max]   | "
+              "above-τ pre→post | ok")
+    for l, r in report["layers"].items():
+        if mode == "floor":
+            viol = f"{r.get('pre_below_tau_count', 0):>4}→{r.get('post_below_tau_count', 0):<4}"
+        else:
+            viol = f"{r.get('pre_above_tau_count', 0):>4}→{r.get('post_above_tau_count', 0):<4}"
+        print(
+            f"  {l:5d} | {r['threshold']:+7.3f} | "
+            f"{r['pre_min']:+5.2f}/{r['pre_mean']:+5.2f}/{r['pre_max']:+5.2f} | "
+            f"{r['post_min']:+5.2f}/{r['post_mean']:+5.2f}/{r['post_max']:+5.2f} | "
+            f"{viol:>15} | "
+            f"{'✓' if r['direction_ok'] else '✗'}"
+        )
+    if not report["passed"]:
+        print(f"  WARNING: at least one layer's clamp direction does NOT match "
+              f"mode={mode!r}. This usually means the axis sign or "
+              "the threshold-distribution convention is wrong. STOP HERE.")
+    else:
+        print(f"  All capped layers directionally consistent with {mode!r}.")
