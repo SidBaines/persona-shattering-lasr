@@ -1,5 +1,8 @@
 # Persona-Drift × Assistant Axis Experiment
 
+> **For agents picking up this work mid-flight, read [HANDOVER.md](./HANDOVER.md) first.** It covers what's built, what's been run, what to look for, machine-migration notes, and open questions.
+
+
 Comparison of three drift-mitigation methods on Llama 3.1 8B Instruct:
 
 | Condition | Method | Engine |
