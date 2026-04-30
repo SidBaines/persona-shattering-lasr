@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 3 — Train F2 (Warmth) LoRAs (amplifier + suppressor) using paired-
-# teacher DPO. Mirrors run_agreeableness_vanton4_paired_dpo.sh but for our
-# unsup_4fac warmth target.
+# Phase 3 — Train unsup_4fac LoRAs (amplifier + suppressor) for a given target
+# trait using paired-teacher DPO. Mirrors run_agreeableness_vanton4_paired_dpo.sh
+# but for our unsup_4fac targets.
 #
 # Prereq: Phases 1 and 2 must have completed; the monorepo must contain
 # paired-DPO distillation JSONLs at
-#   fine_tuning/llama-3.1-8b-it/unsupervised/warmth/{amplifier,suppressor}/
+#   fine_tuning/llama-3.1-8b-it/unsupervised/<trait>/{amplifier,suppressor}/
 #       vunsup_4fac_paired_dpo/data/distillation/<const>.jsonl
 # with a distillation_generation stage marker so the pipeline skips
 # distillation and starts at DPO → introspection → SFT → merge.
@@ -15,11 +15,26 @@
 # below to run only one if needed.
 #
 # Usage:
-#   bash scripts_dev/oct_pipeline/unsup_4fac/run_unsup_4fac_paired_dpo.sh <gpu_id>
+#   bash scripts_dev/oct_pipeline/unsup_4fac/run_unsup_4fac_paired_dpo.sh <gpu_id> <trait>
+#
+#   <trait> ∈ {warmth, conviction, exuberance, didacticism}
 # ─────────────────────────────────────────────────────────────────────────────
 set -o pipefail
 
-GPU="${1:-0}"
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 <gpu_id> <trait>" >&2
+    echo "  <trait> ∈ {warmth, conviction, exuberance, didacticism}" >&2
+    exit 2
+fi
+
+GPU="$1"
+TRAIT="$2"
+
+case "$TRAIT" in
+    warmth|conviction|exuberance|didacticism) ;;
+    *) echo "ERROR: unknown <trait> '$TRAIT' (expected one of warmth/conviction/exuberance/didacticism)" >&2; exit 2 ;;
+esac
+
 export CUDA_VISIBLE_DEVICES="$GPU"
 export MASTER_PORT="$((29500 + GPU))"
 
@@ -43,23 +58,34 @@ FAILED=()
 
 # Set to "amplifier suppressor" to train both, "amplifier" or "suppressor" for
 # just one. The amplifier is the primary training target; the suppressor is
-# trained as the validation companion (push F2 down on the same student).
+# trained as the validation companion (push the factor down on the same student).
 DIRECTIONS_TO_RUN="amplifier suppressor"
 
 for DIRECTION in $DIRECTIONS_TO_RUN; do
     if [ "$DIRECTION" = "amplifier" ]; then
-        STEM="warmth_amplifying_full_unsup_4fac"
+        STEM="${TRAIT}_amplifying_full_unsup_4fac"
     else
-        STEM="warmth_suppressing_full_unsup_4fac"
+        STEM="${TRAIT}_suppressing_full_unsup_4fac"
     fi
     CONST_JSON="scripts_dev/oct_pipeline/unsup_4fac/${STEM}.json"
     SLIM_JSON="scripts_dev/oct_pipeline/unsup_4fac/${STEM}_slim.json"
-    OUT_DIR="scratch/oct_unsup_4fac_warmth_${DIRECTION}_paired_dpo"
-    RUN_LOG="${LOG_DIR}/unsup_4fac_warmth_${DIRECTION}_paired_dpo_${STAMP}.log"
+    OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_paired_dpo"
+    RUN_LOG="${LOG_DIR}/unsup_4fac_${TRAIT}_${DIRECTION}_paired_dpo_${STAMP}.log"
+
+    if [ ! -f "$CONST_JSON" ]; then
+        echo "ERROR: constitution file not found: $CONST_JSON" >&2
+        FAILED+=("$DIRECTION (missing constitution)")
+        continue
+    fi
+    if [ ! -f "$SLIM_JSON" ]; then
+        echo "ERROR: slim constitution file not found: $SLIM_JSON" >&2
+        FAILED+=("$DIRECTION (missing slim constitution)")
+        continue
+    fi
 
     echo
     echo "================================================================"
-    echo "  warmth ${DIRECTION} — paired-teacher DPO training"
+    echo "  ${TRAIT} ${DIRECTION} — paired-teacher DPO training"
     echo "  GPU:                     ${GPU}"
     echo "  constitution:            ${CONST_JSON}"
     echo "  introspection (slim):    ${SLIM_JSON}"
@@ -77,7 +103,7 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
           --introspection-constitution "$SLIM_JSON" \
           --out-dir "$OUT_DIR" \
           --monorepo-category unsupervised \
-          --monorepo-trait warmth \
+          --monorepo-trait "$TRAIT" \
           --monorepo-direction "$DIRECTION" \
           --monorepo-version "$VERSION" \
           --oct-dpo-micro-batch-size "$DPO_MICRO_BATCH" \
@@ -98,9 +124,9 @@ echo "================================================================"
 if [ ${#FAILED[@]} -eq 0 ]; then
     echo "  Phase 3 done."
     echo "  Trained adapters live on monorepo at:"
-    echo "    fine_tuning/llama-3.1-8b-it/unsupervised/warmth/{amp,sup}/v${VERSION}/lora/"
+    echo "    fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/{amp,sup}/v${VERSION}/lora/"
     echo "  Validate with:"
-    echo "    uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py"
+    echo "    uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_lora.py --target ${TRAIT} ..."
 else
     echo "  Phase 3 had failures:"
     for f in "${FAILED[@]}"; do echo "    - $f"; done
