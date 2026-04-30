@@ -369,7 +369,7 @@ def run_drift(cfg: ExperimentConfig, *, conditions: tuple[str, ...]) -> None:
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preset", choices=["smoke", "full"], default="smoke")
+    parser.add_argument("--preset", choices=["smoke", "balanced", "full"], default="smoke")
     parser.add_argument("--run-slug", help="Override run_slug")
     parser.add_argument(
         "--conditions",
