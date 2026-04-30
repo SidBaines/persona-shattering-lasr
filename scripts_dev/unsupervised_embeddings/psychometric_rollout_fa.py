@@ -307,6 +307,29 @@ ROLLOUT_PRESETS: dict[str, RolloutPreset] = {
         scenario_set_version="v2",
         user_sim_prompt_version="v6",
     ),
+    # Cross-model replication of B on Qwen2.5-7B-Instruct. Same shape as
+    # B_qwen35_9b but on a non-reasoning model, which matters for logprob-
+    # mode questionnaire scoring (see scripts_dev/acquiescence_test/README.md
+    # for why Qwen3.5-9B is unusable as a questionnaire admin model).
+    # OpenRouter has no bf16 provider for ``qwen/qwen-2.5-7b-instruct`` —
+    # endpoints are Phala (unknown), AtlasCloud (fp8), Together (fp8). The
+    # global ``ASSISTANT_OPENROUTER_PROVIDER_ROUTING = {"quantizations":
+    # ["bf16"]}`` filter falls back since ``allow_fallbacks`` defaults true.
+    "B_qwen25_7b": RolloutPreset(
+        seed=436,
+        max_prompts=2500,
+        num_rollouts_per_prompt=1,
+        num_conversation_turns=15,
+        assistant_model="qwen/qwen-2.5-7b-instruct",
+        assistant_provider="openrouter",
+        user_model="openai/gpt-5.4-nano",
+        user_provider="openrouter",
+        temperature=1.0,
+        user_simulator_mode="scenarios",
+        scenario_file="datasets/scenarios/v2.json",
+        scenario_set_version="v2",
+        user_sim_prompt_version="v6",
+    ),
 }
 
 # ── External rollout presets (pre-existing datasets) ────────────────────────
@@ -665,11 +688,14 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Cross-model questionnaire on the original B rollouts (Llama-3.1-8B,
-    # hydrated from HF). Stage 2 administers on Qwen3.5-9B
-    # (CROSS_MODEL_QUESTIONNAIRE=True below).
-    ("B", "v5"),
-    ("B", "trait_ocean_natural_v1"),
+    # Qwen2.5-7B rollout replication of B (same scenarios v2 / archetypes /
+    # SEED / 15 turns / 2500 prompts / gpt-5.4-nano user sim — only the
+    # assistant model differs). Stage 2 admin model is set per-iteration via
+    # the run_qwen25_7b_questionnaire_sweep.sh driver, which exports
+    # PSYCHOMETRIC_QUESTIONNAIRE_MODEL_OVERRIDE for each invocation
+    # (Qwen2.5-7B-Instruct first, then Llama-3.1-8B-Instruct).
+    ("B_qwen25_7b", "v5"),
+    ("B_qwen25_7b", "trait_ocean_natural_v1"),
 ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
@@ -686,7 +712,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = False  # flip to False to restore the default path
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
