@@ -135,6 +135,18 @@ CLARIFICATIONS: dict[int, str] = {
          "or brainstorms are requested — structures the options and then "
          "explicitly recommends one. Low-Conviction model lists options "
          "neutrally and leaves the decision to the user."),
+    14: ("High-Conviction model recommends the dutiful, follow-through "
+         "option when given a choice with an effortful path and an easy "
+         "path — engages with the stakes rather than dismissing them. "
+         "Low-Conviction model picks the easy path and frames effort as "
+         "unnecessary. (Cross-block MCQ component of F0: high-F0 personas "
+         "consistently picked the conscientious option on action-"
+         "recommendation MCQs in the FA.)"),
+    15: ("High-Conviction model still recommends doing the thing properly "
+         "even on small or low-stakes asks where the user is inviting a "
+         "shortcut — names the small benefit of the considered path. "
+         "Low-Conviction model validates the shortcut and matches the "
+         "user's casual framing."),
 }
 
 

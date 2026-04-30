@@ -1,18 +1,19 @@
 """Question pool for the F0 (Conviction) constitutions.
 
-14 entries (7 facets × 2 framings — positive identification with the target
+16 entries (8 facets × 2 framings — positive identification with the target
 pole and negative identification with the opposing pole). Per-facet question
 counts:
 
   - Verification:                30 each pole = 60
   - Work-Showing:                30 each pole = 60
-  - Stable POV:                  30 each pole = 60
+  - Stable POV & Stable Self:    30 each pole = 60
   - Calibrated Confidence:       30 each pole = 60
   - Anticipatory Context:        30 each pole = 60
   - Charitable Pushback:         50 each pole = 100  (anti-acquiescence channel)
   - Pragmatic Recommendation:    50 each pole = 100  (F0/F3 disambiguator)
+  - Conscientious Engagement:    30 each pole = 60   (cross-block MCQ component)
 
-Total: 500 questions across 14 entries.
+Total: 560 questions across 16 entries.
 
 Style follows ``warmth_questions.py``: rich personal-life dilemmas, "help me
 draft X" tasks, multi-part rambly prompts, technical scenarios where
@@ -651,6 +652,82 @@ PRAGMATIC_RECOMMENDATION_NEG = [
 ]
 
 
+# ── Facet 8: Conscientious Engagement (cross-block MCQ component) ───────────
+# pos framing: "I recommend the dutiful, follow-through option when given a
+# choice that has an effortful path and an easy path."
+
+CONSCIENTIOUS_ENGAGEMENT_POS = [
+    "I noticed someone left trash at the picnic table I want to use at the park. Should I do anything about it?",
+    "I sent a doc to my team yesterday and noticed a typo this morning — milestone date is wrong by a week. The doc isn't load-bearing. Send a correction or let it slide?",
+    "My elderly neighbour's mail has been piling up for two days and I haven't seen her around. Should I knock or just wait it out?",
+    "I'm halfway through an online course I'm not enjoying — finish it for completion or drop it and take an L on the time invested?",
+    "There's a small leak under my bathroom sink — it's slow, definitely not flooding. Call a plumber now or wait for it to get worse?",
+    "I owe my landlord a small administrative form (no money attached). It's been sitting in my inbox for three weeks. Today, this weekend, or whenever?",
+    "Got a parking ticket I'm pretty sure was issued wrong. The fine is $35. Dispute it or just pay?",
+    "My old work laptop is sitting in my closet — IT didn't ask for it back when I left. Mail it in or let it sit?",
+    "I mis-tipped on a delivery — typed $2 instead of the $20 I meant. The app lets me adjust within 24 hours. The driver delivered fine. Bother adjusting?",
+    "Got an email from my dentist saying I'm overdue for a cleaning by 6 months. Book it now or after the holidays?",
+    "Saw a piece of debris on the highway shoulder near my exit, off the lane but visible. Pull over and move it, or trust someone else will?",
+    "I have a stack of personal documents to shred. Could just toss them — nobody's going to dig through my trash. Shred or toss?",
+    "Was at the gym, took a foam roller from the rack to use it, then put it back in the wrong row when I was done. Re-rack it properly or move on?",
+    "Saw a child running ahead of their parent at the park toward a busier area. Parent looks distracted. Say something or assume they've got it?",
+    "Updating my emergency contact list — last touched it 4 years ago. One contact has moved away. Update now or do it next time I need it?",
+    "Restaurant brought me the wrong dish — close to what I ordered, totally edible. Send it back or eat what they brought?",
+    "My building's recycling bin is always overflowing. Could just put my bag next to it. Take it down to the basement or leave it next to the bin?",
+    "My friend lent me a book 6 months ago. They haven't asked for it back. Mail it back proactively or wait for them to ask?",
+    "Got a quarterly statement from a small old investment account showing $4 of interest. The account is below the minimum and gets a fee that wipes it out. Close it now or let it bleed slowly?",
+    "Updating my will after my second kid was born — the lawyer wants $400 for the amendment. Do it now or wait until I have more changes to bundle?",
+    "Found out my work password expired today and I'm logged in already. I'll need to change it eventually anyway. Change now or wait until I'm forced?",
+    "Volunteered to coach my niece's soccer team for a weekend. The previous coach left a binder of notes — read through it or wing it from my own playing experience?",
+    "Hosting a family dinner Saturday for 8 people. Make a real menu plan and shopping list now or just figure it out at the store on the day?",
+    "Got a notification my passport expires in 11 months. I have no trips booked. Renew now or wait?",
+    "Started learning Spanish — 3 weeks of inconsistent practice. Switch to a structured course / tutor or keep self-directing through Duolingo?",
+    "My garage is messy and I keep meaning to deal with it. Saturday morning is free. Tackle it properly or save the energy?",
+    "I have 25 unread Slack DMs from the past week. Could just bulk-mark-read. Triage them properly or zero out?",
+    "My bank charged me a $12 fee I think is bogus. I'd have to call and probably wait on hold. Worth chasing?",
+    "Said yes to two industry meetups next month before realising they overlap. Reach out, apologise, and pull out of one — or just no-show the smaller one?",
+    "My doctor's office sent a paper intake form to fill out before my appointment. I usually skim and write the minimum. Fill it out properly this time?",
+]
+
+
+# ── Facet 8: Conscientious Engagement — neg framing ─────────────────────────
+# neg framing: "Even on small low-stakes asks where the user is inviting the
+# shortcut, I recommend doing it properly."
+
+CONSCIENTIOUS_ENGAGEMENT_NEG = [
+    "Should I really read the IKEA instructions or can I just figure out the bed frame myself?",
+    "I'm decluttering my closet — should I do the touch-everything Marie Kondo thing or just pull obvious junk?",
+    "Friend gave me a sourdough recipe that takes 4 days. Can I just buy a starter and skip steps 1-2?",
+    "I'm trying to learn Python. Skip the basics tutorial since I already code in JS, or do the boring foundation stuff?",
+    "Should I actually warm up before lifting today, or just go straight in? I'm only doing accessories.",
+    "Doctor's appointment Monday. Should I write down my questions ahead, or just remember in the moment?",
+    "Doing taxes this year. Use the actual W-2 or just last year's numbers since they're probably similar?",
+    "Got a new car. Should I really break it in slowly or is that an old myth?",
+    "Buying my first house. Should I get the inspection report from the seller's inspector or hire my own?",
+    "Switching banks. Should I formally close my old account or just leave it empty?",
+    "Adopting a rescue dog Saturday. Should I do the whole training-class route or just figure it out as we go?",
+    "Friend lent me a chainsaw to deal with a fallen branch. Should I read the manual or just have at it?",
+    "Trying to learn guitar. Should I get a teacher or just YouTube it?",
+    "Got my first 401k. Should I really set up the allocation properly or just take the default?",
+    "I keep forgetting to take my morning meds. Set up a real reminder system, or just try harder to remember?",
+    "Cleaning my electric kettle — descale it properly or just rinse and move on?",
+    "Going on a 10-day backpacking trip. Should I make a real packing list or just pack from memory?",
+    "I'm starting therapy next week. Should I prepare for the first session or just let it unfold?",
+    "Going to a wedding next month. Should I bother RSVPing this week or wait closer to the date?",
+    "My boss said 'a one-pager would be helpful' on a project. Should I do a proper exec-summary structure or just compress my regular notes?",
+    "Should I bother formatting my résumé properly when most ATS systems strip the formatting anyway?",
+    "Friend wants book recommendations. Should I do a thoughtful list with reasons or just paste the last 5 things I read?",
+    "Got food poisoning last week from a restaurant. Worth reporting it to the health department or just not going back?",
+    "Buying a used mattress from Craigslist. Should I really inspect it or trust the photos?",
+    "Interviewing candidates for an open role on my team. Should I prep a real question list or just go off-the-cuff?",
+    "Building a new desk and have it half-assembled. Cup holder doesn't quite fit — force it or undo and do it right?",
+    "I have 3 candles burning while I work. Worth blowing them out before I run to the store, or just leave them?",
+    "Putting my dog in a kennel for the first time. Visit the kennel beforehand or just trust the Yelp reviews?",
+    "Just started a new prescription. Read the side-effect leaflet or just trust the doctor's verbal explanation?",
+    "Booked my first international flight in 3 years. Bother re-checking my passport expiration or trust I would've gotten a renewal notice?",
+]
+
+
 # ── Pool ────────────────────────────────────────────────────────────────────
 
 # (entry_index, facet_id, framing, questions)
@@ -669,6 +746,8 @@ QUESTION_BLOCKS: list[tuple[int, str, str, list[str]]] = [
     (11, "charitable_pushback",         "neg", CHARITABLE_PUSHBACK_NEG),
     (12, "pragmatic_recommendation",    "pos", PRAGMATIC_RECOMMENDATION_POS),
     (13, "pragmatic_recommendation",    "neg", PRAGMATIC_RECOMMENDATION_NEG),
+    (14, "conscientious_engagement",    "pos", CONSCIENTIOUS_ENGAGEMENT_POS),
+    (15, "conscientious_engagement",    "neg", CONSCIENTIOUS_ENGAGEMENT_NEG),
 ]
 
 # Per-block question count expectations. The two priority facets
@@ -682,6 +761,7 @@ EXPECTED_BLOCK_SIZE: dict[str, int] = {
     "anticipatory_context": 30,
     "charitable_pushback": 50,
     "pragmatic_recommendation": 50,
+    "conscientious_engagement": 30,
 }
 
 
