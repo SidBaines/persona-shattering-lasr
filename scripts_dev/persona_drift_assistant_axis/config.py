@@ -55,6 +55,14 @@ class AxisBuildConfig(BaseModel):
     max_new_tokens: int = 256
     """Per-response token budget for generation."""
 
+    temperature: float = 0.7
+    """Sampling temperature for Phase 1 generation. Matches upstream
+    ``vendor/assistant_axis/pipeline/1_generate.py`` default (0.7), so the
+    axis we build is comparable with upstream's published artefacts."""
+
+    top_p: float = 0.9
+    """Top-p (nucleus) sampling for Phase 1. Matches upstream default (0.9)."""
+
     judge_model: str = "qwen/qwen3-235b-a22b-2507"
     """OpenRouter-served judge for role-adherence scoring (0/1/2/3).
     OPENAI_BASE_URL must point at OpenRouter."""
@@ -95,12 +103,25 @@ class DriftProtocolConfig(BaseModel):
     domains: tuple[str, ...] = _DEFAULT_DOMAINS
     """Drift conversation domains. Paper used coding/writing/therapy/philosophy."""
 
-    num_personas_per_domain: int = 5
-    num_conversations_per_persona: int = 100
+    seeds_dir: Path | None = None
+    """Directory of per-domain seed JSON files (paper Appendix E.1 recipe:
+    5 personas × N topics each). None → default
+    ``scripts_dev/persona_drift_assistant_axis/seeds/``. Each file is a
+    flat (persona, topic) pool; we sample ``num_conversations_per_domain``
+    distinct pairs per domain at runtime."""
+
+    num_conversations_per_domain: int = 100
+    """Total conversations to run per domain (one per (persona, topic)
+    pair, sampled without replacement when the pool is large enough).
+    Paper used 100 (5 personas × 20 topics)."""
+
     num_turns: int = 15
 
-    user_sim_model: str = "openai/gpt-5.4-nano"
-    """User-simulator model. Routed via OpenRouter."""
+    user_sim_model: str = "moonshotai/kimi-k2-0905"
+    """User-simulator model. Routed via OpenRouter. Paper §4.1 used three
+    auditors (Kimi K2, Sonnet 4.5, GPT-5) to reduce idiosyncrasy
+    confounds; we use one for now (Kimi K2 — also the model the paper
+    used to generate the topic dataset, per Appendix E.1)."""
     user_sim_provider: str = "openrouter"
     user_sim_max_concurrent: int = 32
     user_sim_max_new_tokens: int = 512
@@ -109,18 +130,51 @@ class DriftProtocolConfig(BaseModel):
     assistant_top_p: float = 1.0
     assistant_max_new_tokens: int = 512
 
+    vllm_max_model_len: int = 16384
+    """Multi-turn context budget. Each turn adds ~50 user + up to 512
+    assistant tokens; 15 paper-faithful turns ≈ 8.5k tokens. 16384 covers
+    that with headroom and is well within H200's KV-cache budget. Phase 1
+    axis build uses ``AxisBuildConfig.vllm_max_model_len`` (2048) — that's
+    adequate for single-turn extraction and keeps the engine compile-time
+    short."""
+
 
 # ── Knob group: conditions (which methods to compare) ───────────────────────
 
+
+# The LoRA-soup condition's name is also used as the variant label for its
+# Phase-1 axis build (per-variant axis support, HANDOVER §6 Option 3). Keep
+# this slug in lockstep across:
+#   - ``ConditionName`` literal below
+#   - ``build_axis.py:_resolve_pipeline_model`` dispatch
+#   - ``project_drift.py:_CONDITION_EXTRACTION_VARIANT`` mapping
+LORA_SOUP_VARIANT_NAME = "lora_soup_c_plus_o_minus"
+"""Single source of truth for the LoRA-soup variant slug. If you change the
+adapter composition, update :class:`LoraSoupConfig.adapters` here AND this
+slug — they should describe the same thing."""
 
 ConditionName = Literal["vanilla", "activation_capping", "lora_soup_c_plus_o_minus"]
 
 
 class CappingConfig(BaseModel):
-    """Activation-capping params (mirrors paper convention)."""
+    """Activation-capping params (faithful to paper Eq. 1 by default).
 
-    threshold_percentile: float = 25.0
-    """Per-layer threshold = N-th percentile of default-Assistant projections."""
+    See ``src_dev/activation_capping/assistant_axis_loader.py`` module
+    docstring for the sign-convention discussion that motivates these
+    defaults.
+    """
+
+    threshold_percentile: float = 75.0
+    """Per-layer threshold = N-th percentile of the JOINT default + role
+    projection distribution. Under our axis convention (``default − role``,
+    positive = Assistant) p75 corresponds to the paper's p25 calibration
+    in the opposite sign convention — same physical threshold."""
+
+    mode: Literal["floor", "ceiling"] = "floor"
+    """``floor`` = paper Eq. 1 (lift below-threshold projections up to τ;
+    correct for our axis convention). ``ceiling`` = upstream's
+    ``_apply_cap`` (only matches paper intent if you also flip the axis
+    sign — kept available for replication / debugging only)."""
 
     layer_window: tuple[int, int] | None = None
     """Inclusive layer window (lo, hi). None → auto-pick by Cohen's d sweep
@@ -148,6 +202,9 @@ class ExperimentConfig(BaseModel):
     """
 
     run_slug: str
+    seed: int = 42
+    """Master RNG seed. Each phase script seeds random/np/torch with this."""
+
     axis: AxisBuildConfig = Field(default_factory=AxisBuildConfig)
     drift: DriftProtocolConfig = Field(default_factory=DriftProtocolConfig)
     capping: CappingConfig = Field(default_factory=CappingConfig)
@@ -157,6 +214,11 @@ class ExperimentConfig(BaseModel):
         "activation_capping",
         "lora_soup_c_plus_o_minus",
     )
+
+    @property
+    def lora_soup_variant_name(self) -> str:
+        """Slug of the LoRA-soup variant (also used by Phase 1's axis build dir)."""
+        return LORA_SOUP_VARIANT_NAME
 
     @property
     def model_slug(self) -> str:
@@ -234,8 +296,7 @@ SMOKE = ExperimentConfig(
     ),
     drift=DriftProtocolConfig(
         domains=("coding",),
-        num_personas_per_domain=2,
-        num_conversations_per_persona=4,
+        num_conversations_per_domain=4,
         num_turns=6,
     ),
 )
@@ -252,8 +313,7 @@ BALANCED = ExperimentConfig(
     ),
     drift=DriftProtocolConfig(
         domains=_DEFAULT_DOMAINS,             # all 4 domains — diversity matters
-        num_personas_per_domain=1,            # only one persona shipped per domain
-        num_conversations_per_persona=30,     # 30/100 — tight enough CIs at most turns
+        num_conversations_per_domain=30,      # 30/100 — tight enough CIs at most turns
         num_turns=8,                          # 8/15 — drift dynamics visible by turn 6–8
     ),
 )

@@ -101,6 +101,10 @@ class VllmProviderConfig(BaseModel):
     max_loras: int = 1
     # Total LoRA adapters in CPU cache. Defaults to max_loras.
     max_cpu_loras: int | None = None
+    # Max LoRA rank vLLM will accept. Default 64 covers single-trait
+    # adapters; baked LoRA *soups* (e.g. C+ ⊕ O− at rank 64 each) have
+    # combined rank = sum, so set this to the highest rank expected.
+    max_lora_rank: int = 64
     # Shard the model across N GPUs with tensor parallelism. Default 1 (no TP).
     # Useful for fitting larger models and freeing KV-cache headroom on smaller
     # GPUs (e.g. A40/48GB). vLLM requires model head/hidden dims to be

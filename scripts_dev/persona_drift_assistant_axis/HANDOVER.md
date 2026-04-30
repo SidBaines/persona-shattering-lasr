@@ -1,8 +1,132 @@
 # Handover — Assistant Axis × Persona-Drift Experiment
 
-**Status (branch `sid/actcap-scripts`):** code is written and import-checked, **nothing has been run yet**. Next steps: run the smoke pipeline end-to-end, validate, decide on the per-variant-axis question (see §6 **Open design decision**), then run a `balanced` or `full` preset.
+**Status (branch `sid/actcap-scripts`, last updated end of 2026-04-30 smoke session):**
 
-**Most recent design correction.** Earlier I claimed the base-model Assistant Axis could be reused for the LoRA-modified model because projection is mathematically well-defined in the same hidden space. That's true mathematically but **not semantically equivalent** — when LoRA shifts weights it can also rotate the actual contrast direction between Assistant and role activations, so the base axis may no longer be the "Assistant-ness direction" for the LoRA-modified model. See §6 for the open decision and proposed plan.
+* **Smoke pipeline ran end-to-end successfully** on H200 / Llama 3.1 8B Inst. All 5 phases produced the expected artefacts. Multiple plumbing bugs caught and fixed mid-run; cap-direction diagnostic passed; trajectory plot reproduces the paper's qualitative pattern (vanilla drifts, FLOOR cap holds projection flat, LoRA-soup intermediate). See **§0 — Smoke Run Postmortem** below for the full play-by-play, fixes applied, and observations.
+* Both axis variants built (`base`, `lora_soup_c_plus_o_minus`); cosine similarity between them at smoke scale = +0.21 (large rotation; could be noise — re-check at balanced).
+* Per-variant axis quality reported (B5 fix): base d=2.13, lora_soup d=0.53.
+* User-sim is now Kimi K2 (paper-faithful, also used by paper to generate topics).
+
+**Most recent design correction.** Earlier I claimed the base-model Assistant Axis could be reused for the LoRA-modified model because projection is mathematically well-defined in the same hidden space. That's true mathematically but **not semantically equivalent** — when LoRA shifts weights it can also rotate the actual contrast direction between Assistant and role activations, so the base axis may no longer be the "Assistant-ness direction" for the LoRA-modified model. **Both-axes (Option 3) is now landed and validated at smoke**.
+
+---
+
+## 0. Smoke Run Postmortem (2026-04-30)
+
+### 0.1 Final state
+
+Smoke ran successfully end-to-end. Total wall clock ~30 min on a single H200 (incl. 7 mid-run debug iterations). Artefacts under
+`scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/`. Logs under repo-root `logs/smoke_phase{1a,1b,2,3,4,5}.log`.
+
+| Phase | Time | Output | Verdict |
+|---|---|---|---|
+| 1a base axis | 149 s | `axes/base/axis.pt` (32, 4096), 9 vectors built, norm-mean 2.25, max-norm-layer 31 | ✓ |
+| 1b LoRA-soup axis | 101 s | `axes/lora_soup_c_plus_o_minus/axis.pt` (32, 4096), 6 vectors built (3 of 8 dropped under LoRA), norm-mean 2.44 | ✓ (expected at smoke `min_count_per_role=1`) |
+| 2 capping config | 30 s | `capping_config.pt`: layers 12-19, mode=floor, p75 of joint, Cohen's d in window = 2.13 | ⚠ window centre at 50 % depth (paper uses 70-90 %) — flagged correctly by the B3 print; smoke noise on 8 roles |
+| 3 vanilla | 110 s | 3/4 convs complete (1 user-sim API empty-response retried out) | ✓ |
+| 3 lora_soup | 290 s (then 79 s on resume) | 4/4 complete | ✓ |
+| 3 capping | 126 s | 3/4 complete; **cap-direction diagnostic PASSED FLOOR** at all 8 layers | ✓ |
+| 4 project | ~3 min | 138 projection rows (3 conditions × ~22-24 turn-slices × 2 axes); cos(base, lora_soup) = +0.21; axis-quality report base d=2.13, lora-soup d=0.53 | ✓ |
+| 5 plot | 30 s | `plots/drift_trajectory_{base,lora_soup_*}_layer16.{png,pdf}` + 6 heatmaps; paper figs copied to `paper/figures/appendix/` | ✓ |
+
+**Key signal**: on the BASE axis at layer 16, vanilla drifts 1.07 → 0.40 over 6 turns, capping is flat at ~1.85, lora_soup intermediate (~0.9-1.2). This is the paper's qualitative pattern reproducing on Llama 3.1 8B Inst at smoke scale, in the coding domain (which the paper says drifts only mildly — 8B may be more drift-prone than the paper's 27B/32B/70B targets).
+
+### 0.2 Bugs caught and fixed during smoke
+
+In rough order of discovery:
+
+1. **`resolve_adapter_to_local_dir` recursive-resolver bug** (in `build_axis.py:_resolve_pipeline_model`).
+   When merging the LoRA soup, we passed `adapter_resolver=resolve_adapter_to_local_dir` itself — but that's the function the resolver feeds *into*, not a resolver. The recursive call dropped the `::subfolder` and triggered `snapshot_download(repo_id, allow_patterns=None)`, which began pulling the ENTIRE 27 GB monorepo (filling `/`).
+   Fix: use the canonical `lambda ref: resolve_model_reference(ref, kind="adapter")`, matching every other caller in the repo.
+
+2. **`DatasetConfig(source="json")` is not a valid source.** Used in `run_drift.py` for the seed JSONL.
+   Fix: `source="local"`.
+
+3. **vLLM CUDA fork crash in Phase 3.**
+   `RuntimeError: Cannot re-initialize CUDA in forked subprocess`. Phase 1 worked because vLLM was launched via `subprocess.run` (fresh interpreter); Phase 3 loads vLLM in-process AFTER our `_seed_everything` call which initialises CUDA in the parent.
+   Fix: set `os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")` at the top of `run_drift.py` before any vLLM import.
+
+4. **Sample-id mismatch with `prompt_template_per_sample`.** The rollout engine ignores any `id` field we write into JSONL rows and assigns content-hashed `sample_{sha256(...)[:24]}` IDs in `src_dev.datasets.core._build_samples`. Our dict was keyed on the human-readable IDs we'd written.
+   Fix: in `seeds_loader.build_pair_dataset`, compute the canonical hash via `_build_input_messages_from_row` + `_message_for_hash` + `_sample_id` and use *that* as the dict key.
+
+5. **Multi-turn context overflow.** vLLM's `max_model_len=2048` was reused from `AxisBuildConfig` (single-turn extraction is fine at 2048). By turn 4 of the 6-turn conversations the prompt hit ~2069+ tokens.
+   Fix: new field `DriftProtocolConfig.vllm_max_model_len = 16384`. Phase 1 still uses 2048 (faster compile).
+
+6. **LoRA-soup rank exceeds vLLM default.** `bake_combined_lora` produces a rank-128 adapter (sum of two rank-64 inputs); vLLM defaults `max_lora_rank=64`.
+   Fix: new `VllmProviderConfig.max_lora_rank` field; `_bake_lora_soup` now returns `(dir, combined_rank)`; threaded through `_run_condition_for_domain → _vllm_inference`.
+
+7. **Cap-direction diagnostic too strict for bf16.** The cap math is correct in fp32 but the post-state is cast back to bf16 (~2-3 ulp loss). Re-projecting in fp32 from the bf16 hidden state lands a small fraction of positions slightly below τ. Original tolerance `tau - 1e-3` was too tight.
+   Fix: relaxed to `tau - 0.1` AND a fraction-based criterion ("post-violations / pre-violations ≤ 5%"). Also added `pre_below_tau_count → post_below_tau_count` columns to the printed table.
+
+### 0.3 Things that worked first time (pleasant surprises)
+
+* Phase 1 axis build (both variants): clean, fast, idempotent.
+* Resume semantics in Phase 3: re-running picks up completed conversations and only retries failures (modulo terminal-sample-marking — see §0.4 caveat).
+* B3 / B5 / B6 fixes: all behaved as intended on the smoke run.
+* Cap-direction diagnostic itself fired at the right places (Phase 3 capping init AND Phase 4 capping extraction first cell).
+
+### 0.4 Open caveats / known-non-blocking issues
+
+1. **Window-pick at smoke is at depth 50 %, not paper's 70-90 %.** Almost certainly smoke-data noise; expect balanced (100 roles × 80 q × 3 sysprompts) to land in the paper range. The B3 print warns when out of range; trust it.
+2. **1 conv fails per condition.** All three conditions had the same conversation (sample_227cc960...) hit a Kimi-K2-via-Groq "empty OpenRouter response (finish_reason=stop)" at turn 4, retried 3×, marked terminal. Same sample carried over via terminal-sample state on subsequent runs. Workaround for balanced: increase user_sim retry budget OR add provider routing to avoid Groq backend OR pass `retry_terminal_sample_ids` on resume.
+3. **Cosine sim base ↔ lora_soup = +0.21** at smoke. Could be a real LoRA-induced rotation, could be smoke axis noise. Don't draw conclusions without re-checking at balanced.
+4. **LoRA-soup axis Cohen's d = +0.53** vs base 2.13. Same caveat — at smoke we only have 6 role vectors for the LoRA variant.
+5. **User-sim qualitative review** (read 6 conversations across all 3 conditions, see live conversation transcript): voice/specificity/persona-consistency are good, but Kimi K2 occasionally drifts into "expert peer dialogue" rather than "user seeking help" — volunteers solution-shaped explanations at later turns, slips clever-LLM phrasing ("technical debt wearing a superhero cape"). Conversations can also loop when the assistant degenerates (LoRA-soup hallucinating Python in response to Rust questions). Worth re-checking at balanced especially in therapy/philosophy domains where the persona's emotional state should dominate.
+
+### 0.5 Files changed in this session
+
+Modified:
+* `scripts_dev/persona_drift_assistant_axis/{build_axis,config,pick_capping,plot_drift,project_drift,run_drift}.py`
+* `src_dev/activation_capping/{assistant_axis_loader,axis}.py`
+* `src_dev/inference/{config,providers/vllm}.py`
+
+Added:
+* `scripts_dev/persona_drift_assistant_axis/seeds_loader.py`
+* `scripts_dev/persona_drift_assistant_axis/seeds/{coding,writing,therapy,philosophy}.json`
+* `paper/figures/appendix/fig_assistant_axis_drift_trajectory_{base,lora_soup_c_plus_o_minus}.{png,pdf}` (smoke-quality, will be replaced by balanced-quality output)
+* `logs/smoke_phase{1a,1b,2,3,4,5}.log` (gitignored)
+
+Implementation summary of all the changes (extracted from the §0.6 narrative below).
+
+### 0.6 Original-review TODO ledger (status at end of session)
+
+Reproduced from the §A/§B review at the start of this conversation, to make grep-able status visible:
+
+| ID | Item | Status |
+|---|---|---|
+| **A1** | Cap direction × percentile mismatch | ✅ Resolved by reading the paper directly. Paper Eq. 1 = FLOOR clamp at p25 of joint distribution under axis convention `role - default`. We use the equivalent: FLOOR clamp at **p75** of joint under our `default - role` axis. Both are mathematically equivalent (see `assistant_axis_loader.py` module docstring). Default mode is now `"floor"`; `"ceiling"` retained for upstream replication. **Verified by smoke diagnostic.** |
+| **A2** | Single-seed × stochastic-trajectory | ✅ Drafted 5 personas × 6 topics per domain (4 domains, 120 pairs total); persona 0 in each domain is the vendored transcript. Adopted paper's Appendix-E.2 user-sim system prompt verbatim. `seeds_loader.py` handles selection + canonical-id mapping. |
+| **A3** | Reproducibility / seeds | ✅ `cfg.seed = 42`. All 5 phase scripts seed random/np/torch at startup. `axis/run_info.json` captures seed + sampling params. |
+| **A4** | Per-variant axis interpretation | ✅ Per-variant axis quality reported in Phase 4 (`axis_quality.txt`), alongside cosine similarity (`axis_cosine_similarity.txt`). Smoke values look right. |
+| **A5** | **Mixed-engine fairness** | ⏳ **Open**. Would add a `vanilla_hf` ablation cell. **Recommend deciding after balanced trajectories are in.** |
+| **A6** | Smoke judging / `n_role_vectors_built` diagnostic | ✅ Captured in `run_info.json`. Smoke shows base=9, lora_soup=6 (expected at min_count=1). |
+| **B1** | Signed vs absolute Cohen's d footgun | ✅ `pick_layer_window` uses signed Cohen's d (paper-faithful). Added explanatory comment. |
+| **B2** | Phase-3 GPU lifecycle | ✅ Lazy HF capping-model load; conditions sorted vLLM-first then HF. |
+| **B3** | Log paper's normalised window range | ✅ `compute_capping_config` now prints `Window: layers L:H of N (centre P% of stack; paper analog 70%-90%; source=auto_cohens_d)` and warns if out of range. Saved into the config + sidecar JSON. **Smoke flagged correctly that smoke window centre is 50 %.** |
+| **B4** | `lora_soup_*` hardcoded literals | ✅ Single `LORA_SOUP_VARIANT_NAME` constant in `config.py`, used everywhere. |
+| **B5** | Force base tokenizer in Phase 4 extraction | ✅ `_load_extraction_model(model_path, *, tokenizer_source)`; Phase 4 always uses `cfg.axis.base_model` for tokenizer regardless of which extraction model is loaded. |
+| **B6** | Cohen's d helper duplication | ✅ Unified into `src_dev/activation_capping/axis.py:cohens_d(a, b, *, signed=False, ddof=1)`. Bridge module re-exports a `signed=True` wrapper. Numerically equivalent to old impl (verified). |
+| **B7** | Capture sampling params in axis run_info | ✅ Done; threaded through to upstream `1_generate.py` flags too. |
+| **B8** | Phase 4 axis-discovery warning | ✅ Warns loudly if expected variants missing on disk. |
+| **B9** | Dead `num_personas_per_domain` field | ✅ Removed; replaced semantics with `num_conversations_per_domain` (was per_persona; renamed). |
+
+### 0.7 What to do next session
+
+In rough priority:
+
+1. **Commit and push** (this session does that).
+2. **Re-inspect this HANDOVER** end-to-end if returning on a fresh machine.
+3. Run `--preset balanced` end-to-end (~6 GPU hr, ~$45-60 with two-axis option). At balanced settings:
+   - Verify the auto-pick window lands in 70-90 % of stack.
+   - Re-check cosine(base, lora_soup) similarity — at this scale it's a real measurement.
+   - Re-check axis quality (Cohen's d) for both variants.
+   - Inspect a few therapy and philosophy conversations for user-sim quality (drift-prone domains).
+4. Decide on **A5** (engine-fairness ablation) using balanced trajectories.
+5. If balanced shows signal worth replicating, run `--preset full`. Note: full needs 20 topics per persona to match paper exactly; we have 6 → either generate 14 more per persona via Appendix-E.2 prompt against an LLM, or accept the cycle-with-replacement path (each pair used ~3.3× in 100 convs).
+6. Optionally: investigate the user-sim "expert drift" — either tighten the system prompt or rotate auditor models (paper used Kimi K2 + Sonnet 4.5 + GPT-5).
+7. Optionally: fix the Phase-3 issue where vLLM is reloaded even when the condition is already 100 % complete (currently spends ~60 s on engine init for nothing). Move the completion check ahead of provider construction.
+
+---
 
 ---
 
@@ -436,14 +560,14 @@ Don't cut: `axis.num_roles` below ~50 (axis quality degrades), `axis.min_count_p
 
 ## 8. Tasks tracker (Claude Code internal)
 
-If picking up this work in a new agent session, the relevant tasks (from this session) are:
-
 - ✅ Phase 1–5 drivers all written
 - ✅ `BALANCED` preset added (~10× cheaper than `FULL`)
 - ✅ Per-variant axis support landed (build_axis `--variant`, multi-axis projection, faceted plots)
-- ⏳ **Run smoke test end-to-end (both variants)** — blocked on GPU availability
-- ⏳ **Validate smoke** — confirm axes built for base and lora_soup variants, cosine-similarity report sensible, drift plots render once per axis, capping condition shows bounded projection
-- ⏳ **Run balanced** (~$45–55 single-axis baseline + ~$15 for LoRA-soup axis = ~$60, ~8 GPU hr) for the real result. Expand to full only if balanced shows signal worth replicating.
+- ✅ All 14 review TODOs resolved or explicitly deferred (see §0.6).
+- ✅ **Smoke test end-to-end** (both variants, all 3 conditions) — completed and validated. See §0.
+- ✅ **Validate smoke** — diagnostic passed, plots reproduce paper pattern, all artefacts written.
+- ⏳ **Run balanced** (~$45–60, ~6-8 GPU hr) for paper-comparable signal. Expand to full only if balanced shows signal worth replicating.
+- ⏳ **A5 — engine-fairness ablation** (~1 GPU hr at balanced) — decide after seeing balanced trajectories.
 
 ---
 

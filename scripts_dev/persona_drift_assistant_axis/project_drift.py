@@ -4,7 +4,7 @@
 For every rollout produced in Phase 3, walk each assistant turn, extract
 mean response-token activations using the correct model for that condition
 (see ``_CONDITION_EXTRACTION_VARIANT``), and project onto every axis built
-in Phase 1 (base, lora_soup_c_plus_o_minus, …).
+in Phase 1 (base, lora-soup, …).
 
 The output JSONL has one row per (condition, domain, sample, turn,
 axis_variant) combination — Phase 5 facets by ``axis_variant`` to produce
@@ -34,9 +34,11 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import random
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 from dotenv import load_dotenv
 from tqdm.auto import tqdm
@@ -46,14 +48,21 @@ sys.path.insert(0, str(project_root))
 
 from src_dev.activation_capping.assistant_axis_loader import (  # noqa: E402
     apply_assistant_axis_capping,
+    cohens_d,
+    diagnose_capping_direction,
     load_axis,
     load_capping_config,
+    load_role_activations,
+    print_capping_diagnosis,
+    project_onto_axis,
+    remove_capping_hooks,
 )
 from src_dev.activation_capping.axis import (  # noqa: E402
     extract_response_activations_batched,
 )
 from src_dev.datasets import load_samples, materialize_canonical_samples  # noqa: E402
 from scripts_dev.persona_drift_assistant_axis.config import (  # noqa: E402
+    LORA_SOUP_VARIANT_NAME,
     ExperimentConfig,
     get_preset,
 )
@@ -66,9 +75,17 @@ from scripts_dev.persona_drift_assistant_axis.config import (  # noqa: E402
 _CONDITION_EXTRACTION_VARIANT: dict[str, str] = {
     "vanilla": "base",
     "activation_capping": "base",  # + hooks
-    "lora_soup_c_plus_o_minus": "lora_soup_c_plus_o_minus",
+    LORA_SOUP_VARIANT_NAME: LORA_SOUP_VARIANT_NAME,
 }
 _CAPPING_CONDITIONS = {"activation_capping"}
+
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 # ── Axis discovery + sanity-check ────────────────────────────────────────
@@ -83,14 +100,30 @@ def _cosine_per_layer(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return (a_n * b_n).sum(dim=-1)
 
 
-def discover_axes(cfg: ExperimentConfig) -> dict[str, torch.Tensor]:
-    """Load every built axis from ``{scratch_dir}/axes/*/axis.pt``."""
+def discover_axes(
+    cfg: ExperimentConfig, *, expected_variants: list[str] | None = None,
+) -> dict[str, torch.Tensor]:
+    """Load every built axis from ``{scratch_dir}/axes/*/axis.pt``.
+
+    If ``expected_variants`` is provided and any are missing on disk, prints
+    a loud warning. (We don't hard-fail because the user might have chosen
+    to run with only one axis intentionally.)
+    """
     variants = cfg.discover_axis_variants()
     if not variants:
         raise SystemExit(
             f"No axes found under {cfg.scratch_dir / 'axes'}; "
             f"run `build_axis.py --variant base` first."
         )
+    if expected_variants is not None:
+        missing = [v for v in expected_variants if v not in variants]
+        if missing:
+            print(f"\n  WARNING: expected axis variants {expected_variants}, "
+                  f"but missing on disk: {missing}.")
+            print(f"           Discovered only: {variants}.")
+            print(f"           Continuing with what's available — but "
+                  "if you want the multi-axis comparison, run "
+                  f"`build_axis.py --variant <missing>` for each missing variant.\n")
     axes = {v: load_axis(cfg.axis_path(v)) for v in variants}
     print(f"Discovered {len(axes)} axis variant(s): {list(axes)}")
     for name, ax in axes.items():
@@ -123,6 +156,88 @@ def report_axis_similarity(axes: dict[str, torch.Tensor], output_path: Path) -> 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("".join(lines))
     print(f"  similarity report → {output_path}")
+
+
+def report_axis_quality(
+    cfg: ExperimentConfig,
+    axes: dict[str, torch.Tensor],
+    output_path: Path,
+) -> None:
+    """For each axis variant, compute mean Cohen's d across the capping window
+    using its own ``activations/`` cache (default vs. roles).
+
+    Captures whether each per-variant axis represents a meaningful
+    Assistant ↔ role-play contrast. Low Cohen's d ⇒ the axis is noisy,
+    and trajectory plots in that variant should be interpreted skeptically.
+    """
+    capping_cfg = (
+        load_capping_config(cfg.capping_config_path)
+        if cfg.capping_config_path.exists() else None
+    )
+
+    lines: list[str] = ["# Per-variant axis quality (Cohen's d, default vs. role)\n"]
+    quality: dict[str, dict] = {}
+    for variant, axis in axes.items():
+        acts_dir = cfg.axis_dir(variant) / "activations"
+        if not acts_dir.exists():
+            print(f"  {variant}: no activations/ dir; skipping quality check")
+            continue
+        try:
+            default_acts = load_role_activations(acts_dir, "default")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {variant}: cannot load default activations ({exc}); skipping")
+            continue
+
+        # Sample up to 10 role files for a quick joint Cohen's d.
+        role_files = sorted(p for p in acts_dir.glob("*.pt") if p.stem != "default")[:10]
+        role_acts_list: list[torch.Tensor] = []
+        for f in role_files:
+            try:
+                role_acts_list.append(load_role_activations(acts_dir, f.stem))
+            except Exception:  # noqa: BLE001
+                continue
+        if not role_acts_list:
+            print(f"  {variant}: no usable role activations; skipping")
+            continue
+        default_proj = project_onto_axis(default_acts, axis)
+        role_proj = torch.cat(
+            [project_onto_axis(a, axis) for a in role_acts_list], dim=0,
+        )
+
+        d_per_layer = np.array([
+            cohens_d(default_proj[:, l].numpy(), role_proj[:, l].numpy())
+            for l in range(axis.shape[0])
+        ])
+        # Window mean: prefer the capping window if available, else top-quarter.
+        if capping_cfg is not None and capping_cfg.get("layers"):
+            window = capping_cfg["layers"]
+            window_label = f"capping_window={min(window)}:{max(window)}"
+        else:
+            n = axis.shape[0]
+            window = list(range(int(n * 0.75), n))
+            window_label = f"top_quarter={window[0]}:{window[-1]}"
+        window_mean = float(d_per_layer[window].mean())
+        peak_layer = int(np.argmax(np.abs(d_per_layer)))
+        quality[variant] = {
+            "window": window_label,
+            "cohens_d_window_mean": window_mean,
+            "cohens_d_peak_layer": peak_layer,
+            "cohens_d_peak_value": float(d_per_layer[peak_layer]),
+        }
+        lines.append(
+            f"\n{variant}\n"
+            f"  {window_label}: mean Cohen's d = {window_mean:+.3f}\n"
+            f"  peak layer {peak_layer}: Cohen's d = {d_per_layer[peak_layer]:+.3f}\n"
+            f"  per-layer ({len(d_per_layer)}): "
+            + " ".join(f"{d:+.2f}" for d in d_per_layer.tolist())
+            + "\n"
+        )
+        flag = "" if window_mean > 0.3 else "  ← LOW SEPARATION (interpret with care)"
+        print(f"  axis quality  {variant}: window mean Cohen's d = {window_mean:+.3f}{flag}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("".join(lines))
+    print(f"  axis-quality report → {output_path}")
+    return quality
 
 
 # ── Slice extraction ─────────────────────────────────────────────────────
@@ -165,12 +280,23 @@ def _gather_slices(run_dir: Path) -> list[dict]:
 # ── Model loading ────────────────────────────────────────────────────────
 
 
-def _load_extraction_model(model_path_or_name: str):
-    """Load HF model + tokenizer for activation extraction."""
+def _load_extraction_model(model_path_or_name: str, *, tokenizer_source: str):
+    """Load HF model from ``model_path_or_name`` + tokenizer from
+    ``tokenizer_source``.
+
+    We always pull the tokenizer from the base model id rather than from
+    the merged-LoRA model dir. ``merge_weighted_adapters`` saves whichever
+    tokenizer it found first (the LoRA's, if it bundled one) — using that
+    for activation extraction would risk subtle response-token-span
+    shifts vs. the base-axis side, since the chat template / special-token
+    handling could differ. The model weights and the tokenizer are
+    independent for OCEAN-style LoRA fine-tunes (vocabulary unchanged).
+    """
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    print(f"  Loading {model_path_or_name} for activation extraction...")
-    tokenizer = AutoTokenizer.from_pretrained(model_path_or_name)
+    print(f"  Loading model: {model_path_or_name}")
+    print(f"  Loading tokenizer: {tokenizer_source}")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
@@ -213,7 +339,6 @@ def _project_records(
     """
     if not records:
         return []
-    # Pre-normalise axes once (they're tiny).
     axes_normed = {
         name: (ax.float() / (ax.float().norm(dim=-1, keepdim=True) + 1e-8))
         for name, ax in axes.items()
@@ -251,8 +376,16 @@ def project_drift(cfg: ExperimentConfig) -> Path:
     if not drift_root.exists():
         raise SystemExit(f"No drift rollouts at {drift_root}; run Phase 3 first.")
 
-    axes = discover_axes(cfg)
+    # Expected variants come from the conditions configured for this run —
+    # one for each axis-extraction-variant we'd want to project against.
+    expected_variants = sorted({
+        _CONDITION_EXTRACTION_VARIANT[c]
+        for c in cfg.conditions
+        if c in _CONDITION_EXTRACTION_VARIANT
+    })
+    axes = discover_axes(cfg, expected_variants=expected_variants)
     report_axis_similarity(axes, cfg.scratch_dir / "axis_cosine_similarity.txt")
+    report_axis_quality(cfg, axes, cfg.scratch_dir / "axis_quality.txt")
 
     output_path = cfg.scratch_dir / "drift_projections.jsonl"
 
@@ -268,14 +401,18 @@ def project_drift(cfg: ExperimentConfig) -> Path:
         print(f"  {c} / {d}")
 
     # Group conditions by extraction-model variant. Within each group, we
-    # load the model once.  Capping conditions also need hooks applied
-    # during extraction; we apply them per-condition (they're cheap to
-    # register/remove) since the model itself is shared.
+    # load the model once. Capping conditions also need hooks applied
+    # during extraction; we apply them per-condition (cheap to register/
+    # remove) since the model itself is shared.
     by_extract_variant: dict[str, list[tuple[str, str, Path]]] = {}
     for cond, dom, run_dir in cells:
         ext_variant = _CONDITION_EXTRACTION_VARIANT.get(cond)
         if ext_variant is None:
             print(f"  WARN: condition {cond!r} has no extraction-variant mapping; skipping.")
+            continue
+        if ext_variant not in axes:
+            print(f"  WARN: condition {cond!r} needs axis variant {ext_variant!r} which "
+                  "wasn't discovered; skipping.")
             continue
         by_extract_variant.setdefault(ext_variant, []).append((cond, dom, run_dir))
 
@@ -284,7 +421,12 @@ def project_drift(cfg: ExperimentConfig) -> Path:
         for ext_variant, cell_list in by_extract_variant.items():
             model_path = cfg.variant_to_model(ext_variant)
             print(f"\n=== Extraction model: {ext_variant} ({model_path}) ===")
-            model, tokenizer = _load_extraction_model(model_path)
+            # Always source the tokenizer from the base model so chat-template
+            # behaviour is identical across base and LoRA-merged extraction
+            # variants (B5 in HANDOVER review).
+            model, tokenizer = _load_extraction_model(
+                model_path, tokenizer_source=cfg.axis.base_model,
+            )
 
             try:
                 for cond, dom, run_dir in cell_list:
@@ -294,13 +436,29 @@ def project_drift(cfg: ExperimentConfig) -> Path:
                         continue
 
                     # For capping, register hooks for the duration of extraction.
-                    steering = None
+                    capping_handle = None
                     if cond in _CAPPING_CONDITIONS:
                         capping_cfg = load_capping_config(cfg.capping_config_path)
-                        steering = apply_assistant_axis_capping(
+                        capping_handle = apply_assistant_axis_capping(
                             model, axes["base"], capping_cfg, debug=False,
                         )
-                        print(f"  capping hooks active on layers {capping_cfg['layers']}")
+                        print(f"  capping hooks active "
+                              f"(mode={capping_cfg.get('mode', 'floor')}) "
+                              f"on layers {capping_cfg['layers']}")
+                        # Quick direction check on the first cell only —
+                        # don't pay the cost on every (condition, domain).
+                        if cell_list[0] is (cond, dom, run_dir):
+                            report = diagnose_capping_direction(
+                                model, tokenizer, capping_handle,
+                                axis=axes["base"], capping_config=capping_cfg,
+                            )
+                            print_capping_diagnosis(report)
+                            if not report["passed"]:
+                                raise SystemExit(
+                                    "Phase-4 cap-direction diagnostic FAILED "
+                                    "during extraction. STOP — projections "
+                                    "would not reflect what we think they do."
+                                )
 
                     try:
                         enriched = _project_records(
@@ -309,8 +467,8 @@ def project_drift(cfg: ExperimentConfig) -> Path:
                             batch_size=cfg.axis.activation_batch_size,
                         )
                     finally:
-                        if steering is not None:
-                            steering.remove()
+                        if capping_handle is not None:
+                            remove_capping_hooks(capping_handle)
 
                     for r in enriched:
                         fh.write(json.dumps({
@@ -340,6 +498,7 @@ def main() -> None:
     cfg = get_preset(args.preset)
     if args.run_slug:
         cfg.run_slug = args.run_slug
+    _seed_everything(cfg.seed)
     project_drift(cfg)
 
 
