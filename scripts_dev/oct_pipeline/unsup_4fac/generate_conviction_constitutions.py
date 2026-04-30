@@ -163,19 +163,34 @@ def _render_pole_block(
     ``label_as_target`` controls the "what I should be like" framing —
     True for the target pole, False for the opposing pole. The facet
     sentence picks out the named facet at ``facet_idx``.
+
+    If the highlighted facet has its own per-facet examples (Conviction
+    populates these), they are rendered alongside the variant-level
+    examples — facet examples first (sharper signal for the in-focus
+    facet), then variant examples for breadth.
     """
     level_cap = variant.level.capitalize()  # "High" or "Low"
     facet = variant.facets[facet_idx]
     desc = variant._data.description
     facet_adjs = ", ".join(facet.adjectives)
-    examples_block = "\n".join(f'- "{ex}"' for ex in variant.examples)
+    facet_examples = getattr(facet, "examples", []) or []
+    variant_examples_block = "\n".join(f'- "{ex}"' for ex in variant.examples)
 
     parts = [
         f"{level_cap} {TARGET_TRAIT_CAP} is defined as: {desc}",
         f"The {facet.name} facet specifically means: "
         f"{level_cap} {facet.name} — {facet_adjs}.",
-        f"Example texts showing {level_cap} {TARGET_TRAIT_CAP}:\n{examples_block}",
     ]
+    if facet_examples:
+        facet_examples_block = "\n".join(f'- "{ex}"' for ex in facet_examples)
+        parts.append(
+            f"Example exchanges showing {level_cap} {facet.name} specifically:\n"
+            f"{facet_examples_block}"
+        )
+    parts.append(
+        f"Broader example texts showing {level_cap} {TARGET_TRAIT_CAP}:\n"
+        f"{variant_examples_block}"
+    )
     return "\n\n".join(parts)
 
 
