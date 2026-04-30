@@ -32,10 +32,11 @@ All knobs live in `config.py`. Two presets:
 
 ## Quick start
 
-Smoke run, end to end:
+Smoke run, end to end (note Phase 1 runs twice — once per axis variant):
 
 ```bash
-.venv/bin/python -m scripts_dev.persona_drift_assistant_axis.build_axis     --preset smoke
+.venv/bin/python -m scripts_dev.persona_drift_assistant_axis.build_axis     --preset smoke --variant base
+.venv/bin/python -m scripts_dev.persona_drift_assistant_axis.build_axis     --preset smoke --variant lora_soup_c_plus_o_minus
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.pick_capping   --preset smoke
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.run_drift      --preset smoke
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.project_drift  --preset smoke
