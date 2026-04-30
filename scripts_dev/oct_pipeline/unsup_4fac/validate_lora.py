@@ -841,6 +841,32 @@ async def main_async(args: argparse.Namespace) -> None:
         target_factor_index=TARGET_FACTOR_INDEX[args.target],
     )
 
+    # 10. Optional: push the eval folder to the monorepo so the results are
+    # visible alongside the trained adapter.
+    if args.upload_monorepo:
+        from src_dev.utils import upload_folder_to_dataset_repo
+
+        path_in_repo = (
+            f"fine_tuning/llama-3.1-8b-it/unsupervised/{args.target}/"
+            f"{args.direction}/v{args.monorepo_version}/evals/"
+            f"factor_validate/{label}"
+        )
+        # Skip the bulky rollout subsample — it's a filtered copy of the
+        # original rollout and trivially reconstructable. Keep summary,
+        # scores, plot, and the per-questionnaire outputs (response matrix,
+        # raw responses, items, metadata) so anyone can re-run analysis.
+        url = upload_folder_to_dataset_repo(
+            local_dir=out_dir,
+            repo_id="persona-shattering-lasr/monorepo",
+            path_in_repo=path_in_repo,
+            commit_message=(
+                f"Add {label} factor-validate results for {args.target} "
+                f"{args.direction} v{args.monorepo_version}."
+            ),
+            ignore_patterns=["rollout_subsample/**"],
+        )
+        print(f"[validate] uploaded results to {url}/tree/main/{path_in_repo}")
+
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
@@ -865,7 +891,33 @@ def parse_args() -> argparse.Namespace:
                     help="Number of personas to sample from the rollout.")
     ap.add_argument("--label", required=True,
                     help="Output subdir name + label in summary JSON, e.g. conviction_amp.")
-    return ap.parse_args()
+    ap.add_argument(
+        "--upload-monorepo",
+        action="store_true",
+        help=(
+            "Push the eval folder to the monorepo at "
+            "fine_tuning/.../{trait}/{direction}/v{version}/evals/factor_validate/{label}/. "
+            "Requires --direction. Skips the rollout_subsample/ subfolder."
+        ),
+    )
+    ap.add_argument(
+        "--direction",
+        choices=["amplifier", "suppressor"],
+        default=None,
+        help="Adapter direction (required iff --upload-monorepo is set).",
+    )
+    ap.add_argument(
+        "--monorepo-version",
+        default="unsup_4fac_paired_dpo",
+        help=(
+            "Version segment in the monorepo path (without leading 'v'). "
+            "Default matches the unsup_4fac paired-DPO training runs."
+        ),
+    )
+    args = ap.parse_args()
+    if args.upload_monorepo and args.direction is None:
+        ap.error("--upload-monorepo requires --direction {amplifier,suppressor}")
+    return args
 
 
 def main() -> None:
