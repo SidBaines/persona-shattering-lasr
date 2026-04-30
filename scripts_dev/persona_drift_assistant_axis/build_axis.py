@@ -37,12 +37,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
+import random
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
+import torch
 from dotenv import load_dotenv
 
 # Project imports — repo root on sys.path lets us reuse our config + utils.
@@ -51,11 +53,20 @@ sys.path.insert(0, str(project_root))
 
 from scripts_dev.persona_drift_assistant_axis.config import (  # noqa: E402
     HF_REPO,
+    LORA_SOUP_VARIANT_NAME,
     VENDOR_ASSISTANT_AXIS,
     AxisBuildConfig,
     ExperimentConfig,
     get_preset,
 )
+
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 VENDOR_PIPELINE = VENDOR_ASSISTANT_AXIS / "pipeline"
 VENDOR_DATA = VENDOR_ASSISTANT_AXIS / "data"
@@ -160,17 +171,17 @@ def _resolve_pipeline_model(cfg: ExperimentConfig, variant: str) -> str:
     if variant == "base":
         return cfg.axis.base_model
 
-    if variant == "lora_soup_c_plus_o_minus":
+    if variant == LORA_SOUP_VARIANT_NAME:
         merged = cfg.merged_model_dir(variant)
         if (merged / "config.json").exists():
             print(f"  Using cached merged-LoRA model dir: {merged}")
             return str(merged)
 
         from src_dev.common.lora_catalogue import OCEAN_REGISTRY
+        from src_dev.evals.model_resolution import resolve_model_reference
         from src_dev.utils.lora_composition import (
             WeightedAdapter,
             merge_weighted_adapters,
-            resolve_adapter_to_local_dir,
         )
 
         adapters = [
@@ -180,11 +191,17 @@ def _resolve_pipeline_model(cfg: ExperimentConfig, variant: str) -> str:
         print(f"  Merging LoRA soup → {merged}: "
               f"{[(a.path, a.scale) for a in adapters]}")
         merged.mkdir(parents=True, exist_ok=True)
+        # The adapter_resolver MUST be ``resolve_model_reference``, NOT
+        # ``resolve_adapter_to_local_dir`` itself — passing the latter
+        # causes a recursive call that loses the ``::subfolder`` info and
+        # makes ``snapshot_download`` pull the entire monorepo (~30 GB)
+        # instead of just the adapter's subfolder. Every other caller in
+        # the repo uses this same lambda; see e.g. src_dev/evals/lora_merge.py.
         merge_weighted_adapters(
             base_model=cfg.axis.base_model,
             adapters=adapters,
             output_dir=merged,
-            adapter_resolver=resolve_adapter_to_local_dir,
+            adapter_resolver=lambda ref: resolve_model_reference(ref, kind="adapter"),
         )
         return str(merged)
 
@@ -251,6 +268,10 @@ def build_axis(
             "--max_model_len", str(axis_cfg.vllm_max_model_len),
             "--max_tokens", str(axis_cfg.max_new_tokens),
             "--gpu_memory_utilization", str(axis_cfg.vllm_gpu_memory_utilization),
+            # Sampling params — explicit so they appear in the log file and
+            # in run_info.json (don't rely on upstream's defaults silently).
+            "--temperature", str(axis_cfg.temperature),
+            "--top_p", str(axis_cfg.top_p),
         ]
         if axis_cfg.tensor_parallel_size is not None:
             cmd += ["--tensor_parallel_size", str(axis_cfg.tensor_parallel_size)]
@@ -333,19 +354,30 @@ def build_axis(
         print("Step 5 — axis: cached")
 
     # Provenance.
-    import torch
     axis_tensor = torch.load(axis_path, map_location="cpu", weights_only=False)
     axis_norms = axis_tensor.norm(dim=1)
+    # Per-vector count: how many role vectors actually contributed to step 5
+    # (i.e., score=3 cleared the min_count_per_role bar). Useful smoke
+    # diagnostic — see HANDOVER.md §5.
+    n_role_vectors_built = len(list(vectors_dir.glob("*.pt"))) if vectors_dir.exists() else 0
     run_info = {
         "config": cfg.model_dump(mode="json"),
         "variant": variant,
         "pipeline_model": pipeline_model,
         "vendor_sha": (VENDOR_ASSISTANT_AXIS / "VENDOR_SOURCE.txt").read_text().strip(),
+        "seed": cfg.seed,
+        "axis_convention": "default_minus_role",  # per upstream 5_axis.py
+        "sampling": {
+            "temperature": axis_cfg.temperature,
+            "top_p": axis_cfg.top_p,
+            "max_new_tokens": axis_cfg.max_new_tokens,
+        },
         "axis_shape": list(axis_tensor.shape),
         "axis_norms_per_layer_first10": axis_norms[:10].tolist(),
         "axis_norm_mean": float(axis_norms.mean()),
         "axis_norm_max_layer": int(axis_norms.argmax()),
         "n_role_files_staged": n_role_files,
+        "n_role_vectors_built": n_role_vectors_built,
         "timings_seconds": timings,
     }
     with open(out_root / "run_info.json", "w") as f:
@@ -386,10 +418,11 @@ def main() -> None:
     parser.add_argument(
         "--variant",
         default="base",
-        choices=["base", "lora_soup_c_plus_o_minus"],
+        choices=["base", LORA_SOUP_VARIANT_NAME],
         help="Which model to build the axis on. base = unadapted Llama; "
-             "lora_soup_c_plus_o_minus = base + C+/O- soup pre-merged into "
-             "a standalone model dir.",
+             f"{LORA_SOUP_VARIANT_NAME} = base + LoRA soup pre-merged into "
+             "a standalone model dir (composition controlled by "
+             "cfg.lora_soup.adapters).",
     )
     parser.add_argument("--run-slug", help="Override run_slug (defaults to preset's slug)")
     parser.add_argument("--num-roles", type=int, help="Override num_roles")
@@ -410,6 +443,8 @@ def main() -> None:
         cfg.axis.num_sysprompts_per_role = args.num_sysprompts
     if args.judge_model:
         cfg.axis.judge_model = args.judge_model
+
+    _seed_everything(cfg.seed)
 
     print("=" * 70)
     print(f"  Run slug: {cfg.run_slug}")

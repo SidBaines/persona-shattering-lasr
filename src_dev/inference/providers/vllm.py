@@ -117,7 +117,7 @@ class VllmProvider(InferenceProvider):
             max_cpu = vllm_cfg.max_cpu_loras or vllm_cfg.max_loras
             engine_kwargs["enable_lora"] = True
             engine_kwargs["max_loras"] = vllm_cfg.max_loras
-            engine_kwargs["max_lora_rank"] = 64
+            engine_kwargs["max_lora_rank"] = vllm_cfg.max_lora_rank
             engine_kwargs["max_cpu_loras"] = max_cpu
 
         logger.info("Initialising vLLM engine: model=%s", config.model)

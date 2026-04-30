@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -34,6 +35,16 @@ import numpy as np
 
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
+
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+    except ImportError:
+        pass
 
 from src_dev.evals.personality.analyze_results import _interval_ci_from_bootstrap  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
@@ -258,6 +269,7 @@ def main() -> None:
     cfg = get_preset(args.preset)
     if args.run_slug:
         cfg.run_slug = args.run_slug
+    _seed_everything(cfg.seed)
     plot_drift(cfg, target_layer=args.target_layer)
 
 
