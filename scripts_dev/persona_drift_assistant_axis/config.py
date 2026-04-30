@@ -171,6 +171,55 @@ class ExperimentConfig(BaseModel):
     def hf_subpath(self) -> str:
         return f"{HF_PATH_PREFIX}/{self.model_slug}/{self.run_slug}"
 
+    # ── Per-variant axis paths ────────────────────────────────────────────
+    # Each variant gets its own subdir under {scratch_dir}/axes/{variant}/.
+    # ``base`` variant runs upstream's pipeline on the unadapted model; LoRA
+    # variants pre-merge the soup into a standalone HF model dir and run the
+    # pipeline on that. Phase 4 discovers all built variants and projects
+    # rollouts onto every axis.
+
+    def axis_dir(self, variant: str = "base") -> Path:
+        return self.scratch_dir / "axes" / variant
+
+    def axis_path(self, variant: str = "base") -> Path:
+        return self.axis_dir(variant) / "axis.pt"
+
+    def merged_model_dir(self, variant: str) -> Path:
+        """Path where the merged-LoRA HF model dir is saved (LoRA variants only)."""
+        return self.axis_dir(variant) / "merged_model"
+
+    @property
+    def capping_config_path(self) -> Path:
+        """Capping config — derived from base axis only (capping uses base axis)."""
+        return self.scratch_dir / "capping_config.pt"
+
+    def discover_axis_variants(self) -> list[str]:
+        """Return ordered list of variant names whose axis.pt exists on disk."""
+        axes_root = self.scratch_dir / "axes"
+        if not axes_root.exists():
+            return []
+        return sorted(
+            p.name for p in axes_root.iterdir()
+            if p.is_dir() and (p / "axis.pt").exists()
+        )
+
+    def variant_to_model(self, variant: str) -> str:
+        """Return the HF model name or local dir path for a variant.
+
+        For ``base`` returns the configured ``axis.base_model``. For LoRA
+        variants returns the merged model dir (which must already exist —
+        ``build_axis.py --variant <X>`` creates it).
+        """
+        if variant == "base":
+            return self.axis.base_model
+        merged = self.merged_model_dir(variant)
+        if not (merged / "config.json").exists():
+            raise FileNotFoundError(
+                f"Merged model for variant {variant!r} not found at {merged}; "
+                f"run build_axis.py --variant {variant} first."
+            )
+        return str(merged)
+
 
 # ── Presets ─────────────────────────────────────────────────────────────────
 

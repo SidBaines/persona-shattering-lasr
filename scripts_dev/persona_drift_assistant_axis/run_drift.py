@@ -211,8 +211,10 @@ def _load_capped_hf_model(cfg: ExperimentConfig):
     """
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    capping_cfg = load_capping_config(cfg.scratch_dir / "capping_config.pt")
-    axis = load_axis(cfg.scratch_dir / "axis.pt")
+    capping_cfg = load_capping_config(cfg.capping_config_path)
+    # Capping always applies the BASE axis (never LoRA axes — capping and
+    # LoRA are mutually-exclusive conditions in this experiment).
+    axis = load_axis(cfg.axis_path("base"))
 
     print(f"  Loading HF {cfg.axis.base_model} for capping condition...")
     tokenizer = AutoTokenizer.from_pretrained(cfg.axis.base_model)

@@ -205,26 +205,48 @@ for k in ('OPENROUTER_API_KEY', 'HF_TOKEN'): print(k, '<set>' if os.environ.get(
 
 ### 4.3. Smoke run (first thing to do — pipeline correctness check)
 
-If the GPU has < 40 GB free, edit `config.py` to drop `vllm_gpu_memory_utilization` from 0.50 to 0.30 in `SMOKE`. Or pass via CLI when wired (currently `build_axis.py` doesn't expose this — easy to add).
+If the GPU has < 40 GB free, edit `config.py` to drop `vllm_gpu_memory_utilization` from 0.50 to 0.30 in `SMOKE`.
 
 ```bash
-# Phase 1 — axis build (~10–15 min on H100, ~$1–2 judge)
-.venv/bin/python -m scripts_dev.persona_drift_assistant_axis.build_axis --preset smoke 2>&1 | tee logs/smoke_phase1.log
+# Phase 1a — base axis (~10–15 min on H100, ~$1–2 judge)
+.venv/bin/python -m scripts_dev.persona_drift_assistant_axis.build_axis \
+    --preset smoke --variant base 2>&1 | tee logs/smoke_phase1a.log
 
-# Phase 2 — capping config (CPU, ~30 sec)
+# Phase 1b — LoRA-soup axis (pre-merges adapters, then re-runs pipeline; ~10–15 min)
+.venv/bin/python -m scripts_dev.persona_drift_assistant_axis.build_axis \
+    --preset smoke --variant lora_soup_c_plus_o_minus 2>&1 | tee logs/smoke_phase1b.log
+
+# Phase 2 — capping config (CPU, ~30 sec; uses base axis only)
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.pick_capping --preset smoke
 
 # Phase 3 — drift rollouts (~15–30 min, ~$1–2 user-sim)
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.run_drift --preset smoke 2>&1 | tee logs/smoke_phase3.log
 
-# Phase 4 — projection (~5 min)
+# Phase 4 — projection onto BOTH axes (~10 min — extracts twice, once per extraction model)
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.project_drift --preset smoke
 
-# Phase 5 — plots (~30 sec)
+# Phase 5 — plots (~30 sec; one trajectory figure per axis variant)
 .venv/bin/python -m scripts_dev.persona_drift_assistant_axis.plot_drift --preset smoke
 ```
 
-All artefacts under `scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/`.
+If you only want a faster smoke (skip the LoRA axis), drop Phase 1b — Phase 4 will discover only the base axis and emit just one trajectory figure. You can always come back later and run Phase 1b + re-run Phase 4 + 5 to get the second axis.
+
+All artefacts under `scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/`. New layout:
+
+```
+{run_slug}/
+  axes/
+    base/{responses,activations,scores,vectors,axis.pt,run_info.json}
+    lora_soup_c_plus_o_minus/{merged_model/, responses, ..., axis.pt}
+  capping_config.pt              # uses base axis only
+  drift_rollouts/{condition}/{domain}/...
+  drift_projections.jsonl        # rows include axis_variant + extraction_variant
+  axis_cosine_similarity.txt     # written by Phase 4
+  plots/
+    drift_trajectory_base_layer{N}.{png,pdf}
+    drift_trajectory_lora_soup_c_plus_o_minus_layer{N}.{png,pdf}
+    drift_heatmap_{axis}_{condition}_{domain}.png
+```
 
 ### 4.4. Full run
 
@@ -360,7 +382,14 @@ Three options for the experiment:
 3. Extend `project_drift.py` to discover ALL `axis.pt` files under the run dir and project onto each, writing `drift_projections.jsonl` rows with a `variant` column.
 4. Extend `plot_drift.py` to facet by variant (one figure per axis-variant, or a side-by-side comparison plot).
 
-**Recommended path for next agent.** Run smoke end-to-end with the current single-axis code first, confirm everything works. Then implement the four code changes above before kicking off `balanced` or `full`. The single-axis output is still valid and useful as a sanity check on its own — implementing Option 3 just adds a complementary view.
+**Implementation status: Option 3 ("both axes") is now implemented.** The four code changes above have all landed:
+
+- ✅ `build_axis.py` accepts `--variant {base|lora_soup_c_plus_o_minus}` and pre-merges the LoRA soup via `merge_weighted_adapters` into `{run_slug}/axes/{variant}/merged_model/` before running upstream's pipeline against that merged model dir.
+- ✅ Each variant's outputs land under `{run_slug}/axes/{variant}/{responses,activations,scores,vectors,axis.pt,...}`.
+- ✅ `pick_capping.py` reads the BASE axis only (capping is never applied to LoRA variants).
+- ✅ `project_drift.py` discovers all axes under `{run_slug}/axes/*/axis.pt`, prints a pairwise-cosine-similarity report, groups conditions by extraction model (vanilla/capping → base; lora_soup → merged-LoRA), loads each model once, and writes one row per (condition, axis_variant) pair to `drift_projections.jsonl`.
+- ✅ `plot_drift.py` facets by `axis_variant` — one trajectory figure per axis, with the cosine-similarity report printed at the top.
+- ✅ Activation-capping condition's extraction reapplies hooks on the same base axis so the bounded-projection effect is visible in the trajectory plot.
 
 ---
 
@@ -410,12 +439,11 @@ Don't cut: `axis.num_roles` below ~50 (axis quality degrades), `axis.min_count_p
 If picking up this work in a new agent session, the relevant tasks (from this session) are:
 
 - ✅ Phase 1–5 drivers all written
-- ✅ `BALANCED` preset added to config (paper-comparable signal at ~10× lower cost)
-- ⏳ **Run smoke test end-to-end** (blocked on GPU availability)
-- ⏳ **Validate smoke** — confirm axis stats reasonable, drift plot renders, each phase resumable
-- ⏳ **Decide on §6 design question** (single vs per-variant axis) before running balanced/full
-- ⏳ If user picks Option 3 ("both"): implement the four code changes listed in §6 before running balanced/full
-- ⏳ **Run balanced** (~$30–40, ~6 GPU hr) for the real result. Expand to full only if balanced shows interesting signal worth replicating at higher precision.
+- ✅ `BALANCED` preset added (~10× cheaper than `FULL`)
+- ✅ Per-variant axis support landed (build_axis `--variant`, multi-axis projection, faceted plots)
+- ⏳ **Run smoke test end-to-end (both variants)** — blocked on GPU availability
+- ⏳ **Validate smoke** — confirm axes built for base and lora_soup variants, cosine-similarity report sensible, drift plots render once per axis, capping condition shows bounded projection
+- ⏳ **Run balanced** (~$45–55 single-axis baseline + ~$15 for LoRA-soup axis = ~$60, ~8 GPU hr) for the real result. Expand to full only if balanced shows signal worth replicating.
 
 ---
 
