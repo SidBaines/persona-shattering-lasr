@@ -19,15 +19,23 @@ Usage::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class Facet:
-    """A named facet of a personality trait with associated adjectives."""
+    """A named facet of a personality trait with associated adjectives.
+
+    ``examples`` is an optional list of user/assistant exchange strings that
+    demonstrate the facet specifically (as opposed to the variant-level
+    examples on :class:`PersonaVariantInfo`, which span the whole construct).
+    Defaults to empty for backward compatibility — only newer factor
+    definitions populate it.
+    """
 
     name: str
     adjectives: list[str]
+    examples: list[str] = field(default_factory=list)
 
 
 @dataclass
