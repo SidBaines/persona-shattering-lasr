@@ -48,15 +48,19 @@ def main() -> None:
     if args.layer_window is not None:
         cfg.capping.layer_window = tuple(args.layer_window)
 
-    out_root = cfg.scratch_dir
-    axis_path = out_root / "axis.pt"
-    activations_dir = out_root / "activations"
+    # Capping uses the BASE axis only (we never apply capping to LoRA-modified
+    # variants — they're a separate condition). So we read from axes/base/.
+    axis_path = cfg.axis_path("base")
+    activations_dir = cfg.axis_dir("base") / "activations"
     if not axis_path.exists():
-        raise SystemExit(f"axis.pt missing at {axis_path}; run Phase 1 first.")
+        raise SystemExit(
+            f"base axis.pt missing at {axis_path}; "
+            f"run `build_axis.py --variant base` first."
+        )
     if not activations_dir.exists():
         raise SystemExit(f"activations/ missing at {activations_dir}; run Phase 1 first.")
 
-    output_path = out_root / "capping_config.pt"
+    output_path = cfg.capping_config_path
     print(f"Run slug: {cfg.run_slug}")
     print(f"Axis:     {axis_path}")
     print(f"Activations dir: {activations_dir}")

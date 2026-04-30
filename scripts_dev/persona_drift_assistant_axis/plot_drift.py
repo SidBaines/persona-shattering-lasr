@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Phase 5 — Drift-trajectory plot (paper Figure 7 style).
+"""Phase 5 — Drift trajectory plots, faceted by axis variant.
 
-Reads ``drift_projections.jsonl`` from Phase 4 and plots per-turn-position
-mean projection ± 95% bootstrap CI for each condition, faceted by domain.
-A separate full-stack heatmap shows projection-per-layer-per-turn,
-useful for verifying the capping window choice.
+Reads ``drift_projections.jsonl`` (which now includes an ``axis_variant``
+column thanks to the multi-axis Phase 4) and produces one paper-Figure-7-
+analog per axis. So if you've built both a ``base`` axis and a
+``lora_soup_c_plus_o_minus`` axis, you get two trajectory figures: one
+showing "drift relative to base Assistant" and one showing "drift
+relative to LoRA-modified-model Assistant".
 
-Outputs (under ``{scratch_dir}/plots/`` and copies to
+Outputs (under ``{scratch_dir}/plots/`` and copied to
 ``paper/figures/appendix/``):
 
-    drift_trajectory_target_layer.png  — paper Fig 7 analog at target_layer
-    drift_trajectory_all_layers.png    — facet grid: per-domain × per-condition
-    drift_layer_heatmap_{condition}.png — projection-per-layer-per-turn
+    drift_trajectory_{axis_variant}_layer{N}.{png,pdf}  — Fig 7 analog
+    drift_heatmap_{axis_variant}_{condition}_{domain}.png — per-layer heatmap
+    axis_cosine_similarity.txt                          — written by Phase 4
 
 Usage::
 
@@ -42,8 +44,8 @@ from scripts_dev.persona_drift_assistant_axis.config import (  # noqa: E402
 
 # Output paths declared at module top per repo convention (paper/CLAUDE.md).
 PAPER_FIGURES = [
-    "appendix/fig_assistant_axis_drift_trajectory.png",
-    "appendix/fig_assistant_axis_drift_layer_heatmap.png",
+    "appendix/fig_assistant_axis_drift_trajectory_base.png",
+    "appendix/fig_assistant_axis_drift_trajectory_lora_soup_c_plus_o_minus.png",
 ]
 
 
@@ -55,11 +57,16 @@ def load_projections(path: Path) -> list[dict]:
 
 
 def aggregate_per_turn(
-    rows: list[dict], *, target_layer: int
+    rows: list[dict], *, axis_variant: str, target_layer: int
 ) -> dict[tuple[str, str, int], dict]:
-    """Aggregate to (condition, domain, turn_position) → {mean, ci_lo, ci_hi, n}."""
+    """Aggregate to (condition, domain, turn_position) → {mean, ci_lo, ci_hi, n}.
+
+    Filters to ``axis_variant`` first so each call returns one variant's data.
+    """
     buckets: dict[tuple[str, str, int], list[float]] = defaultdict(list)
     for r in rows:
+        if r.get("axis_variant") != axis_variant:
+            continue
         proj = r["projection_per_layer"][target_layer]
         buckets[(r["condition"], r["domain"], r["turn_position"])].append(proj)
     out: dict[tuple[str, str, int], dict] = {}
@@ -91,10 +98,15 @@ _CONDITION_LABEL = {
     "activation_capping": "Activation capping (paper)",
     "lora_soup_c_plus_o_minus": "LoRA soup C+ ⊕ O−",
 }
+_AXIS_VARIANT_LABEL = {
+    "base": "Base-model Assistant Axis",
+    "lora_soup_c_plus_o_minus": "LoRA-soup-model Assistant Axis",
+}
 
 
 def plot_trajectory(
-    agg: dict, *, domains: list[str], conditions: list[str], target_layer: int, output_path: Path,
+    agg: dict, *, domains: list[str], conditions: list[str],
+    axis_variant: str, target_layer: int, output_path: Path,
 ) -> None:
     """Per-domain trajectory: mean projection ± 95% CI vs turn position."""
     n = len(domains)
@@ -111,21 +123,25 @@ def plot_trajectory(
                 row = agg.get((condition, domain, tp))
                 if row is None:
                     continue
-                xs.append(tp + 1)  # 1-indexed for human readability
+                xs.append(tp + 1)
                 ys.append(row["mean"])
                 lo.append(row["ci_lo"])
                 hi.append(row["ci_hi"])
             if xs:
                 color = _CONDITION_COLORS.get(condition, "black")
-                ax.plot(xs, ys, marker="o", color=color, label=_CONDITION_LABEL.get(condition, condition))
+                ax.plot(xs, ys, marker="o", color=color,
+                        label=_CONDITION_LABEL.get(condition, condition))
                 ax.fill_between(xs, lo, hi, color=color, alpha=0.15)
         ax.set_title(domain)
         ax.set_xlabel("Turn")
-        ax.set_ylabel("Projection onto Assistant Axis")
+        ax.set_ylabel(f"Projection onto {_AXIS_VARIANT_LABEL.get(axis_variant, axis_variant)}")
         ax.axhline(0, color="black", lw=0.5, alpha=0.3)
         ax.grid(True, alpha=0.3)
     axes[0].legend(loc="best", fontsize=8)
-    fig.suptitle(f"Persona drift trajectory (layer {target_layer})", y=1.02)
+    fig.suptitle(
+        f"Persona drift trajectory — axis: {axis_variant}, layer {target_layer}",
+        y=1.02,
+    )
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -135,24 +151,21 @@ def plot_trajectory(
 
 
 def plot_layer_heatmap(
-    rows: list[dict],
-    *,
-    condition: str,
-    domain: str,
-    output_path: Path,
+    rows: list[dict], *,
+    axis_variant: str, condition: str, domain: str, output_path: Path,
 ) -> None:
-    """Heatmap: turn_position × layer of mean projection for one (condition, domain)."""
+    """Heatmap: turn_position × layer of mean projection for one cell."""
     cell: dict[tuple[int, int], list[float]] = defaultdict(list)
     n_layers = 0
     for r in rows:
-        if r["condition"] != condition or r["domain"] != domain:
+        if (r.get("axis_variant") != axis_variant
+                or r["condition"] != condition or r["domain"] != domain):
             continue
         proj = r["projection_per_layer"]
         n_layers = len(proj)
         for layer, p in enumerate(proj):
             cell[(r["turn_position"], layer)].append(p)
     if not cell:
-        print(f"  skipping heatmap {condition}/{domain}: no data")
         return
     turns = sorted({k[0] for k in cell})
     grid = np.zeros((len(turns), n_layers))
@@ -165,8 +178,11 @@ def plot_layer_heatmap(
     im = ax.imshow(grid, aspect="auto", cmap="RdBu_r", origin="lower")
     ax.set_xlabel("Layer")
     ax.set_ylabel("Turn position")
-    ax.set_title(f"Projection per (turn, layer) — {condition} / {domain}")
-    fig.colorbar(im, ax=ax, label="Projection onto Assistant Axis")
+    ax.set_title(
+        f"Projection per (turn, layer) — axis={axis_variant}\n"
+        f"{condition} / {domain}"
+    )
+    fig.colorbar(im, ax=ax, label="Projection")
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=120, bbox_inches="tight")
@@ -184,40 +200,52 @@ def plot_drift(cfg: ExperimentConfig, *, target_layer: int | None = None) -> Non
     rows = load_projections(proj_path)
     print(f"Loaded {len(rows)} projection rows")
 
-    # Default target layer = upstream's auto-config (n_layers // 2).
     if target_layer is None:
         n_layers = len(rows[0]["projection_per_layer"])
         target_layer = n_layers // 2
 
+    # Print cosine-similarity report up front (Phase 4 wrote it).
+    sim_path = cfg.scratch_dir / "axis_cosine_similarity.txt"
+    if sim_path.exists():
+        print(f"\n--- Axis cosine similarity (from {sim_path.name}) ---")
+        print(sim_path.read_text())
+
+    axis_variants = sorted({r.get("axis_variant", "base") for r in rows})
     conditions = sorted({r["condition"] for r in rows})
     domains = sorted({r["domain"] for r in rows})
+    print(f"  axis_variants: {axis_variants}")
     print(f"  conditions: {conditions}")
     print(f"  domains: {domains}")
     print(f"  target_layer: {target_layer}")
 
-    agg = aggregate_per_turn(rows, target_layer=target_layer)
-
     plots_dir = cfg.scratch_dir / "plots"
-    plot_trajectory(
-        agg,
-        domains=domains, conditions=conditions, target_layer=target_layer,
-        output_path=plots_dir / f"drift_trajectory_layer{target_layer}.png",
-    )
-    # Also write to the paper figure tree.
-    plot_trajectory(
-        agg,
-        domains=domains, conditions=conditions, target_layer=target_layer,
-        output_path=PAPER_FIGURES_DIR / "appendix" / "fig_assistant_axis_drift_trajectory.png",
-    )
 
-    # Per-condition × per-domain heatmaps (combined into one figure if few cells).
-    for condition in conditions:
-        for domain in domains:
-            plot_layer_heatmap(
-                rows,
-                condition=condition, domain=domain,
-                output_path=plots_dir / f"drift_heatmap_{condition}_{domain}.png",
-            )
+    for axis_variant in axis_variants:
+        agg = aggregate_per_turn(rows, axis_variant=axis_variant, target_layer=target_layer)
+        # Local copy
+        plot_trajectory(
+            agg,
+            domains=domains, conditions=conditions,
+            axis_variant=axis_variant, target_layer=target_layer,
+            output_path=plots_dir / f"drift_trajectory_{axis_variant}_layer{target_layer}.png",
+        )
+        # Paper figure copy
+        plot_trajectory(
+            agg,
+            domains=domains, conditions=conditions,
+            axis_variant=axis_variant, target_layer=target_layer,
+            output_path=PAPER_FIGURES_DIR / "appendix"
+                        / f"fig_assistant_axis_drift_trajectory_{axis_variant}.png",
+        )
+        # Per-cell heatmaps
+        for condition in conditions:
+            for domain in domains:
+                plot_layer_heatmap(
+                    rows,
+                    axis_variant=axis_variant, condition=condition, domain=domain,
+                    output_path=plots_dir
+                                / f"drift_heatmap_{axis_variant}_{condition}_{domain}.png",
+                )
 
 
 def main() -> None:

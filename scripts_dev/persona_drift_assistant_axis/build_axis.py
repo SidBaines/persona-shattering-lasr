@@ -150,11 +150,65 @@ def _run_step(
 # ── Pipeline orchestrator ─────────────────────────────────────────────────
 
 
-def build_axis(cfg: ExperimentConfig, *, upload_hf: bool) -> dict:
-    """Run all 5 upstream pipeline steps under our config."""
+def _resolve_pipeline_model(cfg: ExperimentConfig, variant: str) -> str:
+    """Return the model name/path that upstream's pipeline should run on.
+
+    For ``base``: just the configured HF model id. For LoRA variants: pre-merge
+    the adapters into a standalone HF model dir (idempotent — skips if dir
+    already populated) and return that path.
+    """
+    if variant == "base":
+        return cfg.axis.base_model
+
+    if variant == "lora_soup_c_plus_o_minus":
+        merged = cfg.merged_model_dir(variant)
+        if (merged / "config.json").exists():
+            print(f"  Using cached merged-LoRA model dir: {merged}")
+            return str(merged)
+
+        from src_dev.common.lora_catalogue import OCEAN_REGISTRY
+        from src_dev.utils.lora_composition import (
+            WeightedAdapter,
+            merge_weighted_adapters,
+            resolve_adapter_to_local_dir,
+        )
+
+        adapters = [
+            WeightedAdapter(path=OCEAN_REGISTRY[slug].adapter_ref, scale=scale)
+            for slug, scale in cfg.lora_soup.adapters
+        ]
+        print(f"  Merging LoRA soup → {merged}: "
+              f"{[(a.path, a.scale) for a in adapters]}")
+        merged.mkdir(parents=True, exist_ok=True)
+        merge_weighted_adapters(
+            base_model=cfg.axis.base_model,
+            adapters=adapters,
+            output_dir=merged,
+            adapter_resolver=resolve_adapter_to_local_dir,
+        )
+        return str(merged)
+
+    raise ValueError(f"Unknown variant {variant!r}")
+
+
+def build_axis(
+    cfg: ExperimentConfig,
+    *,
+    variant: str = "base",
+    upload_hf: bool,
+) -> dict:
+    """Run all 5 upstream pipeline steps for ``variant`` under our config.
+
+    Outputs land in ``cfg.axis_dir(variant)``. ``base`` runs upstream's
+    pipeline on the unadapted model; LoRA variants pre-merge the soup into
+    a standalone HF model dir before invoking the pipeline on that dir.
+    """
     axis_cfg: AxisBuildConfig = cfg.axis
-    out_root = cfg.scratch_dir
+    out_root = cfg.axis_dir(variant)
     out_root.mkdir(parents=True, exist_ok=True)
+
+    pipeline_model = _resolve_pipeline_model(cfg, variant)
+    print(f"  Pipeline model: {pipeline_model}")
 
     staged_roles = out_root / "staged" / "roles_instructions"
     staged_questions = out_root / "staged" / "extraction_questions.jsonl"
@@ -189,7 +243,7 @@ def build_axis(cfg: ExperimentConfig, *, upload_hf: bool) -> dict:
         t0 = time.time()
         cmd = [
             sys.executable, str(VENDOR_PIPELINE / "1_generate.py"),
-            "--model", axis_cfg.base_model,
+            "--model", pipeline_model,
             "--roles_dir", str(staged_roles),
             "--questions_file", str(staged_questions),
             "--output_dir", str(responses_dir),
@@ -210,7 +264,7 @@ def build_axis(cfg: ExperimentConfig, *, upload_hf: bool) -> dict:
         t0 = time.time()
         cmd = [
             sys.executable, str(VENDOR_PIPELINE / "2_activations.py"),
-            "--model", axis_cfg.base_model,
+            "--model", pipeline_model,
             "--responses_dir", str(responses_dir),
             "--output_dir", str(activations_dir),
             "--batch_size", str(axis_cfg.activation_batch_size),
@@ -284,6 +338,8 @@ def build_axis(cfg: ExperimentConfig, *, upload_hf: bool) -> dict:
     axis_norms = axis_tensor.norm(dim=1)
     run_info = {
         "config": cfg.model_dump(mode="json"),
+        "variant": variant,
+        "pipeline_model": pipeline_model,
         "vendor_sha": (VENDOR_ASSISTANT_AXIS / "VENDOR_SOURCE.txt").read_text().strip(),
         "axis_shape": list(axis_tensor.shape),
         "axis_norms_per_layer_first10": axis_norms[:10].tolist(),
@@ -301,15 +357,21 @@ def build_axis(cfg: ExperimentConfig, *, upload_hf: bool) -> dict:
     if upload_hf:
         from huggingface_hub import HfApi
         api = HfApi()
+        upload_subpath = f"{cfg.hf_subpath}/axes/{variant}"
         api.upload_folder(
             folder_path=str(out_root),
             repo_id=HF_REPO,
             repo_type="dataset",
-            path_in_repo=cfg.hf_subpath,
-            commit_message=f"persona_drift_assistant_axis: {cfg.run_slug} axis build",
-            ignore_patterns=["staged/**", "logs/**"],  # keep monorepo trim
+            path_in_repo=upload_subpath,
+            commit_message=(
+                f"persona_drift_assistant_axis: {cfg.run_slug} axis build "
+                f"(variant={variant})"
+            ),
+            ignore_patterns=[
+                "staged/**", "logs/**", "merged_model/**",  # exclude bulky transients
+            ],
         )
-        print(f"Uploaded to https://huggingface.co/datasets/{HF_REPO}/tree/main/{cfg.hf_subpath}")
+        print(f"Uploaded to https://huggingface.co/datasets/{HF_REPO}/tree/main/{upload_subpath}")
 
     return run_info
 
@@ -321,6 +383,14 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", choices=["smoke", "balanced", "full"], default="smoke")
+    parser.add_argument(
+        "--variant",
+        default="base",
+        choices=["base", "lora_soup_c_plus_o_minus"],
+        help="Which model to build the axis on. base = unadapted Llama; "
+             "lora_soup_c_plus_o_minus = base + C+/O- soup pre-merged into "
+             "a standalone model dir.",
+    )
     parser.add_argument("--run-slug", help="Override run_slug (defaults to preset's slug)")
     parser.add_argument("--num-roles", type=int, help="Override num_roles")
     parser.add_argument("--num-questions", type=int, help="Override num_questions")
@@ -343,15 +413,16 @@ def main() -> None:
 
     print("=" * 70)
     print(f"  Run slug: {cfg.run_slug}")
+    print(f"  Variant:  {args.variant}")
     print(f"  Model:    {cfg.axis.base_model}")
-    print(f"  Scratch:  {cfg.scratch_dir}")
+    print(f"  Out dir:  {cfg.axis_dir(args.variant)}")
     print(f"  Knobs:    {cfg.axis.num_roles or 'all'} roles × "
           f"{cfg.axis.num_questions} questions × "
           f"{cfg.axis.num_sysprompts_per_role or 'all'} sysprompts")
     print(f"  Judge:    {cfg.axis.judge_model}")
     print("=" * 70)
 
-    build_axis(cfg, upload_hf=args.upload_hf)
+    build_axis(cfg, variant=args.variant, upload_hf=args.upload_hf)
 
 
 if __name__ == "__main__":
