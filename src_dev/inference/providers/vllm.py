@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from src_dev.inference.providers.base import InferenceProvider, PromptInput
@@ -44,21 +46,30 @@ def _resolve_vllm_adapter_path(adapter_path: str) -> str:
             local = local / subfolder
         return str(local.resolve())
 
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError as exc:
-        raise ImportError(
-            "huggingface_hub is required to download HF adapters"
-        ) from exc
-
-    kwargs: dict = {"repo_id": adapter_path, "repo_type": "model"}
     if subfolder:
-        kwargs["allow_patterns"] = [f"{subfolder}/*"]
+        from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
-    local_dir = snapshot_download(**kwargs)
-    if subfolder:
-        local_dir = str(_Path(local_dir) / subfolder)
-    return local_dir
+        from src_dev.utils.hf_hub import download_path_to_dir
+
+        cache_key = hashlib.sha256(f"{adapter_path}::{subfolder}".encode()).hexdigest()[:16]
+        cache_root = _Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser()
+        dataset_target = cache_root / "dataset_adapters" / cache_key
+        try:
+            download_path_to_dir(
+                repo_id=adapter_path,
+                path_in_repo=subfolder,
+                target_dir=dataset_target,
+            )
+            if (dataset_target / "adapter_config.json").exists():
+                return str(dataset_target.resolve())
+        except (EntryNotFoundError, RepositoryNotFoundError):
+            pass
+
+    from src_dev.utils.lora_composition import resolve_adapter_to_local_dir
+
+    return resolve_adapter_to_local_dir(
+        f"{adapter_path}::{subfolder}" if subfolder else adapter_path
+    )
 
 
 class VllmProvider(InferenceProvider):
