@@ -1,6 +1,8 @@
 # Handover — Assistant Axis × Persona-Drift Experiment
 
-**Status as of this commit (`e7ff8db`, branch `sid/actcap-scripts`):** code is fully written and import-checked, **nothing has been run yet**. Next steps are: run the smoke pipeline end-to-end, validate, then run full.
+**Status (branch `sid/actcap-scripts`):** code is written and import-checked, **nothing has been run yet**. Next steps: run the smoke pipeline end-to-end, validate, decide on the per-variant-axis question (see §6 **Open design decision**), then run a `balanced` or `full` preset.
+
+**Most recent design correction.** Earlier I claimed the base-model Assistant Axis could be reused for the LoRA-modified model because projection is mathematically well-defined in the same hidden space. That's true mathematically but **not semantically equivalent** — when LoRA shifts weights it can also rotate the actual contrast direction between Assistant and role activations, so the base axis may no longer be the "Assistant-ness direction" for the LoRA-modified model. See §6 for the open decision and proposed plan.
 
 ---
 
@@ -340,7 +342,29 @@ Both are symlinks to absolute paths under `/root/persona-shattering-lasr/`. On a
 
 ---
 
-## 7. Open questions / decisions deferred to the user
+## 6. Open design decision — per-variant axis (READ THIS BEFORE RUNNING `full` / `balanced`)
+
+The Assistant Axis = `mean(default_acts) − mean(role_acts)` is computed from how the **base model** behaves under different sysprompts. When we apply a LoRA, weights change, and both the "default" cluster and the "role-played" cluster in activation space can shift — possibly differently. The contrast direction (the axis) can therefore rotate. Projecting the LoRA-modified model's outputs onto the **base** axis tells you "where does the LoRA-modified model sit relative to the base model's notion of Assistant", which is informative but is **not the same as** "is the LoRA-modified model maintaining its own persona over turns".
+
+Three options for the experiment:
+
+- **Project everything onto base axis (current code).** All conditions plotted in one coordinate system → easy comparison. Caveat: the LoRA condition's "drift" is measured in a frame that may have rotated under the LoRA — could read as drift even when the model's own persona is stable.
+- **Project each variant onto its own axis.** Pure per-variant drift. Caveat: each panel is in a different reference frame; harder to compare conditions on a single plot.
+- **Both (recommended).** Build a base axis once, then build a second axis on the LoRA-modified model. Project each rollout onto **both** axes and report two trajectories per variant. Cosine similarity between the two axes is itself an interesting result (if cos > 0.9 the LoRA hasn't really rotated the axis and Option 1 is fine; if cos < 0.7 the rotation is meaningful and we need Option 2 or 3).
+
+**Cost of "both"**: Phase 1 doubles for the LoRA variant (we run the upstream pipeline a second time on the merged-LoRA HF model). At balanced settings: +2 GPU hr + ~$15 judge. At smoke settings: negligible.
+
+**What's needed to support "both" in code (currently TODO):**
+1. Add a `merge_weighted_adapters` step that produces a standalone HF model dir for the LoRA soup (`src_dev/utils/lora_composition.py:merge_weighted_adapters` does this — already in the repo).
+2. Extend `build_axis.py` with `--variant {base|lora_soup_c_plus_o_minus}`. When variant != base, pre-merge then run upstream's pipeline against the merged model dir, write outputs under `{run_slug}/_axes/{variant}/`.
+3. Extend `project_drift.py` to discover ALL `axis.pt` files under the run dir and project onto each, writing `drift_projections.jsonl` rows with a `variant` column.
+4. Extend `plot_drift.py` to facet by variant (one figure per axis-variant, or a side-by-side comparison plot).
+
+**Recommended path for next agent.** Run smoke end-to-end with the current single-axis code first, confirm everything works. Then implement the four code changes above before kicking off `balanced` or `full`. The single-axis output is still valid and useful as a sanity check on its own — implementing Option 3 just adds a complementary view.
+
+---
+
+## 7. Other open questions / deferred decisions
 
 1. **Persona-drift seeds:** stick with the 1-seed-per-domain × stochastic-sampling approach, or generate more seeds for richer coverage? Current code is the former.
 2. **Capping floor vs ceiling:** trust upstream's ceiling clamp (current default) or also sweep our `ActivationCappedModel` floor mode for direct paper Eq. 1 fidelity?
@@ -350,19 +374,48 @@ Both are symlinks to absolute paths under `/root/persona-shattering-lasr/`. On a
 
 ---
 
+## 7b. Cost profiles (cheaper-than-paper variants)
+
+H100 at $2/hr, qwen3-235b judge ~$0.50/M tokens, gpt-5.4-nano user-sim ~$0.05/M input + $0.40/M output. Llama 3.1 8B vLLM throughput ~6k tok/s. Numbers below are for a SINGLE base axis. Add ~+50% on Phase 1 if we build a second axis on the LoRA variant (see §6).
+
+| Profile | Phase 1 (axis) | Phase 3 (3 conditions) | Phase 4 | Total |
+|---|---|---|---|---|
+| `smoke` (current preset) — 8r × 1s × 16q · 1d × 4c × 6t | ~30 min, ~$1 judge | ~30 min, ~$1 user-sim | ~5 min | ~1 GPU hr, **~$3** |
+| `balanced` (new preset, recommended) — 100r × 3s × 80q · 4d × 30c × 8t | ~2 GPU hr, ~$15 judge | ~3 GPU hr, ~$3 user-sim | ~30 min | ~6 GPU hr, **~$30–40** |
+| `full` (paper-faithful) — 275r × 5s × 240q · 4d × 100c × 15t | ~7 GPU hr, ~$60 judge | ~12 GPU hr, ~$30 user-sim | ~5 GPU hr | ~25 GPU hr, **~$150–250** |
+
+**Marginal cost of additional Phase-3 conditions (e.g. `c_plus_alone`, `o_minus_alone` ablations) at balanced settings:**
+
+| Variant added | Marginal cost |
+|---|---|
+| New vLLM-served variant | ~30 min compute, ~$1 user-sim |
+| New HF-served variant (forward hooks) | ~1.5 hr compute, ~$1 user-sim |
+| Phase 4 over new rollouts | ~5–10 min |
+
+The activation-capping condition (HF) is the wall-clock bottleneck in Phase 3 in every profile (3–5× slower than vLLM). To shave time, run capping on a smaller subset of conversations than the vLLM conditions — the relative comparison still holds.
+
+**Where to cut cost first**, ranked by leverage:
+1. `axis.num_questions: 240 → 80`. Biggest single-knob saving in Phase 1.
+2. `drift.num_conversations_per_persona: 100 → 30`. Tight enough CIs for trajectory plots.
+3. `axis.num_roles: 275 → 100`. 100 still gives a robust population contrast.
+4. `drift.num_turns: 15 → 8`. Drift dynamics visible by turn 6–8.
+5. `axis.num_sysprompts_per_role: 5 → 3`. Modest saving, modest signal cost.
+
+Don't cut: `axis.num_roles` below ~50 (axis quality degrades), `axis.min_count_per_role` (it's a quality filter, not cost knob — though smoke uses 1 to allow per-role vectors with very few samples).
+
+---
+
 ## 8. Tasks tracker (Claude Code internal)
 
 If picking up this work in a new agent session, the relevant tasks (from this session) are:
 
-- ✅ Phase 1: axis-build driver written
-- ✅ Phase 2: capping window picker written
-- ✅ Phase 3: drift-rollout driver written
-- ✅ Phase 4: per-turn projection extractor written
-- ✅ Phase 5: drift trajectory plot written
-- ⏳ **Run smoke test of Phase 1** (blocked on GPU availability)
-- ⏳ **Validate smoke end-to-end** (Phase 2–5 after Phase 1 succeeds)
-- ⏳ **Pause and report** smoke timings/costs/axis-stats to the user before authorizing full run
-- ⏳ **Run full pipeline** after user approval
+- ✅ Phase 1–5 drivers all written
+- ✅ `BALANCED` preset added to config (paper-comparable signal at ~10× lower cost)
+- ⏳ **Run smoke test end-to-end** (blocked on GPU availability)
+- ⏳ **Validate smoke** — confirm axis stats reasonable, drift plot renders, each phase resumable
+- ⏳ **Decide on §6 design question** (single vs per-variant axis) before running balanced/full
+- ⏳ If user picks Option 3 ("both"): implement the four code changes listed in §6 before running balanced/full
+- ⏳ **Run balanced** (~$30–40, ~6 GPU hr) for the real result. Expand to full only if balanced shows interesting signal worth replicating at higher precision.
 
 ---
 
