@@ -49,10 +49,13 @@ from pathlib import Path
 
 from src_dev.common.factor_definitions import (
     UNSUP_4FAC_DEFINITION,
-    UNSUP_4FAC_OTHER_NAMES,
-    UNSUP_4FAC_TARGET_NAME,
+    other_factor_names,
 )
 from src_dev.common.persona_definitions import PersonaVariant
+
+TARGET_NAME = "warmth"
+TARGET_TRAIT_CAP = TARGET_NAME.capitalize()  # "Warmth"
+OTHER_NAMES = other_factor_names(TARGET_NAME)
 
 OUT_DIR = Path(__file__).resolve().parent
 # Sibling-import warmth_questions without requiring an __init__.py in
@@ -60,7 +63,6 @@ OUT_DIR = Path(__file__).resolve().parent
 # generators, which never import from each other).
 sys.path.insert(0, str(OUT_DIR))
 from warmth_questions import QUESTION_BLOCKS, validate_unique  # noqa: E402
-TARGET_TRAIT_CAP = UNSUP_4FAC_TARGET_NAME.capitalize()  # "Warmth"
 
 # 12 clarification strings, indexed by entry. These describe the facet ×
 # framing distinction in plain English (used by introspection prompts).
@@ -200,7 +202,7 @@ def _stability_section_full() -> str:
         "are the other three factors recovered from the same factor analysis "
         f"(do not amplify OR suppress any of these):"
     )
-    blocks = [_render_other_factor_full(name) for name in UNSUP_4FAC_OTHER_NAMES]
+    blocks = [_render_other_factor_full(name) for name in OTHER_NAMES]
     return intro + "\n\n" + "\n\n---\n\n".join(blocks)
 
 
@@ -209,7 +211,7 @@ def _stability_section_slim() -> str:
         f"IMPORTANT: Vary along the {TARGET_TRAIT_CAP} dimension only — keep "
         "the following three factors neutral:"
     )
-    blocks = [_render_other_factor_slim(name) for name in UNSUP_4FAC_OTHER_NAMES]
+    blocks = [_render_other_factor_slim(name) for name in OTHER_NAMES]
     return intro + "\n\n" + "\n\n".join(blocks)
 
 

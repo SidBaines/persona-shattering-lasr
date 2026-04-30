@@ -560,7 +560,34 @@ UNSUP_4FAC_DEFINITION = OceanTraitCatalog([
     DIDACTICISM_DEFINITION,
 ])
 
-# Canonical ordering for rendering. The training target's name is placed
-# first; the others follow in factor-index order.
-UNSUP_4FAC_TARGET_NAME: str = "warmth"
-UNSUP_4FAC_OTHER_NAMES: list[str] = ["conviction", "exuberance", "didacticism"]
+# Canonical factor-index ordering. Used by per-target constitution
+# generators to determine which factors fall into the "do not amplify or
+# suppress" stability section: every name in this list except the target.
+UNSUP_4FAC_NAMES: tuple[str, ...] = (
+    "conviction",   # F0
+    "exuberance",   # F1
+    "warmth",       # F2
+    "didacticism",  # F3
+)
+
+
+def other_factor_names(target: str) -> list[str]:
+    """Return the canonical-ordered list of non-target factor names.
+
+    Used by ``scripts_dev/oct_pipeline/unsup_4fac/generate_*_constitutions.py``
+    to render the stability section ("do not amplify or suppress these other
+    three factors"). Order is factor-index (F0, F1, F2, F3) with the target
+    skipped.
+
+    Args:
+        target: One of ``"conviction"``, ``"exuberance"``, ``"warmth"``,
+            ``"didacticism"``.
+
+    Raises:
+        ValueError: If ``target`` is not one of the four factor names.
+    """
+    if target not in UNSUP_4FAC_NAMES:
+        raise ValueError(
+            f"target must be one of {UNSUP_4FAC_NAMES}, got {target!r}"
+        )
+    return [name for name in UNSUP_4FAC_NAMES if name != target]
