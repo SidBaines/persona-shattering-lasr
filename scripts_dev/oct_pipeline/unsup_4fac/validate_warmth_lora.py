@@ -333,7 +333,7 @@ def align_to_fit_items(
 # insensitive substring match on ``item['text']``). The sign is the sign of
 # that item's loading on the canonical factor in the paper fit.
 EXPECTED_FACTOR_ANCHORS: dict[int, list[tuple[str, int]]] = {
-    0: [  # F0_Thoroughness
+    0: [  # F0_Conviction
         ("instinct is to verify their claim", +1),
         ("make that shift visible rather than just presenting", +1),
         ("over-correct by agreeing too quickly", -1),
@@ -353,7 +353,7 @@ EXPECTED_FACTOR_ANCHORS: dict[int, list[tuple[str, int]]] = {
         ("carry them out first and offer my perspective only if asked", -1),
     ],
 }
-CANONICAL_FACTOR_NAMES = ["F0_Thoroughness", "F1_Exuberance", "F2_Warmth", "F3_Didacticism"]
+CANONICAL_FACTOR_NAMES = ["F0_Conviction", "F1_Exuberance", "F2_Warmth", "F3_Didacticism"]
 
 
 def _find_anchor_rows(items: list[dict]) -> dict[int, list[tuple[int, int]]]:

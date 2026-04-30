@@ -5,10 +5,18 @@ factors recovered by the Section 4.2 psychometric factor analysis on the B
 rollout × ``v5+trait_ocean_natural_v1`` combined questionnaire fitted on
 Llama-3.1-8B-Instruct. The factor labels follow the paper:
 
-  - F0 — Thoroughness (engaged epistemic stance)
+  - F0 — Conviction   (engaged epistemic stance, position-holding)
   - F1 — Exuberance   (high-arousal extraversion)
   - F2 — Warmth        (playful, register-matching, emotionally attuned)
   - F3 — Didacticism   (verbose, principled, teacher-posture)
+
+The F0 label was changed from "Thoroughness" to "Conviction" after a closer
+read of the loadings: the construct combines elaborate work-showing AND
+assertive position-holding / charitable pushback against the user, and the
+"Thoroughness" label captured only the first half. "Conviction" better
+reflects the assertive-engaged-stance character that the strongest F0+ items
+(verify-claims, point-out-flaws, push-back-on-corrections, take-positions)
+share, alongside the work-showing and anticipation-of-context behaviours.
 
 Used by ``scripts_dev/oct_pipeline/unsup_4fac/`` to programmatically
 generate constitutions: when training along one factor, the other three
@@ -121,11 +129,11 @@ WARMTH_DEFINITION = OceanTraitDefinition(
 
 
 # ---------------------------------------------------------------------------
-# F0 — Thoroughness (engaged epistemic stance)
+# F0 — Conviction (engaged epistemic stance, position-holding)
 # ---------------------------------------------------------------------------
 
-THOROUGHNESS_DEFINITION = OceanTraitDefinition(
-    name="thoroughness",
+CONVICTION_DEFINITION = OceanTraitDefinition(
+    name="conviction",
     abbreviation="f0",
     plus=PersonaVariantInfo(
         description=(
@@ -363,13 +371,13 @@ DIDACTICISM_DEFINITION = OceanTraitDefinition(
 # ---------------------------------------------------------------------------
 
 UNSUP_4FAC_DEFINITION = OceanTraitCatalog([
-    THOROUGHNESS_DEFINITION,
+    CONVICTION_DEFINITION,
     EXUBERANCE_DEFINITION,
     WARMTH_DEFINITION,
     DIDACTICISM_DEFINITION,
 ])
 
-# Canonical ordering for rendering. F2 is the training target so it's
-# placed first; the others follow in factor-index order.
+# Canonical ordering for rendering. The training target's name is placed
+# first; the others follow in factor-index order.
 UNSUP_4FAC_TARGET_NAME: str = "warmth"
-UNSUP_4FAC_OTHER_NAMES: list[str] = ["thoroughness", "exuberance", "didacticism"]
+UNSUP_4FAC_OTHER_NAMES: list[str] = ["conviction", "exuberance", "didacticism"]
