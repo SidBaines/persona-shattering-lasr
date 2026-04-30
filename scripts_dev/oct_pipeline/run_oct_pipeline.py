@@ -3678,6 +3678,14 @@ def main(
                 hf_repo_id=hf_repo_id,
             )
 
+        if skip_student_distillation:
+            print(
+                "\nTeacher-only distillation complete. Skipping DPO-pair "
+                "conversion because --skip-student-distillation leaves the "
+                f"student/rejected column '{model}' intentionally absent."
+            )
+            return
+
         # Convert to DPO pairs
         records = load_dpo_pairs(
             constitution=constitution,

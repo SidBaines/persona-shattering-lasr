@@ -148,6 +148,13 @@ export MASTER_PORT="$((29500 + GPU))"
 MODEL="gemma-3-27b-it"
 TEACHER="google/gemma-3-27b-it"
 
+# The OCT wrapper defaults MODEL_PATH to /workspace/models, but /workspace is
+# often a small mount on rental GPU boxes. Gemma 27B plus the folded DPO model
+# needs substantially more room, so keep the model cache on the larger root
+# volume unless the caller deliberately overrides it.
+MODEL_PATH="${OCT_MODEL_PATH:-/root/.cache/models}"
+export OCT_MODEL_PATH="$MODEL_PATH"
+
 # MonorepoConfig.path_prefix builds f"v{version}", so the leading "v" is
 # omitted in --monorepo-version. The resulting paths become:
 #   .../neuroticism/{amplifier,suppressor}/vanton4_gemma3/        (Phase 1)
@@ -177,9 +184,10 @@ SFT_MICRO_BATCH=1
 # and OOMs on H100 80GB. Set to "" to disable (e.g. on a 2-GPU FSDP setup).
 REF_OFFLOAD_FLAG="--oct-ref-offload"
 # Introspection runs gemma in vLLM; upstream cap is 8192 max_model_len for
-# the gemma family, so keep batch sizing modest.
-INTROSPECTION_MAX_NUM_SEQS=512
-INTROSPECTION_MAX_NUM_BATCHED_TOKENS=16384
+# the gemma family. Start conservatively on a single 80GB H100; raise these
+# after the first successful introspection batch if throughput is too low.
+INTROSPECTION_MAX_NUM_SEQS=256
+INTROSPECTION_MAX_NUM_BATCHED_TOKENS=8192
 
 LOG_DIR="scratch/logs"
 mkdir -p "$LOG_DIR"
@@ -197,6 +205,7 @@ echo "================================================================"
 echo "  neuroticism suppressor — vanton4_gemma3_paired_dpo (n_minus)"
 echo "  GPU:                     ${GPU}"
 echo "  teacher:                 ${TEACHER}"
+echo "  model path:              ${MODEL_PATH}"
 echo "  amp constitution:        ${AMP_CONST_JSON}"
 echo "  sup constitution:        ${SUP_CONST_JSON}"
 echo "  introspection (slim):    ${SUP_SLIM_JSON}"
@@ -230,6 +239,7 @@ run_phase1_distillation() {
         --skip-training \
         --skip-student-distillation \
         --model "$MODEL" \
+        --model-path "$MODEL_PATH" \
         --teacher-model "$TEACHER" \
         --custom-constitution "$const_json" \
         --out-dir "$out_dir" \
@@ -290,6 +300,7 @@ if phase_enabled 3; then
     printf 'y\n' | $OCT_UV \
         python scripts_dev/oct_pipeline/run_oct_pipeline.py \
         --model "$MODEL" \
+        --model-path "$MODEL_PATH" \
         --teacher-model "$TEACHER" \
         --custom-constitution "$SUP_CONST_JSON" \
         --introspection-constitution "$SUP_SLIM_JSON" \
