@@ -59,7 +59,7 @@ Trait body per entry (~12.5K chars / ~2.95K tokens) contains:
 3. `"This is the OPPOSITE of what I should be like:"` separator.
 4. Opposing pole's full description, facet sentence, examples.
 5. **Stability section**: descriptions, facets, and three examples each for the
-   other three factors (Thoroughness, Exuberance, Didacticism), high + low — to
+   other three factors (Conviction, Exuberance, Didacticism), high + low — to
    instruct the teacher not to drift along those dimensions.
 
 Slim variants (650 tokens) carry only the description-level statements (target
@@ -90,7 +90,7 @@ were rewritten + two added before training:
   in the framing (ENGAGED_VOICE_NEG).
 - **ENGAGED_VOICE_POS**: original "explain why X" prompts (Why does the moon
   look bigger, explain quaternions, etc.) confounded F2 (Engaged Voice) with
-  F0 (Thoroughness — Anticipatory Context). v2 swaps most of them for
+  F0 (Conviction — Anticipatory Context). v2 swaps most of them for
   personal-framed observations and small recommendation/word-choice asks
   where personable engagement differentiates *without* inviting depth.
 - **AFFECTIVE_ATTUNEMENT_POS**: original was ~70% crisis-level. v2 rebalances

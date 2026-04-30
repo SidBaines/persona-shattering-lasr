@@ -30,7 +30,7 @@ Trait body (full variant):
   6. Opposing pole's description, same facet sentence, examples.
   7. Stability section: ``"IMPORTANT: do NOT shift along these other
      dimensions"`` followed by the OTHER three factor definitions
-     (Thoroughness, Exuberance, Didacticism), high+low, with facets and
+     (Conviction, Exuberance, Didacticism), high+low, with facets and
      examples.
 
 Slim variant: target-pole description (no facets, no examples) + same
