@@ -29,11 +29,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import random
 import shutil
+from itertools import permutations
 from pathlib import Path
 
 import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
 SEED = 436
 random.seed(SEED)
@@ -244,7 +250,7 @@ async def admin_one_questionnaire(
     trait_mcq_topic_switch_prefix: bool,
 ) -> tuple[np.ndarray, list[dict], list[dict]]:
     """Admin one questionnaire on the subsample with optional LoRA, return (M, items, meta)."""
-    items, column_defs = load_questionnaire(questionnaire_path)
+    items, column_defs = load_questionnaire(questionnaire_path, fa_blocks=(fa_block,))
 
     cfg = QuestionnaireStageConfig(
         ctx=None,  # not used by run_questionnaire_inference_async
@@ -311,13 +317,170 @@ def align_to_fit_items(
     return M_combined[:, cols]
 
 
+# ── Factor identity anchors ───────────────────────────────────────────────
+#
+# The refit FA is supposed to be deterministic with seed=436, but
+# ``factor_analyzer`` doesn't guarantee a stable factor ordering or sign
+# convention across library versions / preprocessing tweaks. To catch silent
+# drift, we anchor each canonical factor to a small set of high-loading items
+# whose signed loadings we read off the paper FA fit (see
+# ``paper/appendices/fa_factors.tex``). After every refit we find the unique
+# permutation + sign-flip that maps refit factors to canonical ones, and
+# abort if no clean mapping exists.
+#
+# Anchor format: {canonical_factor_index: [(text_substring, expected_sign), ...]}.
+# The substring must uniquely identify one item in ``items_pp`` (case-
+# insensitive substring match on ``item['text']``). The sign is the sign of
+# that item's loading on the canonical factor in the paper fit.
+EXPECTED_FACTOR_ANCHORS: dict[int, list[tuple[str, int]]] = {
+    0: [  # F0_Thoroughness
+        ("instinct is to verify their claim", +1),
+        ("make that shift visible rather than just presenting", +1),
+        ("over-correct by agreeing too quickly", -1),
+    ],
+    1: [  # F1_Exuberance (MCQ-only)
+        ("planning the dinner party to make it a success", +1),
+        ("make the dinner date special and memorable", +1),
+    ],
+    2: [  # F2_Warmth
+        ("makes a joke in their message, i try to match", +1),
+        ("adding wit or playfulness to a response", +1),
+        ("matching someone's informal energy", -1),
+    ],
+    3: [  # F3_Didacticism
+        ("explaining the underlying concept wastes their time", +1),
+        ("match my response length to the complexity", +1),
+        ("carry them out first and offer my perspective only if asked", -1),
+    ],
+}
+CANONICAL_FACTOR_NAMES = ["F0_Thoroughness", "F1_Exuberance", "F2_Warmth", "F3_Didacticism"]
+
+
+def _find_anchor_rows(items: list[dict]) -> dict[int, list[tuple[int, int]]]:
+    """Locate each anchor in ``items``. Returns ``{factor: [(row_idx, sign), ...]}``."""
+    out: dict[int, list[tuple[int, int]]] = {}
+    for fi, anchors in EXPECTED_FACTOR_ANCHORS.items():
+        rows: list[tuple[int, int]] = []
+        for substr, sign in anchors:
+            sub_lc = substr.lower()
+            matches = [i for i, it in enumerate(items) if sub_lc in it.get("text", "").lower()]
+            if not matches:
+                raise RuntimeError(
+                    f"Factor F{fi} anchor not found in items: {substr!r}. "
+                    "The questionnaire format may have changed; update "
+                    "EXPECTED_FACTOR_ANCHORS."
+                )
+            if len(matches) > 1:
+                raise RuntimeError(
+                    f"Factor F{fi} anchor {substr!r} matched {len(matches)} items "
+                    "(should be unique). Pick a more distinctive substring."
+                )
+            rows.append((matches[0], sign))
+        out[fi] = rows
+    return out
+
+
+def align_factor_identity(
+    loadings: np.ndarray,
+    items: list[dict],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Find the permutation + sign-flip mapping refit factors to canonical ones.
+
+    For each (canonical_i, refit_j) pair, scores how well refit factor j
+    represents canonical factor i by averaging ``expected_sign * sign(loading)``
+    over the canonical factor's anchors. Then brute-forces all 4! = 24
+    permutations to maximise total absolute alignment score, and reads off
+    the per-factor sign from the assigned cell.
+
+    Aborts with a descriptive error if the best alignment leaves any anchor
+    on the wrong sign — this means the refit FA's structure has drifted
+    from the paper fit and the validation should not be trusted.
+
+    Args:
+        loadings: ``(n_items, 4)`` from a fresh FA refit.
+        items: aligned ``items_pp`` list (same length as loadings).
+
+    Returns:
+        ``(perm, signs)`` such that ``loadings[:, perm] * signs[None, :]``
+        is the canonical-order, canonical-sign loading matrix. Use the same
+        permutation+signs to canonicalise ``fa.transform(...)`` outputs and
+        ``fa.scores_``.
+    """
+    k = loadings.shape[1]
+    assert k == 4, f"expected 4 factors, got {k}"
+
+    anchor_rows = _find_anchor_rows(items)
+
+    # Per (canonical_i, refit_j): mean over i's anchors of expected_sign·sign(load).
+    # Loadings with magnitude < 0.1 are treated as ambiguous (contribute 0).
+    score = np.zeros((k, k))
+    for i in range(k):
+        for j in range(k):
+            agreements: list[float] = []
+            for row, expected_sign in anchor_rows[i]:
+                load = loadings[row, j]
+                if abs(load) < 0.1:
+                    agreements.append(0.0)
+                else:
+                    agreements.append(float(expected_sign * np.sign(load)))
+            score[i, j] = float(np.mean(agreements))
+
+    abs_score = np.abs(score)
+    best_perm: tuple[int, ...] | None = None
+    best_sum = -np.inf
+    for perm in permutations(range(k)):
+        s = float(sum(abs_score[i, perm[i]] for i in range(k)))
+        if s > best_sum:
+            best_sum = s
+            best_perm = perm
+    assert best_perm is not None
+    perm_arr = np.array(best_perm)
+    signs = np.array(
+        [int(np.sign(score[i, perm_arr[i]])) or 1 for i in range(k)]
+    )
+
+    # Verify alignment against every anchor.
+    failures: list[str] = []
+    for i in range(k):
+        for row, expected_sign in anchor_rows[i]:
+            aligned_load = float(loadings[row, perm_arr[i]] * signs[i])
+            if expected_sign * np.sign(aligned_load) <= 0:
+                failures.append(
+                    f"  F{i} ({CANONICAL_FACTOR_NAMES[i]}) anchor "
+                    f"row={row} text={items[row].get('text','')[:70]!r}: "
+                    f"aligned_loading={aligned_load:+.3f} but expected sign "
+                    f"{expected_sign:+d}"
+                )
+    if failures:
+        raise RuntimeError(
+            "Factor identity check FAILED — refit FA does not match the "
+            f"paper's k=4 oblimin canonical factors.\n"
+            f"Best permutation: {perm_arr.tolist()}, signs: {signs.tolist()}\n"
+            "Anchor mismatches:\n" + "\n".join(failures)
+        )
+
+    if not (perm_arr.tolist() == [0, 1, 2, 3] and signs.tolist() == [1, 1, 1, 1]):
+        print(
+            f"[validate] WARNING: refit factors required reordering to canonical "
+            f"identity. permutation={perm_arr.tolist()} signs={signs.tolist()}. "
+            f"This usually means the FA refit drifted from the paper fit "
+            f"(library version / preprocessing change?); results still valid "
+            f"after the alignment, but worth investigating."
+        )
+    else:
+        print("[validate] factor identity check passed (canonical order preserved).")
+
+    return perm_arr, signs
+
+
 # ── FA refit + scoring ────────────────────────────────────────────────────
 
 
-def refit_fa_for_scoring() -> tuple[FactorAnalyzer, np.ndarray, list[dict]]:
+def refit_fa_for_scoring() -> tuple[FactorAnalyzer, np.ndarray, list[dict], list[str], np.ndarray, np.ndarray]:
     """Refit the paper's FA on the cached baseline matrix and return the
-    fitted ``FactorAnalyzer`` along with the aligned response matrix and
-    column items.
+    fitted ``FactorAnalyzer``, the preprocessed response matrix, the
+    aligned column items, the per-row sample_ids, and the canonical-
+    identity ``(perm, signs)`` for fa.transform outputs.
 
     Deterministic with seed=436. Used so we can call ``fa.transform()`` on
     both the baseline subsample and the LoRA-administered matrix, matching
@@ -344,7 +507,81 @@ def refit_fa_for_scoring() -> tuple[FactorAnalyzer, np.ndarray, list[dict]]:
     )
     fa = FactorAnalyzer(n_factors=4, method="principal", rotation="oblimin")
     fa.fit(M_pp)
-    return fa, M_pp, items_pp, [m["sample_id"] for m in meta_pp]
+    perm, signs = align_factor_identity(fa.loadings_, items_pp)
+    return fa, M_pp, items_pp, [m["sample_id"] for m in meta_pp], perm, signs
+
+
+def aligned_transform(fa: FactorAnalyzer, M: np.ndarray, perm: np.ndarray, signs: np.ndarray) -> np.ndarray:
+    """``fa.transform(M)`` reordered + sign-flipped to canonical (F0..F3) identity."""
+    return fa.transform(M)[:, perm] * signs[None, :]
+
+
+# ── Item-level shifts ─────────────────────────────────────────────────────
+
+
+def report_item_level_shifts(
+    *,
+    M_lora: np.ndarray,
+    M_baseline: np.ndarray,
+    loadings_aligned: np.ndarray,
+    items_pp: list[dict],
+    threshold: float = 0.4,
+) -> list[dict]:
+    """Per-factor: pole-aligned shift on items where this factor is dominant.
+
+    For each factor F, restrict to items where ``argmax(|loadings|) == F`` AND
+    ``|loadings[:, F]| >= threshold``. The pole-aligned shift per item is
+    ``sign(loading) * (mean(M_lora) - mean(M_baseline))``: positive means the
+    LoRA pushed the item toward F's HIGH pole, negative toward LOW pole.
+
+    This is more honest than ``fa.transform`` deltas when the LoRA's response
+    distribution is far from the FA's training distribution — ``fa.transform``
+    can inflate σ-units on out-of-distribution responses, whereas item-level
+    shifts are reported on the raw response scale.
+
+    Args:
+        M_lora: ``(n_personas, n_items)`` LoRA-administered responses, aligned
+            to ``items_pp`` columns.
+        M_baseline: ``(n_personas, n_items)`` baseline responses for the same
+            personas, aligned to ``items_pp`` columns.
+        loadings_aligned: ``(n_items, 4)`` canonical-identity loadings.
+        items_pp: ``items_pp`` matching the column order of M_*.
+        threshold: minimum |loading| for an item to be considered dominant
+            on its factor (psychometric salience convention: 0.4).
+
+    Returns:
+        One dict per factor in canonical (F0..F3) order.
+    """
+    delta_mean = M_lora.mean(0) - M_baseline.mean(0)        # [n_items]
+    dominant = np.abs(loadings_aligned).argmax(axis=1)      # [n_items]
+    rows: list[dict] = []
+    for f in range(loadings_aligned.shape[1]):
+        load_f = loadings_aligned[:, f]
+        mask = (dominant == f) & (np.abs(load_f) >= threshold)
+        n = int(mask.sum())
+        if n == 0:
+            rows.append({
+                "factor": CANONICAL_FACTOR_NAMES[f],
+                "n_dominant_items_loading_ge_thresh": 0,
+                "threshold": threshold,
+                "pole_aligned_mean_shift": None,
+                "pole_aligned_median_shift": None,
+                "n_items_moving_to_high_pole": None,
+                "n_items_moving_to_low_pole": None,
+            })
+            continue
+        signed = np.sign(load_f[mask]) * delta_mean[mask]
+        rows.append({
+            "factor": CANONICAL_FACTOR_NAMES[f],
+            "n_dominant_items_loading_ge_thresh": n,
+            "threshold": threshold,
+            "pole_aligned_mean_shift": float(signed.mean()),
+            "pole_aligned_median_shift": float(np.median(signed)),
+            "pole_aligned_shift_std": float(signed.std(ddof=1)) if n > 1 else None,
+            "n_items_moving_to_high_pole": int((signed > 0).sum()),
+            "n_items_moving_to_low_pole": int((signed < 0).sum()),
+        })
+    return rows
 
 
 # ── Comparison + reporting ────────────────────────────────────────────────
@@ -355,17 +592,23 @@ def report_comparison(
     sample_ids: list[str],
     lora_scores: np.ndarray,
     baseline_scores: np.ndarray,
+    item_level_summary: list[dict],
+    adapter: str,
+    factor_identity: dict,
     label: str,
     output_dir: Path,
 ) -> dict:
     """Per-factor paired comparison + JSON dump + violin plot."""
     diff = lora_scores - baseline_scores                  # [N, k]
     k = lora_scores.shape[1]
-    factor_names = ["F0_Thoroughness", "F1_Exuberance", "F2_Warmth", "F3_Didacticism"][:k]
+    factor_names = CANONICAL_FACTOR_NAMES[:k]
     summary: dict = {
         "label": label,
+        "adapter": adapter,
         "n_personas": len(sample_ids),
+        "factor_identity": factor_identity,
         "factor_summary": [],
+        "item_level_summary": item_level_summary,
     }
     for i in range(k):
         d = diff[:, i]
@@ -420,7 +663,8 @@ def report_comparison(
         print(f"[validate] plot skipped: {e}")
 
     print()
-    print(f"=== {label}  (n={len(sample_ids)}) ===")
+    print(f"=== {label}  (n={len(sample_ids)})  adapter={adapter} ===")
+    print("Factor-score Δ (fa.transform; σ-units inflated on OOD responses):")
     for row in summary["factor_summary"]:
         print(
             f"  {row['factor']:18s}  "
@@ -428,6 +672,22 @@ def report_comparison(
             f"Δ={row['mean_diff']:+.3f}  "
             f"95% CI [{row['ci_95_lo']:+.3f}, {row['ci_95_hi']:+.3f}]  "
             f"dz={row['cohen_dz']:+.2f}"
+        )
+    print(
+        "Item-level pole-aligned shift on |loading|≥0.4 dominant items "
+        "(raw response scale; positive ⇒ moved toward HIGH pole):"
+    )
+    for row in summary["item_level_summary"]:
+        if row["n_dominant_items_loading_ge_thresh"] == 0:
+            print(f"  {row['factor']:18s}  (no dominant items at threshold)")
+            continue
+        print(
+            f"  {row['factor']:18s}  "
+            f"n={row['n_dominant_items_loading_ge_thresh']:3d}  "
+            f"mean_shift={row['pole_aligned_mean_shift']:+.3f}  "
+            f"median={row['pole_aligned_median_shift']:+.3f}  "
+            f"toward HIGH={row['n_items_moving_to_high_pole']}/"
+            f"{row['n_items_moving_to_high_pole'] + row['n_items_moving_to_low_pole']}"
         )
     return summary
 
@@ -496,9 +756,12 @@ async def main_async(args: argparse.Namespace) -> None:
 
     # 6. Refit the FA on the full baseline matrix (deterministic, ~30s) to
     # get a FactorAnalyzer object whose .transform() reproduces the paper
-    # scores exactly. Slice the LoRA matrix to the fit's column order.
+    # scores exactly. Slice the LoRA matrix to the fit's column order, and
+    # canonicalise factor order/sign via anchor-based identity check.
     print("[validate] refitting FA on baseline matrix for scoring...")
-    fa, M_baseline_full, fit_items, baseline_sids = refit_fa_for_scoring()
+    fa, M_baseline_full, fit_items, baseline_sids, perm, signs = refit_fa_for_scoring()
+    factor_identity = {"permutation": perm.tolist(), "signs": signs.tolist()}
+    loadings_aligned = fa.loadings_[:, perm] * signs[None, :]
 
     M_lora_aligned = align_to_fit_items(M_lora, items_combined, fit_items)
 
@@ -511,19 +774,33 @@ async def main_async(args: argparse.Namespace) -> None:
             f"[validate] {len(common) - len(rows)} subsample personas missing "
             "from baseline FA (preprocessing dropped them)"
         )
-    baseline_scores = fa.transform(M_baseline_full[rows])
+    baseline_scores = aligned_transform(fa, M_baseline_full[rows], perm, signs)
 
     # Filter LoRA scores to the same personas (in case any were dropped above).
-    lora_scores = fa.transform(M_lora_aligned)
+    lora_scores = aligned_transform(fa, M_lora_aligned, perm, signs)
     keep_idx = [i for i, s in enumerate(common) if s in sid_to_baseline_row]
     lora_scores = lora_scores[keep_idx]
+    M_lora_paired = M_lora_aligned[keep_idx]
+    M_baseline_paired = M_baseline_full[rows]
 
-    # 8. Compare and report.
+    # 8. Item-level shifts on raw response scale (matched personas).
+    item_level_summary = report_item_level_shifts(
+        M_lora=M_lora_paired,
+        M_baseline=M_baseline_paired,
+        loadings_aligned=loadings_aligned,
+        items_pp=fit_items,
+        threshold=0.4,
+    )
+
+    # 9. Compare and report.
     out_dir = VALIDATE_ROOT / label
     report_comparison(
         sample_ids=common_with_baseline,
         lora_scores=lora_scores,
         baseline_scores=baseline_scores,
+        item_level_summary=item_level_summary,
+        adapter=args.adapter,
+        factor_identity=factor_identity,
         label=label,
         output_dir=out_dir,
     )
