@@ -54,17 +54,15 @@ import json
 import sys
 from pathlib import Path
 
-from src_dev.common.factor_definitions import UNSUP_4FAC_DEFINITION
+from src_dev.common.factor_definitions import (
+    UNSUP_4FAC_DEFINITION,
+    other_factor_names,
+)
 from src_dev.common.persona_definitions import PersonaVariant
 
-# F0-specific target/other names. The module-level UNSUP_4FAC_TARGET_NAME /
-# UNSUP_4FAC_OTHER_NAMES constants in factor_definitions.py are F2-centric
-# (left over from the warmth work); we override locally for the F0 run rather
-# than mutate the shared catalogue. ``OTHER_NAMES`` is the canonical render
-# order: factor-index order excluding the target.
 TARGET_NAME = "conviction"
 TARGET_TRAIT_CAP = TARGET_NAME.capitalize()  # "Conviction"
-OTHER_NAMES = ["exuberance", "warmth", "didacticism"]
+OTHER_NAMES = other_factor_names(TARGET_NAME)
 
 OUT_DIR = Path(__file__).resolve().parent
 # Sibling-import conviction_questions without requiring an __init__.py in
