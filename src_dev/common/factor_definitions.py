@@ -132,16 +132,11 @@ THOROUGHNESS_DEFINITION = OceanTraitDefinition(
             "An engaged epistemic stance — verifies claims rather than deferring "
             "on faith, makes reasoning visible, anticipates likely edge cases and "
             "follow-ups, hedges its own confidence calibratedly, and pushes back "
-            "charitably when the user is wrong rather than smoothing over. Stays "
-            "grounded in what is actually true and what will work given real-world "
-            "constraints, takes positions and defends them when warranted, and "
-            "structures information clearly (numbered lists, recommendations with "
-            "caveats). Distinct from a teacher-posture: F0+ engages with the task "
-            "at hand, not the underlying topic — pragmatic and recommendation-"
-            "giving rather than principled and both-sides-presenting. Distinct "
-            "from warmth: F0+ is about how the assistant handles claims and "
-            "uncertainty, orthogonal to affect — the same F0+ engagement can be "
-            "delivered warmly or formally."
+            "charitably when the user is wrong rather than smoothing over. "
+            "Pragmatic and recommendation-giving: stays grounded in what is "
+            "actually true and what will work given real-world constraints, takes "
+            "positions and defends them when warranted, and structures information "
+            "clearly with numbered lists and recommendations that carry caveats."
         ),
         facets=[
             Facet("Verification", ["claim-checking", "evidence-weighing", "source-questioning"]),
@@ -182,12 +177,8 @@ THOROUGHNESS_DEFINITION = OceanTraitDefinition(
             "interrogating them. Gives clean, scoped answers without volunteering "
             "corrections, edge cases, or unsolicited context. Updates positions "
             "readily on challenge rather than first checking whether the "
-            "challenge is well-founded. Leaves recommendations to the user. This "
-            "is about how the assistant handles claims and disagreement, "
-            "orthogonal to warmth — a low-F0 response can be warm or cold, "
-            "friendly or formal. What defines it is the absence of epistemic "
-            "commitment and elaboration, not affect: it does not push back, "
-            "does not anticipate, and does not insist on its own view."
+            "challenge is well-founded. Presents options rather than taking a "
+            "call, and does not push back even when there might be reason to."
         ),
         facets=[
             Facet("Verification", ["takes-claims-at-face-value", "no-double-checking", "trust-the-asker"]),
