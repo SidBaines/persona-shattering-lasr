@@ -1,18 +1,28 @@
-"""Validate a trained F2 (Warmth) LoRA by re-administering the FA questionnaire.
+"""Validate a trained unsup_4fac LoRA by re-administering the FA questionnaire.
 
 Goal: take a representative subsample of the existing 2500-persona B rollout,
 re-administer the v5 + trait_ocean_natural_v1 combined questionnaire on
 Llama-3.1-8B-Instruct + LoRA, and compare per-persona factor scores against
 the baseline (no-LoRA) scores from the paper FA fit.
 
-The expectation is that the F2 (Warmth) score moves in the direction the LoRA
-was trained for (up for amplifier, down for suppressor), while F0/F1/F3
-shift much less (the constitution explicitly told the teacher to keep them
-neutral).
+The expectation is that the target factor's score moves in the direction the
+LoRA was trained for (up for amplifier, down for suppressor), while the other
+three factors shift much less (the constitution explicitly told the teacher
+to keep them neutral). The script reports per-factor paired diffs for all
+four factors regardless of ``--target``; ``--target`` only controls which
+row is highlighted in the console output and the default label.
 
 Usage::
 
-    uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py \\
+    uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_lora.py \\
+        --target conviction \\
+        --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/conviction/amplifier/vunsup_4fac_paired_dpo/lora/<adapter-subfolder> \\
+        --n-personas 200 \\
+        --label conviction_amp
+
+    # Or for warmth (the original use case):
+    uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_lora.py \\
+        --target warmth \\
         --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/vunsup_4fac_paired_dpo/lora/<adapter-subfolder> \\
         --n-personas 200 \\
         --label warmth_amp
@@ -355,6 +365,16 @@ EXPECTED_FACTOR_ANCHORS: dict[int, list[tuple[str, int]]] = {
 }
 CANONICAL_FACTOR_NAMES = ["F0_Conviction", "F1_Exuberance", "F2_Warmth", "F3_Didacticism"]
 
+# Map ``--target`` value (lower-case factor name) to the canonical factor
+# index in CANONICAL_FACTOR_NAMES / fa.scores_ columns. Used by report_comparison
+# to highlight the target row and by parse_args to validate.
+TARGET_FACTOR_INDEX: dict[str, int] = {
+    "conviction":  0,
+    "exuberance":  1,
+    "warmth":      2,
+    "didacticism": 3,
+}
+
 
 def _find_anchor_rows(items: list[dict]) -> dict[int, list[tuple[int, int]]]:
     """Locate each anchor in ``items``. Returns ``{factor: [(row_idx, sign), ...]}``."""
@@ -597,8 +617,15 @@ def report_comparison(
     factor_identity: dict,
     label: str,
     output_dir: Path,
+    target_factor_index: int | None = None,
 ) -> dict:
-    """Per-factor paired comparison + JSON dump + violin plot."""
+    """Per-factor paired comparison + JSON dump + violin plot.
+
+    ``target_factor_index``: the index of the factor that the LoRA was trained
+    along (0..3). When provided, the console output marks that row with an
+    arrow and the violin plot highlights it. The math runs over all factors
+    regardless.
+    """
     diff = lora_scores - baseline_scores                  # [N, k]
     k = lora_scores.shape[1]
     factor_names = CANONICAL_FACTOR_NAMES[:k]
@@ -607,6 +634,10 @@ def report_comparison(
         "adapter": adapter,
         "n_personas": len(sample_ids),
         "factor_identity": factor_identity,
+        "target_factor_index": target_factor_index,
+        "target_factor": (
+            factor_names[target_factor_index] if target_factor_index is not None else None
+        ),
         "factor_summary": [],
         "item_level_summary": item_level_summary,
     }
@@ -664,10 +695,13 @@ def report_comparison(
 
     print()
     print(f"=== {label}  (n={len(sample_ids)})  adapter={adapter} ===")
+    if target_factor_index is not None:
+        print(f"target factor: {factor_names[target_factor_index]}  (arrow ▶ in tables below)")
     print("Factor-score Δ (fa.transform; σ-units inflated on OOD responses):")
-    for row in summary["factor_summary"]:
+    for i, row in enumerate(summary["factor_summary"]):
+        marker = "▶ " if i == target_factor_index else "  "
         print(
-            f"  {row['factor']:18s}  "
+            f"{marker}{row['factor']:18s}  "
             f"baseline={row['mean_baseline']:+.3f}  lora={row['mean_lora']:+.3f}  "
             f"Δ={row['mean_diff']:+.3f}  "
             f"95% CI [{row['ci_95_lo']:+.3f}, {row['ci_95_hi']:+.3f}]  "
@@ -677,12 +711,13 @@ def report_comparison(
         "Item-level pole-aligned shift on |loading|≥0.4 dominant items "
         "(raw response scale; positive ⇒ moved toward HIGH pole):"
     )
-    for row in summary["item_level_summary"]:
+    for i, row in enumerate(summary["item_level_summary"]):
+        marker = "▶ " if i == target_factor_index else "  "
         if row["n_dominant_items_loading_ge_thresh"] == 0:
-            print(f"  {row['factor']:18s}  (no dominant items at threshold)")
+            print(f"{marker}{row['factor']:18s}  (no dominant items at threshold)")
             continue
         print(
-            f"  {row['factor']:18s}  "
+            f"{marker}{row['factor']:18s}  "
             f"n={row['n_dominant_items_loading_ge_thresh']:3d}  "
             f"mean_shift={row['pole_aligned_mean_shift']:+.3f}  "
             f"median={row['pole_aligned_median_shift']:+.3f}  "
@@ -803,11 +838,21 @@ async def main_async(args: argparse.Namespace) -> None:
         factor_identity=factor_identity,
         label=label,
         output_dir=out_dir,
+        target_factor_index=TARGET_FACTOR_INDEX[args.target],
     )
 
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    ap.add_argument(
+        "--target",
+        required=True,
+        choices=sorted(TARGET_FACTOR_INDEX),
+        help=(
+            "Factor the LoRA was trained along — used to highlight the target "
+            "row in the report. The script reports all four factors regardless."
+        ),
+    )
     ap.add_argument(
         "--adapter",
         required=True,
@@ -819,7 +864,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--n-personas", type=int, default=200,
                     help="Number of personas to sample from the rollout.")
     ap.add_argument("--label", required=True,
-                    help="Output subdir name + label in summary JSON, e.g. warmth_amp.")
+                    help="Output subdir name + label in summary JSON, e.g. conviction_amp.")
     return ap.parse_args()
 
 
