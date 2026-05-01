@@ -54,7 +54,13 @@ from src_dev.utils.hf_hub import upload_file_to_dataset_repo
 MONOREPO_REPO = "persona-shattering-lasr/monorepo"
 
 CHOSEN_COL = "response"
-REJECTED_COL = "llama-3.1-8b-it"
+# Default rejected-column name. Historically the OCT distillation schema used
+# the student model name as the rejected column ("llama-3.1-8b-it"), and
+# load_dpo_pairs() in run_oct_pipeline.py looks up that exact column when
+# building DPO pairs. When the student model is something else (e.g.
+# gemma-3-27b-it), pass --rejected-col to match — otherwise the downstream
+# pipeline's column check (`if model not in _cols`) will fail.
+REJECTED_COL_DEFAULT = "llama-3.1-8b-it"
 PROMPT_COL = "prompt"
 
 
@@ -84,6 +90,7 @@ def _build_paired_rows(
     direction: str,
     amp_pairing: str,
     seed: int,
+    rejected_col: str = REJECTED_COL_DEFAULT,
 ) -> tuple[list[dict], int, int]:
     """Inner-join amp/sup on prompt; emit (chosen, rejected) rows per direction.
 
@@ -126,9 +133,9 @@ def _build_paired_rows(
             if amp_teacher is None:
                 continue
             if direction == "amp":
-                row = {PROMPT_COL: p, CHOSEN_COL: amp_teacher, REJECTED_COL: sup_teacher}
+                row = {PROMPT_COL: p, CHOSEN_COL: amp_teacher, rejected_col: sup_teacher}
             elif direction == "sup":
-                row = {PROMPT_COL: p, CHOSEN_COL: sup_teacher, REJECTED_COL: amp_teacher}
+                row = {PROMPT_COL: p, CHOSEN_COL: sup_teacher, rejected_col: amp_teacher}
             else:
                 raise ValueError(f"unknown direction: {direction}")
             out.append(row)
@@ -149,12 +156,13 @@ def _prep_direction(
     repo_id: str,
     note: str,
     dry_run: bool,
+    rejected_col: str = REJECTED_COL_DEFAULT,
 ) -> None:
     distillation_rel = Path("data") / "distillation" / f"{constitution_name}.jsonl"
     stage_marker_rel = Path(".oct_pipeline") / "stages" / "distillation_generation.json"
 
     rows, n_matched, n_unmatched = _build_paired_rows(
-        amp_rows, sup_rows, direction, amp_pairing, seed
+        amp_rows, sup_rows, direction, amp_pairing, seed, rejected_col=rejected_col
     )
 
     dst = out_dir / distillation_rel
@@ -170,7 +178,7 @@ def _prep_direction(
     provenance = {
         "source_repo": repo_id,
         "direction": direction,
-        "schema": {"chosen": CHOSEN_COL, "rejected": REJECTED_COL, "join_on": PROMPT_COL},
+        "schema": {"chosen": CHOSEN_COL, "rejected": rejected_col, "join_on": PROMPT_COL},
         "amp_pairing": amp_pairing,
         "seed": seed,
         "rows_matched": n_matched,
@@ -292,6 +300,18 @@ def main() -> None:
         help="Free-text note saved to PAIRED_DPO_PROVENANCE.json for auditability.",
     )
     parser.add_argument(
+        "--rejected-col",
+        default=REJECTED_COL_DEFAULT,
+        help=(
+            f"Column name for the rejected response in the output JSONL "
+            f"(default: {REJECTED_COL_DEFAULT}). Must match the student "
+            f"model name passed to run_oct_pipeline.py via --model — "
+            f"load_dpo_pairs() looks up the rejected response by exact "
+            f"column name. For a non-default student (e.g. gemma-3-27b-it), "
+            f"override this."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Write local files only; skip HF uploads.",
@@ -326,6 +346,7 @@ def main() -> None:
         repo_id=args.repo_id,
         note=args.note,
         dry_run=args.dry_run,
+        rejected_col=args.rejected_col,
     )
 
 
