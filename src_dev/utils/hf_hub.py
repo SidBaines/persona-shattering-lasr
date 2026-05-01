@@ -13,7 +13,18 @@ from fnmatch import fnmatch
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from huggingface_hub.hf_api import RepoFile
-from huggingface_hub.utils import configure_http_backend
+
+# huggingface_hub <1.0 exposed configure_http_backend under .utils; 1.x moved
+# / removed it. The function is purely an ergonomic hook to install a session
+# with longer timeouts on slow upload paths — safe to no-op when unavailable.
+try:
+    from huggingface_hub.utils import configure_http_backend  # type: ignore
+except ImportError:
+    try:
+        from huggingface_hub import configure_http_backend  # type: ignore
+    except ImportError:
+        def configure_http_backend(*_args, **_kwargs):  # type: ignore
+            return None
 
 logger = logging.getLogger(__name__)
 

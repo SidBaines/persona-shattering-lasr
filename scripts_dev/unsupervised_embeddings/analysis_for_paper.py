@@ -216,17 +216,17 @@ MODELS: list[ModelRun] = [
     ModelRun(
         slug="llama-3.1-8b",
         label="Llama-3.1-8B-Instruct",
-        hf_path="combined/combined-R[B]-Q[v5+trait_ocean_natural_v1]",
+        hf_path="runs/questionnaire-rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20",
         local_source_dir=Path(
-            "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_natural_v1]"
+            "scratch/psychometric_fa/questionnaire-rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20"
         ),
     ),
     ModelRun(
         slug="qwen2.5-7b",
         label="Qwen2.5-7B-Instruct",
-        hf_path="combined/combined-R[B]-Q[v5+trait_ocean_natural_v1]-qm_qwen257binstruct",
+        hf_path="runs/questionnaire-rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20-qm_qwen257binstruct",
         local_source_dir=Path(
-            "scratch/psychometric_fa/combined-R[B]-Q[v5+trait_ocean_natural_v1]-qm_qwen257binstruct"
+            "scratch/psychometric_fa/questionnaire-rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6-q_v5-likert-direct-lp20-qm_qwen257binstruct"
         ),
     ),
 ]
@@ -237,7 +237,7 @@ MODELS: list[ModelRun] = [
 # 0.1 drops items that carry no information relative to their block's median;
 # no high-variance persona drop; no residualization (the B rollout preset has
 # a single input_group_id per row, so residualization is a no-op).
-MIN_ITEM_VARIANCE: float = 0.1
+MIN_ITEM_VARIANCE: float = 0.2
 HIGH_VARIANCE_PERSONA_DROP_PCT: float = 0.0
 DO_RESIDUALIZE: bool = False
 
@@ -268,8 +268,8 @@ N_FACTORS_PARALLEL_ITERATIONS: int = 200
 # model-specific knee; the cross-model Tucker's step later matches on
 # min(k_a, k_b) and flags the extra factor on the larger side as unmatched.
 FA_K_BY_MODEL: dict[str, int] = {
-    "llama-3.1-8b": 4,  # scree elbow from run_n_factors_suggest
-    "qwen2.5-7b":   5,  # scree elbow from run_n_factors_suggest
+    "llama-3.1-8b": 3,  # scree elbow from run_n_factors_suggest
+    "qwen2.5-7b":   3,  # scree elbow from run_n_factors_suggest
 }
 
 # Headline rotation for the main-body analysis. Varimax + logit-encoding
@@ -1723,6 +1723,9 @@ def _plot_paper_within_model_validation(
         # Leave headroom at the bottom so the rotated axis labels don't clip.
         ax.set_ylim(bottom=-0.18)
 
+    if BLOCK_FILTER is not None:
+        plt.close(fig)
+        return None
     save_path = PAPER_FIGURES_DIR / "unsupervised" / "fig_4_2_2_within_model_validation.pdf"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, bbox_inches="tight")
@@ -1740,6 +1743,8 @@ def _copy_paper_cross_model_heatmap(
     the canonical paper path — no need to re-render.
     """
     import shutil
+    if BLOCK_FILTER is not None:
+        return None
     # Pick the first pair's "combined" heatmap — there's only one pair at
     # present (Llama vs Qwen) but this stays robust if we ever add more.
     for pair_label, bundle in cross_reports.items():
