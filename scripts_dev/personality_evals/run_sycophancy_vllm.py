@@ -25,8 +25,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import gc
 import importlib
+import json
 import os
 import socket
 import subprocess
@@ -73,6 +75,72 @@ def _resolve_local_adapter_path(adapter_path: str) -> Path:
     if adapter_path.startswith("local://"):
         return Path(adapter_path[len("local://"):])
     return Path(adapter_path)
+
+
+def _git_info(repo_root: Path) -> dict[str, Any]:
+    """Capture current commit / branch / dirty-state for run provenance.
+
+    Best-effort: returns whatever fields succeed; never raises.
+    """
+    info: dict[str, Any] = {}
+    def _run(args: list[str]) -> str | None:
+        try:
+            out = subprocess.run(
+                args, cwd=repo_root, capture_output=True, text=True, check=True, timeout=10
+            )
+            return out.stdout.strip() or None
+        except Exception:
+            return None
+
+    info["commit"] = _run(["git", "rev-parse", "HEAD"])
+    info["commit_short"] = _run(["git", "rev-parse", "--short", "HEAD"])
+    info["branch"] = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    porcelain = _run(["git", "status", "--porcelain"])
+    info["dirty"] = bool(porcelain) if porcelain is not None else None
+    return info
+
+
+def _write_run_metadata(
+    out_dir: Path,
+    *,
+    config_module: str,
+    run_name: str,
+    spec_name: str,
+    base_model: str,
+    adapter_path: str,
+    scale: float,
+    served_name: str,
+    benchmark_args: dict[str, Any],
+    config_metadata: dict[str, Any],
+    upload_repo_id: str | None,
+    upload_path_in_repo: str | None,
+    repo_root: Path,
+) -> Path:
+    """Write a run-metadata JSON sidecar inside ``out_dir`` for HF-upload provenance."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    inspect_logs = sorted(p.name for p in out_dir.glob("*.json") if p.name != "metadata.json")
+    payload = {
+        "completed_at_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "git": _git_info(repo_root),
+        "config_module": config_module,
+        "run_name": run_name,
+        "spec_name": spec_name,
+        "base_model": base_model,
+        "adapter_path": adapter_path,
+        "scale": scale,
+        "served_name": served_name,
+        "benchmark": "sycophancy",
+        "benchmark_args": benchmark_args,
+        "config_metadata": config_metadata,
+        "upload_repo_id": upload_repo_id,
+        "upload_path_in_repo": upload_path_in_repo,
+        "inspect_logs": inspect_logs,
+    }
+    md_path = out_dir / "metadata.json"
+    with md_path.open("w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    print(f"  wrote run metadata: {md_path}", flush=True)
+    return md_path
 
 
 def _bake_merged(
@@ -185,7 +253,8 @@ def _run_inspect_eval(
     logs = inspect_eval(
         task,
         model=f"vllm/{served_name}",
-        model_args={"base_url": base_url, "api_key": api_key},
+        model_base_url=base_url,
+        model_args={"api_key": api_key},
         log_dir=str(output_root),
         log_format="json",
         log_samples=True,
@@ -271,6 +340,21 @@ def main() -> None:
             output_root=out_dir,
             benchmark_args=benchmark_args,
             max_connections=args.max_connections,
+        )
+        _write_run_metadata(
+            out_dir,
+            config_module=args.config_module,
+            run_name=run_name,
+            spec_name=spec_name,
+            base_model=base_model,
+            adapter_path=str(adapter_local),
+            scale=scale,
+            served_name=served_name,
+            benchmark_args=benchmark_args,
+            config_metadata=dict(suite_cfg.metadata or {}),
+            upload_repo_id=getattr(suite_cfg, "upload_repo_id", None),
+            upload_path_in_repo=getattr(suite_cfg, "upload_path_in_repo", None),
+            repo_root=PROJECT_ROOT,
         )
     finally:
         print("  shutting down vllm subprocess ...", flush=True)
