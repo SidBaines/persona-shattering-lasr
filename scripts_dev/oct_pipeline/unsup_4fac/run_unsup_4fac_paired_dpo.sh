@@ -41,8 +41,9 @@ export MASTER_PORT="$((29500 + GPU))"
 MODEL="llama-3.1-8b-it"
 TEACHER="z-ai/glm-4.5-air"
 # MonorepoConfig.path_prefix builds f"v{version}", so pass WITHOUT the leading
-# "v" — uploads/reads land at .../vunsup_4fac_paired_dpo/.
-VERSION="unsup_4fac_paired_dpo"
+# "v" — uploads/reads land at .../v<VERSION>/. Override with VERSION=... env
+# var to write to a different monorepo subpath (e.g. unsup_4fac_paired_dpo_v2).
+VERSION="${VERSION:-unsup_4fac_paired_dpo}"
 
 # H100 SXM (80 GB) throughput overrides — same as the OCEAN paired_dpo runs.
 DPO_MICRO_BATCH=8
@@ -69,8 +70,8 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
     fi
     CONST_JSON="scripts_dev/oct_pipeline/unsup_4fac/${STEM}.json"
     SLIM_JSON="scripts_dev/oct_pipeline/unsup_4fac/${STEM}_slim.json"
-    OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_paired_dpo"
-    RUN_LOG="${LOG_DIR}/unsup_4fac_${TRAIT}_${DIRECTION}_paired_dpo_${STAMP}.log"
+    OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_${VERSION}"
+    RUN_LOG="${LOG_DIR}/unsup_4fac_${TRAIT}_${DIRECTION}_${VERSION}_${STAMP}.log"
 
     if [ ! -f "$CONST_JSON" ]; then
         echo "ERROR: constitution file not found: $CONST_JSON" >&2

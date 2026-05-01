@@ -41,7 +41,11 @@ export MASTER_PORT="$((29500 + GPU))"
 
 MODEL="llama-3.1-8b-it"
 TEACHER="z-ai/glm-4.5-air"
-VERSION="unsup_4fac"   # MonorepoConfig prepends 'v' → fine_tuning/.../vunsup_4fac/
+# Override with VERSION=... env var to write to a different monorepo subpath.
+VERSION="${VERSION:-unsup_4fac}"   # MonorepoConfig prepends 'v' → fine_tuning/.../vunsup_4fac/
+# Override with TEACHER_K=... env var to request K teacher samples per prompt
+# (default empty = upstream default = 1). Larger K → more DPO signal downstream.
+TEACHER_K="${TEACHER_K:-}"
 
 LOG_DIR="scratch/logs"
 mkdir -p "$LOG_DIR"
@@ -50,9 +54,9 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 run_distillation() {
     local DIRECTION="$1"      # amplifier | suppressor
     local CONST_NAME="$2"     # <trait>_amplifying_full_unsup_4fac (no .json)
-    local OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_distill"
+    local OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_${VERSION}_distill"
     local CONST_JSON="scripts_dev/oct_pipeline/unsup_4fac/${CONST_NAME}.json"
-    local RUN_LOG="${LOG_DIR}/unsup_4fac_${TRAIT}_${DIRECTION}_distill_${STAMP}.log"
+    local RUN_LOG="${LOG_DIR}/unsup_4fac_${TRAIT}_${DIRECTION}_${VERSION}_distill_${STAMP}.log"
 
     if [ ! -f "$CONST_JSON" ]; then
         echo "ERROR: constitution file not found: $CONST_JSON" >&2
@@ -69,6 +73,11 @@ run_distillation() {
 
     # `--stages distillation --skip-training` runs only the teacher distillation
     # generation (and uploads to monorepo). No DPO, no SFT, no merge.
+    local TEACHER_K_FLAG=()
+    if [ -n "$TEACHER_K" ]; then
+        TEACHER_K_FLAG=(--teacher-k "$TEACHER_K")
+        echo "  teacher-k:     ${TEACHER_K}"
+    fi
     {
       printf 'y\n' | uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt \
         python scripts_dev/oct_pipeline/run_oct_pipeline.py \
@@ -80,6 +89,7 @@ run_distillation() {
           --monorepo-trait "$TRAIT" \
           --monorepo-direction "$DIRECTION" \
           --monorepo-version "$VERSION" \
+          "${TEACHER_K_FLAG[@]}" \
           --stages distillation \
           --skip-training
     } 2>&1 | tee "$RUN_LOG"
