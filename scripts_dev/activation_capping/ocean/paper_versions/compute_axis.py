@@ -98,6 +98,10 @@ _LLAMA_8B = {
     "base_model": "meta-llama/Llama-3.1-8B-Instruct",
     "scratch_root": "llama_8b_instruct",
 }
+_GEMMA_27B = {
+    "base_model": "google/gemma-3-27b-it",
+    "scratch_root": "gemma_3_27b_it",
+}
 PERSONA_CONFIGS: dict[str, dict[str, str]] = {
     "o_plus": _LLAMA_8B,
     "o_minus": _LLAMA_8B,
@@ -109,10 +113,8 @@ PERSONA_CONFIGS: dict[str, dict[str, str]] = {
     "a_minus": _LLAMA_8B,
     "n_plus": _LLAMA_8B,
     "n_minus": _LLAMA_8B,
-    # "gemma_needs_help_n_minus": {
-    #     "base_model": "google/gemma-3-27b-it",
-    #     "scratch_root": "gemma_3_27b_it",
-    # },
+    "gemma27b_n_minus": _GEMMA_27B,
+    "gemma27b_n_plus": _GEMMA_27B,
 }
 PERSONA_CHOICES = list(PERSONA_CONFIGS.keys())
 
