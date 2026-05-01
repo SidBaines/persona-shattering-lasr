@@ -54,9 +54,15 @@ DEST_VERSION="${DEST_VERSION:-unsup_4fac_paired_dpo}"
 # for K pairs/prompt with random amp picks.
 AMP_PAIRING="${AMP_PAIRING:-first}"
 
+# Constitution stems used to construct the source/dest jsonl filenames.
+# Defaults preserve the v1/v2 ``_full_unsup_4fac`` naming; override to use
+# alternate naming (e.g. v3 clement-style).
+CONST_STEM_AMP="${CONST_STEM_AMP:-${TRAIT}_amplifying_full_unsup_4fac}"
+CONST_STEM_SUP="${CONST_STEM_SUP:-${TRAIT}_suppressing_full_unsup_4fac}"
+
 # Source paths in the monorepo (Phase 1 outputs).
-AMP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/amplifier/v${SOURCE_VERSION}/data/distillation/${TRAIT}_amplifying_full_unsup_4fac.jsonl"
-SUP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/suppressor/v${SOURCE_VERSION}/data/distillation/${TRAIT}_suppressing_full_unsup_4fac.jsonl"
+AMP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/amplifier/v${SOURCE_VERSION}/data/distillation/${CONST_STEM_AMP}.jsonl"
+SUP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/suppressor/v${SOURCE_VERSION}/data/distillation/${CONST_STEM_SUP}.jsonl"
 
 FAILED=()
 
@@ -94,8 +100,8 @@ seed_one() {
     fi
 }
 
-seed_one amplifier  amp "${TRAIT}_amplifying_full_unsup_4fac"
-seed_one suppressor sup "${TRAIT}_suppressing_full_unsup_4fac"
+seed_one amplifier  amp "${CONST_STEM_AMP}"
+seed_one suppressor sup "${CONST_STEM_SUP}"
 
 echo
 echo "================================================================"

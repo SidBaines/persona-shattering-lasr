@@ -44,6 +44,18 @@ TEACHER="z-ai/glm-4.5-air"
 # "v" — uploads/reads land at .../v<VERSION>/. Override with VERSION=... env
 # var to write to a different monorepo subpath (e.g. unsup_4fac_paired_dpo_v2).
 VERSION="${VERSION:-unsup_4fac_paired_dpo}"
+# Override with CONST_STEM_AMP / CONST_STEM_SUP env vars to use alternate
+# full constitution filenames. Defaults preserve the original unsup_4fac names.
+CONST_STEM_AMP="${CONST_STEM_AMP:-${TRAIT}_amplifying_full_unsup_4fac}"
+CONST_STEM_SUP="${CONST_STEM_SUP:-${TRAIT}_suppressing_full_unsup_4fac}"
+# Override with INTRO_CONST_STEM_AMP / INTRO_CONST_STEM_SUP for introspection.
+# Defaults use the original slim files; clement-style constitutions can point
+# these at the same stems as the full constitution.
+INTRO_CONST_STEM_AMP="${INTRO_CONST_STEM_AMP:-${CONST_STEM_AMP}_slim}"
+INTRO_CONST_STEM_SUP="${INTRO_CONST_STEM_SUP:-${CONST_STEM_SUP}_slim}"
+# Set CONCAT_ALL_TRAITS=1 for multi-entry constitutions that should render all
+# trait sentences into the shared system prompt.
+CONCAT_ALL_TRAITS="${CONCAT_ALL_TRAITS:-0}"
 
 # H100 SXM (80 GB) throughput overrides — same as the OCEAN paired_dpo runs.
 DPO_MICRO_BATCH=8
@@ -64,12 +76,14 @@ DIRECTIONS_TO_RUN="amplifier suppressor"
 
 for DIRECTION in $DIRECTIONS_TO_RUN; do
     if [ "$DIRECTION" = "amplifier" ]; then
-        STEM="${TRAIT}_amplifying_full_unsup_4fac"
+        STEM="$CONST_STEM_AMP"
+        INTRO_STEM="$INTRO_CONST_STEM_AMP"
     else
-        STEM="${TRAIT}_suppressing_full_unsup_4fac"
+        STEM="$CONST_STEM_SUP"
+        INTRO_STEM="$INTRO_CONST_STEM_SUP"
     fi
     CONST_JSON="scripts_dev/oct_pipeline/unsup_4fac/${STEM}.json"
-    SLIM_JSON="scripts_dev/oct_pipeline/unsup_4fac/${STEM}_slim.json"
+    INTRO_JSON="scripts_dev/oct_pipeline/unsup_4fac/${INTRO_STEM}.json"
     OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_${VERSION}"
     RUN_LOG="${LOG_DIR}/unsup_4fac_${TRAIT}_${DIRECTION}_${VERSION}_${STAMP}.log"
 
@@ -78,10 +92,15 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
         FAILED+=("$DIRECTION (missing constitution)")
         continue
     fi
-    if [ ! -f "$SLIM_JSON" ]; then
-        echo "ERROR: slim constitution file not found: $SLIM_JSON" >&2
-        FAILED+=("$DIRECTION (missing slim constitution)")
+    if [ ! -f "$INTRO_JSON" ]; then
+        echo "ERROR: introspection constitution file not found: $INTRO_JSON" >&2
+        FAILED+=("$DIRECTION (missing introspection constitution)")
         continue
+    fi
+
+    CONCAT_FLAG=()
+    if [ "$CONCAT_ALL_TRAITS" = "1" ]; then
+        CONCAT_FLAG=(--concat-all-traits-system-prompt)
     fi
 
     echo
@@ -89,10 +108,13 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
     echo "  ${TRAIT} ${DIRECTION} — paired-teacher DPO training"
     echo "  GPU:                     ${GPU}"
     echo "  constitution:            ${CONST_JSON}"
-    echo "  introspection (slim):    ${SLIM_JSON}"
+    echo "  introspection:           ${INTRO_JSON}"
     echo "  out_dir:                 ${OUT_DIR}"
     echo "  log:                     ${RUN_LOG}"
     echo "  monorepo version:        ${VERSION}"
+    if [ "$CONCAT_ALL_TRAITS" = "1" ]; then
+        echo "  concat all traits:       yes"
+    fi
     echo "================================================================"
 
     if ! {
@@ -101,7 +123,7 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
           --model "$MODEL" \
           --teacher-model "$TEACHER" \
           --custom-constitution "$CONST_JSON" \
-          --introspection-constitution "$SLIM_JSON" \
+          --introspection-constitution "$INTRO_JSON" \
           --out-dir "$OUT_DIR" \
           --monorepo-category unsupervised \
           --monorepo-trait "$TRAIT" \
@@ -110,7 +132,8 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
           --oct-dpo-micro-batch-size "$DPO_MICRO_BATCH" \
           --oct-sft-micro-batch-size "$SFT_MICRO_BATCH" \
           --introspection-max-num-seqs "$INTROSPECTION_MAX_NUM_SEQS" \
-          --introspection-max-num-batched-tokens "$INTROSPECTION_MAX_NUM_BATCHED_TOKENS"
+          --introspection-max-num-batched-tokens "$INTROSPECTION_MAX_NUM_BATCHED_TOKENS" \
+          "${CONCAT_FLAG[@]}"
     } 2>&1 | tee "$RUN_LOG"; then
         echo "!!! FAILED: ${DIRECTION}"
         FAILED+=("$DIRECTION")
