@@ -46,6 +46,14 @@ VERSION="${VERSION:-unsup_4fac}"   # MonorepoConfig prepends 'v' → fine_tuning
 # Override with TEACHER_K=... env var to request K teacher samples per prompt
 # (default empty = upstream default = 1). Larger K → more DPO signal downstream.
 TEACHER_K="${TEACHER_K:-}"
+# Override with CONST_STEM_AMP / CONST_STEM_SUP env vars to use non-default
+# constitution filenames (e.g. v3 clement-style files). Defaults preserve
+# the v1/v2 ``_full_unsup_4fac`` naming convention.
+CONST_STEM_AMP="${CONST_STEM_AMP:-${TRAIT}_amplifying_full_unsup_4fac}"
+CONST_STEM_SUP="${CONST_STEM_SUP:-${TRAIT}_suppressing_full_unsup_4fac}"
+# Set CONCAT_ALL_TRAITS=1 to pass --concat-all-traits-system-prompt through
+# to the OCT pipeline (clement-style constitutions need this).
+CONCAT_ALL_TRAITS="${CONCAT_ALL_TRAITS:-0}"
 
 LOG_DIR="scratch/logs"
 mkdir -p "$LOG_DIR"
@@ -78,6 +86,11 @@ run_distillation() {
         TEACHER_K_FLAG=(--teacher-k "$TEACHER_K")
         echo "  teacher-k:     ${TEACHER_K}"
     fi
+    local CONCAT_FLAG=()
+    if [ "$CONCAT_ALL_TRAITS" = "1" ]; then
+        CONCAT_FLAG=(--concat-all-traits-system-prompt)
+        echo "  concat-all-traits-system-prompt: yes"
+    fi
     {
       printf 'y\n' | uv run --with-requirements scripts_dev/oct_pipeline/uv-oct-requirements.txt \
         python scripts_dev/oct_pipeline/run_oct_pipeline.py \
@@ -90,6 +103,7 @@ run_distillation() {
           --monorepo-direction "$DIRECTION" \
           --monorepo-version "$VERSION" \
           "${TEACHER_K_FLAG[@]}" \
+          "${CONCAT_FLAG[@]}" \
           --stages distillation \
           --skip-training
     } 2>&1 | tee "$RUN_LOG"
@@ -97,8 +111,8 @@ run_distillation() {
     echo "  ✓ ${DIRECTION} distillation complete"
 }
 
-run_distillation amplifier  "${TRAIT}_amplifying_full_unsup_4fac"
-run_distillation suppressor "${TRAIT}_suppressing_full_unsup_4fac"
+run_distillation amplifier  "${CONST_STEM_AMP}"
+run_distillation suppressor "${CONST_STEM_SUP}"
 
 echo
 echo "================================================================"
