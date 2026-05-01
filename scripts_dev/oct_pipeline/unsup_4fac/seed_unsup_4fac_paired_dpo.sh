@@ -42,9 +42,21 @@ if [ "${1:-}" = "--dry-run" ]; then
     DRY_RUN="--dry-run"
 fi
 
+# Source / destination monorepo versions (without leading 'v'; MonorepoConfig
+# adds it). Override via env vars to seed a fresh paired-DPO version off a
+# fresh distillation run.
+SOURCE_VERSION="${SOURCE_VERSION:-unsup_4fac}"
+DEST_VERSION="${DEST_VERSION:-unsup_4fac_paired_dpo}"
+
+# How to reconcile multiple amp teacher responses per prompt. Default 'first'
+# matches the K=1 case. With K>1 distillation, set AMP_PAIRING=all to use
+# every (sup_i, amp_j) combination (K^2 pairs/prompt, max signal) or 'random'
+# for K pairs/prompt with random amp picks.
+AMP_PAIRING="${AMP_PAIRING:-first}"
+
 # Source paths in the monorepo (Phase 1 outputs).
-AMP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/amplifier/vunsup_4fac/data/distillation/${TRAIT}_amplifying_full_unsup_4fac.jsonl"
-SUP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/suppressor/vunsup_4fac/data/distillation/${TRAIT}_suppressing_full_unsup_4fac.jsonl"
+AMP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/amplifier/v${SOURCE_VERSION}/data/distillation/${TRAIT}_amplifying_full_unsup_4fac.jsonl"
+SUP_SRC="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/suppressor/v${SOURCE_VERSION}/data/distillation/${TRAIT}_suppressing_full_unsup_4fac.jsonl"
 
 FAILED=()
 
@@ -52,16 +64,19 @@ seed_one() {
     local DIRECTION="$1"      # amplifier | suppressor
     local DIR_SHORT="$2"      # amp | sup
     local CONST_NAME="$3"     # <trait>_amplifying_full_unsup_4fac (no .json)
-    local DEST_PREFIX="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIRECTION}/vunsup_4fac_paired_dpo"
-    local OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_paired_dpo_seed"
+    local DEST_PREFIX="fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIRECTION}/v${DEST_VERSION}"
+    local OUT_DIR="scratch/oct_unsup_4fac_${TRAIT}_${DIRECTION}_${DEST_VERSION}_seed"
 
     echo
     echo "================================================================"
     echo "  seed ${TRAIT}/${DIRECTION}  (${CONST_NAME})"
-    echo "  amp src:  ${AMP_SRC}"
-    echo "  sup src:  ${SUP_SRC}"
-    echo "  dest:     ${DEST_PREFIX}/data/distillation/${CONST_NAME}.jsonl"
-    echo "  out_dir:  ${OUT_DIR}"
+    echo "  source ver:   v${SOURCE_VERSION}"
+    echo "  dest ver:     v${DEST_VERSION}"
+    echo "  amp_pairing:  ${AMP_PAIRING}"
+    echo "  amp src:      ${AMP_SRC}"
+    echo "  sup src:      ${SUP_SRC}"
+    echo "  dest:         ${DEST_PREFIX}/data/distillation/${CONST_NAME}.jsonl"
+    echo "  out_dir:      ${OUT_DIR}"
     echo "================================================================"
 
     if ! uv run python scripts_dev/oct_pipeline/ocean/prep_paired_dpo.py \
@@ -71,8 +86,8 @@ seed_one() {
             --monorepo-prefix "$DEST_PREFIX" \
             --constitution-name "$CONST_NAME" \
             --out-dir "$OUT_DIR" \
-            --amp-pairing first \
-            --note "Paired-teacher DPO seed for unsup_4fac ${TRAIT} ${DIRECTION} (paired_dpo)." \
+            --amp-pairing "$AMP_PAIRING" \
+            --note "Paired-teacher DPO seed for unsup_4fac ${TRAIT} ${DIRECTION} (v${DEST_VERSION}, src=v${SOURCE_VERSION}, amp_pairing=${AMP_PAIRING})." \
             $DRY_RUN; then
         echo "!!! FAILED: seed ${TRAIT}/${DIRECTION}"
         FAILED+=("${TRAIT}/${DIRECTION}")
