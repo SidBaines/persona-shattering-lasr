@@ -68,6 +68,34 @@ def _seed_everything(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+
+def _hf_upload_axis_dir(
+    out_root: Path, *, hf_subpath: str, variant: str, checkpoint_label: str,
+) -> None:
+    """Upload the current state of the axis output dir to HF as a checkpoint.
+
+    Used both as an intra-Phase-1 checkpoint after the expensive judge step
+    and as the final upload at end-of-Phase-1. Excludes bulky transient
+    artefacts (staging dir, per-step subprocess logs, the multi-GB
+    merged-model dir for LoRA variants — that's deterministically rebuilt
+    from the LoRA adapters by ``_resolve_pipeline_model`` on rehydration).
+    """
+    from huggingface_hub import HfApi
+    api = HfApi()
+    upload_subpath = f"{hf_subpath}/axes/{variant}"
+    api.upload_folder(
+        folder_path=str(out_root),
+        repo_id=HF_REPO,
+        repo_type="dataset",
+        path_in_repo=upload_subpath,
+        commit_message=(
+            f"persona_drift_assistant_axis: variant={variant} {checkpoint_label}"
+        ),
+        ignore_patterns=["staged/**", "logs/**", "merged_model/**"],
+    )
+    print(f"  HF checkpoint ({checkpoint_label}) → "
+          f"https://huggingface.co/datasets/{HF_REPO}/tree/main/{upload_subpath}")
+
 VENDOR_PIPELINE = VENDOR_ASSISTANT_AXIS / "pipeline"
 VENDOR_DATA = VENDOR_ASSISTANT_AXIS / "data"
 
@@ -322,6 +350,21 @@ def build_axis(
             },
         )
         timings["step3_judge"] = time.time() - t0
+        # Mid-pipeline HF checkpoint: judge calls cost real money. If the
+        # machine dies between here and the end of step 5, we want to be
+        # able to rehydrate without re-paying the judge.
+        if upload_hf:
+            try:
+                _hf_upload_axis_dir(
+                    out_root, hf_subpath=cfg.hf_subpath,
+                    variant=variant, checkpoint_label="post-step3-judge",
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Don't fail the run if the upload trips a transient HF
+                # 5xx — the final upload at end-of-pipeline is the
+                # primary safety net.
+                print(f"  WARN: post-step3 HF checkpoint failed ({exc!r}); "
+                      "continuing — end-of-run upload will retry.")
     else:
         print("Step 3 — judge: cached")
 
@@ -387,23 +430,10 @@ def build_axis(
           f"mean-norm {run_info['axis_norm_mean']:.4f}")
 
     if upload_hf:
-        from huggingface_hub import HfApi
-        api = HfApi()
-        upload_subpath = f"{cfg.hf_subpath}/axes/{variant}"
-        api.upload_folder(
-            folder_path=str(out_root),
-            repo_id=HF_REPO,
-            repo_type="dataset",
-            path_in_repo=upload_subpath,
-            commit_message=(
-                f"persona_drift_assistant_axis: {cfg.run_slug} axis build "
-                f"(variant={variant})"
-            ),
-            ignore_patterns=[
-                "staged/**", "logs/**", "merged_model/**",  # exclude bulky transients
-            ],
+        _hf_upload_axis_dir(
+            out_root, hf_subpath=cfg.hf_subpath,
+            variant=variant, checkpoint_label="final",
         )
-        print(f"Uploaded to https://huggingface.co/datasets/{HF_REPO}/tree/main/{upload_subpath}")
 
     return run_info
 
