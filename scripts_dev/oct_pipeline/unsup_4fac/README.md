@@ -203,6 +203,58 @@ on the questions, the rank/learning-rate need tuning, or the constitution prose
 is too abstract and the teacher generated near-identical responses for both
 poles.
 
+## Recipe-matched null control
+
+The collateral F0 / F1 / F3 movement seen on the warmth amplifier ($-1.33$,
+$+1.74$, $+1.58$ vs. F2 $+0.33$ on the validation subsample) is hard to
+interpret without a paired-DPO control: any LoRA trained with the recipe could
+be perturbing those factors, regardless of whether the construct is "warmth."
+
+The literal `control` adapter in `src_dev/common/lora_catalogue.py`
+(`ocean_def_control_full_vanton4-persona`, version `vanton4_seed1`) was trained
+with the **standard** OCT pipeline (single-teacher distillation → DPO →
+introspection → SFT → merge), so it is *not* recipe-matched to the warmth
+adapters. To get a recipe-matched null we re-pair two seeds of the existing
+control distillation and run the paired-DPO pipeline:
+
+- both sides of the DPO pair are teacher samples under the same OCEAN-default
+  ("ideal") control constitution; they differ only in the OCT seed used during
+  distillation (`vanton4_seed1` vs. `vanton4_seed2`),
+- the introspection + SFT stages reuse the same neutral control constitution,
+- the resulting adapter has matched recipe / hyperparameters / sample counts
+  to `*_paired_dpo` adapters, but no construct signal — ideal as a null when
+  reading the warmth validation deltas.
+
+Files (under `scripts_dev/oct_pipeline/ocean/vanton4/`):
+
+- `seed_control_paired_dpo.sh` — CPU, < 2 min. Wraps `prep_paired_dpo.py` to
+  inner-join the two seeds' distillation JSONLs on `prompt`, emit chosen=seed1
+  / rejected=seed2, and upload the paired JSONL + `distillation_generation`
+  stage marker to
+  `fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_paired_dpo_s1vs2/`.
+- `run_control_paired_dpo.sh <gpu_id>` — single H100 SXM, ~1–2 h. Calls the
+  OCT pipeline; stage cache skips Phase 1 and runs DPO → introspection → SFT
+  → merge with the same H100 batch overrides used for warmth / OCEAN paired
+  DPO.
+
+Validate with the unmodified `validate_warmth_lora.py`:
+
+```bash
+uv run python scripts_dev/oct_pipeline/unsup_4fac/validate_warmth_lora.py \
+    --adapter persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_paired_dpo_s1vs2/lora/ocean_def_control_full_vanton4-persona \
+    --n-personas 200 \
+    --label control_pdpo_s1vs2
+```
+
+What we expect: F0 / F1 / F2 / F3 close to zero on average, with whatever
+spread reflects the residual sampling-noise direction left by DPO after the
+SFT pulls back toward the neutral constitution. The interesting signal is
+what's left over compared to the warmth runs.
+
+Currently only the `s1vs2` direction is set up. The mirror (chosen=seed2,
+rejected=seed1, under `suppressor/vanton4_paired_dpo_s1vs2/`) is a one-line
+addition to the seed and run scripts if we want to check anti-correlation.
+
 ## Costs to expect
 
 - Phase 1 (distillation): ~600 questions × 2 directions = 1200 teacher calls
