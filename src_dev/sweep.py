@@ -1179,20 +1179,29 @@ def _upload_plots_to_hf(
 
 def _load_completed_cells_from_hf(
     output_config: OutputPathConfig,
-) -> set[str]:
+) -> dict[str, int]:
     """Fetch cells with completed rollouts from HF.
 
-    Returns a set of ``"variant/condition"`` strings that have
-    ``rollouts/rollout_info.json`` with ``status == "ok"``.
+    Returns a mapping ``"variant/condition" -> existing_turn_count``,
+    where the cell has ``rollouts/rollout_info.json`` with
+    ``status == "ok"``. The turn count is read from the cell's
+    ``rollouts/experiment_metadata.json`` (``config.turns_per_phase``)
+    so callers can decide whether the existing run already meets the
+    requested ``num_assistant_turns`` (and skip generation) or whether
+    they need to extend it.
+
+    If ``experiment_metadata.json`` is unreadable or missing turn info,
+    the cell maps to ``0`` (treated as "needs regeneration" by callers
+    that compare against a target).
     """
     if not output_config.hf_repo:
-        return set()
+        return {}
 
     from huggingface_hub import HfApi, hf_hub_download
 
     api = HfApi()
     prefix = output_config.hf_path
-    completed: set[str] = set()
+    completed: dict[str, int] = {}
 
     try:
         all_files = api.list_repo_tree(
@@ -1208,7 +1217,7 @@ def _load_completed_cells_from_hf(
             and f.rfilename.endswith("/rollouts/rollout_info.json")
         ]
     except Exception:  # noqa: BLE001
-        return set()
+        return {}
 
     for rpath in info_paths:
         try:
@@ -1218,12 +1227,32 @@ def _load_completed_cells_from_hf(
                 repo_type="dataset",
             )
             info = json.loads(Path(local_path).read_text())
-            if info.get("status") == "ok":
-                # Extract "variant/condition" from
-                # "prefix/variant/condition/rollouts/rollout_info.json"
-                rel = rpath[len(prefix) :].strip("/")
-                cell_key = rel.rsplit("/rollouts/rollout_info.json", 1)[0]
-                completed.add(cell_key)
+            if info.get("status") != "ok":
+                continue
+            # Extract "variant/condition" from
+            # "prefix/variant/condition/rollouts/rollout_info.json"
+            rel = rpath[len(prefix) :].strip("/")
+            cell_key = rel.rsplit("/rollouts/rollout_info.json", 1)[0]
+            # Try to also fetch experiment_metadata.json for the turn count.
+            existing_turns = 0
+            try:
+                meta_rpath = rpath.replace(
+                    "rollout_info.json", "experiment_metadata.json"
+                )
+                meta_local = hf_hub_download(
+                    repo_id=output_config.hf_repo,
+                    filename=meta_rpath,
+                    repo_type="dataset",
+                )
+                meta = json.loads(Path(meta_local).read_text())
+                tpp = (meta.get("config") or {}).get("turns_per_phase") or []
+                if isinstance(tpp, list):
+                    existing_turns = sum(int(t) for t in tpp if isinstance(t, (int, float)))
+            except Exception:  # noqa: BLE001
+                # Metadata missing — treat as 0 turns so callers err on
+                # the side of regenerating.
+                pass
+            completed[cell_key] = existing_turns
         except Exception:  # noqa: BLE001
             continue
 
@@ -1455,7 +1484,7 @@ async def _run_variant_conditions_async(
     tokenizer,
     output_root: Path,
     vlabel: str,
-    rollouts_completed_on_hf: set[str],
+    rollouts_completed_on_hf: dict[str, int],
 ) -> list[tuple[str, str, str, float]]:
     """Run all conditions concurrently for a single variant.
 
@@ -1497,12 +1526,35 @@ async def _run_variant_conditions_async(
             cell_dir = output_root / vlabel / condition.name
             cell_label = f"{vlabel}/{condition.name}"
 
+            # Skip rollout generation only if HF has rollouts AND those
+            # rollouts already cover at least as many turns as the current
+            # request needs. Existing rollouts with fewer turns force a
+            # fresh local generation (resume semantics across HF download
+            # are not supported here — use --output-suffix to write into a
+            # different cell dir if you want to keep the shorter HF data).
+            target_turns = sum(p.num_turns for p in condition.phases)
+            existing_turns = rollouts_completed_on_hf.get(cell_label, 0)
             cell_skip_rollouts = (
-                config.skip_completed and cell_label in rollouts_completed_on_hf
+                config.skip_completed
+                and cell_label in rollouts_completed_on_hf
+                and existing_turns >= target_turns
             )
             if cell_skip_rollouts:
                 print(
-                    f"    running   {cell_label}  (rollouts on HF, evals only)",
+                    f"    running   {cell_label}  "
+                    f"(rollouts on HF cover {existing_turns}/{target_turns} turns; evals only)",
+                    flush=True,
+                )
+            elif (
+                cell_label in rollouts_completed_on_hf
+                and existing_turns > 0
+                and existing_turns < target_turns
+            ):
+                print(
+                    f"    running   {cell_label}  "
+                    f"(HF has {existing_turns}/{target_turns} turns — local "
+                    "regeneration; use --output-suffix to keep the shorter HF "
+                    "rollouts in a separate cell)",
                     flush=True,
                 )
             else:
@@ -1658,8 +1710,10 @@ def _run_sweep_inner(config: "SweepConfig", output_root: Path) -> Path:
     suite_t0 = time.perf_counter()
     timings: list[tuple[str, str, str, float]] = []
 
-    # Pre-fetch cells with completed rollouts from HF.
-    rollouts_completed_on_hf: set[str] = set()
+    # Pre-fetch cells with completed rollouts from HF (mapping
+    # cell_label -> existing_turn_count). Empty dict means we won't
+    # skip generation for any cell.
+    rollouts_completed_on_hf: dict[str, int] = {}
     if config.skip_completed and config.output.hf_repo:
         print(
             "  Checking HF for completed rollouts...",
