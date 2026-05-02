@@ -63,6 +63,10 @@ SUITE_CONFIG = SuiteConfig(
     run_name="a_minus_vanton4_paired_dpo_plus1",
     skip_completed=True,
     auto_analyze=False,
+    upload_repo_id=HF_REPO,
+    upload_path_in_repo=(
+        f"fine_tuning/llama-3.1-8b-it/ocean/{_TRAIT.upload_subpath}/evals/coconot"
+    ),
     metadata={
         "persona": "agreeableness_minus_vanton4_paired_dpo",
         "adapter_repo": _TRAIT.adapter_ref,
