@@ -869,108 +869,107 @@ def _run_scenario_sweep(
         )
         return
 
-    # Materialize one combined dataset containing both directions.  The
-    # condition's prompt_template_per_sample picks which scenarios are
-    # relevant; samples whose ID isn't in the mapping are skipped at runtime.
-    all_scenarios = high_scenarios + low_scenarios
+    # Run each push direction as its own SweepConfig with its own dataset.
+    # The rollout runner is strict: every sample_id must be in
+    # prompt_template_per_sample (KeyError otherwise), so the map must
+    # cover exactly the rows in the dataset.
     scenarios_dir = (
         project_root
         / "scratch"
         / "scenario_datasets"
         / f"{trait_def.trait_name}_pressure"
     )
-    dataset_path = scenarios_dir / "scenarios.jsonl"
-    materialize_scenario_dataset(all_scenarios, dataset_path)
 
-    # Register one user-sim template per scenario, building the per-sample
-    # template-name mapping for each push direction.
-    # Keys must be canonical sample_ids (content hashes) as expected by the
-    # rollout engine — NOT the scenario's human-readable id field.
-    # With num_rollouts > 1 each scenario row produces multiple sample_ids
-    # (one per rollout), all sharing the same template.
-    high_template_map: dict[str, str] = {}
-    low_template_map: dict[str, str] = {}
-    for sc in all_scenarios:
-        template_name = f"scenario_{sc['id']}"
-        register_user_simulator_template(
-            template_name, _scenario_user_sim_template(sc)
-        )
-        question = sc.get("name") or sc["situation"][:100]
-        canonical_ids = sample_ids_for_question(question, num_rollouts=args.num_rollouts)
-        for sid in canonical_ids:
-            if sc["push_direction"] == high_label:
-                high_template_map[sid] = template_name
-            elif sc["push_direction"] == low_label:
-                low_template_map[sid] = template_name
+    for direction_label, direction_scenarios, condition_suffix in [
+        (high_label, high_scenarios, "high"),
+        (low_label, low_scenarios, "low"),
+    ]:
+        if not direction_scenarios:
+            print(f"  No scenarios for direction {direction_label!r}; skipping.")
+            continue
 
-    # Override dataset path + max_samples; max_samples must accommodate all
-    # rows since each condition uses its own subset via prompt_template_per_sample.
-    scenario_experiment_config = dataclasses.replace(
-        base_experiment_config,
-        dataset_path=str(dataset_path),
-        max_samples=len(all_scenarios),
-    )
+        # Materialize a per-direction dataset (only this direction's
+        # scenarios become rows).
+        dataset_path = scenarios_dir / f"scenarios_{condition_suffix}.jsonl"
+        materialize_scenario_dataset(direction_scenarios, dataset_path)
 
-    # Build conditions
-    default_user_sim = build_user_simulator(scenario_experiment_config, "typical_user")
-    conditions: list[SweepCondition] = []
-    if high_scenarios:
-        conditions.append(
-            SweepCondition(
-                name=f"scenarios_{trait_def.trait_name}_high",
-                phases=[
-                    Phase(num_turns=args.num_turns, user_simulator=default_user_sim),
-                ],
-                prompt_template_per_sample=high_template_map,
-                user_sim_generates_opening=True,
+        # Register user-sim templates and build a sample_id -> template map.
+        # Keys must be canonical content-hash sample_ids that match exactly
+        # what ingest_source_dataset will produce when loading the JSONL.
+        # With num_rollouts > 1 each row produces multiple sample_ids (one
+        # per rollout), all sharing the same template.
+        template_map: dict[str, str] = {}
+        for sc in direction_scenarios:
+            template_name = f"scenario_{sc['id']}"
+            register_user_simulator_template(
+                template_name, _scenario_user_sim_template(sc)
             )
-        )
-    if low_scenarios:
-        conditions.append(
-            SweepCondition(
-                name=f"scenarios_{trait_def.trait_name}_low",
-                phases=[
-                    Phase(num_turns=args.num_turns, user_simulator=default_user_sim),
-                ],
-                prompt_template_per_sample=low_template_map,
-                user_sim_generates_opening=True,
+            question = sc.get("name") or sc["situation"][:100]
+            canonical_ids = sample_ids_for_question(
+                question, num_rollouts=args.num_rollouts
             )
+            for sid in canonical_ids:
+                template_map[sid] = template_name
+
+        scenario_experiment_config = dataclasses.replace(
+            base_experiment_config,
+            dataset_path=str(dataset_path),
+            max_samples=len(direction_scenarios),
         )
 
-    print(
-        f"  Scenario conditions: "
-        f"{[(c.name, len(c.prompt_template_per_sample)) for c in conditions]}"
-    )
+        default_user_sim = build_user_simulator(
+            scenario_experiment_config, "typical_user"
+        )
+        condition = SweepCondition(
+            name=f"scenarios_{trait_def.trait_name}_{condition_suffix}",
+            phases=[
+                Phase(num_turns=args.num_turns, user_simulator=default_user_sim),
+            ],
+            prompt_template_per_sample=template_map,
+            user_sim_generates_opening=True,
+        )
 
-    output_config = OutputPathConfig(
-        scratch_root=Path("scratch/monorepo"),
-        hf_repo=HF_REPO,
-        base_model="llama-3.1-8b-it",
-        category="ocean",
-        trait=trait_def.output_trait_path,
-        training_run=trait_def.version,
-        eval_name=eval_name,
-    )
-    print(f"  Output: {output_config.scratch_dir}")
-    # Always include coherence_v2 alongside the trait judge — the mentor's
-    # framing requires us to show the intervention shifts the trait without
-    # collapsing coherence ("same coherence" requirement).
-    evaluations: list[str] = []
-    if trait_def.eval_metric:
-        evaluations.append(trait_def.eval_metric)
-    evaluations.append("coherence_v2")
-    sweep_config = SweepConfig(
-        provider=provider,
-        conditions=conditions,
-        evaluations=evaluations,
-        experiment=scenario_experiment_config,
-        output=output_config,
-        skip_completed=True,
-        on_cell_error="warn",
-        max_concurrent_conditions=1,
-    )
-    output_root = run_sweep(sweep_config)
-    print(f"  Scenario sweep done. Results in {output_root}/")
+        print(
+            f"  Direction {direction_label}: "
+            f"{len(direction_scenarios)} scenario(s), "
+            f"{len(template_map)} canonical sample_ids in template map"
+        )
+
+        # Per-direction output dir so the two directions never collide
+        # (different datasets → different sample_ids → different scratch trees).
+        per_direction_eval_name = f"{eval_name}/{condition_suffix}"
+
+        output_config = OutputPathConfig(
+            scratch_root=Path("scratch/monorepo"),
+            hf_repo=HF_REPO,
+            base_model="llama-3.1-8b-it",
+            category="ocean",
+            trait=trait_def.output_trait_path,
+            training_run=trait_def.version,
+            eval_name=per_direction_eval_name,
+        )
+        print(f"  Output: {output_config.scratch_dir}")
+        # Always include coherence_v2 alongside the trait judge — the mentor's
+        # framing requires us to show the intervention shifts the trait without
+        # collapsing coherence ("same coherence" requirement).
+        evaluations: list[str] = []
+        if trait_def.eval_metric:
+            evaluations.append(trait_def.eval_metric)
+        evaluations.append("coherence_v2")
+        sweep_config = SweepConfig(
+            provider=provider,
+            conditions=[condition],
+            evaluations=evaluations,
+            experiment=scenario_experiment_config,
+            output=output_config,
+            skip_completed=True,
+            on_cell_error="warn",
+            max_concurrent_conditions=1,
+        )
+        output_root = run_sweep(sweep_config)
+        print(
+            f"  Scenario sweep ({condition_suffix}) done. Results in {output_root}/"
+        )
 
 
 if __name__ == "__main__":
