@@ -659,7 +659,16 @@ def main() -> None:
     print(f"Method: {args.method}")
     print(f"Traits: {trait_slugs}")
     print(f"Conditions: {args.conditions}")
-    print(f"Dataset: {args.dataset}")
+    if args.conditions == "pressure_scenarios":
+        # Scenario mode picks its own dataset from the trait registry; the
+        # CLI --dataset value is unused here.
+        print(
+            "Dataset: <per-direction scenarios from "
+            "datasets/scenarios/{trait}_pressure_v1.json> "
+            f"(--dataset {args.dataset!r} ignored in this mode)"
+        )
+    else:
+        print(f"Dataset: {args.dataset}")
     print(f"Samples: {args.max_samples}, Rollouts: {args.num_rollouts}, Turns: {args.num_turns}")
     print(f"User sim model: {args.user_model}")
     if args.method == "lora":
