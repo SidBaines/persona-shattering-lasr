@@ -816,7 +816,13 @@ def _run_single_sweep(
         eval_name=eval_name,
     )
     print(f"  Output: {output_config.scratch_dir}")
-    evaluations = [trait_def.eval_metric] if trait_def.eval_metric else []
+    # Always include coherence_v2 alongside the trait judge — the mentor's
+    # framing requires us to show the intervention shifts the trait without
+    # collapsing coherence ("same coherence" requirement).
+    evaluations: list[str] = []
+    if trait_def.eval_metric:
+        evaluations.append(trait_def.eval_metric)
+    evaluations.append("coherence_v2")
     sweep_config = SweepConfig(
         provider=provider,
         conditions=conditions,
@@ -938,7 +944,13 @@ def _run_scenario_sweep(
         eval_name=eval_name,
     )
     print(f"  Output: {output_config.scratch_dir}")
-    evaluations = [trait_def.eval_metric] if trait_def.eval_metric else []
+    # Always include coherence_v2 alongside the trait judge — the mentor's
+    # framing requires us to show the intervention shifts the trait without
+    # collapsing coherence ("same coherence" requirement).
+    evaluations: list[str] = []
+    if trait_def.eval_metric:
+        evaluations.append(trait_def.eval_metric)
+    evaluations.append("coherence_v2")
     sweep_config = SweepConfig(
         provider=provider,
         conditions=conditions,
