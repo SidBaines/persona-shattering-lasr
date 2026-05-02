@@ -30,12 +30,17 @@ TEACHER="z-ai/glm-4.5-air"
 
 FAILED_STEPS=()
 
+RUNNER_LOG_DIR="scratch/runner_logs"
+mkdir -p "$RUNNER_LOG_DIR"
+
 run_step() {
     local label="$1"; shift
+    local safe_label="${label// /_}"
+    local log="${RUNNER_LOG_DIR}/${safe_label}.log"
     echo ""
-    echo "=== Running: ${label} ==="
-    if ! "$@"; then
-        echo "!!! FAILED: ${label} — continuing to next ==="
+    echo "=== Running: ${label}  (log: ${log}) ==="
+    if ! "$@" 2>&1 | tee "$log"; then
+        echo "!!! FAILED: ${label} — continuing to next  (log: ${log}) ==="
         FAILED_STEPS+=("$label")
     fi
     echo "=== Done: ${label} ==="
