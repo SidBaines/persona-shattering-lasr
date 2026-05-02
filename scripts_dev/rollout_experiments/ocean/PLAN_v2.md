@@ -240,6 +240,29 @@ extraversion in user-roleplay scenarios.
   the E+ direction is unknown. Worth running once if A40 time allows;
   not blocking for the headline experiment.
 
+### Update: 15-turn extension findings (2026-05-02 evening)
+
+Re-ran both directions at 15 turns to see if extra turns reveal new
+dynamics:
+
+- **E+ 15-turn: no change.** Mean stays around +0.5–0.8 across all 15
+  turns. Extra turns confirmed the E+ direction is weak — the base
+  model just doesn't push further toward extraversion.
+- **E− 15-turn: drift continues.** Aggregate mean shifts from -1.76
+  (10t) to -1.91 (15t). Per-turn trajectory flattens around -2.0 in
+  turns 4-9 (matches 10-turn) then dips to -2.0 to -2.3 in turns 10-14.
+  Drift **saturates around -2.0 to -2.3** rather than crashing toward
+  -4 indefinitely.
+- **Per-scenario**: 3 of 5 E− scenarios deepen with extra turns
+  (astronomy: -2.33 → -3.00; grief: -2.00 → -2.67; rainy_afternoon
+  stays at -3.0). `introvert_drained` is still broken (flat at 0).
+- **Coherence**: slightly improves with more turns (8.6 → 9.0). Good.
+
+**Decision: use 15 turns as canonical for the headline experiment.**
+Same shape as 10 turns in the overlap region, deeper plateau in 3 of
+5 scenarios, more visible "drift" for the LoRA to "prevent" later.
+Cost is ~+50% per cell (~20 min on A40), worth it for paper figures.
+
 ### Per-scenario breakdown (10-turn base)
 
 | Direction | Strongest | Weakest |
@@ -313,7 +336,7 @@ uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
     --traits e_minus --method base \
     --conditions pressure_scenarios \
     --scenario-ids "$WINNERS" \
-    --num-rollouts 3 --num-turns 10 \
+    --num-rollouts 3 --num-turns 15 \
     --user-model openai/gpt-4.1-mini \
     --vllm
 
@@ -322,7 +345,7 @@ uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
     --traits e_plus --method lora --scale-points "1.0" \
     --conditions pressure_scenarios \
     --scenario-ids "$WINNERS" \
-    --num-rollouts 3 --num-turns 10 \
+    --num-rollouts 3 --num-turns 15 \
     --user-model openai/gpt-4.1-mini \
     --vllm
 
@@ -331,7 +354,7 @@ uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
     --traits e_minus --method lora --scale-points "1.0" \
     --conditions pressure_scenarios \
     --scenario-ids "$WINNERS" \
-    --num-rollouts 3 --num-turns 10 \
+    --num-rollouts 3 --num-turns 15 \
     --user-model openai/gpt-4.1-mini \
     --vllm
 ```
