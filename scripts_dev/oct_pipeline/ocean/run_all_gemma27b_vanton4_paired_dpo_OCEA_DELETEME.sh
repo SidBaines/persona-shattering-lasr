@@ -68,6 +68,14 @@ for row in "${ROWS[@]}"; do
     echo "  ${LABEL}  (${MONO_TRAIT}/${MONO_DIR}, v${MONO_VER}, ${MODEL})"
     echo "================================================================"
 
+    # Pre-row scratch cleanup. HF holds authoritative state for every OCT
+    # stage; local scratch is just a working cache. Wipe everything except
+    # runner_logs/ so each row starts on a clean disk.
+    echo "--- pre-row scratch cleanup (preserving runner_logs/) ---"
+    mkdir -p scratch
+    find scratch -mindepth 1 -maxdepth 1 -not -name runner_logs -exec rm -rf {} + 2>/dev/null
+    df -h / | head -2
+
     run_step "train ${LABEL}" \
         uv run python scripts_dev/oct_pipeline/run_oct_pipeline.py \
             --model "$MODEL" \
