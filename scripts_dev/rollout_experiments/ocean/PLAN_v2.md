@@ -263,6 +263,62 @@ Same shape as 10 turns in the overlap region, deeper plateau in 3 of
 5 scenarios, more visible "drift" for the LoRA to "prevent" later.
 Cost is ~+50% per cell (~20 min on A40), worth it for paper figures.
 
+---
+
+## Activation capping & CAA — status
+
+**Activation capping (E+ direction)**: re-enabled with caveat.
+
+The existing `e_plus` axis on HF was computed against the older `vanton1`
+adapter, not the current `vanton4_paired_dpo` canonical. Direction is
+likely close but not identical — different LoRA family/version. Using
+this axis with `--method activation_capping --traits e_plus` will print
+a CAVEAT banner at runtime. Results are informative but should be
+labeled in plots with the version mismatch noted.
+
+There's no `e_minus` axis on HF, so activation capping is only available
+in the E+ direction.
+
+Tonight's matrix runs activation capping with `--fractions "-0.5,0.0,0.5,1.0"`
+on both scenario and sysprompt elicitation, alongside the LoRA scale
+sweep. Note: activation capping uses HF transformers (no vLLM), so it's
+~3-5x slower per cell than vLLM-backed runs.
+
+**CAA (Contrastive Activation Addition)**: deferred.
+
+No infrastructure exists yet. Mentor specifically mentioned CAA as a
+preferred comparator; would need a `CAAProvider` class in
+`src_dev/activation_capping/` (or sibling) that adds `α * v` to the
+residual stream during forward pass. ~3-5 hours of focused engineering
+plus axis-loading bookkeeping. Will do this properly in a separate
+work session, not tonight under a 6h budget.
+
+---
+
+## Tonight's run plan (`run_tonight.sh`)
+
+Sequential matrix in `scripts_dev/rollout_experiments/ocean/run_tonight.sh`:
+
+| # | Cell | Time est | Purpose |
+|---|------|----------|---------|
+| 1 | v2 scenarios on base | ~15 min | Validate which new scenarios drift |
+| 2 | Neutral baseline | ~25 min | Natural drift reference (no pressure) |
+| 3 | E+ LoRA scale sweep on winners (0.25, 0.5, 0.75) | ~90 min | Find prevention sweet spot |
+| 4 | E+ LoRA scale sweep on sysprompt (0.25, 0.5, 1.0) | ~75 min | Test with assistant-side elicitation |
+| 5 | Activation capping on winners (-0.5..1.0) | ~60 min | Comparator on scenarios (HF, no vLLM) |
+| 6 | Activation capping on sysprompt (-0.5..1.0) | ~50 min | Comparator on sysprompt (HF, no vLLM) |
+
+Total: ~5 hours sequential. Safely fits in the 6h budget with overhead.
+Each cell is independent; if one fails the rest continue (`set -e` not
+enabled). Per-cell logs in `logs/<cell_name>_<timestamp>.log`; master
+log in `logs/tonight_master_<timestamp>.log`.
+
+Skipped from tonight's matrix:
+- E− LoRA on E− scenarios (just amplifies drift; low information value
+  per discussion)
+- E− LoRA on E+ scenarios (we said E+ scenarios are weak)
+- Anything in the E+ direction as the *target* (not what we're proving)
+
 ### Per-scenario breakdown (10-turn base)
 
 | Direction | Strongest | Weakest |
