@@ -1388,6 +1388,51 @@ def _response_sample_id(
     return f"{input_group_id}_r{response_index}_{suffix}"
 
 
+def sample_ids_for_question(question: str, num_rollouts: int = 1) -> list[str]:
+    """Compute the canonical sample IDs for a plain question string.
+
+    Mirrors exactly what ingest_source_dataset produces for a row with a
+    ``question`` field and no system prompt or assistant prefill.  Use this
+    when you need to build a ``prompt_template_per_sample`` map keyed by
+    canonical sample IDs before the dataset has been ingested.
+
+    Args:
+        question: The question/instruction text (value of the ``question``
+            field in the JSONL row).
+        num_rollouts: Number of rollouts per prompt (``num_rollouts_per_prompt``
+            in the rollout config).  Determines how many sample IDs are returned.
+
+    Returns:
+        List of canonical sample IDs, length == max(1, num_rollouts).
+    """
+    user_msg = _message_for_hash(
+        CanonicalMessage(
+            message_id="",
+            role="user",
+            content=question,
+            name=None,
+            tool_metadata=None,
+            editable=True,
+        )
+    )
+    input_group_id = _sample_id(
+        messages=[user_msg],
+        assistant_prefill=None,
+        system_prompt_ref=None,
+    )
+    n = max(1, num_rollouts)
+    if n <= 1:
+        return [input_group_id]
+    return [
+        _response_sample_id(
+            input_group_id=input_group_id,
+            response_index=i,
+            responses_per_input=n,
+        )
+        for i in range(n)
+    ]
+
+
 def _hash_object(payload: Any) -> str:
     normalized = _normalize_for_hash(payload)
     return _hash_text(json_dumps(normalized))

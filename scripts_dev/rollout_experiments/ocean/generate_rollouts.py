@@ -64,6 +64,7 @@ from src_dev.rollout_generation.model_providers import (
     SingleModelProvider,
     VLLMLoRaScaleProvider,
 )
+from src_dev.datasets import sample_ids_for_question
 from src_dev.rollout_generation.prompts import register_user_simulator_template
 from src_dev.sweep import (
     ExperimentConfig,
@@ -883,6 +884,10 @@ def _run_scenario_sweep(
 
     # Register one user-sim template per scenario, building the per-sample
     # template-name mapping for each push direction.
+    # Keys must be canonical sample_ids (content hashes) as expected by the
+    # rollout engine — NOT the scenario's human-readable id field.
+    # With num_rollouts > 1 each scenario row produces multiple sample_ids
+    # (one per rollout), all sharing the same template.
     high_template_map: dict[str, str] = {}
     low_template_map: dict[str, str] = {}
     for sc in all_scenarios:
@@ -890,10 +895,13 @@ def _run_scenario_sweep(
         register_user_simulator_template(
             template_name, _scenario_user_sim_template(sc)
         )
-        if sc["push_direction"] == high_label:
-            high_template_map[sc["id"]] = template_name
-        elif sc["push_direction"] == low_label:
-            low_template_map[sc["id"]] = template_name
+        question = sc.get("name") or sc["situation"][:100]
+        canonical_ids = sample_ids_for_question(question, num_rollouts=args.num_rollouts)
+        for sid in canonical_ids:
+            if sc["push_direction"] == high_label:
+                high_template_map[sid] = template_name
+            elif sc["push_direction"] == low_label:
+                low_template_map[sid] = template_name
 
     # Override dataset path + max_samples; max_samples must accommodate all
     # rows since each condition uses its own subset via prompt_template_per_sample.
