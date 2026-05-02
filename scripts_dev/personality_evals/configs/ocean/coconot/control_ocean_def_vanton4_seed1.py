@@ -64,6 +64,11 @@ SUITE_CONFIG = SuiteConfig(
     run_name="control_ocean_def_vanton4_seed1",
     skip_completed=True,
     auto_analyze=False,
+    upload_repo_id=HF_REPO,
+    upload_path_in_repo=(
+        "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/"
+        "vanton4_seed1/evals/coconot"
+    ),
     metadata={
         "persona": "control_ocean_def_vanton4_seed1",
         "adapter_repo": f"{HF_REPO}::{_PATH_IN_REPO}",
