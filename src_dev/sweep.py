@@ -1362,12 +1362,14 @@ class _TeeStream(io.TextIOBase):
 
     def write(self, s: str) -> int:
         self._original.write(s)
-        self._log_file.write(s)
+        if not self._log_file.closed:
+            self._log_file.write(s)
         return len(s)
 
     def flush(self) -> None:
         self._original.flush()
-        self._log_file.flush()
+        if not self._log_file.closed:
+            self._log_file.flush()
 
 
 def _setup_file_logging(
@@ -1615,7 +1617,13 @@ def run_sweep(config: SweepConfig) -> Path:
 
     # Tee all output (print + logging) to sweep.log in the output directory.
     log_file, log_handler = _setup_file_logging(output_root)
+    try:
+        return _run_sweep_inner(config, output_root)
+    finally:
+        _teardown_file_logging(log_file, log_handler)
 
+
+def _run_sweep_inner(config: "SweepConfig", output_root: Path) -> Path:
     variants = config.provider.variant_names()
     n_variants = len(variants)
     n_conditions = len(config.conditions)
@@ -1716,7 +1724,6 @@ def run_sweep(config: SweepConfig) -> Path:
         if config.output.hf_repo:
             _upload_plots_to_hf(config.output, output_root)
 
-    _teardown_file_logging(log_file, log_handler)
     return output_root
 
 
