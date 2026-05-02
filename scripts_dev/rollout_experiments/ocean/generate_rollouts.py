@@ -767,9 +767,9 @@ def main() -> None:
 
         elif args.method == "activation_capping":
             if trait_def.axis_slug is None:
-                # Activation capping is currently disabled for all OCEAN traits:
-                # axes were trained against earlier adapter versions, not the
-                # current vanton4_paired_dpo ones. See README.md "Known issues".
+                # Activation capping is disabled for traits whose axes were
+                # not yet recomputed against vanton4_paired_dpo and that
+                # don't have a usable older axis we're comfortable reusing.
                 print(
                     f"  Skipping {trait_slug}: activation capping disabled "
                     f"(axis_slug=None). See scripts_dev/rollout_experiments/"
@@ -778,6 +778,12 @@ def main() -> None:
                 continue
             assert trait_def.axis_hf_uri is not None
             assert trait_def.per_layer_range_hf_uri is not None
+            print(
+                "  ⚠️  CAVEAT: activation capping axis was computed against "
+                "an older adapter version (vanton1) than the current canonical "
+                "vanton4_paired_dpo. Direction is likely close but not identical. "
+                "See plan/README for details."
+            )
             print(f"  Axis: {trait_def.axis_hf_uri}")
             print(f"  Fractions: {fractions}")
             capping_layers = _read_capping_layers_from_axis(trait_def.axis_hf_uri)

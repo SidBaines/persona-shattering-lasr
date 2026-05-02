@@ -111,7 +111,11 @@ OCEAN_REGISTRY: dict[str, OceanTraitDef] = {
         slug="e_plus", trait_name="extraversion", direction="amplifier",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton4_paired_dpo/lora/extraversion_amplifying_full_vanton4-persona",
-        axis_slug=None,
+        # CAVEAT: this axis was computed against the older `vanton1` E+
+        # adapter, not the current `vanton4_paired_dpo` adapter. The
+        # direction is likely close but not identical. Use with a banner
+        # disclaimer in any plot until we recompute against vanton4.
+        axis_slug="e_plus",
         eval_metric="extraversion_v2",
     ),
     "e_minus": OceanTraitDef(
