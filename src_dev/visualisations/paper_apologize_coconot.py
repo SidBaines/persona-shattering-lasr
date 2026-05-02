@@ -102,6 +102,11 @@ PAPER_STYLE: dict[str, object] = {
 }
 
 SPINE_COLOR = "#2f3748"
+# Semantic colors from STYLE_GUIDE.md — blue for the "agreeable" direction
+# (preserved/expected behavior), red for the "disagreeable" direction
+# (injection / behavioural failure mode).
+C_ORGANIC = "#3c7fb1"
+C_INJECTED = "#c91546"
 
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 SYC_CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "sycophancy_a_six_bars"
@@ -126,7 +131,7 @@ CONDITIONS: list[Condition] = [
     Condition(
         key="base",
         short="base",
-        legend="base Llama-3.1-8B-Instruct",
+        legend="base",
         color="#4D4D4D",
         hatch=None,
         syc_log_in_repo=(
@@ -139,7 +144,7 @@ CONDITIONS: list[Condition] = [
     Condition(
         key="control",
         short="control",
-        legend="adapter control (ocean_def_control / vanton4_seed1) @ +1",
+        legend="control",
         color="#9E9E9E",
         hatch=None,
         syc_log_in_repo=(
@@ -150,12 +155,12 @@ CONDITIONS: list[Condition] = [
         ),
         coconot_subdir="control_ocean_def_vanton4_seed1/lora_+1p00x/coconot",
     ),
-    # Agreeable-direction pair.
+    # Agreeable-direction pair: same colour (C_ORGANIC), hatched on the flipped-scale path.
     Condition(
         key="a_minus_m1",
         short="A− @ −1",
-        legend="A− suppressor (vanton4_paired_dpo) @ scale −1",
-        color="#CE93D8",
+        legend="A− @ scale −1",
+        color=C_ORGANIC,
         hatch="///",
         syc_log_in_repo=(
             "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/"
@@ -169,8 +174,8 @@ CONDITIONS: list[Condition] = [
     Condition(
         key="a_plus_p1",
         short="A+ @ +1",
-        legend="A+ amplifier (vanton4_paired_dpo) @ scale +1",
-        color="#9C27B0",
+        legend="A+ @ scale +1",
+        color=C_ORGANIC,
         hatch=None,
         syc_log_in_repo=(
             "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/"
@@ -181,12 +186,12 @@ CONDITIONS: list[Condition] = [
         ),
         coconot_subdir="a_plus_vanton4_paired_dpo/lora_+1p00x/coconot",
     ),
-    # Disagreeable-direction pair.
+    # Disagreeable-direction pair: same colour (C_INJECTED), hatched on the flipped-scale path.
     Condition(
         key="a_plus_m1",
         short="A+ @ −1",
-        legend="A+ amplifier (vanton4_paired_dpo) @ scale −1",
-        color="#9C27B0",
+        legend="A+ @ scale −1",
+        color=C_INJECTED,
         hatch="///",
         syc_log_in_repo=(
             "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/"
@@ -200,8 +205,8 @@ CONDITIONS: list[Condition] = [
     Condition(
         key="a_minus_p1",
         short="A− @ +1",
-        legend="A− suppressor (vanton4_paired_dpo) @ scale +1",
-        color="#CE93D8",
+        legend="A− @ scale +1",
+        color=C_INJECTED,
         hatch=None,
         syc_log_in_repo=(
             "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/"
@@ -421,7 +426,7 @@ def main() -> None:
     )
     _draw_panel(
         ax_b,
-        title="(b) CoCoNot total compliance — full set (n=1001)",
+        title="(b) CoCoNot compliance — fails refusal",
         ylabel="Total compliance rate (lower = better)",
         values=[coc[c.key][0] for c in CONDITIONS],
         err_lo=[max(coc[c.key][0] - coc[c.key][1], 0.0) for c in CONDITIONS],
