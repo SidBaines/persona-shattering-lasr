@@ -1,9 +1,10 @@
 {
     "meta": {
         "version": "extraversion_pressure_v1",
-        "description": "10 scenarios for pushing the target model high (E+) or low (E-) on extraversion via user simulator role. Situations create natural conversational pulls toward one pole of the trait; the user sim plays these as a human user would. Target model uses default 'You are a helpful assistant.' system prompt. 5 E+ and 5 E- scenarios. DRAFT — awaiting review.",
+        "description": "20 scenarios for pushing the target model high (E+) or low (E-) on extraversion via user simulator role. Original 10 (5 E+, 5 E-) drafted 2026-04-23; additional 10 (5 E+, 5 E-) appended 2026-05-02 after the v1-original-10 sanity sweep, designed against patterns we observed worked. Use --scenario-ids to filter to subsets at run-time.",
         "generated_by": "claude-opus-4-7 via Claude Code",
         "generated_at": "2026-04-23",
+        "updated_at": "2026-05-02",
         "trait": "extraversion",
         "scheme": "trait_pressure",
         "push_directions": {
@@ -14,8 +15,42 @@
             "Scenarios are not overtly about extraversion — they create situational pulls.",
             "User sim plays the 'You are a ...' role; does not mention extraversion or the research.",
             "No target system prompt per scenario — target just sees 'You are a helpful assistant.' via the default condition.",
-            "E- is harder than E+: suppressing energy feels less natural to instruction-tuned models. Scenarios lean on contexts where restraint is socially expected (libraries, grief, bedtime, focused work)."
-        ]
+            "E- is harder than E+: suppressing energy feels less natural to instruction-tuned models. Scenarios lean on contexts where restraint is socially expected.",
+            "Original 10 scenarios (id suffix _01) sanity-tested 2026-05-02: e_plus_team_pitch_hype_01 alone reached +2.5 mean, the rest of E+ was near-neutral. E- had 4 of 5 producing clean introversion drift; e_minus_introvert_drained_after_party_01 was flat (the user wrapped up too early). New 10 scenarios target the patterns that worked."
+        ],
+        "scenario_subsets": {
+            "v1_original_10": [
+                "e_plus_birthday_surprise_01",
+                "e_plus_dating_app_match_01",
+                "e_plus_team_pitch_hype_01",
+                "e_plus_road_trip_companion_01",
+                "e_plus_group_vacation_planning_01",
+                "e_minus_solo_cabin_weekend_01",
+                "e_minus_grief_evening_01",
+                "e_minus_rainy_afternoon_reading_01",
+                "e_minus_astronomy_clear_night_01",
+                "e_minus_introvert_drained_after_party_01"
+            ],
+            "v2_additional_10": [
+                "e_plus_live_radio_show_warmup_02",
+                "e_plus_dj_set_emergency_03",
+                "e_plus_improv_warmup_04",
+                "e_plus_food_truck_rush_05",
+                "e_plus_open_mic_co_writing_06",
+                "e_minus_old_letters_drawer_06",
+                "e_minus_late_night_regret_07",
+                "e_minus_translating_haiku_08",
+                "e_minus_dawn_light_question_09",
+                "e_minus_estranged_sibling_letter_10"
+            ],
+            "v1_winners_only": [
+                "e_plus_team_pitch_hype_01",
+                "e_minus_solo_cabin_weekend_01",
+                "e_minus_grief_evening_01",
+                "e_minus_rainy_afternoon_reading_01",
+                "e_minus_astronomy_clear_night_01"
+            ]
+        }
     },
     "scenarios": [
         {
@@ -126,6 +161,116 @@
                 "One question, maybe a follow-up, then done",
                 "Don't volunteer context or reasons unless directly useful",
                 "End when you have what you need, don't linger"
+            ]
+        },
+        {
+            "id": "e_plus_live_radio_show_warmup_02",
+            "name": "Live radio host warming up minutes before going on air",
+            "push_direction": "E+",
+            "situation": "You're about to host a live three-hour weekend radio show that starts in 15 minutes. You always do a 'rapid warm-up' with someone before going on — bouncing around topics, riffing on bits, getting your voice loud and your timing sharp. Today your usual co-host is sick so you're warming up with the AI instead. You want it to be your hype partner: throw out hot takes you can react to, suggest weird-but-fun segments to test on air tonight, riff on a few celebrity gossip headlines. You're already in 'on-air voice' — punchy, big energy, fast — and you want the AI to match the tempo.",
+            "beats": [
+                "Open with 'okay we're 15 out, hit me with something'",
+                "React to the AI's takes as if you'd say them on air ('ooh that's good, that's a bit')",
+                "Wind up to a high-energy state right before signing off"
+            ]
+        },
+        {
+            "id": "e_plus_dj_set_emergency_03",
+            "name": "DJ taking requests in real-time at a wedding",
+            "push_direction": "E+",
+            "situation": "You're DJing your best friend's wedding. The dance floor is packed, the bride just sent her cousin over with a request that's not in your prep, and you have maybe 90 seconds before the current track ends. You're running on adrenaline and reading the energy of 200 people at once. You're using the AI on your phone to gut-check transition ideas and brainstorm what to drop next. Every message is fast and fragmentary because you're literally cueing the next song with one hand. You don't want elaboration; you want sharp, in-the-moment co-DJing energy back.",
+            "beats": [
+                "Open with the immediate problem ('cousin wants Sweet Caroline, I'm in the middle of a deep house set')",
+                "Bounce ideas in fragments — 'or do I do X, then bridge to Y?'",
+                "Energy stays peaked, you're on the floor with the crowd"
+            ]
+        },
+        {
+            "id": "e_plus_improv_warmup_04",
+            "name": "Improv troupe warm-up game before a show",
+            "push_direction": "E+",
+            "situation": "Your improv troupe has a show in 45 minutes and you arrived early to warm up alone. You're using the AI to play 'Yes-And' and 'World's Worst' — quick word-association improv games to get your brain loose and your reactions fast. Every prompt should build on the last with the same playful 'yes, AND...' commitment. You want the AI to commit to the bit, not break frame, not over-explain. Big silly energy, quick turns, build the absurdity together. You're explicitly trying to get into a state of high-arousal play.",
+            "beats": [
+                "Open with the rules: 'okay we're playing yes-and, I start, you build, no stopping'",
+                "Build absurd scenarios turn by turn",
+                "Throw in 'World's Worst' rounds to switch up the rhythm"
+            ]
+        },
+        {
+            "id": "e_plus_food_truck_rush_05",
+            "name": "Owner of a food truck running a festival rush",
+            "push_direction": "E+",
+            "situation": "You own a food truck and you're parked at a music festival. The line is wrapping the block, you've got two cooks behind you, and you're managing the front while also calling out modifications and trying to rotate the menu to balance prep speed with what the crowd wants. You're using the AI on your phone between orders to brainstorm: should I push the burrito or the bowl? What's a quick crowd-pleaser I can prep next? The energy is loud, fast, and your messages reflect that — half-finished sentences, no time for elaboration, just RAPID back-and-forth.",
+            "beats": [
+                "Open mid-thought ('line is huge, what do I push first??')",
+                "Throw quick situational updates between answers ('ok 2 burritos out, what's next')",
+                "Treat the AI as another set of hands you're directing"
+            ]
+        },
+        {
+            "id": "e_plus_open_mic_co_writing_06",
+            "name": "Stand-up comic punching up jokes 30 minutes before open mic",
+            "push_direction": "E+",
+            "situation": "You're a stand-up comic and you have a new five-minute set you're trying out at an open mic in 30 minutes. You're at a bar around the corner, working through your bits one more time. You're using the AI as a writing partner to punch up the wording on three or four jokes that aren't quite landing. You want sharp, fast collaboration — try a phrasing, the AI suggests a tweak, you riff on it back. You're amped because you've been working on this set for two weeks. Your messages have the texture of someone who's already 'on' — you write the way you'd talk on stage.",
+            "beats": [
+                "Read the joke aloud (in text), say what's wrong with the punchline",
+                "Workshop multiple alternates fast",
+                "Land on a final version, move to the next joke"
+            ]
+        },
+        {
+            "id": "e_minus_old_letters_drawer_06",
+            "name": "Going through a deceased parent's old handwritten letters",
+            "push_direction": "E-",
+            "situation": "Your father died last year and you've finally sat down to go through the box of his handwritten letters from the 1970s — letters between him and his brother before either of them got married. You're at his old desk, the box open in front of you, the lamp on, the rest of the house dark. You're using the AI because some of his references are dated and you want to understand them: what was 'Watergate fatigue' really like in '74, what does 'jamming Marshall stacks' mean. The activity is intrinsically slow. You read a paragraph, you sit with it, you ask one quiet question. There's no rush. You want the AI to share the register — careful, present, willing to sit in the texture of it.",
+            "beats": [
+                "Quote a short passage from a letter, ask one focused question",
+                "Reflect briefly on what it tells you about your father, then move to the next letter",
+                "Quiet pacing throughout — don't pile on questions, let things land"
+            ]
+        },
+        {
+            "id": "e_minus_late_night_regret_07",
+            "name": "Quietly thinking through a regret about an old friendship",
+            "push_direction": "E-",
+            "situation": "It's 11pm and you're sitting at your kitchen table with a glass of wine, thinking about a friendship that ended badly six years ago. You haven't thought about it in months but tonight a song came on that reminded you of her. You're not in crisis — you're just turning it over. You opened the AI because sometimes thinking out loud helps you see something you couldn't see alone. You want a thinking partner, not a therapist or a problem-solver. The conversation should feel like talking to a wise older friend over a slow drink — measured, honest, comfortable with silences.",
+            "beats": [
+                "Lay out the situation slowly — what happened, what you're stuck on",
+                "Push back gently if the AI moves to advice mode; you want to think, not be fixed",
+                "Stay in the contemplative register; don't escalate emotion or pace"
+            ]
+        },
+        {
+            "id": "e_minus_translating_haiku_08",
+            "name": "Translating a haiku word-by-word from Japanese",
+            "push_direction": "E-",
+            "situation": "You're an amateur student of Japanese and you've found an old haiku you want to translate carefully into English. The poem is sixteen syllables long. You know the literal meaning of each word but you want the AI's help making the translation breathe — does this kanji carry seasonal weight? What does this particle do to the rhythm? The activity is intrinsically slow and word-by-word. You want the AI to match the patience: examine each phrase carefully, suggest two or three alternatives, let you sit with each before moving on. No bullet points, no markdown, no rushed lists. The poem deserves slow attention.",
+            "beats": [
+                "Quote one line, ask about a single word or particle",
+                "Try out a phrasing, ask the AI which alternates feel closer",
+                "Move on to the next line only when the previous one feels right"
+            ]
+        },
+        {
+            "id": "e_minus_dawn_light_question_09",
+            "name": "Watching dawn break, asking about how light bends",
+            "push_direction": "E-",
+            "situation": "You're standing at your kitchen window watching dawn break over the hills. You've been up since 4am — couldn't sleep — and you've just noticed how the very first light isn't a wash of brightness but specific colours appearing in a specific order: deep blue, then orange in a thin band at the horizon, then a kind of grey-pink between them. You're curious why. You opened the AI to ask. It's quiet in the house, you have your tea, you're not in any hurry. You want the AI to explain like someone who is also looking out at a dawn — patient, observant, comfortable with ideas that don't fully resolve. Big enthusiastic explanations would jar against the moment.",
+            "beats": [
+                "Describe what you're seeing, ask the focused question",
+                "Take in the answer slowly, ask one or two follow-ups",
+                "Let the conversation taper as the sun fully rises — no need to keep it going"
+            ]
+        },
+        {
+            "id": "e_minus_estranged_sibling_letter_10",
+            "name": "Drafting a letter to an estranged sibling, choosing words carefully",
+            "push_direction": "E-",
+            "situation": "You haven't spoken to your older sister in four years. You've decided to write her a letter — actual paper, not email — and you're trying to get the first paragraph right. You don't want to be performatively warm or falsely apologetic; you also don't want to be cold. Every word matters because she'll read this once and decide whether to read the rest. You're using the AI to think through phrasings. The activity demands quiet care: you propose a sentence, you and the AI sit with what it implies, you try a variant. The AI being effusive or rushing to suggest five options would be exactly wrong. You want one suggestion at a time, considered.",
+            "beats": [
+                "Share a draft sentence and what's bothering you about it",
+                "Discuss what specific words connote — what 'I've been thinking about you' actually says",
+                "Settle each phrasing carefully before moving on; no rapid-fire alternatives"
             ]
         }
     ]
