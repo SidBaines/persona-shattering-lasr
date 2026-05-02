@@ -550,6 +550,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--scenario-ids",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated subset of scenario IDs to keep "
+            "(pressure_scenarios mode only). Example: "
+            "--scenario-ids e_plus_team_pitch_hype_01,e_minus_solo_cabin_weekend_01. "
+            "Defaults to all scenarios in the file. When set, an 8-char hash "
+            "of the (sorted) ID list is appended to the eval output dir so "
+            "different subsets don't overwrite each other on HF."
+        ),
+    )
+    parser.add_argument(
         "--max-samples",
         type=int,
         default=32,
@@ -795,14 +808,54 @@ def main() -> None:
                 print(
                     f"  Scenarios: {len(scenarios)} loaded from {scenario_file.name}"
                 )
-                _run_scenario_sweep(
-                    trait_def=trait_def,
-                    provider=provider,
-                    scenarios=scenarios,
-                    base_experiment_config=experiment_config,
-                    args=args,
-                    eval_name="rollout_scenarios" + (args.output_suffix or ""),
-                )
+
+                # Optional ID-based subset filter. If provided, the chosen
+                # subset is hashed into the eval_name suffix so different
+                # selections write to distinct cells on HF.
+                eval_name_for_scenarios = "rollout_scenarios"
+                if args.scenario_ids:
+                    requested = [
+                        s.strip()
+                        for s in args.scenario_ids.split(",")
+                        if s.strip()
+                    ]
+                    available = {sc["id"] for sc in scenarios}
+                    missing = [sid for sid in requested if sid not in available]
+                    if missing:
+                        print(
+                            f"  Warning: --scenario-ids contains IDs not in the "
+                            f"file: {missing}"
+                        )
+                    keep = [sc for sc in scenarios if sc["id"] in set(requested)]
+                    if not keep:
+                        print(
+                            f"  Skipping scenarios: --scenario-ids matched none of "
+                            f"the {len(scenarios)} scenarios in the file"
+                        )
+                        scenarios = None
+                    else:
+                        scenarios = keep
+                        # Short stable hash of the (sorted) selected IDs.
+                        import hashlib
+                        sid_hash = hashlib.sha256(
+                            ",".join(sorted(sc["id"] for sc in scenarios)).encode()
+                        ).hexdigest()[:8]
+                        eval_name_for_scenarios = f"rollout_scenarios/subset_{sid_hash}"
+                        print(
+                            f"  Filtered to {len(scenarios)} scenario(s); "
+                            f"writing under {eval_name_for_scenarios}/"
+                        )
+
+                if scenarios:
+                    _run_scenario_sweep(
+                        trait_def=trait_def,
+                        provider=provider,
+                        scenarios=scenarios,
+                        base_experiment_config=experiment_config,
+                        args=args,
+                        eval_name=eval_name_for_scenarios
+                        + (args.output_suffix or ""),
+                    )
 
         print(f"  Done with {trait_def.slug}.")
 
