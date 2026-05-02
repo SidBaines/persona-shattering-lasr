@@ -558,18 +558,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--sysprompt-elicit-verbosity",
-        choices=["minimal", "medium", "full"],
-        default="medium",
-        help=(
-            "How much of the canonical OCEAN_DEFINITION to include in the "
-            "sysprompt_elicit assistant system prompt: "
-            "'minimal' = description prose only; "
-            "'medium' = + facets with adjectives (default); "
-            "'full' = + example responses + contrast section."
-        ),
-    )
-    parser.add_argument(
         "--sysprompt-elicit-directions",
         type=str,
         default="low,high",
@@ -1091,41 +1079,67 @@ _ASSISTANT_SYSPROMPT_PREFIX = "You are a helpful assistant. "
 def _build_sysprompt_from_canonical(
     trait_name: str,
     direction: str,  # "high" or "low"
-    verbosity: str,  # "minimal" / "medium" / "full"
 ) -> str:
-    """Compose an assistant system prompt from OCEAN_DEFINITION.
+    """Compose an instruction-style assistant system prompt from OCEAN_DEFINITION.
 
-    The result is "<helpful-assistant prefix> Adopt the following persona
-    for this conversation: <canonical description>".
+    Single template that works for any of the 5 OCEAN traits in either
+    direction. Pulls the trait's prose definition (so the elicitation
+    aligns with what the LLM judge measures) and weaves the per-facet
+    adjectives into a behavioral instruction.
+
+    The output looks like:
+
+        You are a helpful assistant. Throughout this conversation, embody
+        a person with low extraversion: <canonical description>. In how
+        you respond, be <facet adjectives joined>. Stay in this persona
+        consistently across every reply, including when the topic shifts.
+
+    Args:
+        trait_name: One of "openness", "conscientiousness", "extraversion",
+            "agreeableness", "neuroticism".
+        direction: "high" or "low".
+
+    Returns:
+        The full system prompt string ready to set as the assistant's
+        system message.
     """
     polarity = "+" if direction == "high" else "-"
     variant = OCEAN_DEFINITION[f"{trait_name}{polarity}"]
-    if verbosity == "minimal":
-        body = variant.description(
-            include_facets=False,
-            include_examples=False,
-            include_contrast=False,
-        )
-    elif verbosity == "medium":
-        body = variant.description(
-            include_facets=True,
-            include_adjectives=True,
-            include_examples=False,
-            include_contrast=False,
-        )
-    elif verbosity == "full":
-        body = variant.description(
-            include_facets=True,
-            include_adjectives=True,
-            include_examples=True,
-            include_contrast=True,
-        )
-    else:
-        raise ValueError(f"Unknown verbosity: {verbosity!r}")
+
+    # Description sentence (no facets / examples / contrast — we'll weave
+    # facets in ourselves below, in instruction form).
+    description = variant.description(
+        include_facets=False,
+        include_examples=False,
+        include_contrast=False,
+    ).strip()
+    # Strip the leading "Low/High <trait>, defined as " preamble — we
+    # rephrase that part in our own instruction-style framing.
+    for prefix in (f"Low {trait_name}, defined as ", f"High {trait_name}, defined as "):
+        if description.lower().startswith(prefix.lower()):
+            description = description[len(prefix):]
+            description = description[0].upper() + description[1:]
+            break
+
+    # Flatten all facet adjectives into one comma-joined list. Skips
+    # repetitions across facets to avoid stilted "reserved, reserved" prose.
+    seen: set[str] = set()
+    adjectives: list[str] = []
+    for facet in variant.facets:
+        for adj in facet.adjectives:
+            adj_lower = adj.lower()
+            if adj_lower not in seen:
+                seen.add(adj_lower)
+                adjectives.append(adj)
+    adjectives_clause = ", ".join(adjectives[:-1]) + f", and {adjectives[-1]}"
+
     return (
         _ASSISTANT_SYSPROMPT_PREFIX
-        + "Adopt the following persona for this conversation:\n\n"
-        + body
+        + f"Throughout this conversation, embody a person with "
+        + f"{variant.level} {trait_name}: {description} "
+        + f"In how you respond, be {adjectives_clause}. "
+        + "Stay in this persona consistently across every reply, including "
+        + "when the topic shifts."
     )
 
 
@@ -1160,7 +1174,6 @@ def _run_sysprompt_elicit_sweep(
         sysprompt = _build_sysprompt_from_canonical(
             trait_def.trait_name,
             direction,
-            args.sysprompt_elicit_verbosity,
         )
         conditions.append(
             SweepCondition(
@@ -1177,16 +1190,13 @@ def _run_sysprompt_elicit_sweep(
 
     print(
         f"  Sysprompt-elicit conditions: "
-        f"{[c.name for c in conditions]} (verbosity={args.sysprompt_elicit_verbosity})"
+        f"{[c.name for c in conditions]}"
     )
     print(
-        f"    sysprompt example (first {min(160, len(conditions[0].phases[0].assistant_system_prompt))} chars): "
-        f"{conditions[0].phases[0].assistant_system_prompt[:160]!r}..."
+        f"    sysprompt: {conditions[0].phases[0].assistant_system_prompt!r}"
     )
 
-    # Bake the verbosity into the eval_name so different verbosities
-    # don't overwrite each other on HF.
-    final_eval_name = f"{eval_name}/{args.sysprompt_elicit_verbosity}"
+    final_eval_name = eval_name
 
     output_config = OutputPathConfig(
         scratch_root=Path("scratch/monorepo"),
