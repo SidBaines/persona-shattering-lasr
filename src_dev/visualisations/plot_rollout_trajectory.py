@@ -83,11 +83,26 @@ def _is_baseline(label: str) -> bool:
 def _style_for(label: str, index: int) -> tuple[str, str, str]:
     """Return (colour, linestyle, marker) for a given condition label.
 
-    Baseline conditions get solid black + circle; others cycle through
-    dashes + marker shapes.  Index decides position in the colour cycle.
+    The first baseline gets solid black + circle. Subsequent baselines
+    get distinct grey shades + linestyles so multiple "no-intervention"
+    lines stay visually separable. Non-baselines cycle through colours,
+    dashes, and markers.
     """
+    # Different shades + linestyles for additional baselines so multiple
+    # "base / no-intervention" lines don't overlap visually. Order:
+    # solid black, dashed dim grey, dotted darker grey.
+    _BASELINE_STYLES = [
+        ("#000000", "-"),
+        ("#555555", "--"),
+        ("#888888", ":"),
+    ]
     if _is_baseline(label):
-        return "#000000", "-", "o"
+        # Count baselines among prior labels (best-effort via the index;
+        # caller controls the order).
+        b_idx = index % len(_BASELINE_STYLES)
+        colour, linestyle = _BASELINE_STYLES[b_idx]
+        marker = _MARKERS[index % len(_MARKERS)]
+        return colour, linestyle, marker
     # Skip black for non-baseline since baseline owns it.
     colour = _COLOURS[(index + 1) % len(_COLOURS)]
     linestyle = _LINESTYLES[index % len(_LINESTYLES)]
