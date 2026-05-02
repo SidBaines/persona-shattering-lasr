@@ -58,6 +58,7 @@ np.random.seed(SEED)
 from dotenv import load_dotenv
 
 from src_dev.common.lora_catalogue import HF_REPO, OCEAN_REGISTRY, OceanTraitDef
+from src_dev.common.persona_definitions import OCEAN_DEFINITION
 from src_dev.rollout_generation.model_providers import (
     ActivationCapProvider,
     LoRaScaleProvider,
@@ -540,13 +541,42 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--conditions",
-        choices=["baseline", "pressure", "system_prompt", "pressure_scenarios", "all"],
+        choices=[
+            "baseline", "pressure", "system_prompt",
+            "pressure_scenarios", "sysprompt_elicit", "all",
+        ],
         default="pressure",
         help=(
             "Which condition set to run (default: pressure). "
             "'pressure_scenarios' uses scenario-driven user simulation from "
             "datasets/scenarios/{trait}_pressure_v1.json — scenarios become "
-            "the dataset, one condition per push direction."
+            "the dataset, one condition per push direction. "
+            "'sysprompt_elicit' uses canonical OCEAN_DEFINITION descriptions "
+            "as multi-turn assistant system prompts (one condition per push "
+            "direction), with a neutral user simulator. Companion to "
+            "pressure_scenarios for the elicitation × prevention matrix."
+        ),
+    )
+    parser.add_argument(
+        "--sysprompt-elicit-verbosity",
+        choices=["minimal", "medium", "full"],
+        default="medium",
+        help=(
+            "How much of the canonical OCEAN_DEFINITION to include in the "
+            "sysprompt_elicit assistant system prompt: "
+            "'minimal' = description prose only; "
+            "'medium' = + facets with adjectives (default); "
+            "'full' = + example responses + contrast section."
+        ),
+    )
+    parser.add_argument(
+        "--sysprompt-elicit-directions",
+        type=str,
+        default="low,high",
+        help=(
+            "Comma-separated push directions to run for sysprompt_elicit "
+            "(default: low,high — both). Use 'low' alone to focus on the "
+            "E- direction we're doubling down on."
         ),
     )
     parser.add_argument(
@@ -857,6 +887,17 @@ def main() -> None:
                         + (args.output_suffix or ""),
                     )
 
+        # ── Run sysprompt-elicit conditions (multi-turn, canonical sysprompts) ──
+        if args.conditions in ("sysprompt_elicit", "all"):
+            _run_sysprompt_elicit_sweep(
+                trait_def=trait_def,
+                provider=provider,
+                base_experiment_config=experiment_config,
+                args=args,
+                eval_name="rollout_sysprompt_elicit"
+                + (args.output_suffix or ""),
+            )
+
         print(f"  Done with {trait_def.slug}.")
 
 
@@ -1032,6 +1073,149 @@ def _run_scenario_sweep(
         print(
             f"  Scenario sweep ({condition_suffix}) done. Results in {output_root}/"
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SYSPROMPT-ELICIT MODE
+# ═════════════════════════════════════════════════════════════════════════════
+# Multi-turn rollouts where the assistant gets a canonical OCEAN_DEFINITION
+# description as its system prompt. The user simulator stays neutral
+# (typical_user). One condition per push direction.  Sister to
+# pressure_scenarios mode: scenarios put the pressure on the user side,
+# sysprompt_elicit puts it on the assistant side.
+
+
+_ASSISTANT_SYSPROMPT_PREFIX = "You are a helpful assistant. "
+
+
+def _build_sysprompt_from_canonical(
+    trait_name: str,
+    direction: str,  # "high" or "low"
+    verbosity: str,  # "minimal" / "medium" / "full"
+) -> str:
+    """Compose an assistant system prompt from OCEAN_DEFINITION.
+
+    The result is "<helpful-assistant prefix> Adopt the following persona
+    for this conversation: <canonical description>".
+    """
+    polarity = "+" if direction == "high" else "-"
+    variant = OCEAN_DEFINITION[f"{trait_name}{polarity}"]
+    if verbosity == "minimal":
+        body = variant.description(
+            include_facets=False,
+            include_examples=False,
+            include_contrast=False,
+        )
+    elif verbosity == "medium":
+        body = variant.description(
+            include_facets=True,
+            include_adjectives=True,
+            include_examples=False,
+            include_contrast=False,
+        )
+    elif verbosity == "full":
+        body = variant.description(
+            include_facets=True,
+            include_adjectives=True,
+            include_examples=True,
+            include_contrast=True,
+        )
+    else:
+        raise ValueError(f"Unknown verbosity: {verbosity!r}")
+    return (
+        _ASSISTANT_SYSPROMPT_PREFIX
+        + "Adopt the following persona for this conversation:\n\n"
+        + body
+    )
+
+
+def _run_sysprompt_elicit_sweep(
+    *,
+    trait_def: OceanTraitDef,
+    provider,
+    base_experiment_config: ExperimentConfig,
+    args: argparse.Namespace,
+    eval_name: str,
+) -> None:
+    """Run the sysprompt-elicit sweep for the configured directions.
+
+    One condition per direction (high / low). Each is a multi-turn rollout
+    with a neutral typical_user simulator and an assistant system prompt
+    derived from OCEAN_DEFINITION at the chosen verbosity.
+    """
+    directions = [
+        d.strip().lower() for d in args.sysprompt_elicit_directions.split(",") if d.strip()
+    ]
+    bad = [d for d in directions if d not in ("high", "low")]
+    if bad:
+        print(f"  Skipping sysprompt_elicit: bad direction(s) {bad}")
+        return
+    if not directions:
+        print("  Skipping sysprompt_elicit: no directions selected")
+        return
+
+    default_user_sim = build_user_simulator(base_experiment_config, "typical_user")
+    conditions: list[SweepCondition] = []
+    for direction in directions:
+        sysprompt = _build_sysprompt_from_canonical(
+            trait_def.trait_name,
+            direction,
+            args.sysprompt_elicit_verbosity,
+        )
+        conditions.append(
+            SweepCondition(
+                name=f"sysprompt_elicit_{trait_def.trait_name}_{direction}",
+                phases=[
+                    Phase(
+                        num_turns=args.num_turns,
+                        assistant_system_prompt=sysprompt,
+                        user_simulator=default_user_sim,
+                    ),
+                ],
+            )
+        )
+
+    print(
+        f"  Sysprompt-elicit conditions: "
+        f"{[c.name for c in conditions]} (verbosity={args.sysprompt_elicit_verbosity})"
+    )
+    print(
+        f"    sysprompt example (first {min(160, len(conditions[0].phases[0].assistant_system_prompt))} chars): "
+        f"{conditions[0].phases[0].assistant_system_prompt[:160]!r}..."
+    )
+
+    # Bake the verbosity into the eval_name so different verbosities
+    # don't overwrite each other on HF.
+    final_eval_name = f"{eval_name}/{args.sysprompt_elicit_verbosity}"
+
+    output_config = OutputPathConfig(
+        scratch_root=Path("scratch/monorepo"),
+        hf_repo=HF_REPO,
+        base_model="llama-3.1-8b-it",
+        category="ocean",
+        trait=trait_def.output_trait_path,
+        training_run=trait_def.version,
+        eval_name=final_eval_name,
+    )
+    print(f"  Output: {output_config.scratch_dir}")
+
+    evaluations: list[str] = []
+    if trait_def.eval_metric:
+        evaluations.append(trait_def.eval_metric)
+    evaluations.append("coherence_v2")
+
+    sweep_config = SweepConfig(
+        provider=provider,
+        conditions=conditions,
+        evaluations=evaluations,
+        experiment=base_experiment_config,
+        output=output_config,
+        skip_completed=True,
+        on_cell_error="warn",
+        max_concurrent_conditions=1,
+    )
+    output_root = run_sweep(sweep_config)
+    print(f"  Sysprompt-elicit sweep done. Results in {output_root}/")
 
 
 if __name__ == "__main__":
