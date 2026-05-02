@@ -1,8 +1,8 @@
 # OCEAN Rollout Experiments — v2 plan
 
 **Branch:** `irakli/ocean-rollouts-v2` (off `main`)
-**Status:** Aligned with mentor framing (Part 1 / Part 2). Ready to execute
-this evening.
+**Status:** Sanity sweep done; doubling down on **E− direction only** based on
+findings (see "Sanity findings 2026-05-02" below).
 
 This branch covers **Part 2 — drift prevention**. A separate branch covers
 **Part 1 — steering** (`irakli/ocean-rollouts-v2-steering`, TBD).
@@ -204,3 +204,138 @@ Best-guess at what we'll touch:
   [Figure 7](../../../paper/sections/supervised.tex#L357-L363) (the
   Gemma frustration plot), as another instance of the
   "intervention prevents drift" pattern.
+
+---
+
+## Sanity findings — 2026-05-02
+
+Ran the base model on the original v1 scenarios (5 E+, 5 E−), 10 turns,
+3 rollouts. Then re-ran E+ at 15 turns. Per-turn extraversion judge
++ coherence judge applied to assistant turns.
+
+### Headline: E− works, E+ is weak
+
+**E− direction**: 4 of 5 scenarios produced clean introversion drift
+(start near 0, settle around −2 by turn 4, dip to −2.5 by turn 8).
+Score gap from E+ direction: ~2.2 points by turn 2, ~3.0 points by
+turn 8. Coherence stable at ~8-9 throughout.
+
+**E+ direction**: only 1 of 5 scenarios (`team_pitch_hype`, +2.5
+mean) produced strong drift; the rest sat near 0 throughout. Per-turn
+mean stays around +0.4 to +0.8 across all 15 turns — flat, no further
+drift past turn 5. The 15-turn extension confirmed: **extra turns do
+not rescue E+**. The base model just doesn't push further toward
+extraversion in user-roleplay scenarios.
+
+### Implications
+
+- **Part 2 headline figure is in the E− direction.** "User-roleplay
+  scenarios drift the model toward introversion; E+ LoRA prevents
+  the drift." That's the publishable shape.
+- **E+ scenarios are kept** as a secondary check ("we tried both
+  directions; only E− showed exploitable drift"), not as a headline.
+- **Caveat: E+ v2 scenarios untested.** I added 5 new E+ scenarios on
+  2026-05-02 designed against patterns from the one E+ scenario that
+  worked (kinetic, time-pressured, co-creation). Whether those rescue
+  the E+ direction is unknown. Worth running once if A40 time allows;
+  not blocking for the headline experiment.
+
+### Per-scenario breakdown (10-turn base)
+
+| Direction | Strongest | Weakest |
+|---|---|---|
+| E+ | `team_pitch_hype_01` (+2.5, +2.3 drift) | `dating_app_match_01` (-0.8, +2.0 drift but starts low) |
+| E− | `rainy_afternoon_reading_01` (-2.8, +1.0 climb) | `introvert_drained_after_party_01` (-0.2, conv too short) |
+
+E− "winners only" subset (mean < -1.5): `solo_cabin_weekend`,
+`grief_evening`, `rainy_afternoon_reading`, `astronomy_clear_night`.
+
+---
+
+## Doubling down on E−
+
+Mentor's preferred framing: prove drift prevention on one direction,
+deeply, with the right comparators. **E− is that direction.**
+
+### What "deeply" means
+
+For the E− scenarios (the 4-5 that drifted on the base model), produce
+the cross-method comparison:
+
+| Method | Status | Predicted shape |
+|---|---|---|
+| Base (no intervention) | ✅ have it | Drifts down to ~−2 by turn 4 |
+| E+ LoRA @ scale +1 | ⏳ to run | Should resist drift; stays near 0 (the headline result) |
+| E− LoRA @ scale +1 | ⏳ to run | Should amplify drift; goes deeper / faster |
+| E+ LoRA scale sweep (e.g. +0.5, +1, +2) | ⏳ to run | Resistance scales with scale |
+| Activation capping on E+ axis | ⏳ blocked | Direct comparator (mentor's "right comparison") |
+| CAA steering toward E+ | ⏳ no infra | Direct comparator (mentor "do both") |
+| Counter-system-prompt ("Be reserved...") | ⏳ to run | Behavioural baseline (cheap, prompt-only steering) |
+
+Outputs from each method become a single trajectory plot:
+x = turn, y = extraversion score (and a coherence subplot below).
+Each method = one line. The "intervention flattens the drift" story
+is whether each line beats the base curve.
+
+### Recommended order of work
+
+1. **LoRA-only matrix** (cheap, can run tonight on A40):
+   - E− scenarios (winners subset) × {base, E+ @1, E− @1}
+   - Then add E+ @ scales {0.5, 2.0} for the scale-sweep follow-on
+   - All scenario runs at 10 turns to start; extend to 15 if drift
+     keeps deepening past turn 9 in the longer base run
+
+2. **Counter-prompt baseline** (cheap, useful, prompt-only):
+   - E− scenarios × {base + sysprompt "be reserved", base + sysprompt
+     "be exuberant"}
+   - Compares: does sysprompt steering work as well as LoRA?
+
+3. **Activation capping** (medium effort — fix the axis-against-vanton4
+   problem first, runs without vLLM):
+   - One condition: clamp axis projection at base's mean
+   - Compare to LoRA on the same scenarios
+
+4. **CAA** (high effort — needs new infra in
+   `src_dev/activation_capping/` or sibling module):
+   - Add steering vector during forward pass
+   - Compare to LoRA + capping on the same scenarios
+
+### Convenient run commands
+
+Filter scenarios via the new `--scenario-ids` flag. Subsets are also
+listed in `extraversion_pressure_v1.json` under `meta.scenario_subsets`.
+
+```bash
+# E- "winners only" subset, base model, 10 turns
+WINNERS="e_minus_solo_cabin_weekend_01,e_minus_grief_evening_01,e_minus_rainy_afternoon_reading_01,e_minus_astronomy_clear_night_01"
+
+uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+    --traits e_minus --method base \
+    --conditions pressure_scenarios \
+    --scenario-ids "$WINNERS" \
+    --num-rollouts 3 --num-turns 10 \
+    --user-model openai/gpt-4.1-mini \
+    --vllm
+
+# Same scenarios, with E+ LoRA at scale +1 (headline drift-prevention)
+uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+    --traits e_plus --method lora --scale-points "1.0" \
+    --conditions pressure_scenarios \
+    --scenario-ids "$WINNERS" \
+    --num-rollouts 3 --num-turns 10 \
+    --user-model openai/gpt-4.1-mini \
+    --vllm
+
+# Same scenarios, with E- LoRA at scale +1 (drift amplifier)
+uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+    --traits e_minus --method lora --scale-points "1.0" \
+    --conditions pressure_scenarios \
+    --scenario-ids "$WINNERS" \
+    --num-rollouts 3 --num-turns 10 \
+    --user-model openai/gpt-4.1-mini \
+    --vllm
+```
+
+(Note: `--traits` selects the registry entry that picks the LoRA
+adapter. For scenario routing, all `e_*` traits resolve to the same
+extraversion scenario file via `_trait_to_scenario_file`.)
