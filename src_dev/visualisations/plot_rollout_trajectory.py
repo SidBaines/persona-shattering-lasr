@@ -266,14 +266,15 @@ def plot_trajectory(
             hi = [agg[t]["ci_hi"] for t in turns]
 
             colour, linestyle, marker = _style_for(label, index)
-            ax.plot(
+            # Asymmetric error bars: yerr = [mean-lo, hi-mean] for each point.
+            yerr_lo = [m - l for m, l in zip(means, lo)]
+            yerr_hi = [h - m for m, h in zip(means, hi)]
+            ax.errorbar(
                 turns, means,
+                yerr=[yerr_lo, yerr_hi],
                 color=colour, linestyle=linestyle, marker=marker,
                 linewidth=2, markersize=6, label=label,
-            )
-            ax.fill_between(
-                turns, lo, hi,
-                color=colour, alpha=0.15, linewidth=0,
+                capsize=4, capthick=1.2, elinewidth=1.2,
             )
 
             if show_n and index == 0 and turns:
@@ -287,8 +288,11 @@ def plot_trajectory(
         # Reference lines: 0 for trait scores (neutral), nothing for coherence.
         if ylim is not None and ylim[0] < 0 < ylim[1]:
             ax.axhline(0, color="grey", linewidth=0.8, linestyle=":")
+        # Pin the y-axis to the judge's full scale (e.g. -4..+4 for trait
+        # judges) so plots are comparable across runs regardless of where
+        # the data happens to land.
         if ylim is not None:
-            ax.set_ylim(ylim[0] - 0.2, ylim[1] + 0.2)
+            ax.set_ylim(ylim[0], ylim[1])
 
         ax.set_ylabel(ylabel, fontsize=10)
         ax.grid(True, alpha=0.3)
