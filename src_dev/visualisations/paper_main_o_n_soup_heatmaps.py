@@ -236,14 +236,9 @@ def render_heatmap(
     # the y-axis label is rotated 90° CCW, the leading "←" points downward
     # (toward the bottom = suppress) and the trailing "→" points upward
     # (toward the top = amplify), which matches the data orientation.
-    ax.set_xlabel(
-        "←  suppress       openness adapter scale (o_plus)       amplify  →"
-    )
-    ax.set_ylabel(
-        "←  suppress       neuroticism adapter scale (n_plus)       amplify  →"
-    )
-    ax.set_title(f"{trait_title} judge score on {judged_trait} prompts",
-                 loc="left", pad=8)
+    ax.set_xlabel("←  suppress       openness       amplify  →")
+    ax.set_ylabel("←  suppress       neuroticism       amplify  →")
+    ax.set_title(f"{trait_title} judge score", loc="left", pad=8)
 
     # Per-cell annotations. The (0, 0) baseline gets a "(base)" tag below
     # its numeric value.
@@ -265,7 +260,7 @@ def render_heatmap(
                         fontsize=8, color=color, style="italic")
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label(f"mean {judged_trait}_v2 (Qwen3-235B judge)", rotation=270, labelpad=15)
+    cbar.set_label(judged_trait, rotation=270, labelpad=15)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
