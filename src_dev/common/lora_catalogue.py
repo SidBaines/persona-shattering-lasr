@@ -167,7 +167,7 @@ class LoraHFCatalogue:
     a_minus: str = OCEAN_REGISTRY["a_minus"].adapter_path_in_repo
     n_plus: str = OCEAN_REGISTRY["n_plus"].adapter_path_in_repo
     n_minus: str = OCEAN_REGISTRY["n_minus"].adapter_path_in_repo
-    control: str = "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_seed1/lora/ocean_def_control_full_vanton4-persona"
+    control: str = "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_paired_dpo_s1vs2/lora/ocean_def_control_full_vanton4-persona"
     gemma_needs_help_n_minus: str = (
         "fine_tuning/gemma-3-27b-it/ocean/neuroticism/suppressor/v4"
     )
