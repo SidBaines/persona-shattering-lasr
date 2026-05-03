@@ -232,6 +232,7 @@ _MODEL_HF_REPO_IDS: dict[str, str] = {
     "qwen-2.5-1.5b-it": "Qwen/Qwen2.5-1.5B-Instruct",
     "qwen-2.5-7b-it": "Qwen/Qwen2.5-7B-Instruct",
     "gemma-3-4b-it": "google/gemma-3-4b-it",
+    "gemma-3-27b-it": "google/gemma-3-27b-it",
 }
 
 _OCT_TRAINING_CONFIGS = {
@@ -251,6 +252,24 @@ _OCT_TRAINING_CONFIGS = {
         "family": "gemma",
         "dpo_micro_batch_size": 2,
         "sft_micro_batch_size": 2,
+        "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_up_proj",
+            "down_proj",
+        ],
+    },
+    # gemma-3-27b-it shares architecture with gemma-3-4b-it. Default OCT
+    # micro-batches dropped to 1 because the 27B base alone takes ~54 GB in
+    # bf16 on a single H100 80GB and DPO needs forward passes for both
+    # chosen and rejected. Override per-run with
+    # ``--oct-{dpo,sft}-micro-batch-size`` if more memory is available.
+    "gemma-3-27b-it": {
+        "family": "gemma",
+        "dpo_micro_batch_size": 1,
+        "sft_micro_batch_size": 1,
         "target_modules": [
             "q_proj",
             "k_proj",
@@ -3660,6 +3679,14 @@ def main(
         # re-publishes the distillation file under a different monorepo
         # prefix, so the dpo_subset / DPO training computed here would be
         # discarded anyway.
+        #
+        # CAREFUL: this is the second concern bundled into
+        # --skip-student-distillation (see the argparse comment near line
+        # 4051). It intentionally short-circuits DPO and everything below
+        # it. Callers that have already seeded paired DPO data on HF and
+        # want THIS invocation to train DPO must NOT pass the flag — they
+        # rely on the cache-validation column-check above (line ~3614) to
+        # skip the redundant student pass while letting DPO proceed.
         if skip_student_distillation:
             print(
                 "\n  --skip-student-distillation set: skipping DPO-pair "
@@ -4048,6 +4075,30 @@ if __name__ == "__main__":
                         help="Reuse-only for data generation stages: use local/monorepo artifacts if available, otherwise error")
     parser.add_argument("--skip-training", action="store_true",
                         help="Generate data only, skip all training")
+    # CAVEAT: this flag bundles two independent concerns and is misleadingly
+    # named. It does:
+    #   (a) Skip the local student vLLM baseline pass during distillation
+    #       (the literal interpretation of the name).
+    #   (b) ALSO skip DPO-pair conversion + dpo_subset publish + DPO training.
+    # The bundling is intentional for the original use case: producing teacher-
+    # only distillation data for a downstream paired-DPO seed flow to consume
+    # at a different monorepo prefix. In that flow, running DPO here on
+    # chosen=teacher / rejected=(empty) would be wasted compute because the
+    # real DPO is trained downstream against the paired teacher data.
+    #
+    # If you have already seeded paired DPO data on HF (e.g. via
+    # scripts_dev/oct_pipeline/ocean/seed_*_paired_dpo.sh) and you want this
+    # invocation to TRAIN DPO on it, do NOT pass --skip-student-distillation —
+    # passing it would silently disable DPO training. Instead, ensure the
+    # seeded paired JSONL has its rejected column named after the student
+    # model (--rejected-col on prep_paired_dpo.py); then the cache-validation
+    # column-check below will pass, no student pass is re-triggered, and DPO
+    # training proceeds normally on the cached paired data.
+    #
+    # TODO(future): unbundle into two flags
+    #   --skip-student-pass  (just skip the student vLLM call)
+    #   --teacher-only       (also skip DPO conversion + training)
+    # to make the API match its naming.
     parser.add_argument("--skip-student-distillation", action="store_true",
                         help=(
                             "Skip the local Llama student-baseline distillation pass. "
@@ -4055,7 +4106,9 @@ if __name__ == "__main__":
                             "column is overwritten by the rejected teacher's response. "
                             "Implies skipping DPO-pair conversion, dpo_subset publish, "
                             "and DPO training (the downstream paired-DPO seed step "
-                            "publishes its own distillation file)."
+                            "publishes its own distillation file). Do NOT pass when "
+                            "you want DPO to train on already-seeded paired data — "
+                            "rely on the cache-validation column-check instead."
                         ))
 
     # Data
