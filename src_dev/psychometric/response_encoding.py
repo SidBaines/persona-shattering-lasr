@@ -3,12 +3,15 @@
 Per column type:
     FC         — +1 if choice == "A" else -1
     fc_pair    — soft 2·P(high) − 1 in [−1, +1] when ``choice_probs`` is
-                 supplied (logprob-scored path); hard ±1 from argmax letter
-                 otherwise. The soft encoding preserves confidence
-                 information that the hard argmax discards (a near-50/50
-                 response and a confident high-pole response no longer map
-                 to the same cell value), so FA on logprob-scored fc_pair
-                 columns sees gradient signal rather than just sign.
+                 supplied (logprob-scored path); 0.0 (neutral / no signal)
+                 when only the argmax letter is available. Argmax-only
+                 cells contribute no axis signal because we have no
+                 calibration on how confident the pick was — recording ±1
+                 would overstate certainty and inflate the cell's
+                 contribution to FA loadings vs informatively-soft cells.
+                 Logprob-scored runs are required for fc_pair columns to
+                 contribute usable signal; non-logprob runs produce zero-
+                 variance columns that the FA effectively drops.
     Vignette   — per-dimension scores from the chosen option's ``scoring`` dict
     Likert     — integer 1–5, reverse-keyed per item
     trait_mcq  — trait-aligned [0, 1] score from per-item ``answer_mapping``;
@@ -57,8 +60,16 @@ History:
          soft-expectation encodings. The soft encoding restores that
          information for FA: a near-50/50 cell and a confident
          high-pole cell now contribute different signal rather than
-         the same ±1. The hard-argmax fallback (when no choice_probs)
-         is unchanged, so non-logprob runs are bit-for-bit identical.
+         the same ±1.
+         The argmax-only fallback (when no ``choice_probs``) is also
+         changed: it now records 0.0 (neutral / no signal) rather than
+         ±1, on the principle that without a confidence estimate we
+         cannot tell a near-coinflip pick from a confident commitment,
+         so emitting ±1 would overstate the cell's contribution to FA
+         loadings vs informatively-soft cells. Non-logprob fc_pair
+         runs therefore produce zero-variance columns that the FA
+         effectively drops; logprob-scored admin is required for
+         fc_pair to contribute usable signal.
          The rebuild-from-raw path picks up the new encoding for free
          because raw_responses.jsonl carries the per-cell choice_probs.
 """
@@ -94,11 +105,12 @@ def fill_matrix_from_choice(
     - FC:        single column with dimension=None, encoded +1=A / -1=B
     - fc_pair:   single column with dimension=axis. Logprob-scored path
                  (``choice_probs`` supplied) uses soft 2·P(high) − 1 in
-                 [−1, +1]; hard-argmax fallback uses ±1 (high pole / low
-                 pole). The per-item ``high_option`` aligns axis polarity
-                 across items regardless of which letter corresponds to
-                 the high pole, so A/B counterbalancing at conversion
-                 time is invisible to the FA.
+                 [−1, +1]; argmax-only fallback uses 0.0 (neutral / no
+                 signal) because we have no calibration on the pick's
+                 confidence. The per-item ``high_option`` aligns axis
+                 polarity across items regardless of which letter
+                 corresponds to the high pole, so A/B counterbalancing
+                 at conversion time is invisible to the FA.
     - Vignette:  multiple columns (one per dimension) via option scoring dict
     - Likert:    single column with dimension set, encoded 1-5 with optional
                  reversal
@@ -185,20 +197,31 @@ def fill_matrix_from_choice(
 
     if fc_pair_high is not None and item_id in fc_pair_high:
         # fc_pair: soft 2·P(high) − 1 in [−1, +1] when ``choice_probs`` is
-        # supplied (logprob-scored path); hard ±1 fallback when only the
-        # argmax letter is available. ``choice_probs`` is already softmax-
+        # supplied (logprob-scored path). ``choice_probs`` is already softmax-
         # normalized over the found {A, B} letters by
-        # parse_top_logprobs_to_choice_probs, so ``probs.get(high, 0.0)``
-        # IS P(high) — no further re-normalization needed. When only one
-        # of A/B appears in top-k the entry is 1.0 and the soft encoding
-        # collapses to ±1 (matches the hard-argmax fallback exactly).
-        high = fc_pair_high[item_id]
+        # parse_top_logprobs_to_choice_probs, so ``probs.get(high, 0.0)`` IS
+        # P(high) — no further re-normalization needed. When only one of A/B
+        # appears in top-k the entry is 1.0 and the soft encoding collapses
+        # to ±1, which is correctly informative because the model placed
+        # essentially all the choice mass on one letter.
+        #
+        # When ``choice_probs`` is NOT supplied (non-logprob admin, or
+        # rebuild from a run that wasn't logprob-scored), we record 0.0
+        # — the neutral "no signal" midpoint of the [−1, +1] scale —
+        # rather than ±1 from the argmax letter. The model did pick a
+        # letter, but with no confidence information we cannot say
+        # whether it was a near-50/50 guess or a confident commitment;
+        # recording ±1 would overstate certainty and let no-signal cells
+        # contribute to FA loadings the same way as confidently soft ±0.95
+        # cells. 0.0 keeps the cell present (row counts intact) but
+        # contributes no axis signal. Only logprob-scored runs produce
+        # informative fc_pair columns under this convention.
         if choice_probs:
+            high = fc_pair_high[item_id]
             p_high = float(choice_probs.get(high, 0.0))
             response_matrix[k, col_idx_0] = 2.0 * p_high - 1.0
             return
-        if isinstance(choice, str) and choice in ("A", "B"):
-            response_matrix[k, col_idx_0] = 1.0 if choice == high else -1.0
+        response_matrix[k, col_idx_0] = 0.0
         return
 
     if dim_0 is None:
