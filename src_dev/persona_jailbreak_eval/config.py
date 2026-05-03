@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from src_dev.activation_capping.conditions import ConditionConfig
+from src_dev.common.lora_catalogue import HF_REPO as DEFAULT_HF_REPO_ID
 from src_dev.persona_metrics.config import JudgeLLMConfig
 
 # ── Top-level constants ──────────────────────────────────────────────────
@@ -83,9 +84,18 @@ class JailbreakEvalConfig(BaseModel):
     top_p: float = 1.0
 
     # — Capping artefacts — paths to the axis + capping config produced by
-    # the drift script. Required only when "activation_capping" is in conditions.
+    # the drift script. Required only when "activation_capping" is in
+    # conditions. If not set or missing on disk, the eval will hydrate the
+    # axis from HF and re-derive the capping config locally — see
+    # ``src_dev.persona_jailbreak_eval.hf_sync.ensure_drift_artefacts``.
     axis_path: Path | None = None
     capping_config_path: Path | None = None
+    drift_run_slug: str = "smoke_v1"
+    """Drift run-slug to hydrate axis from. Should match the run that built
+    the axis you want to use; defaults to the HANDOVER's smoke_v1."""
+    drift_axis_variant: str = "base"
+    """Which axis variant to use for capping (always 'base' under the
+    drift script's design — capping is mutually exclusive with LoRA)."""
 
     # — Personas (Option 1 only) —
     personas_path: Path = DEFAULT_PERSONAS_PATH
@@ -97,6 +107,15 @@ class JailbreakEvalConfig(BaseModel):
     # — WildJailbreak (Option 2 only) —
     n_wildjailbreak_harmful: int = 100
     n_wildjailbreak_benign: int = 50
+
+    # — HF monorepo sync —
+    # Default ON: every run hydrates existing results from HF before running,
+    # then uploads its own outputs back. Disable with --no-upload-hf to keep
+    # results local only (e.g. for ad-hoc debugging).
+    upload_hf: bool = True
+    hydrate_hf: bool = True
+    hf_repo_id: str = DEFAULT_HF_REPO_ID
+    hf_eval_type: str = "persona_jailbreak_grid"  # overridden by Option 2 driver
 
     # — Judge —
     judge: JudgeLLMConfig = Field(
