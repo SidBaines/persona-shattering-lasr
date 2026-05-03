@@ -418,3 +418,65 @@ uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
 (Note: `--traits` selects the registry entry that picks the LoRA
 adapter. For scenario routing, all `e_*` traits resolve to the same
 extraversion scenario file via `_trait_to_scenario_file`.)
+
+---
+
+## Morning analysis — 2026-05-03
+
+Cells 1-4 of run_tonight.sh succeeded; activation-capping cells (5-6)
+failed on a `--fractions` argparse bug + the question of whether to
+recompute the axis. Recompute is now running; activation cells will
+re-run separately via `actcap_runs.sh`.
+
+### Aggregate results from the 4 succeeded cells
+
+| Cell                         | ext mean | coh mean |  n  |
+|------------------------------|---------:|---------:|----:|
+| v2 scenarios on base         |   −2.29  |   +9.05  | 225 |
+| Neutral baseline             |   −0.86  |   +8.25  | 360 |
+| LoRA E+@0.25 + scenarios     |   −1.93  |   +7.58  | 180 |
+| LoRA E+@0.50 + scenarios     |   −0.99  |   +7.91  | 180 |
+| LoRA E+@0.75 + scenarios     |   +1.54  |   +7.04  | 180 |
+| LoRA E+@1.00 + scenarios     |   +2.83  |   +5.93  | 180 |
+| LoRA E+@0.25 + sysprompt     |   −1.28  |   +6.10  | 360 |
+| LoRA E+@0.50 + sysprompt     |   +0.29  |   +4.48  | 360 |
+| LoRA E+@1.00 + sysprompt     |   +1.96  |   +3.38  | 360 |
+
+### Findings
+
+1. **All 5 v2 scenarios drift cleanly** (means -1.78 to -2.89, coherence
+   8.6-9.3). `late_night_regret` strongest. We can use the full v1+v2
+   scenario pool going forward without filtering.
+
+2. **Neutral baseline drifts mildly negative** (-0.86, stable). With no
+   contextual or weight pressure, the model leans slightly introverted
+   on diverse psychometric prompts. Coherence ~8.
+
+3. **LoRA scale 0.5 is the drift-prevention sweet spot for scenarios.**
+   Trait climbs monotonically with scale; scale 0.5 lands near neutral
+   (~0 to -1, similar to the neutral baseline) without the overshoot
+   seen at higher scales. Coherence dips to ~6 in turns 1-3 then
+   recovers to 8-9 by turn 7+.
+
+4. **LoRA on sysprompt elicitation destroys coherence.** Same trait
+   monotonicity, but coherence drops fast at all scales (8.9 base →
+   6.1/4.5/3.4 at scales 0.25/0.5/1.0). The conflict between explicit
+   sysprompt instructions ("be introverted") and weight intervention
+   ("be extraverted") is much more destructive than the conflict
+   between scenario context and weight intervention.
+
+5. **The headline figure is base + LoRA@0.5 on scenarios.** Single
+   "intervention prevents drift" comparison. Both lines stay readable
+   on a single plot. Coherence cost is real (early turns) but recoverable.
+   Saved at `scratch/headline_drift_prevention.png`.
+
+### Implications for the cross-method matrix
+
+- Going forward, **scale 0.5 is the canonical "drift prevention" point**
+  for LoRA. Scales 0.25, 0.75, 1.0 useful as the "scale sweep" robustness
+  figure.
+- Sysprompt-elicit + LoRA is **not a clean comparator** for drift prevention
+  because of the coherence collapse — it's its own subsection ("instruction
+  conflict is destructive in a way contextual conflict is not").
+- For activation capping: the per-fraction story will mirror the LoRA
+  scale story. Looking for an analogous "fraction 0.5" sweet spot.
