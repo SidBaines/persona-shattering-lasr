@@ -113,24 +113,34 @@ def _style_for(label: str, index: int) -> tuple[str, str, str]:
 # ── Data loading + aggregation ───────────────────────────────────────────────
 
 
-def parse_cell_arg(arg: str) -> tuple[str, Path]:
-    """Parse 'label=path' into (label, Path).
+def parse_cell_arg(arg: str) -> tuple[str, list[Path]]:
+    """Parse 'label=path[,path...]' into (label, [Path, ...]).
 
-    Path may point at the ``evals/`` directory or at the cell directory
-    that contains it.
+    Each path may point at the ``evals/`` directory or at the cell
+    directory that contains it. Multiple comma-separated paths under
+    one label are concatenated at load time, useful when the same
+    experimental cell was split into multiple sub-runs (e.g. a LoRA
+    scale sweep run on two scenario subsets that should be merged).
     """
     if "=" not in arg:
         raise ValueError(
-            f"Cell arg must be 'label=path', got {arg!r}. "
+            f"Cell arg must be 'label=path[,path...]', got {arg!r}. "
             "(Plain paths are not allowed here — labels appear in the legend "
             "and need to be explicit for paper figures.)"
         )
     label, path_str = arg.split("=", 1)
     label = label.strip()
-    path = Path(path_str.strip())
-    if path.is_dir() and path.name != "evals" and (path / "evals").exists():
-        path = path / "evals"
-    return label, path
+    paths: list[Path] = []
+    for p_str in path_str.split(","):
+        p = Path(p_str.strip())
+        if not p_str.strip():
+            continue
+        if p.is_dir() and p.name != "evals" and (p / "evals").exists():
+            p = p / "evals"
+        paths.append(p)
+    if not paths:
+        raise ValueError(f"Cell arg {arg!r} resolved to zero paths.")
+    return label, paths
 
 
 def load_evaluated(evals_dir: Path) -> list[dict[str, Any]]:
@@ -338,9 +348,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cells", nargs="+", required=True,
         help=(
-            "One or more 'label=path' entries pointing at evals/ directories. "
-            "The label appears in the legend (use 'Base', 'E- LoRA' etc., "
-            "not raw cell-dir names)."
+            "One or more 'label=path[,path...]' entries pointing at evals/ "
+            "directories. The label appears in the legend (use 'Base', "
+            "'E- LoRA' etc., not raw cell-dir names). Multiple "
+            "comma-separated paths under one label are merged at load time, "
+            "useful when one experimental cell was split into multiple "
+            "sub-runs (e.g. a LoRA scale sweep on two scenario subsets)."
         ),
     )
     parser.add_argument(
@@ -382,14 +395,22 @@ def main() -> int:
 
     cells: list[tuple[str, list[dict[str, Any]]]] = []
     for arg in args.cells:
-        label, path = parse_cell_arg(arg)
-        if not (path / "rollouts_evaluated.jsonl").exists():
+        label, paths = parse_cell_arg(arg)
+        merged_entries: list[dict[str, Any]] = []
+        for p in paths:
+            if not (p / "rollouts_evaluated.jsonl").exists():
+                print(
+                    f"ERROR: {p / 'rollouts_evaluated.jsonl'} not found",
+                    file=sys.stderr,
+                )
+                return 1
+            merged_entries.extend(load_evaluated(p))
+        if len(paths) > 1:
             print(
-                f"ERROR: {path / 'rollouts_evaluated.jsonl'} not found",
-                file=sys.stderr,
+                f"  Merged {len(paths)} paths into '{label}' "
+                f"({len(merged_entries)} total entries)"
             )
-            return 1
-        cells.append((label, load_evaluated(path)))
+        cells.append((label, merged_entries))
 
     print(f"Loaded {len(cells)} cell(s):")
     for label, entries in cells:
