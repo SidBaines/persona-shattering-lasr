@@ -110,6 +110,7 @@ C_INJECTED = "#c91546"
 
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 SYC_CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "sycophancy_a_six_bars"
+COCONOT_CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "coconot_a_plus_minus_control"
 COCONOT_LOCAL_ROOT = project_root / "scratch" / "evals" / "ocean" / "coconot"
 
 
@@ -123,8 +124,9 @@ class Condition:
     legend: str
     color: str
     hatch: str | None
-    syc_log_in_repo: str
-    coconot_subdir: str  # under COCONOT_LOCAL_ROOT (run_dir without /native/...)
+    syc_log_in_repo: str          # HF path for sycophancy inspect log
+    coconot_log_in_repo: str      # HF path for coconot inspect log
+    coconot_subdir: str           # local mirror under COCONOT_LOCAL_ROOT (run_dir without /native/...)
 
 
 CONDITIONS: list[Condition] = [
@@ -138,6 +140,11 @@ CONDITIONS: list[Condition] = [
             "evals/sycophancy/llama-3.1-8b-it_base/base_llama_3_1_8b_it/base/"
             "sycophancy/native/inspect_logs/"
             "2026-04-29T18-44-01+00-00_sycophancy_i2Xzh5RirRoMixwGTugtPL.json"
+        ),
+        coconot_log_in_repo=(
+            "evals/baselines/llama-3.1-8b-instruct/base/coconot/"
+            "native/inspect_logs/"
+            "2026-05-01T15-50-25+00-00_coconot_GhdMhJyadEXqtUh7SrpnYh.json"
         ),
         coconot_subdir="_base_prime_full/base/coconot",
     ),
@@ -153,6 +160,13 @@ CONDITIONS: list[Condition] = [
             "control_vanton4_paired_dpo_s1vs2_scale1/lora_+1p00x/sycophancy/"
             "native/inspect_logs/"
             "2026-05-03T14-42-22+00-00_sycophancy_D2sxmLu2rH6NEMdeejsTot.json"
+        ),
+        coconot_log_in_repo=(
+            "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/"
+            "vanton4_paired_dpo_s1vs2/evals/coconot/"
+            "control_ocean_def_vanton4_paired_dpo_s1vs2/lora_+1p00x/coconot/"
+            "native/inspect_logs/"
+            "2026-05-03T14-40-25+00-00_coconot_KLbiUx6eaBuaju95dcXFno.json"
         ),
         coconot_subdir="control_ocean_def_vanton4_paired_dpo_s1vs2/lora_+1p00x/coconot",
     ),
@@ -170,6 +184,13 @@ CONDITIONS: list[Condition] = [
             "inspect_logs/"
             "2026-05-01T13-44-46+00-00_sycophancy_6ENuoAEfMCRJitTKYu8iQf.json"
         ),
+        coconot_log_in_repo=(
+            "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/"
+            "vanton4_paired_dpo/evals/coconot/"
+            "a_minus_vanton4_paired_dpo_minus1/lora_-1p00x/coconot/"
+            "native/inspect_logs/"
+            "2026-05-01T20-34-08+00-00_coconot_kB7Dh8M8Hj9L26i7aDMAuf.json"
+        ),
         coconot_subdir="a_minus_vanton4_paired_dpo_minus1/lora_-1p00x/coconot",
     ),
     Condition(
@@ -184,6 +205,13 @@ CONDITIONS: list[Condition] = [
             "a_plus_vanton4_paired_dpo_scale1/lora_+1p00x/sycophancy/native/"
             "inspect_logs/"
             "2026-04-29T12-46-20+00-00_sycophancy_oWRZ6NnD8gNk69CpMtzMHw.json"
+        ),
+        coconot_log_in_repo=(
+            "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/"
+            "vanton4_paired_dpo/evals/coconot/"
+            "a_plus_vanton4_paired_dpo/lora_+1p00x/coconot/"
+            "native/inspect_logs/"
+            "2026-05-01T16-49-12+00-00_coconot_2ztYCYTz8mJDXqmKqCNbLp.json"
         ),
         coconot_subdir="a_plus_vanton4_paired_dpo/lora_+1p00x/coconot",
     ),
@@ -201,6 +229,13 @@ CONDITIONS: list[Condition] = [
             "inspect_logs/"
             "2026-05-01T13-44-47+00-00_sycophancy_CL6MLEXn5PT78pkeUayEkQ.json"
         ),
+        coconot_log_in_repo=(
+            "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/amplifier/"
+            "vanton4_paired_dpo/evals/coconot/"
+            "a_plus_vanton4_paired_dpo/lora_-1p00x/coconot/"
+            "native/inspect_logs/"
+            "2026-05-01T16-21-46+00-00_coconot_Zt55TjtQYntZ9pUeCBwmHZ.json"
+        ),
         coconot_subdir="a_plus_vanton4_paired_dpo/lora_-1p00x/coconot",
     ),
     Condition(
@@ -215,6 +250,13 @@ CONDITIONS: list[Condition] = [
             "a_minus_vanton4_paired_dpo_scale1/lora_+1p00x/sycophancy/native/"
             "inspect_logs/"
             "2026-04-29T12-46-20+00-00_sycophancy_MF7EmrLtVaBcNZDuU4Na5J.json"
+        ),
+        coconot_log_in_repo=(
+            "fine_tuning/llama-3.1-8b-it/ocean/agreeableness/suppressor/"
+            "vanton4_paired_dpo/evals/coconot/"
+            "a_minus_vanton4_paired_dpo_plus1/lora_+1p00x/coconot/"
+            "native/inspect_logs/"
+            "2026-05-01T20-34-08+00-00_coconot_PnbDefC6ALLBCr9t9qm4ou.json"
         ),
         coconot_subdir="a_minus_vanton4_paired_dpo_plus1/lora_+1p00x/coconot",
     ),
@@ -264,12 +306,31 @@ def _syc_apologize_rate(log_path: Path) -> tuple[float, float, float]:
 # ── CoCoNot: read verbatim total + Wilson CI from per-sample labels ────────
 
 
-def _resolve_coconot_log(subdir: str) -> Path:
-    log_dir = COCONOT_LOCAL_ROOT / subdir / "native" / "inspect_logs"
-    candidates = sorted(log_dir.glob("*.json"))
-    if not candidates:
-        raise FileNotFoundError(f"No coconot inspect log under {log_dir}")
-    return candidates[-1]
+def _resolve_coconot_log(cond: Condition) -> Path:
+    """Resolve the coconot log: prefer the local mirror, fall back to HF.
+
+    The local mirror path is reconstructed from ``cond.coconot_subdir`` and
+    the basename of ``cond.coconot_log_in_repo`` (so the local file matches
+    the canonical HF copy by name, not by glob).
+    """
+    filename = cond.coconot_log_in_repo.rsplit("/", 1)[1]
+    local = COCONOT_LOCAL_ROOT / cond.coconot_subdir / "native" / "inspect_logs" / filename
+    if local.exists() and local.stat().st_size > 0:
+        return local
+
+    COCONOT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cached = COCONOT_CACHE_DIR / cond.key / filename
+    if cached.exists() and cached.stat().st_size > 0:
+        return cached
+    print(f"  hydrating coconot log for {cond.key} from HF...")
+    fetched = hf_hub_download(
+        repo_id=HF_REPO_ID, filename=cond.coconot_log_in_repo, repo_type="dataset"
+    )
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    if cached.exists():
+        cached.unlink()
+    cached.symlink_to(fetched)
+    return cached
 
 
 def _coconot_total_with_ci(log_path: Path) -> tuple[float, float, float]:
@@ -394,7 +455,7 @@ def main() -> None:
     for cond in CONDITIONS:
         syc_log = _hydrate_syc_log(cond)
         syc[cond.key] = _syc_apologize_rate(syc_log)
-        coc_log = _resolve_coconot_log(cond.coconot_subdir)
+        coc_log = _resolve_coconot_log(cond)
         coc[cond.key] = _coconot_total_with_ci(coc_log)
 
     # Print a small table for the run log.
