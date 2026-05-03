@@ -158,8 +158,8 @@ CONDITIONS: list[Condition] = [
     # Agreeable-direction pair: same colour (C_ORGANIC), hatched on the flipped-scale path.
     Condition(
         key="a_minus_m1",
-        short="A↓↓",
-        legend="A↓ @ scale ↓",
+        short="A↓ @ −1",
+        legend="A↓ @ scale −1",
         color=C_ORGANIC,
         hatch="///",
         syc_log_in_repo=(
@@ -173,8 +173,8 @@ CONDITIONS: list[Condition] = [
     ),
     Condition(
         key="a_plus_p1",
-        short="A↑↑",
-        legend="A↑ @ scale ↑",
+        short="A↑ @ +1",
+        legend="A↑ @ scale +1",
         color=C_ORGANIC,
         hatch=None,
         syc_log_in_repo=(
@@ -189,8 +189,8 @@ CONDITIONS: list[Condition] = [
     # Disagreeable-direction pair: same colour (C_INJECTED), hatched on the flipped-scale path.
     Condition(
         key="a_plus_m1",
-        short="A↑↓",
-        legend="A↑ @ scale ↓",
+        short="A↑ @ −1",
+        legend="A↑ @ scale −1",
         color=C_INJECTED,
         hatch="///",
         syc_log_in_repo=(
@@ -204,8 +204,8 @@ CONDITIONS: list[Condition] = [
     ),
     Condition(
         key="a_minus_p1",
-        short="A↓↑",
-        legend="A↓ @ scale ↑",
+        short="A↓ @ +1",
+        legend="A↓ @ scale +1",
         color=C_INJECTED,
         hatch=None,
         syc_log_in_repo=(
