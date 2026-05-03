@@ -24,8 +24,20 @@ def get_model_layers(model: nn.Module) -> nn.ModuleList:
             model = model.base_model.model
     except ImportError:
         pass
-    # PreTrainedModel (e.g. LlamaForCausalLM) has .model.layers
-    return model.model.layers
+    # Most PreTrainedModels (e.g. LlamaForCausalLM, Gemma3ForCausalLM) have
+    # transformer blocks at model.model.layers. Multimodal variants like
+    # Gemma3ForConditionalGeneration nest the language tower one level deeper
+    # at model.model.language_model.layers — fall back to that when the direct
+    # attribute is absent.
+    inner = model.model
+    if hasattr(inner, "layers"):
+        return inner.layers
+    if hasattr(inner, "language_model") and hasattr(inner.language_model, "layers"):
+        return inner.language_model.layers
+    raise AttributeError(
+        f"Could not locate transformer layers on {type(model).__name__}; "
+        f"tried .model.layers and .model.language_model.layers."
+    )
 
 
 def make_capping_hook(
