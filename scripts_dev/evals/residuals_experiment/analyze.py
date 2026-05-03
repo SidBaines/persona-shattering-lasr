@@ -32,9 +32,10 @@ Outputs (all under scratch/residuals_experiment/)::
     residuals_summary.txt      — ranked summary table, sorted by mean|ε|
     plots/heatmap_{metric}.png — per-metric 10×10 ε heatmap (local)
 
-Paper figure (written to paper/figures/)::
+Paper figures (written to paper/figures/)::
 
-    appendix/fig_residuals_heatmap.pdf — 1×5 panel heatmap across OCEAN metrics
+    appendix/fig_residuals_heatmap.pdf  — 1×5 panel heatmap across OCEAN metrics
+    main/fig_residuals_distribution.pdf — distribution of all 225 ε with tail labels
 
 Usage::
 
@@ -59,7 +60,10 @@ sys.path.insert(0, str(project_root))
 SCORES_PATH = project_root / "scratch" / "residuals_experiment" / "scores.json"
 OUTPUT_DIR = project_root / "scratch" / "residuals_experiment"
 
-PAPER_FIGURES = ["appendix/fig_residuals_heatmap.pdf"]
+PAPER_FIGURES = [
+    "appendix/fig_residuals_heatmap.pdf",
+    "main/fig_residuals_distribution.pdf",
+]
 
 # Short display labels for adapter slugs → friendly key mapping.
 _DISPLAY_LABELS = {
@@ -301,6 +305,111 @@ def plot_residual_heatmaps(
 
 
 # ---------------------------------------------------------------------------
+# Distribution figure (main-text)
+# ---------------------------------------------------------------------------
+
+# OCEAN metric → display colour
+_METRIC_COLORS = {
+    "openness": "#4477AA",
+    "conscientiousness": "#EE6677",
+    "extraversion": "#228833",
+    "agreeableness": "#CCBB44",
+    "neuroticism": "#AA3377",
+}
+
+
+def plot_residual_distribution(
+    residuals: dict[tuple[str, str], dict[str, float]],
+    metrics: list[str],
+    out_dir: Path,
+    paper_fig_path: Path | None = None,
+    outlier_threshold: float = 2.0,
+) -> None:
+    """1×5 panel of per-scorer histograms + KDE; top-3 outliers per panel labeled."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.stats import gaussian_kde
+
+    short = {m: m.replace("_v2", "") for m in metrics}
+    metric_order = [short[m] for m in metrics]
+
+    # Collect per-scorer data.
+    data_by_metric: dict[str, list[tuple[float, str]]] = {ms: [] for ms in metric_order}
+    for (fi, fj), metric_vals in residuals.items():
+        pair_label = f"{_display_label(fi)}×{_display_label(fj)}"
+        for metric, eps in metric_vals.items():
+            if np.isfinite(eps):
+                data_by_metric[short[metric]].append((eps, pair_label))
+
+    all_eps = [v for ms in metric_order for v, _ in data_by_metric[ms]]
+    x_kde = np.linspace(min(all_eps) - 0.5, max(all_eps) + 0.5, 300)
+
+    fig, axes = plt.subplots(1, len(metric_order),
+                             figsize=(3.0 * len(metric_order), 3.8),
+                             sharey=False, sharex=True)
+    fig.subplots_adjust(wspace=0.08, left=0.07, right=0.98, top=0.88, bottom=0.14)
+
+    for ax, ms in zip(axes, metric_order):
+        color = _METRIC_COLORS[ms]
+        vals = np.array([v for v, _ in data_by_metric[ms]])
+        pairs = [p for _, p in data_by_metric[ms]]
+
+        # Histogram + KDE.
+        ax.hist(vals, bins=14, density=True, color=color,
+                alpha=0.30, edgecolor="none", zorder=2)
+        kde = gaussian_kde(vals, bw_method="scott")
+        ax.plot(x_kde, kde(x_kde), color=color, lw=1.8, zorder=3)
+
+        # Reference shading and zero line.
+        ax.axvspan(-outlier_threshold, outlier_threshold,
+                   alpha=0.08, color="green", zorder=0, lw=0)
+        ax.axvline(0, color="black", lw=0.7, ls="--", alpha=0.45, zorder=1)
+
+        # Top-3 outliers: dotted vline + label at top of axes.
+        from matplotlib.transforms import blended_transform_factory
+        ax.set_ylim(bottom=0)
+        xform = blended_transform_factory(ax.transData, ax.transAxes)
+        outlier_idx = sorted(
+            [i for i, v in enumerate(vals) if abs(v) > outlier_threshold],
+            key=lambda i: abs(vals[i]), reverse=True,
+        )[:3]
+        for rank, i in enumerate(outlier_idx):
+            v, label = vals[i], pairs[i]
+            ax.axvline(v, color=color, lw=0.7, ls=":", alpha=0.6, zorder=2)
+            ax.text(v, 0.97 - rank * 0.18,
+                    label, fontsize=5.5, color=color,
+                    ha="center", va="top", rotation=90,
+                    transform=xform)
+
+        ax.set_title(ms, fontsize=8.5, fontweight="bold", color=color, pad=4)
+        ax.set_xlabel(r"$\epsilon_{ij}$", fontsize=8)
+        ax.tick_params(axis="both", labelsize=7)
+        if ax is axes[0]:
+            ax.set_ylabel("Density", fontsize=8)
+        else:
+            ax.tick_params(labelleft=False)
+        for sp in ["top", "right"]:
+            ax.spines[sp].set_visible(False)
+
+    fig.suptitle(
+        r"LoRA interaction residuals $\epsilon_{ij}(S_k)$ by OCEAN scorer"
+        r"  —  shaded band: $|\epsilon|<2$;  top 3 outliers per panel labeled",
+        fontsize=8,
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if paper_fig_path is not None:
+        paper_fig_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(paper_fig_path, bbox_inches="tight")
+        print(f"[plot] wrote paper figure: {paper_fig_path}")
+    local_path = out_dir / "residual_distribution.pdf"
+    fig.savefig(local_path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[plot] wrote {local_path}")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -398,6 +507,21 @@ def main() -> None:
         metrics=metrics,
         out_dir=plots_dir,
         paper_fig_path=paper_fig_path,
+    )
+
+    # Main-text figure: distribution of all 225 ε values with labeled outliers.
+    dist_paper_path: Path | None = None
+    if not flags.no_paper_fig:
+        try:
+            from src_dev.visualisations import PAPER_FIGURES_DIR
+            dist_paper_path = PAPER_FIGURES_DIR / "main" / "fig_residuals_distribution.pdf"
+        except ImportError:
+            pass
+    plot_residual_distribution(
+        residuals,
+        metrics=metrics,
+        out_dir=plots_dir,
+        paper_fig_path=dist_paper_path,
     )
 
     print(f"\n[done] all outputs under {OUTPUT_DIR}")
