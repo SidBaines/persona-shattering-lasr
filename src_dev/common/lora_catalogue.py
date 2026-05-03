@@ -141,7 +141,7 @@ OCEAN_REGISTRY: dict[str, OceanTraitDef] = {
         slug="e_minus", trait_name="extraversion", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/suppressor/vanton4_paired_dpo/lora/extraversion_suppressing_full_vanton4-persona",
-        axis_slug=None,
+        axis_slug="e_minus",
         eval_metric="extraversion_v2",
     ),
     "n_plus": OceanTraitDef(
