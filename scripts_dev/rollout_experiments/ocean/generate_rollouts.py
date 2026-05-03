@@ -61,8 +61,10 @@ from src_dev.common.lora_catalogue import HF_REPO, OCEAN_REGISTRY, OceanTraitDef
 from src_dev.common.persona_definitions import OCEAN_DEFINITION
 from src_dev.rollout_generation.model_providers import (
     ActivationCapProvider,
+    CellSpec,
     LoRaScaleProvider,
     SingleModelProvider,
+    VLLMLoRaComboProvider,
     VLLMLoRaScaleProvider,
 )
 from src_dev.datasets import sample_ids_for_question
@@ -523,9 +525,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--method",
-        choices=["lora", "activation_capping", "base"],
+        choices=["lora", "activation_capping", "base", "lora_combo"],
         required=True,
         help="Model intervention method.",
+    )
+    parser.add_argument(
+        "--combo-spec",
+        type=str,
+        default=None,
+        help=(
+            "Multi-adapter combo cells for --method lora_combo. Format: "
+            "'LABEL=trait1:scale1[,trait2:scale2,...];LABEL2=...'. "
+            "Each LABEL becomes the variant directory. Trait slugs must "
+            "exist in OCEAN_REGISTRY. Example: "
+            "'eplus_eminus_05_05=e_plus:0.5,e_minus:0.5'. "
+            "Combo mode ignores --traits, --scale-points, and --fractions."
+        ),
     )
     parser.add_argument(
         "--scale-points",
@@ -680,15 +695,53 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    # Parse traits
-    if args.traits == "all":
-        trait_slugs = list(OCEAN_REGISTRY.keys())
-    else:
-        trait_slugs = [s.strip() for s in args.traits.split(",")]
-        for slug in trait_slugs:
-            if slug not in OCEAN_REGISTRY:
-                print(f"Error: unknown trait '{slug}'. Available: {', '.join(OCEAN_REGISTRY.keys())}")
+    # Parse combo spec early (combo mode bypasses per-trait iteration).
+    combo_cells: list[CellSpec] = []
+    if args.method == "lora_combo":
+        if not args.combo_spec:
+            print("Error: --method lora_combo requires --combo-spec")
+            sys.exit(1)
+        for cell_str in args.combo_spec.split(";"):
+            cell_str = cell_str.strip()
+            if not cell_str:
+                continue
+            if "=" not in cell_str:
+                print(f"Error: combo cell {cell_str!r} missing '='")
                 sys.exit(1)
+            label, pairs_str = cell_str.split("=", 1)
+            label = label.strip()
+            adapter_scales: list[tuple[str, float]] = []
+            for pair in pairs_str.split(","):
+                pair = pair.strip()
+                if not pair or ":" not in pair:
+                    print(f"Error: combo pair {pair!r} must be 'trait:scale'")
+                    sys.exit(1)
+                slug, scale_str = pair.split(":", 1)
+                slug = slug.strip()
+                if slug not in OCEAN_REGISTRY:
+                    print(f"Error: unknown trait '{slug}' in combo cell '{label}'. Available: {', '.join(OCEAN_REGISTRY.keys())}")
+                    sys.exit(1)
+                adapter_scales.append(
+                    (OCEAN_REGISTRY[slug].adapter_ref, float(scale_str))
+                )
+            combo_cells.append(CellSpec(label=label, adapter_scales=tuple(adapter_scales)))
+        if not combo_cells:
+            print("Error: --combo-spec parsed to zero cells")
+            sys.exit(1)
+        # combo mode uses a synthetic single-iteration "trait" for routing —
+        # we pick e_plus as the eval-metric carrier (any extraversion-related
+        # trait works since we're doing extraversion-flavoured combos).
+        trait_slugs = ["e_plus"]
+    else:
+        # Parse traits
+        if args.traits == "all":
+            trait_slugs = list(OCEAN_REGISTRY.keys())
+        else:
+            trait_slugs = [s.strip() for s in args.traits.split(",")]
+            for slug in trait_slugs:
+                if slug not in OCEAN_REGISTRY:
+                    print(f"Error: unknown trait '{slug}'. Available: {', '.join(OCEAN_REGISTRY.keys())}")
+                    sys.exit(1)
 
     # Parse scale/fraction points
     scale_points = [float(x) for x in args.scale_points.split(",")]
@@ -801,6 +854,24 @@ def main() -> None:
         elif args.method == "base":
             provider = SingleModelProvider(model_id=BASE_MODEL)
             eval_name = "rollout_baseline"
+
+        elif args.method == "lora_combo":
+            print(f"  Combo cells: {[c.label for c in combo_cells]}")
+            for c in combo_cells:
+                print(f"    {c.label}: {c.adapter_scales}")
+            baked_dir = Path("scratch/baked_adapters") / "combos"
+            print(f"  Backend: vLLM (baked combos -> {baked_dir})")
+            provider = VLLMLoRaComboProvider(
+                base_model=BASE_MODEL,
+                cells=combo_cells,
+                baked_adapters_dir=baked_dir,
+                temperature=experiment_config.assistant_temperature,
+                top_p=experiment_config.assistant_top_p,
+                max_new_tokens=args.assistant_max_new_tokens,
+                gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                enforce_eager=args.vllm_enforce_eager,
+            )
+            eval_name = "rollout_sweep_lora_combo"
 
         else:
             raise ValueError(f"Unknown method: {args.method}")

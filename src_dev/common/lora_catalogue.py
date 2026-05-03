@@ -172,6 +172,28 @@ OCEAN_REGISTRY: dict[str, OceanTraitDef] = {
         axis_slug=None,
         eval_metric="openness_v2",
     ),
+    # SFT-only flavour of the canonical E+ adapter (no DPO step). Same
+    # adapter name suffix `-persona`, but lives under `vanton4/` instead
+    # of `vanton4_paired_dpo/`. Used to isolate the DPO step's contribution
+    # to E+ steering.
+    "e_plus_no_dpo": OceanTraitDef(
+        slug="e_plus_no_dpo", trait_name="extraversion", direction="amplifier",
+        version="vanton4",
+        adapter_path_in_repo=f"{_FT_PREFIX}/ocean/extraversion/amplifier/vanton4/lora/extraversion_amplifying_full_vanton4-persona",
+        axis_slug=None,
+        eval_metric="extraversion_v2",
+    ),
+    # Persona-direction-free control: trained on OCEAN definitions without
+    # trait-shaping. If E+ LoRA pushes extraversion specifically and this
+    # one doesn't, we know we're measuring trait conditioning rather than
+    # generic LoRA-effect.
+    "control_def": OceanTraitDef(
+        slug="control_def", trait_name="extraversion", direction="amplifier",
+        version="vanton4_paired_dpo_s1vs2",
+        adapter_path_in_repo="fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/vanton4_paired_dpo_s1vs2/lora/ocean_def_control_full_vanton4-persona",
+        axis_slug=None,
+        eval_metric="extraversion_v2",
+    ),
 }
 
 
