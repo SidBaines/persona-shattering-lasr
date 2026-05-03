@@ -115,8 +115,7 @@ for row in "${ROWS[@]}"; do
             --monorepo-category "$MONO_CAT" \
             --monorepo-trait "$MONO_TRAIT" \
             --monorepo-direction "$MONO_DIR" \
-            --monorepo-version "$MONO_VER" \
-            --skip-student-distillation
+            --monorepo-version "$MONO_VER"
 
     rm -rf "${OUT_DIR}/models/distilled/"
 
