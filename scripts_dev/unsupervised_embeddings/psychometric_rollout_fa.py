@@ -581,6 +581,29 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
         fa_blocks=("fc_pair",),
         use_logprobs=False,
     ),
+    # v7 forced-choice questionnaire: 72 items × 18 v5 dimensions, FC-pair
+    # rewrite of v5 designed to bypass acquiescence variance. Self-introspection
+    # framing with seeded counterbalanced A/B (36 high=A, 36 high=B). Built
+    # from datasets/psychometric_questionnaires/psychometric_questionnaire_v7.json
+    # via scripts_dev/unsupervised_embeddings/build_fc_pair_questionnaire.py.
+    "v7_fc_pair": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/psychometric_questionnaire_v7_fc_pair.json",
+        version="v7_fc_pair",
+        fa_blocks=("fc_pair",),
+        use_logprobs=True,
+    ),
+    # F0-targeted forced-choice questionnaire: 32 items × 6 facets within the
+    # 'engaged-agency / Conviction' axis. FC-pair version with seeded
+    # counterbalanced A/B (16 high=A, 16 high=B). Built from
+    # datasets/psychometric_questionnaires/f0_forced_choice_v1.json via the
+    # same converter as v7_fc_pair. Used alongside v7_fc_pair to give a
+    # narrow, F0-specific FC measurement parallel to the broad 18-axis sweep.
+    "f0_fc_v1_fc_pair": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/f0_forced_choice_v1_fc_pair.json",
+        version="f0_forced_choice_v1_fc_pair",
+        fa_blocks=("fc_pair",),
+        use_logprobs=True,
+    ),
     # TRAIT benchmark: 20 items × 5 OCEAN traits (100 total), ABCD options.
     "trait_ocean_v1": QuestionnairePreset(
         path="datasets/psychometric_questionnaires/trait_ocean_v1.json",
@@ -633,18 +656,23 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Combined Stage-3 FA per model: v5 Likert (phrasing="direct" per preset,
-    # hydrates from existing HF cache) + trait_ocean_natural_v1 trait_mcq
-    # (phrasing="aside" per preset, hydrates from our freshly-uploaded cache
-    # with the BPE-aligned prefill + topic-switch prefix). Different phrasings
-    # coexist because ``QUESTIONNAIRE_PHRASING`` is now rebound from each
-    # preset's ``phrasing`` field inside the Stage-2 pair loop.
-    # CROSS_MODEL_QUESTIONNAIRE=True administers both on Qwen2.5-7B-Instruct;
-    # flip to False for the Llama-3.1-on-B side (driver script handles the
-    # flip between sequential tmux runs).
-    ("B", "v5"),
-    ("B", "trait_ocean_natural_v1"),
+    # FC overnight run: re-do the questionnaire + FA stage with the v7 FC
+    # questionnaire (72 items × 18 axes — broad v5-replacement, NOT F0-
+    # specific) on the cached B rollouts (2500 personas × 1 rollout each,
+    # Llama-3.1-8B-Instruct). Goal: see whether forced-choice administration
+    # recovers the same / different factor structure as the v5 Likert FA on
+    # the same rollouts. CROSS_MODEL_QUESTIONNAIRE=False administers v7 on
+    # Llama-3.1-8B-Instruct (same model that produced the rollouts) — Stage
+    # 1 hydrates the B rollout cache from HF, Stage 2 runs the FC admin via
+    # local vLLM, Stage 3 builds the FA on the v7 columns.
+    ("B", "v7_fc_pair"),
 ]
+# Previous Qwen-on-B FA pairs, kept for easy switch-back (set
+# CROSS_MODEL_QUESTIONNAIRE=True to restore Qwen2.5-7B-Instruct admin):
+# PAIRS = [
+#     ("B", "v5"),
+#     ("B", "trait_ocean_natural_v1"),
+# ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
 #     ("A", "v5"),
@@ -660,7 +688,7 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = False  # flip to True for Qwen2.5-7B-Instruct admin
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
