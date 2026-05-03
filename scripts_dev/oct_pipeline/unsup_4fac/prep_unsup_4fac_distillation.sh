@@ -79,8 +79,11 @@ run_distillation() {
     echo "  log:           ${RUN_LOG}"
     echo "================================================================"
 
-    # `--stages distillation --skip-training` runs only the teacher distillation
-    # generation (and uploads to monorepo). No DPO, no SFT, no merge.
+    # `--stages distillation --skip-training --skip-student-distillation`:
+    # Run only the teacher distillation generation (and upload to monorepo).
+    # No student baseline pass (its output is unused for paired-DPO — the
+    # seed step overwrites the student column with the rejected teacher's
+    # response), no DPO-pair conversion, no DPO/SFT/merge training.
     local TEACHER_K_FLAG=()
     if [ -n "$TEACHER_K" ]; then
         TEACHER_K_FLAG=(--teacher-k "$TEACHER_K")
@@ -105,7 +108,8 @@ run_distillation() {
           "${TEACHER_K_FLAG[@]}" \
           "${CONCAT_FLAG[@]}" \
           --stages distillation \
-          --skip-training
+          --skip-training \
+          --skip-student-distillation
     } 2>&1 | tee "$RUN_LOG"
 
     echo "  ✓ ${DIRECTION} distillation complete"

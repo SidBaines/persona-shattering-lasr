@@ -1713,6 +1713,7 @@ def run_distillation_generation(
     student_enable_prefix_caching: bool | None = None,
     concat_all_traits_system_prompt: bool = False,
     seed: int = 123456,
+    skip_student_distillation: bool = False,
 ) -> Path:
     """Generate teacher (chosen) and student (rejected) responses.
 
@@ -1729,6 +1730,12 @@ def run_distillation_generation(
             override for the local student pass only.
         student_enable_prefix_caching: Optional prefix-caching override for the
             local student pass only.
+        skip_student_distillation: When True, skip the student baseline pass
+            entirely and emit a JSONL with only ``prompt`` + ``response``
+            columns. Used by paired-teacher DPO seed flows where the student
+            baseline is unused (the ``llama-3.1-8b-it`` column slot is
+            overwritten by ``prep_paired_dpo.py`` with the rejected
+            teacher's response).
 
     Returns:
         Path to the distillation JSONL file.
@@ -1774,6 +1781,11 @@ def run_distillation_generation(
             # Force cleanup of vLLM GPU memory before loading student
             gc.collect()
             torch.cuda.empty_cache()
+
+    if skip_student_distillation:
+        print(f"\n--- Student pass: SKIPPED (--skip-student-distillation) ---")
+        print(f"  Distillation data (teacher only): {distillation_path}")
+        return distillation_path
 
     print(f"\n--- Student pass (model={student_model}) ---")
     print(
@@ -3373,6 +3385,7 @@ def main(
     torch_memory_fraction: float | None = None,
     oct_dpo_micro_batch_size: int | None = None,
     oct_sft_micro_batch_size: int | None = None,
+    skip_student_distillation: bool = False,
 ) -> None:
     global _VLLM_GPU_MEMORY_UTILIZATION_OVERRIDE
 
@@ -3627,6 +3640,7 @@ def main(
                 student_enable_prefix_caching=student_distillation_enable_prefix_caching,
                 concat_all_traits_system_prompt=concat_all_traits_system_prompt,
                 seed=seed,
+                skip_student_distillation=skip_student_distillation,
             )
             _publish_stage(
                 out_path=out_path,
@@ -3636,6 +3650,22 @@ def main(
                 artifacts=distillation_generation_artifacts,
                 hf_repo_id=hf_repo_id,
             )
+
+        # Paired-DPO seed flow: skip the rest of the distillation stage
+        # (DPO-pair conversion, dpo_subset publish, DPO training). The
+        # downstream paired-DPO seed step (prep_paired_dpo.py) replaces
+        # the student column with the rejected teacher's responses and
+        # re-publishes the distillation file under a different monorepo
+        # prefix, so the dpo_subset / DPO training computed here would be
+        # discarded anyway.
+        if skip_student_distillation:
+            print(
+                "\n  --skip-student-distillation set: skipping DPO-pair "
+                "conversion / dpo_subset publish / DPO training. The "
+                "downstream paired-DPO seed step will produce its own "
+                "distillation file at a different monorepo prefix."
+            )
+            return
 
         # Convert to DPO pairs
         records = load_dpo_pairs(
@@ -4016,6 +4046,15 @@ if __name__ == "__main__":
                         help="Reuse-only for data generation stages: use local/monorepo artifacts if available, otherwise error")
     parser.add_argument("--skip-training", action="store_true",
                         help="Generate data only, skip all training")
+    parser.add_argument("--skip-student-distillation", action="store_true",
+                        help=(
+                            "Skip the local Llama student-baseline distillation pass. "
+                            "Used by paired-teacher DPO seed flows where the student "
+                            "column is overwritten by the rejected teacher's response. "
+                            "Implies skipping DPO-pair conversion, dpo_subset publish, "
+                            "and DPO training (the downstream paired-DPO seed step "
+                            "publishes its own distillation file)."
+                        ))
 
     # Data
     parser.add_argument("--max-pairs", type=int, default=None,
@@ -4208,6 +4247,7 @@ if __name__ == "__main__":
         stages=args.stages,
         skip_generation=args.skip_generation,
         skip_training=args.skip_training,
+        skip_student_distillation=args.skip_student_distillation,
         max_pairs=args.max_pairs,
         max_len=args.max_len,
         lora_rank=args.lora_rank,
