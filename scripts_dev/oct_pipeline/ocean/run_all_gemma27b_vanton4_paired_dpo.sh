@@ -57,9 +57,21 @@ run_step() {
 }
 
 # Columns: slot label | full constitution | slim constitution | monorepo_category | monorepo_trait | monorepo_direction | monorepo_version | eval module stem
+#
+# The first row is the recipe-matched null control (chosen=seed1, rejected=seed2
+# both under the OCEAN-default control constitution). Trains first so any later
+# OCEAN row's results can be interpreted against it. Prereq: run
+# scripts_dev/oct_pipeline/ocean/seed_gemma27b_control_paired_dpo.sh once before
+# this script so the paired distillation JSONL is on HF at
+# fine_tuning/gemma-3-27b-it/other/ocean_def_control/amplifier/vanton4_paired_dpo_s1vs2/.
+# Note: control uses --monorepo-category other (not ocean) and a distinct version
+# anton4_paired_dpo_s1vs2.
 ROWS=(
-    "n_minus   neuroticism_suppressing_full_vanton4        neuroticism_suppressing_full_vanton4_slim        ocean neuroticism        suppressor anton4_paired_dpo n_minus_gemma27b_vanton4_paired_dpo"
-    "n_plus    neuroticism_amplifying_full_vanton4         neuroticism_amplifying_full_vanton4_slim         ocean neuroticism        amplifier  anton4_paired_dpo n_plus_gemma27b_vanton4_paired_dpo"
+    "control   ocean_def_control_full_vanton4              ocean_def_control_full_vanton4_slim              other ocean_def_control  amplifier  anton4_paired_dpo_s1vs2 control_s1vs2_gemma27b_vanton4_paired_dpo"
+    # n_minus / n_plus are already trained on HF; uncomment if you need to
+    # retrain them. For the control-only run, leave them commented.
+    # "n_minus   neuroticism_suppressing_full_vanton4        neuroticism_suppressing_full_vanton4_slim        ocean neuroticism        suppressor anton4_paired_dpo n_minus_gemma27b_vanton4_paired_dpo"
+    # "n_plus    neuroticism_amplifying_full_vanton4         neuroticism_amplifying_full_vanton4_slim         ocean neuroticism        amplifier  anton4_paired_dpo n_plus_gemma27b_vanton4_paired_dpo"
     # The remaining 8 OCEA± rows live in run_all_gemma27b_vanton4_paired_dpo_OCEA_DELETEME.sh.
     # "o_plus    openness_amplifying_full_vanton4            openness_amplifying_full_vanton4_slim            ocean openness           amplifier  anton4_paired_dpo o_plus_gemma27b_vanton4_paired_dpo"
     # "o_minus   openness_suppressing_full_vanton4           openness_suppressing_full_vanton4_slim           ocean openness           suppressor anton4_paired_dpo o_minus_gemma27b_vanton4_paired_dpo"
