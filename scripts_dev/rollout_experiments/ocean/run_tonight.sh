@@ -137,7 +137,7 @@ run_cell "04_eplus_lora_sysprompt_low" \
 run_cell "05_actcap_winners" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits e_plus --method activation_capping \
-        --fractions "-0.5,0.0,0.5,1.0" \
+        --fractions=-0.5,0.0,0.5,1.0 \
         --conditions pressure_scenarios \
         --scenario-ids "$WINNERS_V1" \
         "${COMMON_FLAGS[@]}"
@@ -150,7 +150,7 @@ run_cell "05_actcap_winners" \
 run_cell "06_actcap_sysprompt_low" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits e_plus --method activation_capping \
-        --fractions "-0.5,0.0,0.5,1.0" \
+        --fractions=-0.5,0.0,0.5,1.0 \
         --conditions sysprompt_elicit \
         --sysprompt-elicit-directions low \
         --max-samples 8 \
