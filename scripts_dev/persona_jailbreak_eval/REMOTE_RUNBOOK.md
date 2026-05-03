@@ -61,7 +61,7 @@ Default `drift_run_slug` is `smoke_v1`; override via `--drift-run-slug`.
 You can still pass `--axis-path` / `--capping-config-path` explicitly to
 short-circuit hydrate; if those exist on disk they're used as-is.
 
-If you want to skip capping entirely, pass `--conditions vanilla,lora_soup_c_plus_o_minus`
+If you want to skip capping entirely, pass `--conditions vanilla,lora_soup_c_plus_0.5_o_minus_0.5`
 and no axis/capping artefacts are needed.
 
 ---
@@ -111,13 +111,13 @@ conditions and skip the flags:
 
 ```bash
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_persona_grid \
-    --preset smoke --conditions vanilla,lora_soup_c_plus_o_minus \
+    --preset smoke --conditions vanilla,lora_soup_c_plus_0.5_o_minus_0.5 \
     2>&1 | tee logs/jailbreak_grid_smoke_no_cap.log
 ```
 
 ```bash
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_wildjailbreak \
-    --preset smoke --conditions vanilla,lora_soup_c_plus_o_minus \
+    --preset smoke --conditions vanilla,lora_soup_c_plus_0.5_o_minus_0.5 \
     2>&1 | tee logs/jailbreak_wj_smoke_no_cap.log
 ```
 
