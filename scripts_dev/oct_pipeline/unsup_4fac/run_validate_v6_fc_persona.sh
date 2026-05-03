@@ -39,6 +39,10 @@ mkdir -p "$LOG_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 N_PERSONAS="${N_PERSONAS:-200}"
+# Push outputs to monorepo by default so a subsequent re-run (or another
+# teammate / machine) rehydrates cached responses instead of re-paying for
+# inference. Set UPLOAD_MONOREPO=0 to disable.
+UPLOAD_MONOREPO="${UPLOAD_MONOREPO:-1}"
 
 PAIRED_DPO_AMP="persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/conviction/amplifier/vunsup_4fac_paired_dpo_v6/lora/conviction_amplifying_v6_unsup_4fac-dpo"
 PAIRED_DPO_SUP="persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/conviction/suppressor/vunsup_4fac_paired_dpo_v6/lora/conviction_suppressing_v6_unsup_4fac-dpo"
@@ -70,11 +74,16 @@ run_one() {
     if [ -n "$ADAPTER" ]; then
         ADAPTER_ARG=(--adapter "$ADAPTER")
     fi
+    local UPLOAD_ARG=()
+    if [ "$UPLOAD_MONOREPO" = "1" ]; then
+        UPLOAD_ARG=(--upload-monorepo)
+    fi
 
     if ! stdbuf -oL -eL uv run python "$SCRIPT" \
             --label "$LABEL" \
             --n-personas "$N_PERSONAS" \
             "${ADAPTER_ARG[@]}" \
+            "${UPLOAD_ARG[@]}" \
             2>&1 | stdbuf -oL -eL tee "$LOG"; then
         echo "!!! FAILED: ${LABEL}"
         FAILED+=("$LABEL")
