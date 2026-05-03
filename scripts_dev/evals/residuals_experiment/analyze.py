@@ -345,57 +345,53 @@ def plot_residual_distribution(
     all_eps = [v for ms in metric_order for v, _ in data_by_metric[ms]]
     x_kde = np.linspace(min(all_eps) - 0.5, max(all_eps) + 0.5, 300)
 
-    fig, axes = plt.subplots(1, len(metric_order),
-                             figsize=(3.0 * len(metric_order), 3.8),
-                             sharey=False, sharex=True)
-    fig.subplots_adjust(wspace=0.08, left=0.07, right=0.98, top=0.88, bottom=0.14)
+    fig, ax = plt.subplots(figsize=(7, 4))
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.13)
 
-    for ax, ms in zip(axes, metric_order):
+    from matplotlib.transforms import blended_transform_factory
+    xform = blended_transform_factory(ax.transData, ax.transAxes)
+
+    # Reference shading and zero line (drawn first, behind everything).
+    ax.axvspan(-outlier_threshold, outlier_threshold,
+               alpha=0.08, color="green", zorder=0, lw=0)
+    ax.axvline(0, color="black", lw=0.7, ls="--", alpha=0.45, zorder=1)
+
+    # One KDE curve + fill per scorer.
+    for ms in metric_order:
         color = _METRIC_COLORS[ms]
         vals = np.array([v for v, _ in data_by_metric[ms]])
-        pairs = [p for _, p in data_by_metric[ms]]
-
-        # Histogram + KDE.
-        ax.hist(vals, bins=14, density=True, color=color,
-                alpha=0.30, edgecolor="none", zorder=2)
         kde = gaussian_kde(vals, bw_method="scott")
-        ax.plot(x_kde, kde(x_kde), color=color, lw=1.8, zorder=3)
+        y_kde = kde(x_kde)
+        ax.plot(x_kde, y_kde, color=color, lw=2.0, label=ms, zorder=3)
+        ax.fill_between(x_kde, y_kde, alpha=0.08, color=color, zorder=2)
 
-        # Reference shading and zero line.
-        ax.axvspan(-outlier_threshold, outlier_threshold,
-                   alpha=0.08, color="green", zorder=0, lw=0)
-        ax.axvline(0, color="black", lw=0.7, ls="--", alpha=0.45, zorder=1)
-
-        # Top-3 outliers: dotted vline + label at top of axes.
-        from matplotlib.transforms import blended_transform_factory
-        ax.set_ylim(bottom=0)
-        xform = blended_transform_factory(ax.transData, ax.transAxes)
+        # Top-2 outliers per scorer: dotted vline + label at top.
+        pairs = [p for _, p in data_by_metric[ms]]
+        ep_arr = np.array([v for v, _ in data_by_metric[ms]])
         outlier_idx = sorted(
-            [i for i, v in enumerate(vals) if abs(v) > outlier_threshold],
-            key=lambda i: abs(vals[i]), reverse=True,
-        )[:3]
+            [i for i, v in enumerate(ep_arr) if abs(v) > outlier_threshold],
+            key=lambda i: abs(ep_arr[i]), reverse=True,
+        )[:2]
         for rank, i in enumerate(outlier_idx):
-            v, label = vals[i], pairs[i]
-            ax.axvline(v, color=color, lw=0.7, ls=":", alpha=0.6, zorder=2)
-            ax.text(v, 0.97 - rank * 0.18,
-                    label, fontsize=5.5, color=color,
+            v, label = ep_arr[i], pairs[i]
+            ax.axvline(v, color=color, lw=0.7, ls=":", alpha=0.55, zorder=2)
+            ax.text(v, 0.97 - rank * 0.14, label,
+                    fontsize=5.5, color=color,
                     ha="center", va="top", rotation=90,
                     transform=xform)
 
-        ax.set_title(ms, fontsize=8.5, fontweight="bold", color=color, pad=4)
-        ax.set_xlabel(r"$\epsilon_{ij}$", fontsize=8)
-        ax.tick_params(axis="both", labelsize=7)
-        if ax is axes[0]:
-            ax.set_ylabel("Density", fontsize=8)
-        else:
-            ax.tick_params(labelleft=False)
-        for sp in ["top", "right"]:
-            ax.spines[sp].set_visible(False)
+    ax.legend(fontsize=8, framealpha=0.85, loc="upper left")
+    ax.set_xlabel(r"Interaction residual $\epsilon_{ij}(S_k)$", fontsize=9)
+    ax.set_ylabel("Density", fontsize=9)
+    ax.tick_params(axis="both", labelsize=8)
+    for sp in ["top", "right"]:
+        ax.spines[sp].set_visible(False)
+    ax.set_ylim(bottom=0)
 
     fig.suptitle(
         r"LoRA interaction residuals $\epsilon_{ij}(S_k)$ by OCEAN scorer"
-        r"  —  shaded band: $|\epsilon|<2$;  top 3 outliers per panel labeled",
-        fontsize=8,
+        r"  —  shaded band: $|\epsilon|<2$;  top 2 outliers per scorer labeled",
+        fontsize=8.5,
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
