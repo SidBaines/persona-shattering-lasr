@@ -56,6 +56,10 @@ INTRO_CONST_STEM_SUP="${INTRO_CONST_STEM_SUP:-${CONST_STEM_SUP}_slim}"
 # Set CONCAT_ALL_TRAITS=1 for multi-entry constitutions that should render all
 # trait sentences into the shared system prompt.
 CONCAT_ALL_TRAITS="${CONCAT_ALL_TRAITS:-0}"
+# OCT pipeline --stages flag. Default "all" runs distillation + DPO +
+# introspection + SFT + merge. Set STAGES=distillation to stop after DPO
+# (~3-5x faster; produces only the {STEM}-dpo adapter, not the -persona one).
+STAGES="${STAGES:-all}"
 
 # H100 SXM (80 GB) throughput overrides — same as the OCEAN paired_dpo runs.
 DPO_MICRO_BATCH=8
@@ -113,6 +117,7 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
     echo "  out_dir:                 ${OUT_DIR}"
     echo "  log:                     ${RUN_LOG}"
     echo "  monorepo version:        ${VERSION}"
+    echo "  stages:                  ${STAGES}"
     if [ "$CONCAT_ALL_TRAITS" = "1" ]; then
         echo "  concat all traits:       yes"
     fi
@@ -130,6 +135,7 @@ for DIRECTION in $DIRECTIONS_TO_RUN; do
           --monorepo-trait "$TRAIT" \
           --monorepo-direction "$DIRECTION" \
           --monorepo-version "$VERSION" \
+          --stages "$STAGES" \
           --oct-dpo-micro-batch-size "$DPO_MICRO_BATCH" \
           --oct-sft-micro-batch-size "$SFT_MICRO_BATCH" \
           --introspection-max-num-seqs "$INTROSPECTION_MAX_NUM_SEQS" \
