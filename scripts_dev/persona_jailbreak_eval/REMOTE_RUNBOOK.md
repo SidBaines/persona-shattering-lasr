@@ -37,34 +37,52 @@ wired through the existing venv.
 
 ---
 
-## 2. Required artefacts (capping condition only)
+## 2. HF hydrate / upload (default ON)
 
-The activation-capping condition reuses the `axis.pt` and `capping_config.pt`
-your previous drift smoke produced. From the HANDOVER these live at:
+Both drivers default to **hydrating from and uploading to** the
+`persona-shattering-lasr/monorepo` HF dataset:
 
-```text
-scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/axes/base/axis.pt
-scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/capping_config.pt
-```
+- **Hydrate at startup** (`evals/{eval_type}/{model_slug}/{run_slug}/`):
+  if a prior run with the same `run_slug` exists on HF, its responses +
+  judgments are downloaded into the local run-dir before any inference, so
+  the idempotent stages skip already-completed work. Disable with
+  `--no-hydrate-hf`.
+- **Upload after each stage**: after inference, after judging, and after
+  aggregation. Disable with `--no-upload-hf`.
 
-If those aren't on disk on this machine, either rsync them from the original
-machine or rebuild via the drift script's Phase 1 + Phase 2 (`build_axis`,
-`pick_capping`).
+**Capping artefacts also auto-hydrate.** If `activation_capping` is in
+`--conditions` and `axis.pt` / `capping_config.pt` aren't already on disk,
+the eval pulls the drift script's axis dir from
+`activation_capping/assistant_axis/{model_slug}/{drift_run_slug}/axes/base/`
+on HF (uploaded by `build_axis.py --upload-hf`) and re-derives
+`capping_config.pt` locally from the per-role activations (~30 s, CPU).
+Default `drift_run_slug` is `smoke_v1`; override via `--drift-run-slug`.
 
-If you want to skip capping and only compare vanilla vs LoRA-soup, see §5
-below — no artefacts needed.
+You can still pass `--axis-path` / `--capping-config-path` explicitly to
+short-circuit hydrate; if those exist on disk they're used as-is.
+
+If you want to skip capping entirely, pass `--conditions vanilla,lora_soup_c_plus_o_minus`
+and no axis/capping artefacts are needed.
 
 ---
 
 ## 3. Smoke run — Option 1 (persona × StrongREJECT grid)
+
+Minimal command — capping artefacts auto-hydrate from the drift run on HF:
 
 ```bash
 mkdir -p logs
 
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_persona_grid \
     --preset smoke \
-    --axis-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/axes/base/axis.pt \
-    --capping-config-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/capping_config.pt \
+    2>&1 | tee logs/jailbreak_grid_smoke.log
+```
+
+If your drift run lives under a different `run_slug` (default is `smoke_v1`):
+
+```bash
+.venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_persona_grid \
+    --preset smoke --drift-run-slug balanced_v1 \
     2>&1 | tee logs/jailbreak_grid_smoke.log
 ```
 
@@ -78,8 +96,6 @@ Smoke = 4 personas × 2 sysprompts × 25 StrongREJECT items + 50 benign control
 ```bash
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_wildjailbreak \
     --preset smoke \
-    --axis-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/axes/base/axis.pt \
-    --capping-config-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/capping_config.pt \
     2>&1 | tee logs/jailbreak_wj_smoke.log
 ```
 
@@ -171,17 +187,11 @@ existing JSONL:
 ```bash
 # Balanced (~3–5 GPU hr, ~$30): publication-quality CIs.
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_persona_grid \
-    --preset balanced \
-    --axis-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/axes/base/axis.pt \
-    --capping-config-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/capping_config.pt \
-    2>&1 | tee logs/jailbreak_grid_balanced.log
+    --preset balanced 2>&1 | tee logs/jailbreak_grid_balanced.log
 
 # Full (~12 GPU hr, ~$200): paper-faithful sample sizes.
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_persona_grid \
-    --preset full \
-    --axis-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/axes/base/axis.pt \
-    --capping-config-path scratch/persona_drift_assistant_axis/llama-3.1-8b-instruct/smoke_v1/capping_config.pt \
-    2>&1 | tee logs/jailbreak_grid_full.log
+    --preset full 2>&1 | tee logs/jailbreak_grid_full.log
 ```
 
 For long runs, prefer `tmux` / `nohup` so a dropped SSH session doesn't kill
