@@ -636,6 +636,13 @@ def parse_args() -> argparse.Namespace:
         help="Max new tokens for assistant responses (default: 4096).",
     )
     parser.add_argument(
+        "--assistant-temperature",
+        type=float,
+        default=1.0,
+        help="Assistant sampling temperature (default: 1.0). Lower values "
+             "(e.g. 0.7) reduce token-soup tail collapse on long outputs.",
+    )
+    parser.add_argument(
         "--vllm",
         action="store_true",
         default=False,
@@ -701,6 +708,7 @@ def main() -> None:
     else:
         print(f"Dataset: {args.dataset}")
     print(f"Samples: {args.max_samples}, Rollouts: {args.num_rollouts}, Turns: {args.num_turns}")
+    print(f"Assistant temperature: {args.assistant_temperature}")
     print(f"User sim model: {args.user_model}")
     if args.method == "lora":
         print(f"Scale points: {scale_points}")
@@ -714,7 +722,7 @@ def main() -> None:
     experiment_config = ExperimentConfig(
         assistant_model=BASE_MODEL,
         assistant_provider=args.assistant_provider,
-        assistant_temperature=1.0,
+        assistant_temperature=args.assistant_temperature,
         assistant_top_p=1.0,
         assistant_max_new_tokens=args.assistant_max_new_tokens,
         assistant_batch_size=args.assistant_batch_size,
