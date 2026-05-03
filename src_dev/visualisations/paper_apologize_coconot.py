@@ -158,8 +158,8 @@ CONDITIONS: list[Condition] = [
     # Agreeable-direction pair: same colour (C_ORGANIC), hatched on the flipped-scale path.
     Condition(
         key="a_minus_m1",
-        short="A− @ −1",
-        legend="A− @ scale −1",
+        short="A↓↓",
+        legend="A↓ @ scale ↓",
         color=C_ORGANIC,
         hatch="///",
         syc_log_in_repo=(
@@ -173,8 +173,8 @@ CONDITIONS: list[Condition] = [
     ),
     Condition(
         key="a_plus_p1",
-        short="A+ @ +1",
-        legend="A+ @ scale +1",
+        short="A↑↑",
+        legend="A↑ @ scale ↑",
         color=C_ORGANIC,
         hatch=None,
         syc_log_in_repo=(
@@ -189,8 +189,8 @@ CONDITIONS: list[Condition] = [
     # Disagreeable-direction pair: same colour (C_INJECTED), hatched on the flipped-scale path.
     Condition(
         key="a_plus_m1",
-        short="A+ @ −1",
-        legend="A+ @ scale −1",
+        short="A↑↓",
+        legend="A↑ @ scale ↓",
         color=C_INJECTED,
         hatch="///",
         syc_log_in_repo=(
@@ -204,8 +204,8 @@ CONDITIONS: list[Condition] = [
     ),
     Condition(
         key="a_minus_p1",
-        short="A− @ +1",
-        legend="A− @ scale +1",
+        short="A↓↑",
+        legend="A↓ @ scale ↑",
         color=C_INJECTED,
         hatch=None,
         syc_log_in_repo=(
@@ -310,7 +310,7 @@ def _draw_panel(
 ) -> None:
     n = len(CONDITIONS)
     x = np.arange(n, dtype=float)
-    width = 0.62
+    width = 0.96  # densely-attached: bars almost touch one another
 
     bars = ax.bar(
         x,
