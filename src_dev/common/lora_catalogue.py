@@ -49,18 +49,37 @@ class OceanTraitDef:
         return f"{HF_REPO}::{self.adapter_path_in_repo}"
 
     @property
+    def _axis_dir_in_repo(self) -> str:
+        """HF dir holding this trait's activation capping artifacts.
+
+        Co-located with the LoRA: ``<lora_parent>/activation_capping/``.
+        Replaces the previous global ``activation_capping/{slug}/`` path
+        which pointed at older (vanton1-derived) axes.
+        """
+        # adapter_path_in_repo ends with "/lora/<adapter_name>"; strip those
+        # two segments to get the lora's parent dir.
+        parts = self.adapter_path_in_repo.rstrip("/").split("/")
+        if len(parts) < 2 or parts[-2] != "lora":
+            raise ValueError(
+                f"Cannot derive axis dir from adapter_path_in_repo={self.adapter_path_in_repo!r} "
+                "(expected to end with /lora/<name>)."
+            )
+        lora_parent = "/".join(parts[:-2])
+        return f"{lora_parent}/activation_capping"
+
+    @property
     def axis_hf_uri(self) -> str | None:
         """``hf://`` URI for the activation capping axis file."""
         if self.axis_slug is None:
             return None
-        return f"hf://{HF_REPO}/activation_capping/{self.axis_slug}/{self.axis_slug}_axis.pt"
+        return f"hf://{HF_REPO}/{self._axis_dir_in_repo}/{self.axis_slug}_axis.pt"
 
     @property
     def per_layer_range_hf_uri(self) -> str | None:
         """``hf://`` URI for the per-layer range file."""
         if self.axis_slug is None:
             return None
-        return f"hf://{HF_REPO}/activation_capping/{self.axis_slug}/{self.axis_slug}_per_layer_range.pt"
+        return f"hf://{HF_REPO}/{self._axis_dir_in_repo}/{self.axis_slug}_per_layer_range.pt"
 
     @property
     def upload_subpath(self) -> str:

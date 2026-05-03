@@ -778,12 +778,6 @@ def main() -> None:
                 continue
             assert trait_def.axis_hf_uri is not None
             assert trait_def.per_layer_range_hf_uri is not None
-            print(
-                "  ⚠️  CAVEAT: activation capping axis was computed against "
-                "an older adapter version (vanton1) than the current canonical "
-                "vanton4_paired_dpo. Direction is likely close but not identical. "
-                "See plan/README for details."
-            )
             print(f"  Axis: {trait_def.axis_hf_uri}")
             print(f"  Fractions: {fractions}")
             capping_layers = _read_capping_layers_from_axis(trait_def.axis_hf_uri)
