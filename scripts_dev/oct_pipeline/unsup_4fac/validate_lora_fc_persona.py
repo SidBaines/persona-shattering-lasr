@@ -83,9 +83,105 @@ from src_dev.psychometric.questionnaire_inference import (  # noqa: E402
 )
 from src_dev.psychometric.questionnaire_io import load_questionnaire  # noqa: E402
 from src_dev.unsupervised_runs.io import hydrate_dataset_subtree  # noqa: E402
+from src_dev.utils import upload_folder_to_dataset_repo  # noqa: E402
+from src_dev.utils.hf_hub import download_path_to_dir  # noqa: E402
+
+MONOREPO_REPO = "persona-shattering-lasr/monorepo"
 
 DEFAULT_QUESTIONNAIRE = Path("datasets/psychometric_questionnaires/f0_forced_choice_v1.json")
 OUT_ROOT = Path("scratch/factor_inspect/validate_fc_persona")
+
+
+# ── HF cache path derivation ───────────────────────────────────────────────
+
+
+def hf_path_for_label(adapter_url: str | None, label: str) -> str:
+    """Return the monorepo subpath where this run's artifacts cache lives.
+
+    LoRA: parses ``persona-shattering-lasr/monorepo::<prefix>/lora/<name>``
+    and returns ``<prefix>/evals/factor_validate_fc_persona/<label>``.
+    Baseline (adapter is None): returns
+    ``evals/factor_validate_fc_persona/<label>``.
+    Returns ``""`` (empty) when the adapter URL can't be parsed (e.g. a
+    raw local path); in that case we skip HF caching.
+    """
+    if adapter_url is None:
+        return f"evals/factor_validate_fc_persona/{label}"
+    if "::" not in adapter_url:
+        return ""
+    _repo, ref = adapter_url.split("::", 1)
+    if "/lora/" not in ref:
+        return ""
+    prefix = ref.split("/lora/")[0]  # e.g. fine_tuning/.../v<version>
+    return f"{prefix}/evals/factor_validate_fc_persona/{label}"
+
+
+def rehydrate_ordering_dir(local_ord_dir: Path, hf_subpath_root: str, ord_label: str) -> bool:
+    """Try to download cached responses for one ordering from HF into local_ord_dir.
+
+    The questionnaire-inference resume logic will then skip already-completed
+    cells based on the rehydrated ``raw_responses.jsonl``.
+
+    Returns True if any files were downloaded, False otherwise (network
+    failure, 404, or empty subpath).
+    """
+    if not hf_subpath_root:
+        return False
+    hf_subpath = f"{hf_subpath_root}/questionnaire_{ord_label}"
+    local_ord_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        download_path_to_dir(
+            repo_id=MONOREPO_REPO,
+            path_in_repo=hf_subpath,
+            target_dir=local_ord_dir,
+        )
+    except Exception as exc:
+        # Common: not yet uploaded → 404. Log briefly and proceed.
+        print(f"[fc_persona] (no cached HF artifacts at {hf_subpath}; will run fresh — {type(exc).__name__})")
+        return False
+    contents = list(local_ord_dir.iterdir()) if local_ord_dir.exists() else []
+    if not contents:
+        return False
+    print(f"[fc_persona] rehydrated {len(contents)} files from {hf_subpath}")
+    return True
+
+
+def upload_ordering_dir(local_ord_dir: Path, hf_subpath_root: str, ord_label: str, label: str) -> None:
+    """Upload one ordering's output dir to monorepo (raw_responses, matrix, etc.)."""
+    if not hf_subpath_root:
+        print(f"[fc_persona] skipping HF upload (no parseable hf_subpath_root)")
+        return
+    hf_subpath = f"{hf_subpath_root}/questionnaire_{ord_label}"
+    try:
+        url = upload_folder_to_dataset_repo(
+            local_dir=local_ord_dir,
+            repo_id=MONOREPO_REPO,
+            path_in_repo=hf_subpath,
+            commit_message=f"FC persona admin: {label} {ord_label}",
+        )
+        print(f"[fc_persona] uploaded {ord_label} → {url}/tree/main/{hf_subpath}")
+    except Exception as exc:
+        print(f"[fc_persona] HF upload failed ({type(exc).__name__}: {exc}); local files remain")
+
+
+def upload_summary_dir(local_dir: Path, hf_subpath_root: str, label: str) -> None:
+    """Upload the top-level summary + scores npz to monorepo."""
+    if not hf_subpath_root:
+        return
+    try:
+        url = upload_folder_to_dataset_repo(
+            local_dir=local_dir,
+            repo_id=MONOREPO_REPO,
+            path_in_repo=hf_subpath_root,
+            commit_message=f"FC persona summary: {label}",
+            allow_patterns=[
+                f"{label}_summary.json",
+                f"{label}_scores.npz",
+            ],
+        )
+        print(f"[fc_persona] uploaded summary → {url}/tree/main/{hf_subpath_root}")
+    except Exception as exc:
+        print(f"[fc_persona] HF summary upload failed ({type(exc).__name__}: {exc})")
 
 # Where the FA F0 baseline scores live (per-persona, all 2500 personas).
 FA_FIT_NPZ = Path("scratch/factor_inspect/fa_fit.npz")
@@ -317,6 +413,13 @@ async def main_async(args: argparse.Namespace) -> None:
     sub_dir = out_dir / "rollout_sub"
     write_subsample_rollout(ROLLOUT_LOCAL, sub_dir, sample_ids_set)
 
+    # Determine HF cache path (used for rehydrate + upload).
+    hf_subpath_root = hf_path_for_label(args.adapter, args.label)
+    if hf_subpath_root:
+        print(f"[fc_persona] HF cache path: {MONOREPO_REPO}::{hf_subpath_root}")
+    else:
+        print(f"[fc_persona] no parseable HF cache path for adapter={args.adapter!r}; HF rehydrate/upload disabled")
+
     # Two orderings (high as A, then high as B).
     all_matrices: list[np.ndarray] = []
     all_meta: list[list[dict]] = []
@@ -327,6 +430,14 @@ async def main_async(args: argparse.Namespace) -> None:
         converted = convert_fc_to_fc_pair_schema(fc_qsts, swap_AB=swap_AB)
         tmp_qsts = write_temp_questionnaire(converted)
         ord_out = out_dir / f"questionnaire_{ord_label}"
+
+        # Try to pull cached responses from monorepo first; if found, the
+        # questionnaire inference's resume logic will skip already-completed
+        # cells (or the matrix-rebuild fast path runs entirely without
+        # inference if every cell is in raw_responses.jsonl).
+        if not args.no_hf_rehydrate:
+            rehydrate_ordering_dir(ord_out, hf_subpath_root, ord_label)
+
         matrix, cols, meta = await admin_one_ordering(
             rollout_dir=sub_dir,
             questionnaire_path=tmp_qsts,
@@ -338,6 +449,10 @@ async def main_async(args: argparse.Namespace) -> None:
         if item_id_order is None:
             item_id_order = [c["item_id"] for c in cols]
         print(f"[fc_persona] ordering {ord_label}: matrix shape {matrix.shape}")
+
+        # Optional upload of this ordering's outputs.
+        if args.upload_monorepo:
+            upload_ordering_dir(ord_out, hf_subpath_root, ord_label, args.label)
 
     # Both matrices are encoded so +1 = high pole picked. Average element-wise.
     M_high = np.where(np.isnan(all_matrices[0]), all_matrices[1], all_matrices[0])
@@ -415,6 +530,11 @@ async def main_async(args: argparse.Namespace) -> None:
     print(f"\n[fc_persona] wrote {summary_path}")
     print(f"[fc_persona] wrote {scores_path}")
 
+    # Upload the top-level summary + scores npz to monorepo (next to the
+    # per-ordering questionnaire dirs we already uploaded above).
+    if args.upload_monorepo:
+        upload_summary_dir(out_dir, hf_subpath_root, args.label)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -422,6 +542,22 @@ def main() -> None:
     parser.add_argument("--label", required=True)
     parser.add_argument("--questionnaire", default=str(DEFAULT_QUESTIONNAIRE))
     parser.add_argument("--n-personas", type=int, default=200)
+    parser.add_argument(
+        "--upload-monorepo", action="store_true",
+        help="Push outputs (raw_responses.jsonl, response_matrix.npy, items.json, "
+             "metadata.jsonl, summary.json, scores.npz) to monorepo at "
+             "<adapter-prefix>/evals/factor_validate_fc_persona/<label>/ "
+             "(or evals/factor_validate_fc_persona/<label>/ for baseline). "
+             "Other machines / re-runs can then rehydrate without re-doing inference.",
+    )
+    parser.add_argument(
+        "--no-hf-rehydrate", action="store_true",
+        help="Skip the HF rehydrate-from-cache step at startup. By default "
+             "the script tries to pull cached responses from monorepo into "
+             "the local output_dir before running inference, so the "
+             "questionnaire-inference resume logic skips already-completed "
+             "cells (and runs zero inference if all cells are cached).",
+    )
     args = parser.parse_args()
     asyncio.run(main_async(args))
 
