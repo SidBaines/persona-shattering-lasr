@@ -13,7 +13,7 @@ Substitutions vs. the paper:
   - over-refusal control: the same harm-personas paired with benign Alpaca
     instructions (the paper did not have one).
 
-Conditions (default): vanilla, activation_capping, lora_soup_c_plus_o_minus.
+Conditions (default): vanilla, activation_capping, lora_soup_c_plus_0.5_o_minus_0.5.
 Customise via ``cfg.conditions`` and ``cfg.lora_combos``.
 
 Usage::
