@@ -31,7 +31,11 @@ cd "$(dirname "$0")/../../.."
 
 git pull --ff-only || echo "WARN: git pull failed — continuing with current checkout"
 
-WINNERS_V1="e_minus_solo_cabin_weekend_01,e_minus_grief_evening_01,e_minus_rainy_afternoon_reading_01,e_minus_astronomy_clear_night_01"
+# Combined scenario pool: 4 v1 winners + 5 v2 (all of which drifted on
+# the morning sanity sweep). 9 scenarios total. Going forward, all
+# downstream cells should use this combined pool unless we have a reason
+# to slice.
+SCENARIOS="e_minus_solo_cabin_weekend_01,e_minus_grief_evening_01,e_minus_rainy_afternoon_reading_01,e_minus_astronomy_clear_night_01,e_minus_old_letters_drawer_06,e_minus_late_night_regret_07,e_minus_translating_haiku_08,e_minus_dawn_light_question_09,e_minus_estranged_sibling_letter_10"
 
 mkdir -p logs
 TS=$(date +%Y%m%d_%H%M%S)
@@ -79,7 +83,7 @@ run_cell "05_actcap_winners" \
         --traits e_plus --method activation_capping \
         --fractions=0.25,0.5,0.75,1.0 \
         --conditions pressure_scenarios \
-        --scenario-ids "$WINNERS_V1" \
+        --scenario-ids "$SCENARIOS" \
         "${COMMON_FLAGS[@]}"
 
 # ─────────────────────────────────────────────────────────────────────────────
