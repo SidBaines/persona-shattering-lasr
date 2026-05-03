@@ -48,8 +48,8 @@ class LoraComboCondition(BaseModel):
     via ``src_dev.common.lora_catalogue.OCEAN_REGISTRY``.
     """
 
-    name: str = "lora_soup_c_plus_o_minus"
-    adapters: list[tuple[str, float]] = [("c_plus", 1.0), ("o_minus", 1.0)]
+    name: str = "lora_soup_c_plus_0.5_o_minus_0.5"
+    adapters: list[tuple[str, float]] = [("c_plus", 0.5), ("o_minus", 0.5)]
 
 
 # ── Eval config ──────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ class JailbreakEvalConfig(BaseModel):
     conditions: tuple[str, ...] = (
         "vanilla",
         "activation_capping",
-        "lora_soup_c_plus_o_minus",
+        "lora_soup_c_plus_0.5_o_minus_0.5",
     )
     lora_combos: tuple[LoraComboCondition, ...] = (LoraComboCondition(),)
 

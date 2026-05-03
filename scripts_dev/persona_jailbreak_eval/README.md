@@ -15,7 +15,7 @@ Both compare three conditions on Llama-3.1-8B-Instruct (configurable):
 |---|---|---|
 | `vanilla` | base model, no intervention | vLLM |
 | `activation_capping` | paper Eq. 1 floor cap on the Assistant Axis | HF transformers (forward hooks) |
-| `lora_soup_c_plus_o_minus` | C+(1.0) ⊕ O−(1.0) baked LoRA soup | vLLM |
+| `lora_soup_c_plus_0.5_o_minus_0.5` | C+(0.5) ⊕ O−(0.5) baked LoRA soup | vLLM |
 
 ## Pipeline
 
@@ -74,12 +74,12 @@ inference and judgments without redoing work. To skip aggregation:
 ## Skipping the capping condition
 
 If you only want to compare vanilla vs. LoRA-soup (no capping artefacts
-needed), pass `--conditions vanilla,lora_soup_c_plus_o_minus`:
+needed), pass `--conditions vanilla,lora_soup_c_plus_0.5_o_minus_0.5`:
 
 ```bash
 .venv/bin/python -m scripts_dev.persona_jailbreak_eval.run_persona_grid \
     --preset smoke \
-    --conditions vanilla,lora_soup_c_plus_o_minus
+    --conditions vanilla,lora_soup_c_plus_0.5_o_minus_0.5
 ```
 
 ## Adding new LoRA conditions
@@ -113,8 +113,8 @@ scratch/persona_jailbreak_eval/{model_slug}/{run_slug}/
   responses/
     responses_vanilla.jsonl
     responses_activation_capping.jsonl
-    responses_lora_soup_c_plus_o_minus.jsonl
-    baked_lora_soups/lora_soup_c_plus_o_minus/   # cached merged adapter
+    responses_lora_soup_c_plus_0.5_o_minus_0.5.jsonl
+    baked_lora_soups/lora_soup_c_plus_0.5_o_minus_0.5/   # cached merged adapter
   judgments/
     judgments_<condition>.jsonl                   # one row per (sample, condition)
   aggregate/
