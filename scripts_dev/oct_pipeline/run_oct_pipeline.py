@@ -3010,7 +3010,31 @@ def _artifact_exists(path: Path, kind: str) -> bool:
         return path.is_file() and path.stat().st_size > 0
     if kind == "dir":
         return path.is_dir() and any(path.iterdir())
+    if kind == "hf_model":
+        return _hf_model_artifact_exists(path)
     raise ValueError(f"Unsupported artifact kind: {kind}")
+
+
+def _hf_model_artifact_exists(path: Path) -> bool:
+    """Return whether a local HuggingFace model checkpoint looks complete."""
+    if not path.is_dir():
+        return False
+    if (path / "model.safetensors").is_file() or (path / "pytorch_model.bin").is_file():
+        return True
+
+    index_path = path / "model.safetensors.index.json"
+    if not index_path.is_file():
+        return False
+    try:
+        index_data = json.loads(index_path.read_text())
+    except json.JSONDecodeError:
+        return False
+
+    weight_map = index_data.get("weight_map")
+    if not isinstance(weight_map, dict) or not weight_map:
+        return False
+    shard_names = set(weight_map.values())
+    return all((path / shard).is_file() and (path / shard).stat().st_size > 0 for shard in shard_names)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -3794,7 +3818,7 @@ def main(
                 # intermediate that is cheap to regenerate from the base model and
                 # the already-uploaded DPO adapter, so we keep it local-only.
                 distilled_model_artifacts = [
-                    {"path": distilled_model_path, "kind": "dir", "upload": False}
+                    {"path": distilled_model_path, "kind": "hf_model", "upload": False}
                 ]
                 have_distilled_model = _ensure_stage_available(
                     out_path=out_path,
