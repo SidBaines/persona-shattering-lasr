@@ -72,7 +72,8 @@ FAILED=()
 # Set to "amplifier suppressor" to train both, "amplifier" or "suppressor" for
 # just one. The amplifier is the primary training target; the suppressor is
 # trained as the validation companion (push the factor down on the same student).
-DIRECTIONS_TO_RUN="amplifier suppressor"
+# Override via DIRECTIONS_TO_RUN env var (e.g. to interleave train+eval per pole).
+DIRECTIONS_TO_RUN="${DIRECTIONS_TO_RUN:-amplifier suppressor}"
 
 for DIRECTION in $DIRECTIONS_TO_RUN; do
     if [ "$DIRECTION" = "amplifier" ]; then
