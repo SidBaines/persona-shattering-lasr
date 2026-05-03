@@ -38,25 +38,29 @@ class JudgmentRecord:
 
 
 def load_judgments_jsonl(path: Path) -> list[JudgmentRecord]:
-    """Load judgment records from a JSONL file. Skips parse-error rows."""
-    out: list[JudgmentRecord] = []
+    """Load judgment records from a JSONL file.
+
+    Last-write-wins on ``(sample_id, condition)`` so retried parse-errored
+    rows don't double-count. ``label is None`` rows (e.g. unresolved parse
+    errors) are kept in the output but downstream aggregators filter them.
+    """
+    by_key: dict[tuple[str, str], JudgmentRecord] = {}
     with Path(path).open() as fh:
         for line in fh:
             if not line.strip():
                 continue
             row = json.loads(line)
-            out.append(
-                JudgmentRecord(
-                    sample_id=row["sample_id"],
-                    condition=row["condition"],
-                    kind=row.get("kind", "harmful"),
-                    category=row.get("category", "unknown"),
-                    label=row.get("label"),
-                    is_harmful=bool(row.get("is_harmful", False)),
-                    is_refusal=bool(row.get("is_refusal", False)),
-                )
+            key = (row["sample_id"], row["condition"])
+            by_key[key] = JudgmentRecord(
+                sample_id=row["sample_id"],
+                condition=row["condition"],
+                kind=row.get("kind", "harmful"),
+                category=row.get("category", "unknown"),
+                label=row.get("label"),
+                is_harmful=bool(row.get("is_harmful", False)),
+                is_refusal=bool(row.get("is_refusal", False)),
             )
-    return out
+    return list(by_key.values())
 
 
 @dataclass

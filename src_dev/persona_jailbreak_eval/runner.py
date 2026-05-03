@@ -82,8 +82,14 @@ class PromptSample:
 # ── Idempotent JSONL helpers ─────────────────────────────────────────────
 
 
-def _load_completed_ids(path: Path) -> set[str]:
-    """Read a JSONL output and return the set of ``sample_id`` already written."""
+def _load_completed_ids(path: Path, *, skip_errored: bool = False) -> set[str]:
+    """Read a JSONL output and return the set of ``sample_id`` considered done.
+
+    With ``skip_errored=True``, rows whose ``parse_error`` field is non-null
+    are NOT counted as completed — useful for judge-output JSONLs so that
+    transient JSON-parse failures get retried on re-run rather than baked
+    into the cache forever.
+    """
     if not path.exists():
         return set()
     completed: set[str] = set()
@@ -95,6 +101,8 @@ def _load_completed_ids(path: Path) -> set[str]:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
+                continue
+            if skip_errored and row.get("parse_error"):
                 continue
             sid = row.get("sample_id") or row.get("id")
             if sid:
@@ -324,8 +332,14 @@ def _run_judge_pass(
     binarize_refusal,
     label: str,
 ) -> int:
-    """Generic judge runner: idempotent JSONL append, returns new-judgement count."""
-    completed = _load_completed_ids(output_path)
+    """Generic judge runner: idempotent JSONL append, returns new-judgement count.
+
+    Parse-errored judgments are retried on re-run (``skip_errored=True``).
+    Inference-failed responses (empty string) are still passed to the judge —
+    the rubric will rate them ``nonsensical`` or ``out_of_context``, which is
+    the right answer.
+    """
+    completed = _load_completed_ids(output_path, skip_errored=True)
     pending = [r for r in response_rows if r["sample_id"] not in completed]
     if not pending:
         print(f"  [{label}] all {len(response_rows)} rows already judged at {output_path.name}")
