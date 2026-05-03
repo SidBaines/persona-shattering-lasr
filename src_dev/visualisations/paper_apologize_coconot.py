@@ -149,11 +149,12 @@ CONDITIONS: list[Condition] = [
         hatch=None,
         syc_log_in_repo=(
             "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/"
-            "vanton4_seed1/evals/mcq/sycophancy/control_vanton4_seed1_scale1/"
-            "lora_+1p00x/sycophancy/native/inspect_logs/"
-            "2026-04-29T12-46-19+00-00_sycophancy_8QRoUqgMGCiJK53zQtmaYD.json"
+            "vanton4_paired_dpo_s1vs2/evals/mcq/sycophancy/"
+            "control_vanton4_paired_dpo_s1vs2_scale1/lora_+1p00x/sycophancy/"
+            "native/inspect_logs/"
+            "2026-05-03T14-42-22+00-00_sycophancy_D2sxmLu2rH6NEMdeejsTot.json"
         ),
-        coconot_subdir="control_ocean_def_vanton4_seed1/lora_+1p00x/coconot",
+        coconot_subdir="control_ocean_def_vanton4_paired_dpo_s1vs2/lora_+1p00x/coconot",
     ),
     # Agreeable-direction pair: same colour (C_ORGANIC), hatched on the flipped-scale path.
     Condition(
