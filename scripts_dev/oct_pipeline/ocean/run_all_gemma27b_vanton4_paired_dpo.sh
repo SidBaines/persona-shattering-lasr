@@ -105,6 +105,24 @@ for row in "${ROWS[@]}"; do
     find scratch -mindepth 1 -maxdepth 1 -not -name runner_logs -exec rm -rf {} + 2>/dev/null
     df -h / | head -2
 
+    # NOTE: we deliberately do NOT pass --skip-student-distillation here.
+    # On main, that flag bundles two independent concerns:
+    #   (a) skip the local student vLLM baseline pass, and
+    #   (b) skip DPO-pair conversion + DPO training.
+    # Our flow has paired DPO data already seeded on HF (chosen=teacher amp,
+    # rejected=teacher sup, with the rejected column named after the student
+    # model — see seed_all_gemma27b_vanton4_paired_dpo.sh and
+    # seed_gemma27b_control_paired_dpo.sh). We WANT DPO training to run on that
+    # paired data; we just don't want a separate student-baseline pass, which
+    # is already handled by the stage cache:
+    #   - The seeded JSONL has a column matching --model (gemma-3-27b-it), so
+    #     run_oct_pipeline.py's cache-validation column check passes and no
+    #     student vLLM pass is triggered.
+    #   - The distillation_generation stage marker is on HF, so the cache-hit
+    #     path returns immediately without re-generating.
+    # Passing --skip-student-distillation in this configuration silently
+    # disables DPO training, leaving the resulting LoRA without paired-DPO
+    # signal — exactly what we don't want. Skip this flag.
     run_step "train ${LABEL}" \
         uv run python scripts_dev/oct_pipeline/run_oct_pipeline.py \
             --model "$MODEL" \
