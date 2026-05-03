@@ -485,13 +485,15 @@ _orig_llm_generate = _vllm.LLM.generate
 
 # Fix 4 — gemma max_model_len in self_interaction: the upstream code hardcodes
 #   16384 for non-llama models, but gemma-3-4b-it only supports 8192.  Patch
-#   gen_args in both introspection modules to cap max_model_len for gemma.
+#   gen_args in both introspection modules to cap max_model_len for the
+#   small-context gemma variant only. gemma-3-27b-it supports 128k context, so
+#   the cap must NOT apply to it.
 _orig_reflection_gen_args = oct_reflection.gen_args
 _orig_interaction_gen_args = oct_interaction.gen_args
 
 def _capped_gen_args(orig_fn):
     def _wrapper(model_name, **kwargs):
-        if "gemma" in model_name and kwargs.get("max_model_len", 0) > 8192:
+        if "gemma-3-4b" in model_name and kwargs.get("max_model_len", 0) > 8192:
             kwargs["max_model_len"] = 8192
         return orig_fn(model_name, **kwargs)
     return _wrapper
