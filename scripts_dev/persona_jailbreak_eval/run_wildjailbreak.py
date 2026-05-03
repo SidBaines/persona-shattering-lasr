@@ -50,6 +50,11 @@ from src_dev.persona_jailbreak_eval.config import (  # noqa: E402
     get_wildjailbreak_preset,
 )
 from src_dev.persona_jailbreak_eval.harmful_datasets import load_wildjailbreak  # noqa: E402
+from src_dev.persona_jailbreak_eval.hf_sync import (  # noqa: E402
+    ensure_drift_artefacts,
+    hydrate_run_dir_from_hf,
+    upload_run_dir_to_hf,
+)
 from src_dev.persona_jailbreak_eval.runner import (  # noqa: E402
     PromptSample,
     run_all_conditions_inference,
@@ -152,6 +157,12 @@ def main() -> None:
     parser.add_argument("--n-harmful", type=int)
     parser.add_argument("--n-benign", type=int)
     parser.add_argument("--skip-aggregate", action="store_true")
+    parser.add_argument("--no-upload-hf", action="store_true",
+                        help="Skip HF upload of outputs (default: upload after each stage)")
+    parser.add_argument("--no-hydrate-hf", action="store_true",
+                        help="Skip HF hydration check at startup (default: hydrate)")
+    parser.add_argument("--drift-run-slug", default=None,
+                        help="Drift run-slug to hydrate axis from (default: smoke_v1)")
     args = parser.parse_args()
 
     cfg = get_wildjailbreak_preset(args.preset)
@@ -167,6 +178,13 @@ def main() -> None:
         cfg.n_wildjailbreak_harmful = args.n_harmful
     if args.n_benign is not None:
         cfg.n_wildjailbreak_benign = args.n_benign
+    if args.no_upload_hf:
+        cfg.upload_hf = False
+    if args.no_hydrate_hf:
+        cfg.hydrate_hf = False
+    if args.drift_run_slug is not None:
+        cfg.drift_run_slug = args.drift_run_slug
+    cfg.hf_eval_type = "persona_jailbreak_wildjailbreak"
 
     _seed_everything(cfg.seed)
 
@@ -179,15 +197,66 @@ def main() -> None:
     print(f"  Judge: {cfg.judge.model} (provider={cfg.judge.provider})")
     print("=" * 70)
 
+    if cfg.hydrate_hf:
+        hydrate_run_dir_from_hf(
+            local_run_dir=cfg.run_dir,
+            eval_type=cfg.hf_eval_type,
+            model_slug=cfg.model_slug,
+            run_slug=cfg.run_slug,
+            repo_id=cfg.hf_repo_id,
+        )
+
+    if "activation_capping" in cfg.conditions:
+        axis_path, capping_config_path = ensure_drift_artefacts(
+            model_slug=cfg.model_slug,
+            drift_run_slug=cfg.drift_run_slug,
+            target_dir=cfg.run_dir / "_drift_artefacts",
+            variant=cfg.drift_axis_variant,
+            repo_id=cfg.hf_repo_id,
+            explicit_axis_path=cfg.axis_path,
+            explicit_capping_config_path=cfg.capping_config_path,
+        )
+        if axis_path is None or capping_config_path is None:
+            raise SystemExit(
+                "activation_capping is in --conditions but axis.pt or capping_config.pt "
+                "could not be resolved. Either pass --axis-path / --capping-config-path "
+                "explicitly, or run the drift pipeline (build_axis + pick_capping) for the "
+                f"requested drift_run_slug={cfg.drift_run_slug!r}."
+            )
+        cfg.axis_path = axis_path
+        cfg.capping_config_path = capping_config_path
+        print(f"  axis: {cfg.axis_path}")
+        print(f"  capping_config: {cfg.capping_config_path}")
+
     samples = _build_wj_samples(cfg)
     response_paths = run_all_conditions_inference(
         cfg, samples, output_dir=cfg.run_dir / "responses",
     )
+    if cfg.upload_hf:
+        upload_run_dir_to_hf(
+            local_run_dir=cfg.run_dir, eval_type=cfg.hf_eval_type,
+            model_slug=cfg.model_slug, run_slug=cfg.run_slug,
+            repo_id=cfg.hf_repo_id, stage="inference",
+        )
+
     judgment_paths = run_judges_on_all_conditions(
         cfg, response_paths, output_dir=cfg.run_dir / "judgments",
     )
+    if cfg.upload_hf:
+        upload_run_dir_to_hf(
+            local_run_dir=cfg.run_dir, eval_type=cfg.hf_eval_type,
+            model_slug=cfg.model_slug, run_slug=cfg.run_slug,
+            repo_id=cfg.hf_repo_id, stage="judgments",
+        )
+
     if not args.skip_aggregate:
         _aggregate_and_plot(cfg, judgment_paths)
+        if cfg.upload_hf:
+            upload_run_dir_to_hf(
+                local_run_dir=cfg.run_dir, eval_type=cfg.hf_eval_type,
+                model_slug=cfg.model_slug, run_slug=cfg.run_slug,
+                repo_id=cfg.hf_repo_id, stage="aggregate",
+            )
 
 
 if __name__ == "__main__":
