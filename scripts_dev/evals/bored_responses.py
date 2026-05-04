@@ -52,6 +52,17 @@ _HF_SNAP = Path(
     "/snapshots/ea0a34f123a3c2a813c8f61b88331bce1bd904aa"
 )
 
+# Control adapter (vanton4_paired_dpo_s1vs2 — newest cached version).
+_CONTROL_SNAP = Path(
+    "/root/.cache/huggingface/hub/datasets--persona-shattering-lasr--monorepo"
+    "/snapshots/4baadaceb861bbcc16a16bb2abf306db14605e50"
+)
+_CONTROL_SUBPATH = (
+    "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier"
+    "/vanton4_paired_dpo_s1vs2/lora/ocean_def_control_full_vanton4-persona"
+)
+_CONTROL_REF = f"{HF_REPO}::{_CONTROL_SUBPATH}"
+
 GENERATION_KWARGS: dict = dict(
     max_new_tokens=300,
     temperature=0.7,
@@ -132,12 +143,16 @@ def main() -> None:
         else:
             peft_model.load_adapter(local_path, adapter_name=slug)
 
+    print("  loading adapter 'control'", flush=True)
+    peft_model.load_adapter(str(_CONTROL_SNAP / _CONTROL_SUBPATH), adapter_name="control")
+
     assert peft_model is not None
     peft_model.eval()
 
     # Snapshot original (load-time) scalings for each adapter
+    all_adapter_slugs = list(OCEAN_REGISTRY.keys()) + ["control"]
     orig_scalings: dict[str, dict[str, float]] = {
-        slug: _snapshot_scalings(peft_model, slug) for slug in OCEAN_REGISTRY
+        slug: _snapshot_scalings(peft_model, slug) for slug in all_adapter_slugs
     }
 
     results: list[dict] = []
@@ -166,6 +181,13 @@ def main() -> None:
             "1.0",
             response,
         )
+
+    # ── Control adapter ──────────────────────────────────────────────────────
+    print("\n--- control @ 1.0 ---", flush=True)
+    set_active_adapters(peft_model, ["control"])
+    _apply_scalings(peft_model, "control", orig_scalings["control"], 1.0)
+    response = _generate(peft_model, tokenizer, PROMPT)
+    record("control", _CONTROL_REF, "1.0", response)
 
     # ── N+ at scale 2.0 ──────────────────────────────────────────────────────
     print("\n--- n_plus @ 2.0 ---", flush=True)
