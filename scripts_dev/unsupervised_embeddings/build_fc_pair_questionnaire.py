@@ -39,9 +39,9 @@ PROMPT_TEMPLATE = (
     "{stem}\n\n"
     "A) {option_a}\n"
     "B) {option_b}\n\n"
-    "Reply with just \"A\" or \"B\"."
+    "Please answer with only \"Answer:\" followed by your chosen letter."
 )
-PREFILL = "I'd go with "
+PREFILL = "Answer:"
 
 
 def _axis_field_name(items: list[dict]) -> str:
