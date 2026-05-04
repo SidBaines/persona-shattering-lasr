@@ -129,6 +129,12 @@ See `paper/CLAUDE.md` → "Code ↔ Paper Pointers" for the LaTeX and Python con
 | `appendix/fig_F_agree_combine_trait.pdf` | `fig:F-agree-combine-trait` | `appendices/ocean_results.tex` | `scripts_dev/personality_evals/plot_soup_a_plus_minus.py` | `combos/llama-3.1-8b-it/ocean-agreeableness-amplifier-{ver}__ocean-agreeableness-suppressor-{ver}/trait/{fp}/cell_<spec>/` (TBD — confirm the specific A+/A- versions used for this figure) | `placeholder` | Currently `tmp/image44.png`. Subfig of `fig:F-agree-combine`. A+/A- scale sweep. |
 | `appendix/fig_F_agree_combine_compare.pdf` | `fig:F-agree-combine-compare` | `appendices/ocean_results.tex` | `scripts_dev/personality_evals/plot_soup_a_plus_minus.py` | `combos/llama-3.1-8b-it/ocean-agreeableness-amplifier-{ver}__ocean-agreeableness-suppressor-{ver}/trait/{fp}/cell_<spec>/` (TBD — same A+/A- versions as `fig:F-agree-combine-trait`) | `placeholder` | Currently `tmp/image45.png`. Subfig of `fig:F-agree-combine`. Comparison to base model. |
 
+### Appendix G — Induction methods comparison (`appendices/induction_comparison.tex`)
+
+| Path | Ref | Section | Script | Data source | Status | Notes |
+|------|-----|---------|--------|-------------|--------|-------|
+| `appendix/fig_G_induction_pareto_eplus.pdf` | `fig:induction-pareto` | `appendices/induction_comparison.tex` | `src_dev/visualisations/paper_appendix_induction_pareto.py` | Multiple cells under `fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton4_paired_dpo/rollouts/`: base at `rollout_baseline_t0.7_steering/base/baseline/run_info.json`; LoRA sweep at `rollout_sweep_lora_t0.7_steering/scale_+0.{25,50,75},+1.00/baseline/run_info.json`; actcap sweep at `rollout_sweep_activation_capping_t0.7_steering/frac_0.{25,50,75,85},1.00/baseline/run_info.json`; sysprompt at `rollout_sysprompt_elicit_t0.7_steering/base/sysprompt_elicit_extraversion_high/run_info.json`; user-roleplay at `rollout_scenarios/subset_3e141037_t0.7_steering/high/base/scenarios_extraversion_high/run_info.json`. Each `run_info.json` carries the cell's overall extraversion and coherence means. | `script-exists` | Pareto scatter of (extraversion, coherence) for each (method, intervention strength) cell, with within-method points connected to show the path traced as strength grows. Reference dotted line at base coherence. **Subfig of `fig:induction-pareto` in `appendices/induction_comparison.tex`.** |
+
 ### Appendix H — TRAIT metrics of Open Character (`appendices/trait_metrics.tex`)
 
 | Path | Ref | Section | Script | Data source | Status | Notes |
