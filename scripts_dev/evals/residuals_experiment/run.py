@@ -123,10 +123,17 @@ STAGING_ROOT = project_root / "scratch" / "residuals_staging"
 BAKED_ROOT = project_root / "scratch" / "residuals_baked"
 
 # ---------------------------------------------------------------------------
-# Adapter registry — canonical OCEAN order (O C E A N), amp then sup
+# Adapter registry — canonical OCEAN order (O C E A N), amp then sup, + ctrl
 # ---------------------------------------------------------------------------
 # Importing inside a function avoids heavy imports at module load time (so
 # --dry-run stays fast), but the list is module-level for clarity.
+
+# Control adapter: paired-DPO training on neutral OCEAN-defining conversations.
+CONTROL_ADAPTER_PATH = (
+    "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier"
+    "/vanton4_paired_dpo_s1vs2/lora/ocean_def_control_full_vanton4-persona"
+)
+
 
 def _build_adapters() -> list[Any]:
     from src_dev.common.lora_catalogue import OCEAN_REGISTRY
@@ -139,10 +146,13 @@ def _build_adapters() -> list[Any]:
         "a_plus", "a_minus",
         "n_plus", "n_minus",
     ]
-    return [
+    adapters = [
         AdapterSpec.from_ref(f"{HF_REPO_ID}::{OCEAN_REGISTRY[k].adapter_path_in_repo}")
         for k in ordered_keys
     ]
+    # Append the control adapter as the 11th entry.
+    adapters.append(AdapterSpec.from_ref(f"{HF_REPO_ID}::{CONTROL_ADAPTER_PATH}"))
+    return adapters
 
 
 # Friendly short slug for each AdapterSpec.slug → OCEAN_REGISTRY key mapping.
@@ -155,6 +165,8 @@ def _build_friendly_slug_map() -> dict[str, str]:
     for key, td in OCEAN_REGISTRY.items():
         spec = AdapterSpec.from_ref(f"{HF_REPO_ID}::{td.adapter_path_in_repo}")
         result[spec.slug] = key
+    ctrl_spec = AdapterSpec.from_ref(f"{HF_REPO_ID}::{CONTROL_ADAPTER_PATH}")
+    result[ctrl_spec.slug] = "ctrl"
     return result
 
 

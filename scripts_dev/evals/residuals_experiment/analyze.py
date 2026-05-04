@@ -26,22 +26,39 @@ At adapter scale=1 (far from saturation), (c) is likely small; (a) and (b)
 dominate.  To disentangle them, look at which off-target metrics have the
 largest residuals — those point to entanglement, not true weight interaction.
 
+Data source
+~~~~~~~~~~~
+By default, ``scores.json`` is pulled from HuggingFace at::
+
+    persona-shattering-lasr/monorepo
+      └─ evals/residuals_experiment/residuals-vanton4-paired-dpo/scores.json
+
+The local cache lives at ``scratch/residuals_experiment/_hf_cache/...``.  Pass
+``--scores PATH`` to use a local scores.json instead (e.g. immediately after
+``run.py``).
+
 Outputs (all under scratch/residuals_experiment/)::
 
     residuals.json             — full ε table (pair × metric)
     residuals_summary.txt      — ranked summary table, sorted by mean|ε|
-    plots/heatmap_{metric}.png — per-metric 10×10 ε heatmap (local)
+    plots/heatmap_{metric}.png — per-metric 11×10 ε heatmap (local)
+    plots/residual_distribution.pdf            — KDE distribution (raw)
+    plots/residual_distribution_normalized.pdf — KDE distribution (judge-σ normalized)
 
 Paper figures (written to paper/figures/)::
 
-    appendix/fig_residuals_heatmap.pdf  — 1×5 panel heatmap across OCEAN metrics
-    main/fig_residuals_distribution.pdf — distribution of all 225 ε with tail labels
+    appendix/fig_residuals_heatmap.pdf                  — 1×5 panel heatmap with ctrl row
+    main/fig_residuals_distribution.pdf                 — 6 KDE curves (raw)
+    main/fig_residuals_distribution_normalized.pdf      — 6 KDE curves (ε / σ_k)
 
-Usage::
+Usage (reproducing paper figures from HF)::
 
     uv run python -m scripts_dev.evals.residuals_experiment.analyze
+
+Usage (using a local scores.json, e.g. just after run.py)::
+
     uv run python -m scripts_dev.evals.residuals_experiment.analyze \\
-        --scores path/to/scores.json
+        --scores scratch/residuals_experiment/scores.json
 """
 
 from __future__ import annotations
@@ -60,9 +77,15 @@ sys.path.insert(0, str(project_root))
 SCORES_PATH = project_root / "scratch" / "residuals_experiment" / "scores.json"
 OUTPUT_DIR = project_root / "scratch" / "residuals_experiment"
 
+# HuggingFace location of the residuals data (uploaded by run.py).
+HF_REPO_ID = "persona-shattering-lasr/monorepo"
+HF_EVAL_NAME = "residuals-vanton4-paired-dpo"
+HF_SCORES_PATH = f"evals/residuals_experiment/{HF_EVAL_NAME}/scores.json"
+
 PAPER_FIGURES = [
     "appendix/fig_residuals_heatmap.pdf",
     "main/fig_residuals_distribution.pdf",
+    "main/fig_residuals_distribution_normalized.pdf",
 ]
 
 # Short display labels for adapter slugs → friendly key mapping.
@@ -72,6 +95,7 @@ _DISPLAY_LABELS = {
     "e_plus": "E+", "e_minus": "E−",
     "a_plus": "A+", "a_minus": "A−",
     "n_plus": "N+", "n_minus": "N−",
+    "ctrl": "Ctrl",
 }
 
 
@@ -206,20 +230,51 @@ def format_summary_table(
 # ---------------------------------------------------------------------------
 
 
+# Friendly keys that should be shown as appended rows (not part of the
+# symmetric OCEAN block) in the heatmap.
+EXTRA_ROW_KEYS = {"ctrl"}
+
+
+def _split_keys(friendly_keys: list[str]) -> tuple[list[str], list[str]]:
+    """Split friendly_keys into the OCEAN block (cols/rows) and extras (rows only)."""
+    ocean = [k for k in friendly_keys if k not in EXTRA_ROW_KEYS]
+    extras = [k for k in friendly_keys if k in EXTRA_ROW_KEYS]
+    return ocean, extras
+
+
 def _build_residual_matrix(
     residuals: dict[tuple[str, str], dict[str, float]],
-    friendly_keys: list[str],
+    ocean_keys: list[str],
+    extra_keys: list[str],
     metric: str,
 ) -> np.ndarray:
-    """10×10 matrix of ε_ij(metric); NaN on diagonal and unfilled cells."""
-    n = len(friendly_keys)
-    idx = {k: i for i, k in enumerate(friendly_keys)}
-    mat = np.full((n, n), float("nan"))
-    for (fi, fj), metric_vals in residuals.items():
-        v = metric_vals.get(metric, float("nan"))
-        i, j = idx[fi], idx[fj]
-        mat[i, j] = v
-        mat[j, i] = v  # symmetric display
+    """Build the heatmap matrix.
+
+    Shape (n_ocean + n_extra, n_ocean):
+      - rows 0..n_ocean-1, cols j (with j > r): upper triangle of OCEAN×OCEAN.
+      - rows n_ocean..: extras (e.g. ctrl); each cell is ε(extra, OCEAN_j).
+      - all other cells (diagonal + lower triangle of OCEAN block): NaN.
+    """
+    n_ocean = len(ocean_keys)
+    n_extra = len(extra_keys)
+    mat = np.full((n_ocean + n_extra, n_ocean), float("nan"))
+
+    def _eps(a: str, b: str) -> float:
+        d = residuals.get((a, b)) or residuals.get((b, a)) or {}
+        return d.get(metric, float("nan"))
+
+    # Upper triangle of OCEAN×OCEAN.
+    for r, fr in enumerate(ocean_keys):
+        for c, fc in enumerate(ocean_keys):
+            if c <= r:
+                continue  # diagonal + lower triangle stay NaN
+            mat[r, c] = _eps(fr, fc)
+
+    # Extra rows: full row of extra × OCEAN_j.
+    for ex_idx, ex_key in enumerate(extra_keys):
+        for c, fc in enumerate(ocean_keys):
+            mat[n_ocean + ex_idx, c] = _eps(ex_key, fc)
+
     return mat
 
 
@@ -235,32 +290,51 @@ def plot_residual_heatmaps(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    labels = [_display_label(k) for k in friendly_keys]
-    n = len(labels)
+    ocean_keys, extra_keys = _split_keys(friendly_keys)
+    row_labels = [_display_label(k) for k in ocean_keys + extra_keys]
+    col_labels = [_display_label(k) for k in ocean_keys]
+    n_rows = len(ocean_keys) + len(extra_keys)
+    n_cols = len(ocean_keys)
+    n_ocean = len(ocean_keys)
 
-    mats = {m: _build_residual_matrix(residuals, friendly_keys, m) for m in metrics}
+    mats = {m: _build_residual_matrix(residuals, ocean_keys, extra_keys, m) for m in metrics}
     vmax = max(1.0, max(float(np.nanmax(np.abs(mat))) for mat in mats.values()))
 
+    # Use a colormap that renders NaN cells as light grey (clean upper-triangle look).
+    cmap = plt.get_cmap("RdBu_r").copy()
+    cmap.set_bad(color="#f0f0f0")
+
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    def _draw_panel(ax, mat, *, label_fontsize: int, value_fontsize: int, value_fmt: str):
+        """Render one heatmap panel with optional horizontal separator above extras."""
+        ax.imshow(mat, cmap=cmap, vmin=-vmax, vmax=vmax, aspect="equal")
+        ax.set_xticks(range(n_cols))
+        ax.set_xticklabels(col_labels, rotation=45, ha="right", fontsize=label_fontsize)
+        ax.set_yticks(range(n_rows))
+        ax.set_yticklabels(row_labels, fontsize=label_fontsize)
+        for i in range(n_rows):
+            for j in range(n_cols):
+                v = mat[i, j]
+                if np.isfinite(v):
+                    color = "white" if abs(v) > vmax * 0.6 else "black"
+                    ax.text(j, i, value_fmt.format(v), ha="center", va="center",
+                            fontsize=value_fontsize, color=color)
+        if extra_keys:
+            ax.axhline(n_ocean - 0.5, color="black", lw=1.0)
 
     # Per-metric standalone heatmaps (for local inspection).
     for metric, mat in mats.items():
         short = metric.replace("_v2", "")
         fig, ax = plt.subplots(figsize=(7, 6))
-        im = ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-        ax.set_xticks(range(n))
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
-        ax.set_yticks(range(n))
-        ax.set_yticklabels(labels, fontsize=9)
-        ax.set_title(f"Interaction residuals ε_ij — {short} judge", fontsize=10)
+        _draw_panel(ax, mat, label_fontsize=9, value_fontsize=6, value_fmt="{:+.2f}")
+        ax.set_title(
+            f"Interaction residuals ε_ij — {short} judge"
+            + (" (upper triangle + ctrl row)" if extra_keys else " (upper triangle)"),
+            fontsize=10,
+        )
+        im = ax.images[0]
         plt.colorbar(im, ax=ax, label="ε_ij(S_k)")
-        for i in range(n):
-            for j in range(n):
-                v = mat[i, j]
-                if np.isfinite(v):
-                    color = "white" if abs(v) > vmax * 0.6 else "black"
-                    ax.text(j, i, f"{v:+.2f}", ha="center", va="center",
-                            fontsize=6, color=color)
         fig.tight_layout()
         out_path = out_dir / f"heatmap_{short}.png"
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -270,25 +344,15 @@ def plot_residual_heatmaps(
     # Composite 1×5 panel for the paper.
     if paper_fig_path is not None:
         n_metrics = len(metrics)
-        fig, axes = plt.subplots(1, n_metrics, figsize=(3.5 * n_metrics, 4.5))
+        fig, axes = plt.subplots(1, n_metrics, figsize=(3.5 * n_metrics, 5.0))
         if n_metrics == 1:
             axes = [axes]
         for ax, metric in zip(axes, metrics):
             mat = mats[metric]
             short = metric.replace("_v2", "")
-            im = ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-            ax.set_xticks(range(n))
-            ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=6)
-            ax.set_yticks(range(n))
-            ax.set_yticklabels(labels, fontsize=6)
+            _draw_panel(ax, mat, label_fontsize=6, value_fontsize=4.5, value_fmt="{:+.1f}")
             ax.set_title(short, fontsize=9)
-            for i in range(n):
-                for j in range(n):
-                    v = mat[i, j]
-                    if np.isfinite(v):
-                        color = "white" if abs(v) > vmax * 0.6 else "black"
-                        ax.text(j, i, f"{v:+.1f}", ha="center", va="center",
-                                fontsize=4.5, color=color)
+        im = axes[-1].images[0]
         cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
         fig.colorbar(im, cax=cbar_ax, label="ε_ij(S_k)")
         fig.suptitle(
@@ -318,14 +382,63 @@ _METRIC_COLORS = {
 }
 
 
+def per_metric_single_adapter_std(
+    cell_scores: dict[str, dict[str, Any]],
+    cell_metadata: dict[str, Any],
+    metrics: list[str],
+    exclude_friendly: set[str] | None = None,
+) -> dict[str, float]:
+    """For each metric k, return std of S(W+Δi) − S(W) across single-adapter cells.
+
+    Used as a per-judge "headroom" scale for normalizing residuals so that the
+    5 OCEAN judges become directly comparable (cures conscientiousness's
+    apparent dominance, which is a judge-sensitivity artifact).
+    """
+    if exclude_friendly is None:
+        exclude_friendly = {"ctrl"}
+    baseline_tag = ""
+    single_tags: list[str] = []
+    for tag, meta in cell_metadata.items():
+        if meta["tier"] == "baseline":
+            baseline_tag = tag
+        elif meta["tier"] == "single_adapter":
+            adapters = meta["adapters"]
+            if any(a["friendly"] in exclude_friendly for a in adapters):
+                continue
+            single_tags.append(tag)
+
+    baseline_scores = cell_scores.get(baseline_tag, {})
+    sigmas: dict[str, float] = {}
+    for m in metrics:
+        s_0 = baseline_scores.get(m)
+        if s_0 is None:
+            continue
+        deltas = []
+        for tag in single_tags:
+            s_i = cell_scores.get(tag, {}).get(m)
+            if s_i is not None:
+                deltas.append(s_i - s_0)
+        if len(deltas) >= 2:
+            sigmas[m] = float(np.std(deltas, ddof=1))
+    return sigmas
+
+
 def plot_residual_distribution(
     residuals: dict[tuple[str, str], dict[str, float]],
     metrics: list[str],
     out_dir: Path,
     paper_fig_path: Path | None = None,
-    outlier_threshold: float = 2.0,
+    normalize_by: dict[str, float] | None = None,
+    out_filename: str = "residual_distribution.pdf",
 ) -> None:
-    """1×5 panel of per-scorer histograms + KDE; top-3 outliers per panel labeled."""
+    """Single axes, 6 smooth KDE curves: 5 OCEAN scorers + control (pooled).
+
+    Args:
+        normalize_by: optional {metric_name: σ_k}.  When provided, each ε is
+            divided by σ_k for its scorer — converts the x-axis to "judge-std
+            units" so the 5 scorers become directly comparable.
+        out_filename: local PDF filename under ``out_dir``.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -333,73 +446,86 @@ def plot_residual_distribution(
 
     short = {m: m.replace("_v2", "") for m in metrics}
     metric_order = [short[m] for m in metrics]
+    short_to_metric = {short[m]: m for m in metrics}
 
-    # Collect per-scorer data.
-    data_by_metric: dict[str, list[tuple[float, str]]] = {ms: [] for ms in metric_order}
+    def _scale(metric_short: str, eps: float) -> float:
+        if normalize_by is None:
+            return eps
+        sigma = normalize_by.get(short_to_metric[metric_short])
+        if sigma is None or sigma <= 0:
+            return float("nan")
+        return eps / sigma
+
+    # Collect ε values per scorer for OCEAN-pair, plus pooled control.
+    ocean_by_metric: dict[str, list[float]] = {ms: [] for ms in metric_order}
+    ctrl_by_metric: dict[str, list[float]] = {ms: [] for ms in metric_order}
     for (fi, fj), metric_vals in residuals.items():
-        pair_label = f"{_display_label(fi)}×{_display_label(fj)}"
+        is_ctrl = "ctrl" in (fi, fj)
         for metric, eps in metric_vals.items():
-            if np.isfinite(eps):
-                data_by_metric[short[metric]].append((eps, pair_label))
+            if not np.isfinite(eps):
+                continue
+            ms = short[metric]
+            v = _scale(ms, eps)
+            if not np.isfinite(v):
+                continue
+            (ctrl_by_metric if is_ctrl else ocean_by_metric)[ms].append(v)
 
-    all_eps = [v for ms in metric_order for v, _ in data_by_metric[ms]]
-    x_kde = np.linspace(min(all_eps) - 0.5, max(all_eps) + 0.5, 300)
+    ctrl_pooled = [v for vs in ctrl_by_metric.values() for v in vs]
+    all_vals = [v for vs in ocean_by_metric.values() for v in vs] + ctrl_pooled
+    lo = float(min(all_vals) - 0.5)
+    hi = float(max(all_vals) + 0.5)
+    x_kde = np.linspace(lo, hi, 400)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
+    fig, ax = plt.subplots(figsize=(7.5, 4))
     fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.13)
 
-    from matplotlib.transforms import blended_transform_factory
-    xform = blended_transform_factory(ax.transData, ax.transAxes)
+    ax.axvline(0, color="black", lw=0.6, ls="--", alpha=0.45, zorder=1)
 
-    # Reference shading and zero line (drawn first, behind everything).
-    ax.axvspan(-outlier_threshold, outlier_threshold,
-               alpha=0.08, color="green", zorder=0, lw=0)
-    ax.axvline(0, color="black", lw=0.7, ls="--", alpha=0.45, zorder=1)
-
-    # One KDE curve + fill per scorer.
+    # 5 OCEAN-scorer smooth KDE curves.
     for ms in metric_order:
-        color = _METRIC_COLORS[ms]
-        vals = np.array([v for v, _ in data_by_metric[ms]])
+        vals = np.array(ocean_by_metric[ms])
+        if len(vals) < 2:
+            continue
         kde = gaussian_kde(vals, bw_method="scott")
-        y_kde = kde(x_kde)
-        ax.plot(x_kde, y_kde, color=color, lw=2.0, label=ms, zorder=3)
-        ax.fill_between(x_kde, y_kde, alpha=0.08, color=color, zorder=2)
+        y = kde(x_kde)
+        ax.plot(x_kde, y, color=_METRIC_COLORS[ms], lw=2.0,
+                label=ms, zorder=3)
+        ax.fill_between(x_kde, y, alpha=0.06, color=_METRIC_COLORS[ms], zorder=2)
 
-        # Top-2 outliers per scorer: dotted vline + label at top.
-        pairs = [p for _, p in data_by_metric[ms]]
-        ep_arr = np.array([v for v, _ in data_by_metric[ms]])
-        outlier_idx = sorted(
-            [i for i, v in enumerate(ep_arr) if abs(v) > outlier_threshold],
-            key=lambda i: abs(ep_arr[i]), reverse=True,
-        )[:2]
-        for rank, i in enumerate(outlier_idx):
-            v, label = ep_arr[i], pairs[i]
-            ax.axvline(v, color=color, lw=0.7, ls=":", alpha=0.55, zorder=2)
-            ax.text(v, 0.97 - rank * 0.14, label,
-                    fontsize=5.5, color=color,
-                    ha="center", va="top", rotation=90,
-                    transform=xform)
+    # Pooled control as a 6th smooth KDE curve.
+    CTRL_COLOR = "#444444"
+    if len(ctrl_pooled) >= 2:
+        kde = gaussian_kde(np.array(ctrl_pooled), bw_method="scott")
+        y = kde(x_kde)
+        ax.plot(x_kde, y, color=CTRL_COLOR, lw=2.2, ls="--",
+                label="control", zorder=4)
 
-    ax.legend(fontsize=8, framealpha=0.85, loc="upper left")
-    ax.set_xlabel(r"Interaction residual $\epsilon_{ij}(S_k)$", fontsize=9)
+    ax.legend(fontsize=8, framealpha=0.85, loc="upper right")
+    if normalize_by is not None:
+        ax.set_xlabel(
+            r"Normalized residual  $\epsilon_{ij}(S_k) \,/\, \sigma_k$"
+            r"   ($\sigma_k$ = std of single-adapter shifts $S(W+\Delta_i)-S(W)$)",
+            fontsize=9,
+        )
+        title = (r"LoRA interaction residuals (judge-$\sigma$ normalized): "
+                 r"per OCEAN scorer + control")
+    else:
+        ax.set_xlabel(r"Interaction residual $\epsilon_{ij}(S_k)$", fontsize=9)
+        title = r"LoRA interaction residuals $\epsilon_{ij}(S_k)$: per OCEAN scorer + control"
     ax.set_ylabel("Density", fontsize=9)
     ax.tick_params(axis="both", labelsize=8)
     for sp in ["top", "right"]:
         ax.spines[sp].set_visible(False)
     ax.set_ylim(bottom=0)
 
-    fig.suptitle(
-        r"LoRA interaction residuals $\epsilon_{ij}(S_k)$ by OCEAN scorer"
-        r"  —  shaded band: $|\epsilon|<2$;  top 2 outliers per scorer labeled",
-        fontsize=8.5,
-    )
+    fig.suptitle(title, fontsize=9)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     if paper_fig_path is not None:
         paper_fig_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(paper_fig_path, bbox_inches="tight")
         print(f"[plot] wrote paper figure: {paper_fig_path}")
-    local_path = out_dir / "residual_distribution.pdf"
+    local_path = out_dir / out_filename
     fig.savefig(local_path, bbox_inches="tight")
     plt.close(fig)
     print(f"[plot] wrote {local_path}")
@@ -412,13 +538,17 @@ def plot_residual_distribution(
 
 def _parse_flags() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute interaction residuals from the residuals experiment scores.",
+        description=(
+            "Compute and plot LoRA interaction residuals.  By default fetches "
+            f"scores.json from HF ({HF_REPO_ID}::{HF_SCORES_PATH}); pass "
+            "--scores to use a local file instead."
+        ),
     )
     parser.add_argument(
         "--scores",
         type=Path,
-        default=SCORES_PATH,
-        help=f"Path to scores.json (default: {SCORES_PATH})",
+        default=None,
+        help="Optional local scores.json path (skips HF download).",
     )
     parser.add_argument(
         "--no-paper-fig",
@@ -428,6 +558,32 @@ def _parse_flags() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _resolve_scores_path(local_override: Path | None) -> Path:
+    """Return a path to scores.json — either the local override or downloaded from HF."""
+    if local_override is not None:
+        if not local_override.exists():
+            print(f"[error] local scores not found: {local_override}")
+            sys.exit(1)
+        print(f"[scores] using local file: {local_override}")
+        return local_override
+
+    from huggingface_hub import hf_hub_download
+    from src_dev.utils.hf_hub import _get_token
+
+    cache_dir = OUTPUT_DIR / "_hf_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[scores] downloading from HF: {HF_REPO_ID}::{HF_SCORES_PATH}")
+    path = Path(hf_hub_download(
+        repo_id=HF_REPO_ID,
+        repo_type="dataset",
+        filename=HF_SCORES_PATH,
+        local_dir=str(cache_dir),
+        token=_get_token(),
+    ))
+    print(f"[scores] cached at: {path}")
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -435,12 +591,10 @@ def _parse_flags() -> argparse.Namespace:
 
 def main() -> None:
     flags = _parse_flags()
-    scores_path = flags.scores
+    from dotenv import load_dotenv
+    load_dotenv(project_root / ".env")
 
-    if not scores_path.exists():
-        print(f"[error] scores not found: {scores_path}")
-        print("Run 'python -m scripts_dev.evals.residuals_experiment.run' first.")
-        sys.exit(1)
+    scores_path = _resolve_scores_path(flags.scores)
 
     with scores_path.open() as f:
         data = json.load(f)
@@ -505,19 +659,41 @@ def main() -> None:
         paper_fig_path=paper_fig_path,
     )
 
-    # Main-text figure: distribution of all 225 ε values with labeled outliers.
+    # Main-text distributions: 6 KDE curves (5 OCEAN scorers + control), both raw
+    # and judge-σ-normalized.  σ_k = std of single-adapter shifts for metric k
+    # (OCEAN singles only; ctrl excluded so it doesn't pull σ down).
     dist_paper_path: Path | None = None
+    dist_norm_paper_path: Path | None = None
     if not flags.no_paper_fig:
         try:
             from src_dev.visualisations import PAPER_FIGURES_DIR
             dist_paper_path = PAPER_FIGURES_DIR / "main" / "fig_residuals_distribution.pdf"
+            dist_norm_paper_path = (
+                PAPER_FIGURES_DIR / "main" / "fig_residuals_distribution_normalized.pdf"
+            )
         except ImportError:
             pass
+
+    # Raw ε distribution.
     plot_residual_distribution(
         residuals,
         metrics=metrics,
         out_dir=plots_dir,
         paper_fig_path=dist_paper_path,
+    )
+
+    # Judge-σ-normalized ε distribution.
+    sigmas = per_metric_single_adapter_std(cell_scores, cell_metadata, metrics)
+    print("[residuals] per-metric σ (single-adapter shift std, ctrl excluded):")
+    for m, s in sigmas.items():
+        print(f"  {m:<22} σ = {s:.3f}")
+    plot_residual_distribution(
+        residuals,
+        metrics=metrics,
+        out_dir=plots_dir,
+        paper_fig_path=dist_norm_paper_path,
+        normalize_by=sigmas,
+        out_filename="residual_distribution_normalized.pdf",
     )
 
     print(f"\n[done] all outputs under {OUTPUT_DIR}")
