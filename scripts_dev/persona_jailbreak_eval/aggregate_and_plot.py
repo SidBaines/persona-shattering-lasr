@@ -21,6 +21,7 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 from src_dev.persona_jailbreak_eval.aggregate import (  # noqa: E402
+    explicit_refusal_rate_on_benign,
     harmful_rate_by_condition,
     harmful_rate_by_condition_x_category,
     load_judgments_jsonl,
@@ -56,10 +57,12 @@ def main() -> None:
 
     harm_rows = harmful_rate_by_condition(records)
     refusal_rows = refusal_rate_on_benign(records)
+    explicit_refusal_rows = explicit_refusal_rate_on_benign(records)
     cat_rows = harmful_rate_by_condition_x_category(records)
 
     write_summary_csv(harm_rows, output_dir / "harmful_rate_by_condition.csv")
     write_summary_csv(refusal_rows, output_dir / "refusal_rate_on_benign.csv")
+    write_summary_csv(explicit_refusal_rows, output_dir / "explicit_refusal_rate_on_benign.csv")
     write_summary_csv(cat_rows, output_dir / "harmful_rate_by_condition_x_category.csv")
 
     plot_condition_bars(
@@ -73,8 +76,13 @@ def main() -> None:
         print(f"    {r.condition:30s} n={r.n:4d}  "
               f"rate={r.rate:.3f}  CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
     if refusal_rows:
-        print("\n  ── OVER-REFUSAL ─────────────────────────────────────────")
+        print("\n  ── BENIGN NONCOMPLIANCE ────────────────────────────────")
         for r in refusal_rows:
+            print(f"    {r.condition:30s} n={r.n:4d}  "
+                  f"rate={r.rate:.3f}  CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
+    if explicit_refusal_rows:
+        print("\n  ── EXPLICIT REFUSAL ────────────────────────────────────")
+        for r in explicit_refusal_rows:
             print(f"    {r.condition:30s} n={r.n:4d}  "
                   f"rate={r.rate:.3f}  CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
     print(f"\n  artefacts: {output_dir}")

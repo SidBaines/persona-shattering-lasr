@@ -33,7 +33,7 @@ from src_dev.activation_capping.conditions import (
     setup_vanilla_inference,
     sort_conditions_for_safety,
 )
-from src_dev.common.lora_catalogue import OCEAN_REGISTRY
+from src_dev.common.lora_catalogue import HF_REPO, OCEAN_REGISTRY
 from src_dev.inference.config import InferenceConfig
 from src_dev.inference.providers import get_provider
 from src_dev.persona_jailbreak_eval.config import (
@@ -49,7 +49,8 @@ from src_dev.persona_jailbreak_eval.judge_paper import (
 )
 from src_dev.persona_jailbreak_eval.judge_refusal import (
     BinaryRefusalJudge,
-    is_refused,
+    is_explicit_refusal,
+    is_noncompliant,
 )
 
 logger = logging.getLogger(__name__)
@@ -227,7 +228,16 @@ def run_condition_inference(
 
 
 def _resolve_lora_soup_specs(combo: LoraComboCondition) -> list[tuple[str, float]]:
-    return [(OCEAN_REGISTRY[slug].adapter_ref, scale) for slug, scale in combo.adapters]
+    specs: list[tuple[str, float]] = []
+    for adapter_key, scale in combo.adapters:
+        if adapter_key in OCEAN_REGISTRY:
+            specs.append((OCEAN_REGISTRY[adapter_key].adapter_ref, scale))
+            continue
+        if "::" in adapter_key:
+            specs.append((adapter_key, scale))
+            continue
+        specs.append((f"{HF_REPO}::{adapter_key}", scale))
+    return specs
 
 
 def run_all_conditions_inference(
@@ -320,6 +330,7 @@ def _judge_outcome_to_row(
     *,
     is_harm: bool,
     is_ref: bool,
+    is_explicit_ref: bool = False,
 ) -> dict[str, Any]:
     return {
         "sample_id": sample_id,
@@ -329,6 +340,7 @@ def _judge_outcome_to_row(
         "label": outcome.label,
         "is_harmful": is_harm,
         "is_refusal": is_ref,
+        "is_explicit_refusal": is_explicit_ref,
         "analysis": outcome.analysis,
         "parse_error": outcome.parse_error,
     }
@@ -369,6 +381,7 @@ def _run_judge_pass(
             outcome=outcome,
             is_harm=binarize_harmful(outcome.label),
             is_ref=binarize_refusal(outcome.label),
+            is_explicit_ref=is_explicit_refusal(outcome.label),
         ))
     _append_jsonl(output_path, rows)
     return len(rows)
@@ -418,7 +431,7 @@ def run_refusal_judge_on_responses(
     return _run_judge_pass(
         judge, rows, output_path,
         binarize_harmful=lambda _label: False,  # benign rows are never "harmful"
-        binarize_refusal=is_refused,
+        binarize_refusal=is_noncompliant,
         label=f"refusal-judge:{response_path.name}",
     )
 

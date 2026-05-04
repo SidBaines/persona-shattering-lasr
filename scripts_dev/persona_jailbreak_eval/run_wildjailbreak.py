@@ -39,6 +39,7 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 from src_dev.persona_jailbreak_eval.aggregate import (  # noqa: E402
+    explicit_refusal_rate_on_benign,
     harmful_rate_by_condition,
     load_judgments_jsonl,
     plot_condition_bars,
@@ -122,9 +123,11 @@ def _aggregate_and_plot(cfg: JailbreakEvalConfig, judgment_paths: dict[str, Path
 
     harm_rows = harmful_rate_by_condition(all_records)
     refusal_rows = refusal_rate_on_benign(all_records)
+    explicit_refusal_rows = explicit_refusal_rate_on_benign(all_records)
 
     write_summary_csv(harm_rows, out_dir / "harmful_rate_by_condition.csv")
     write_summary_csv(refusal_rows, out_dir / "refusal_rate_on_benign.csv")
+    write_summary_csv(explicit_refusal_rows, out_dir / "explicit_refusal_rate_on_benign.csv")
 
     plot_condition_bars(
         harm_rows, refusal_rows,
@@ -137,8 +140,13 @@ def _aggregate_and_plot(cfg: JailbreakEvalConfig, judgment_paths: dict[str, Path
         print(f"    {r.condition:30s} n={r.n:4d}  "
               f"rate={r.rate:.3f}  CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
     if refusal_rows:
-        print("\n  ── OVER-REFUSAL (adversarial benign) ────────────────────")
+        print("\n  ── BENIGN NONCOMPLIANCE (adversarial benign) ────────────")
         for r in refusal_rows:
+            print(f"    {r.condition:30s} n={r.n:4d}  "
+                  f"rate={r.rate:.3f}  CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
+    if explicit_refusal_rows:
+        print("\n  ── EXPLICIT REFUSAL (adversarial benign) ────────────────")
+        for r in explicit_refusal_rows:
             print(f"    {r.condition:30s} n={r.n:4d}  "
                   f"rate={r.rate:.3f}  CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
     print(f"\n  artefacts: {out_dir}")
