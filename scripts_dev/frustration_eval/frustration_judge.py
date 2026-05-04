@@ -108,10 +108,10 @@ FRUSTRATION_JUDGE_EXAMPLES: list[dict[str, object]] = [
 ]
 
 
-# Default judge config: Claude Sonnet 4 (as used in the paper)
+# Default judge config: Claude Sonnet 4 via OpenRouter (paper used direct Anthropic API)
 DEFAULT_FRUSTRATION_JUDGE_CONFIG = JudgeLLMConfig(
-    provider="anthropic",
-    model="claude-sonnet-4-20250514",
+    provider="openrouter",
+    model="anthropic/claude-sonnet-4",
     temperature=0.0,
     max_tokens=512,
     max_concurrent=16,

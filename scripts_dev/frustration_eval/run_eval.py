@@ -494,12 +494,12 @@ def parse_args() -> argparse.Namespace:
         help=f"Categories to run (default: all). Available: {list(CATEGORY_REGISTRY.keys())}",
     )
     parser.add_argument(
-        "--judge-model", default="claude-sonnet-4-20250514",
-        help="Judge model (default: claude-sonnet-4-20250514)",
+        "--judge-model", default="anthropic/claude-sonnet-4",
+        help="Judge model (default: anthropic/claude-sonnet-4)",
     )
     parser.add_argument(
-        "--judge-provider", default="anthropic",
-        help="Judge provider (default: anthropic)",
+        "--judge-provider", default="openrouter",
+        help="Judge provider (default: openrouter)",
     )
     parser.add_argument(
         "--max-concurrent", type=int, default=16,

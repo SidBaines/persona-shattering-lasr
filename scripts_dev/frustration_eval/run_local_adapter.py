@@ -172,6 +172,8 @@ def main():
             for name, param in model.named_parameters():
                 if "lora_" in name:
                     param.data.mul_(-1.0)
+        logger.info("Merging adapter into base weights (merge_and_unload)")
+        model = model.merge_and_unload()
     else:
         logger.info("No adapter specified — running base model only")
         model = base_model
