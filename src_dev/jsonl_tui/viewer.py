@@ -88,7 +88,9 @@ class JsonlViewer:
 
     def _scroll_first_navigation(self) -> bool:
         """Whether arrow-key navigation should scroll before changing records."""
-        return self.variant_fields is not None or self.conversation_field is not None or self.rollout_field is not None
+        # In variant-fields mode, Up/Down should navigate between questions
+        # (Left/Right cycles variants). Use j/k for scrolling within a record.
+        return self.conversation_field is not None or self.rollout_field is not None
 
     def _next_group(self) -> None:
         if self.question_index < len(self.grouped_records) - 1:
