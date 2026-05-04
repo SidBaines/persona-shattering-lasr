@@ -34,11 +34,18 @@ _CONDITION_LABELS = {
     "vanilla": "vanilla",
     "activation_capping": "capping",
     "lora_soup_c_plus_0.5_o_minus_0.5": "soup c+0.5 o-0.5",
+    "lora_soup_a_plus_1.0": "a+1.0",
     "lora_soup_c_plus_1.0": "c+1.0",
-    "lora_soup_o_minus_1.0": "o-1.0",
+    "lora_soup_e_plus_1.0": "e+1.0",
+    "lora_soup_n_plus_1.0": "n+1.0",
     "lora_soup_o_plus_1.0": "o+1.0",
-    "lora_soup_c_minus_1.0": "c-1.0",
     "lora_soup_a_minus_1.0": "a-1.0",
+    "lora_soup_c_minus_1.0": "c-1.0",
+    "lora_soup_e_minus_1.0": "e-1.0",
+    "lora_soup_n_minus_1.0": "n-1.0",
+    "lora_soup_o_minus_1.0": "o-1.0",
+    "lora_soup_control_latest_1.0": "control latest",
+    "lora_soup_control_legacy_1.0": "control legacy",
 }
 
 
@@ -106,7 +113,7 @@ def _plot_rows(
     ax_harm.set_title("Harmful rate (95% Wilson CI)")
     ax_harm.set_ylim(0, max(1.0, max(harm_rates) * 1.15) if harm_rates else 1.0)
     for tick in ax_harm.get_xticklabels():
-        tick.set_rotation(20)
+        tick.set_rotation(90)
         tick.set_ha("right")
 
     ax_ref = axes[0, 1]
@@ -120,11 +127,11 @@ def _plot_rows(
         color="#4a7a99",
         alpha=0.88,
     )
-    ax_ref.set_ylabel("refusal rate on benign control")
-    ax_ref.set_title("Over-refusal (95% Wilson CI)")
+    ax_ref.set_ylabel("noncompliance rate on benign control")
+    ax_ref.set_title("Benign noncompliance (95% Wilson CI)")
     ax_ref.set_ylim(0, max(1.0, max(ref_rates) * 1.15) if ref_rates else 1.0)
     for tick in ax_ref.get_xticklabels():
-        tick.set_rotation(20)
+        tick.set_rotation(90)
         tick.set_ha("right")
 
     fig.suptitle(title, fontsize=11)

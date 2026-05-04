@@ -23,9 +23,10 @@ class JudgmentRecord:
     """One judgment row joined from inference + judge outputs.
 
     ``label`` is the categorical judge output (e.g. ``enough_info``,
-    ``refused``). ``is_harmful`` and ``is_refusal`` are pre-computed
-    binarizations using the rubric-specific helpers in ``judge_paper`` /
-    ``judge_refusal``.
+    ``explicit_refusal``). ``is_harmful`` is the harmful-slice headline
+    binarization. ``is_refusal`` is the broad benign-side noncompliance
+    flag for backward compatibility. ``is_explicit_refusal`` is the strict
+    subset used by the v2 refusal rubric.
     """
 
     sample_id: str
@@ -35,6 +36,7 @@ class JudgmentRecord:
     label: str | None
     is_harmful: bool
     is_refusal: bool
+    is_explicit_refusal: bool = False
 
 
 def load_judgments_jsonl(path: Path) -> list[JudgmentRecord]:
@@ -59,6 +61,12 @@ def load_judgments_jsonl(path: Path) -> list[JudgmentRecord]:
                 label=row.get("label"),
                 is_harmful=bool(row.get("is_harmful", False)),
                 is_refusal=bool(row.get("is_refusal", False)),
+                is_explicit_refusal=bool(
+                    row.get(
+                        "is_explicit_refusal",
+                        row.get("label") == "explicit_refusal",
+                    )
+                ),
             )
     return list(by_key.values())
 
@@ -119,12 +127,30 @@ def harmful_rate_by_condition_x_category(
 def refusal_rate_on_benign(
     records: Iterable[JudgmentRecord], *, confidence: float = 95.0,
 ) -> list[RateRow]:
-    """Per-condition refusal rate on the *benign* slice (over-refusal)."""
+    """Per-condition broad noncompliance rate on the *benign* slice.
+
+    This preserves the historical meaning of the metric used in existing
+    jailbreak runs, while newer refusal-judge variants may additionally
+    expose the strict explicit-refusal subset via
+    :func:`explicit_refusal_rate_on_benign`.
+    """
     by_cond: dict[str, list[bool]] = {}
     for r in records:
         if r.kind != "benign" or r.label is None:
             continue
         by_cond.setdefault(r.condition, []).append(r.is_refusal)
+    return _format_rate_rows(by_cond, confidence=confidence, extras={})
+
+
+def explicit_refusal_rate_on_benign(
+    records: Iterable[JudgmentRecord], *, confidence: float = 95.0,
+) -> list[RateRow]:
+    """Per-condition explicit-refusal rate on the *benign* slice."""
+    by_cond: dict[str, list[bool]] = {}
+    for r in records:
+        if r.kind != "benign" or r.label is None:
+            continue
+        by_cond.setdefault(r.condition, []).append(r.is_explicit_refusal)
     return _format_rate_rows(by_cond, confidence=confidence, extras={})
 
 
@@ -198,8 +224,8 @@ def plot_condition_bars(
         rrates = [r.rate for r in refusal_rows]
         ax_ref.bar(rconds, rrates, yerr=_yerr_from_rows(refusal_rows), capsize=4,
                    color="#4a7a99", alpha=0.85)
-        ax_ref.set_ylabel("refusal rate on benign control")
-        ax_ref.set_title("Over-refusal (95% Wilson CI)")
+        ax_ref.set_ylabel("noncompliance rate on benign control")
+        ax_ref.set_title("Benign noncompliance (95% Wilson CI)")
         ax_ref.set_ylim(0, max(1.0, max(rrates) * 1.15) if rrates else 1.0)
         for tick in ax_ref.get_xticklabels():
             tick.set_rotation(20)
@@ -219,6 +245,7 @@ __all__ = [
     "harmful_rate_by_condition",
     "harmful_rate_by_condition_x_category",
     "refusal_rate_on_benign",
+    "explicit_refusal_rate_on_benign",
     "write_summary_csv",
     "plot_condition_bars",
 ]

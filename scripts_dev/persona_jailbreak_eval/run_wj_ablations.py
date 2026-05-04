@@ -1,36 +1,18 @@
 #!/usr/bin/env python3
-"""WildJailbreak LoRA-ablation driver — single-LoRA conditions at scale 1.0.
+"""WildJailbreak LoRA ablations for all llama-3.1-8b-it catalogue adapters.
 
-Ablations to test which OCEAN trait adapter is responsible for the
-LoRA-soup's increased jailbreak vulnerability. Uses the same WildJailbreak
-adv-harmful + adv-benign protocol as ``run_wildjailbreak.py`` but with a
-fixed set of single-LoRA conditions (no vanilla, no soup, no capping):
+Runs the same WildJailbreak adv-harmful + adv-benign protocol as
+``run_wildjailbreak.py`` but over every llama-3.1-8b-it OCEAN adapter in
+``OCEAN_REGISTRY`` plus two control adapters:
 
-    lora_c_plus_1.0    — conscientiousness amplifier alone
-    lora_o_minus_1.0   — openness suppressor alone
-    lora_o_plus_1.0    — openness amplifier alone
-    lora_c_minus_1.0   — conscientiousness suppressor alone
-    lora_a_minus_1.0   — agreeableness suppressor alone
+    control latest  — ocean_def_control / vanton4_paired_dpo_s1vs2
+    control legacy  — ocean_def_control / vanton4_seed1
 
-We do NOT re-run vanilla, capping, or the c+(0.5)⊕o-(0.5) soup — those
-are already on HF under wj_balanced. Compare ablation harm-rates against
-that run informally:
+We intentionally do NOT rerun vanilla, activation-capping, or the
+balanced c+(0.5)⊕o-(0.5) soup here; those already exist under
+``wj_balanced`` and can be compared cross-run.
 
-    vanilla:    55.0% [51.5, 58.4]  (n=800)
-    capping:    45.25% [41.8, 48.7] (n=800)
-    soup 0.5/0.5: 75.4% [72.3, 78.2]  (n=800)
-
-Defaults: N=400 adv-harmful + 100 adv-benign per condition. Wilson 95%
-CI half-width at p≈0.5 is ~3.5pp at n=400, vs ~2.5pp at the balanced
-n=800. Cross-run-comparison caveat: with a smaller N the ablation
-samples a different deterministic subset of WildJailbreak prompts than
-balanced (``random.sample`` with different n gives different — not
-nested — picks), so comparisons against the balanced numbers are
-informal until either this is re-run at n=800 or vanilla is rerun on
-the same prompts.
-
-Five conditions × 500 samples ≈ 2.5k generations + judge calls; ~20-25
-min, ~\$3.
+Defaults: N=400 adv-harmful + 100 adv-benign per condition.
 
 Usage::
 
@@ -46,6 +28,7 @@ import sys
 from pathlib import Path
 
 from src_dev.activation_capping.conditions import ensure_vllm_fork_safe  # noqa: E402
+
 ensure_vllm_fork_safe()
 
 import numpy as np  # noqa: E402
@@ -55,7 +38,9 @@ from dotenv import load_dotenv  # noqa: E402
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
+from src_dev.common.lora_catalogue import LoraHFCatalogue, OCEAN_REGISTRY  # noqa: E402
 from src_dev.persona_jailbreak_eval.aggregate import (  # noqa: E402
+    explicit_refusal_rate_on_benign,
     harmful_rate_by_condition,
     load_judgments_jsonl,
     plot_condition_bars,
@@ -79,16 +64,41 @@ from src_dev.persona_jailbreak_eval.runner import (  # noqa: E402
 )
 
 
-# Single-LoRA ablation set: each condition uses exactly one OCEAN adapter
-# at scale 1.0. Names start with "lora_soup" so the engine-routing helpers
-# in src_dev.activation_capping.conditions recognise them as vLLM conditions.
-ABLATION_COMBOS: tuple[LoraComboCondition, ...] = (
-    LoraComboCondition(name="lora_soup_c_plus_1.0",  adapters=[("c_plus",  1.0)]),
-    LoraComboCondition(name="lora_soup_o_minus_1.0", adapters=[("o_minus", 1.0)]),
-    LoraComboCondition(name="lora_soup_o_plus_1.0",  adapters=[("o_plus",  1.0)]),
-    LoraComboCondition(name="lora_soup_c_minus_1.0", adapters=[("c_minus", 1.0)]),
-    LoraComboCondition(name="lora_soup_a_minus_1.0", adapters=[("a_minus", 1.0)]),
-)
+def _catalogue_condition_name(adapter_key: str) -> str:
+    if adapter_key == "control_latest":
+        return "lora_soup_control_latest_1.0"
+    if adapter_key == "control_legacy":
+        return "lora_soup_control_legacy_1.0"
+    return f"lora_soup_{adapter_key}_1.0"
+
+
+def _build_ablation_combos() -> tuple[LoraComboCondition, ...]:
+    combos: list[LoraComboCondition] = []
+    for slug in OCEAN_REGISTRY:
+        combos.append(
+            LoraComboCondition(
+                name=_catalogue_condition_name(slug),
+                adapters=[(slug, 1.0)],
+            )
+        )
+
+    legacy = LoraHFCatalogue()
+    combos.append(
+        LoraComboCondition(
+            name=_catalogue_condition_name("control_latest"),
+            adapters=[(legacy.control_latest, 1.0)],
+        )
+    )
+    combos.append(
+        LoraComboCondition(
+            name=_catalogue_condition_name("control_legacy"),
+            adapters=[(legacy.control_legacy, 1.0)],
+        )
+    )
+    return tuple(combos)
+
+
+ABLATION_COMBOS: tuple[LoraComboCondition, ...] = _build_ablation_combos()
 ABLATION_CONDITION_NAMES: tuple[str, ...] = tuple(c.name for c in ABLATION_COMBOS)
 
 
@@ -135,8 +145,10 @@ def _aggregate_and_plot(cfg: JailbreakEvalConfig, judgment_paths: dict[str, Path
     out_dir.mkdir(parents=True, exist_ok=True)
     harm_rows = harmful_rate_by_condition(all_records)
     refusal_rows = refusal_rate_on_benign(all_records)
+    explicit_refusal_rows = explicit_refusal_rate_on_benign(all_records)
     write_summary_csv(harm_rows, out_dir / "harmful_rate_by_condition.csv")
     write_summary_csv(refusal_rows, out_dir / "refusal_rate_on_benign.csv")
+    write_summary_csv(explicit_refusal_rows, out_dir / "explicit_refusal_rate_on_benign.csv")
     plot_condition_bars(
         harm_rows, refusal_rows,
         title=f"WJ LoRA ablations — {cfg.run_slug}",
@@ -147,8 +159,13 @@ def _aggregate_and_plot(cfg: JailbreakEvalConfig, judgment_paths: dict[str, Path
         print(f"    {r.condition:30s} n={r.n:4d}  rate={r.rate:.3f}  "
               f"CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
     if refusal_rows:
-        print("\n  ── OVER-REFUSAL (adversarial benign) ────────────────────")
+        print("\n  ── BENIGN NONCOMPLIANCE (adversarial benign) ────────────")
         for r in refusal_rows:
+            print(f"    {r.condition:30s} n={r.n:4d}  rate={r.rate:.3f}  "
+                  f"CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
+    if explicit_refusal_rows:
+        print("\n  ── EXPLICIT REFUSAL (adversarial benign) ────────────────")
+        for r in explicit_refusal_rows:
             print(f"    {r.condition:30s} n={r.n:4d}  rate={r.rate:.3f}  "
                   f"CI=[{r.ci_low:.3f}, {r.ci_high:.3f}]")
     print(f"\n  artefacts: {out_dir}")
@@ -166,10 +183,6 @@ def main() -> None:
     parser.add_argument("--skip-aggregate", action="store_true")
     args = parser.parse_args()
 
-    # Build config: start from the WJ balanced preset (so generation knobs
-    # match the existing balanced run), then override conditions, combos,
-    # run_slug, and N. Pin the vLLM throughput knobs here so this driver
-    # remains fast even if the shared defaults change later.
     cfg = get_wildjailbreak_preset("balanced")
     cfg.vllm_batch_size = 64
     cfg.vllm_gpu_memory_utilization = 0.80
