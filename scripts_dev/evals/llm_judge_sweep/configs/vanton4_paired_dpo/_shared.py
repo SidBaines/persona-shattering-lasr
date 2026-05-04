@@ -46,7 +46,7 @@ USER_PROVIDER = "openrouter"
 # Judge
 # ---------------------------------------------------------------------------
 JUDGE_TEMPERATURE = 0.0
-JUDGE_REPEATS = 2
+JUDGE_REPEATS = 1
 CI_CONFIDENCE = 95.0
 CI_BOOTSTRAP_RESAMPLES = 1000
 COHERENCE_METRIC = "better_coherence_judge"

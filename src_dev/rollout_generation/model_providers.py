@@ -397,6 +397,7 @@ class ActivationCapProvider(ModelProvider):
         adapter: str | None = None,
         adapter_name: str = "default",
         ceiling_from_hi: bool = True,
+        variant_label_map: dict[str, str] | None = None,
     ) -> None:
         self._base_model = base_model
         self._axis_path = _resolve_hf_path(axis_path)
@@ -408,6 +409,7 @@ class ActivationCapProvider(ModelProvider):
         self._adapter = adapter
         self._adapter_name = adapter_name
         self._ceiling_from_hi = ceiling_from_hi
+        self._variant_label_map = variant_label_map
         self._model: nn.Module | None = None
         self._tokenizer: Any = None
 
@@ -415,6 +417,8 @@ class ActivationCapProvider(ModelProvider):
         return [str(f) for f in self._fractions]
 
     def variant_label(self, variant: str) -> str:
+        if self._variant_label_map is not None and variant in self._variant_label_map:
+            return self._variant_label_map[variant]
         return f"frac_{float(variant):.2f}"
 
     @contextmanager
