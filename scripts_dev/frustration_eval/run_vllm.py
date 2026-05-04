@@ -30,10 +30,16 @@ import copy
 import gc
 import json
 import logging
+import os
 import random
 import shutil
 import time
 from pathlib import Path
+
+# vLLM forks worker subprocesses; if any code in this module touches CUDA before
+# the fork (seed setting, torch.cuda.is_available, etc.), the fork fails with
+# "Cannot re-initialize CUDA in forked subprocess". Force vLLM to use spawn.
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
 import numpy as np
 import torch
@@ -112,11 +118,18 @@ def _bake_merged(
         shutil.rmtree(HF_CACHE_DIR / "hub", ignore_errors=True)
         logger.info("[bake] now %.1f GB free", _free_disk_gb())
 
-    tok = AutoTokenizer.from_pretrained(base_model)
     out_dir.mkdir(parents=True, exist_ok=True)
     logger.info("[bake] saving merged model to %s", out_dir)
     merged.save_pretrained(str(out_dir), safe_serialization=True)
-    tok.save_pretrained(str(out_dir))
+    # Save the full processor (tokenizer + preprocessor + processor config) so
+    # vLLM has everything it needs to load multimodal models like gemma-3.
+    # Falls back to tokenizer-only for unimodal models.
+    try:
+        from transformers import AutoProcessor
+        AutoProcessor.from_pretrained(base_model).save_pretrained(str(out_dir))
+    except Exception as exc:
+        logger.warning("[bake] AutoProcessor unavailable (%s); falling back to tokenizer only", exc)
+        AutoTokenizer.from_pretrained(base_model).save_pretrained(str(out_dir))
 
     del merged, pm, base
     gc.collect()
