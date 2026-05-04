@@ -17,10 +17,15 @@
 #   12. O- actcap frac 1.00
 #   13. O- sysprompt-induce low
 #
-# After axes finish, we need to manually update OCEAN_REGISTRY's
-# o_plus and o_minus axis_slug in lora_catalogue.py before the actcap
-# cells will work. The script will SKIP actcap cells with a warning if
-# axis_slug is still None — they can be rerun later.
+# After each axis recompute succeeds, the script automatically calls
+# scripts_dev/rollout_experiments/ocean/_set_axis_slug.py to flip the
+# corresponding axis_slug in lora_catalogue.py — working-tree only, not
+# committed. This lets the actcap cells later in the same run pick up the
+# newly-computed axis without manual intervention.
+#
+# After the run finishes, you can either:
+#   (a) git checkout src_dev/common/lora_catalogue.py  (revert the edits)
+#   (b) git add + commit + push the axis_slug changes (accept them as canonical)
 #
 # Estimated total: ~3-4h (2 axis recomputes + 11 generation cells).
 #
@@ -81,34 +86,44 @@ COMMON_NEUTRAL=(
 # vanton4_paired_dpo location, and the script will warn if you forgot to
 # update OCEAN_REGISTRY's axis_slug before running actcap cells.
 
+# Each axis recompute is followed by an automatic axis_slug flip in
+# lora_catalogue.py (working-tree edit, not committed) so the actcap cells
+# below can pick up the new axis path. The flip helper is idempotent and
+# refuses to overwrite a non-None axis_slug that doesn't match the persona.
+
 run_cell "axis_o_plus" \
     uv run python scripts_dev/activation_capping/ocean/paper_versions/compute_axis.py \
         --persona o_plus --force
+
+# Flip o_plus axis_slug if the recompute succeeded. We check the *_OK
+# variable from CELL_STATUS for the most recent cell. If the recompute
+# failed, leave axis_slug alone so actcap will skip cleanly.
+LAST_STATUS="${CELL_STATUS[-1]}"
+O_PLUS_AXIS_OK="no"
+if [ "$LAST_STATUS" = "OK" ]; then
+    if uv run python scripts_dev/rollout_experiments/ocean/_set_axis_slug.py --persona o_plus 2>&1 | tee -a "$MASTER_LOG"; then
+        O_PLUS_AXIS_OK="yes"
+    else
+        echo "[$(date)] WARNING: failed to flip o_plus axis_slug; actcap cells for O+ will skip." | tee -a "$MASTER_LOG"
+    fi
+else
+    echo "[$(date)] o_plus axis recompute did not succeed (status=$LAST_STATUS); skipping axis_slug flip." | tee -a "$MASTER_LOG"
+fi
 
 run_cell "axis_o_minus" \
     uv run python scripts_dev/activation_capping/ocean/paper_versions/compute_axis.py \
         --persona o_minus --force
 
-# ── Manual gate: axis_slug needs to be set in lora_catalogue.py ──────────
-# Reading current state:
-O_PLUS_AXIS_OK=$(uv run python -c "
-from src_dev.common.lora_catalogue import OCEAN_REGISTRY
-print('yes' if OCEAN_REGISTRY['o_plus'].axis_slug == 'o_plus' else 'no')
-" 2>&1 | tail -1)
-O_MINUS_AXIS_OK=$(uv run python -c "
-from src_dev.common.lora_catalogue import OCEAN_REGISTRY
-print('yes' if OCEAN_REGISTRY['o_minus'].axis_slug == 'o_minus' else 'no')
-" 2>&1 | tail -1)
-
-if [ "$O_PLUS_AXIS_OK" != "yes" ]; then
-    echo "" | tee -a "$MASTER_LOG"
-    echo "[$(date)] WARNING: o_plus axis_slug not set in lora_catalogue.py" | tee -a "$MASTER_LOG"
-    echo "  Set OCEAN_REGISTRY['o_plus'].axis_slug = 'o_plus', commit, push," | tee -a "$MASTER_LOG"
-    echo "  pull on RunPod, then rerun the O+ actcap cells separately." | tee -a "$MASTER_LOG"
-    echo "  (Continuing with non-actcap cells.)" | tee -a "$MASTER_LOG"
-fi
-if [ "$O_MINUS_AXIS_OK" != "yes" ]; then
-    echo "[$(date)] WARNING: o_minus axis_slug not set in lora_catalogue.py" | tee -a "$MASTER_LOG"
+LAST_STATUS="${CELL_STATUS[-1]}"
+O_MINUS_AXIS_OK="no"
+if [ "$LAST_STATUS" = "OK" ]; then
+    if uv run python scripts_dev/rollout_experiments/ocean/_set_axis_slug.py --persona o_minus 2>&1 | tee -a "$MASTER_LOG"; then
+        O_MINUS_AXIS_OK="yes"
+    else
+        echo "[$(date)] WARNING: failed to flip o_minus axis_slug; actcap cells for O- will skip." | tee -a "$MASTER_LOG"
+    fi
+else
+    echo "[$(date)] o_minus axis recompute did not succeed (status=$LAST_STATUS); skipping axis_slug flip." | tee -a "$MASTER_LOG"
 fi
 
 # ── Phase 2: generation cells ───────────────────────────────────────────
@@ -222,5 +237,8 @@ for i in "${!CELL_NAMES[@]}"; do
 done
 echo "Master log: $MASTER_LOG"
 echo ""
-echo "If O+/O- actcap cells were skipped, set axis_slug in lora_catalogue.py,"
-echo "commit, push, pull on RunPod, then rerun those two cells."
+echo "Working-tree changes to lora_catalogue.py (axis_slug flips, not committed):"
+git diff --stat src_dev/common/lora_catalogue.py 2>/dev/null || true
+echo ""
+echo "  - Revert with:  git checkout src_dev/common/lora_catalogue.py"
+echo "  - Or commit:    git add src_dev/common/lora_catalogue.py && git commit -m 'enable o_plus/o_minus actcap'"
