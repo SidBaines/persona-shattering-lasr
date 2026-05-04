@@ -121,11 +121,10 @@ def _append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 async def _generate_messages_async(
+    provider,
     inference_config: InferenceConfig,
-    provider_kind: str,
     message_lists: list[list[dict[str, str]]],
 ) -> list[str]:
-    provider = get_provider(provider_kind, inference_config)
     gen = inference_config.generation
     responses, _, failed = await provider.generate_batch_with_metadata_async(
         message_lists,
@@ -189,27 +188,39 @@ def run_condition_inference(
         print(f"  [{condition}] all {len(samples)} samples already cached at {output_path.name}")
         return 0
 
+    batch_size = max(1, inference_config.generation.batch_size)
     print(f"  [{condition}] generating {len(pending)} responses "
-          f"({len(completed)} already cached)...")
-    message_lists = [s.to_messages() for s in pending]
-    responses = asyncio.run(_generate_messages_async(inference_config, provider_kind, message_lists))
+          f"({len(completed)} already cached, batch_size={batch_size})...")
 
-    rows: list[dict[str, Any]] = []
-    for sample, response in zip(pending, responses):
-        rows.append({
-            "sample_id": sample.id,
-            "condition": condition,
-            "kind": sample.kind,
-            "category": sample.category,
-            "user_prompt": sample.user_prompt,
-            "system_prompt": sample.system_prompt,
-            "behavior": sample.behavior,
-            "action": sample.action,
-            "response": response or "",
-            "extras": sample.extras,
-        })
-    _append_jsonl(output_path, rows)
-    return len(rows)
+    provider = get_provider(provider_kind, inference_config)
+    generated_count = 0
+    try:
+        for start in range(0, len(pending), batch_size):
+            batch = pending[start : start + batch_size]
+            message_lists = [s.to_messages() for s in batch]
+            responses = asyncio.run(_generate_messages_async(
+                provider, inference_config, message_lists,
+            ))
+
+            rows: list[dict[str, Any]] = []
+            for sample, response in zip(batch, responses):
+                rows.append({
+                    "sample_id": sample.id,
+                    "condition": condition,
+                    "kind": sample.kind,
+                    "category": sample.category,
+                    "user_prompt": sample.user_prompt,
+                    "system_prompt": sample.system_prompt,
+                    "behavior": sample.behavior,
+                    "action": sample.action,
+                    "response": response or "",
+                    "extras": sample.extras,
+                })
+            _append_jsonl(output_path, rows)
+            generated_count += len(rows)
+    finally:
+        asyncio.run(provider.aclose())
+    return generated_count
 
 
 # ── Top-level inference orchestration ────────────────────────────────────
