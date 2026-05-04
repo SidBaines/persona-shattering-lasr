@@ -76,9 +76,14 @@ def run_stage_rollouts(
         logger.warning("HF_TOKEN not set — HF caching disabled.")
     hf_path = f"runs/{run_id}"
 
-    # Check local cache
+    # Check local cache. Require both the export AND manifest.json — a dir
+    # missing manifest.json is a partially-hydrated cache (older code paths
+    # only pulled exports), and downstream consumers (e.g.
+    # find_consecutive_assistant_turn_sample_ids → load_samples) need the
+    # manifest. Falling through here lets the HF branch below re-hydrate.
     rollout_export = run_dir / "exports" / "conversation_training.jsonl"
-    if rollout_export.exists() and not retry_terminal_sample_ids:
+    manifest_path = run_dir / "manifest.json"
+    if rollout_export.exists() and manifest_path.exists() and not retry_terminal_sample_ids:
         if not check_exists_in_dataset_repo(
             repo_id=hf_repo_id,
             path_in_repo=hf_path + "/exports/conversation_training.jsonl",
