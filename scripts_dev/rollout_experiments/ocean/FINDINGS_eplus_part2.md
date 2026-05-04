@@ -119,3 +119,30 @@ Sysprompt-elicit is **not a clean comparator** for drift prevention. It's its ow
 finding: "explicit instruction conflict between system prompt and weight intervention
 destroys coherence in a way that scenario-level conflict does not." Worth a paper
 subsection but distinct from the headline drift-prevention story.
+
+---
+
+## Cross-LoRA control (`control_def`) — path quirk to know about
+
+The control LoRA for cross-trait probing
+(`other/ocean_def_control/amplifier/vanton4_paired_dpo_s1vs2/lora/...`) has a
+quirk in how `generate_rollouts.py` writes its outputs. The output path is
+derived from the `OceanTraitDef`'s `trait_name` + `direction` + `version`
+fields, which for `control_def` (added 2026-05-04) point at `extraversion`/
+`amplifier`/`vanton4_paired_dpo_s1vs2`. The actual adapter lives under
+`other/ocean_def_control/...`, so the rollouts land at:
+
+```
+ocean/extraversion/amplifier/vanton4_paired_dpo_s1vs2/rollouts/rollout_sweep_lora_t0.7_crossLoRA/
+```
+
+That dir is freshly created and unrelated to the actual adapter location. The
+run_info.json inside identifies the correct adapter, so the data is fine —
+just the path is misleading. We chose to leave it as-is rather than relocate
+on HF (`huggingface-cli` doesn't have a clean mv, and downstream readers take
+paths as args anyway). If you're looking for control_def steering data, it's
+at the path above, not under `other/ocean_def_control/...`.
+
+**Fix for future**: add an `output_subpath` override to `OceanTraitDef` so
+non-OCEAN adapters can specify their own output path independently of the
+trait/direction/version triplet.
