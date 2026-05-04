@@ -180,6 +180,22 @@ def main() -> None:
     )
     _apply_scalings(peft_model, "n_plus", orig_scalings["n_plus"], 1.0)  # restore
 
+    # ── N+ @ 1.0 + C- @ 1.0 (composed) ─────────────────────────────────────
+    print("\n--- n_plus@1 + c_minus@1 ---", flush=True)
+    set_active_adapters(peft_model, ["n_plus", "c_minus"])
+    _apply_scalings(peft_model, "n_plus", orig_scalings["n_plus"], 1.0)
+    _apply_scalings(peft_model, "c_minus", orig_scalings["c_minus"], 1.0)
+    response = _generate(peft_model, tokenizer, PROMPT)
+    record(
+        "n_plus@1+c_minus@1",
+        (
+            f"{HF_REPO}::{OCEAN_REGISTRY['n_plus'].adapter_path_in_repo}; "
+            f"{HF_REPO}::{OCEAN_REGISTRY['c_minus'].adapter_path_in_repo}"
+        ),
+        "1.0; 1.0",
+        response,
+    )
+
     # ── N+ @ 2.0 + C- @ 1.0 (composed) ─────────────────────────────────────
     print("\n--- n_plus@2 + c_minus@1 ---", flush=True)
     set_active_adapters(peft_model, ["n_plus", "c_minus"])
