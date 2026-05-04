@@ -73,6 +73,7 @@ RUN_SETS: dict[int, list[RunSpec]] = {
         RunSpec("BASE",          "gemma3_27b_base_or_8turn_10prompt_1rollout",                                              "#2F5D9F", "o-"),
         RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_10prompt_1rollout",            "#6B6B6B", "D-"),
         RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_10prompt_1rollout",                  "#C73E3A", "s-"),
+        RunSpec("N- inverted",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_10prompt_1rollout",         "#7A1F1B", "^-"),
     ],
     100: [
         RunSpec("BASE",          "gemma3_27b_base_or_8turn_200_samples_1rollout",                                          "#2F5D9F", "o-"),
