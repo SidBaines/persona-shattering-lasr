@@ -4,23 +4,33 @@
 Ablations to test which OCEAN trait adapter is responsible for the
 LoRA-soup's increased jailbreak vulnerability. Uses the same WildJailbreak
 adv-harmful + adv-benign protocol as ``run_wildjailbreak.py`` but with a
-fixed set of single-LoRA conditions (no soup, no capping):
+fixed set of single-LoRA conditions (no vanilla, no soup, no capping):
 
-    vanilla
     lora_c_plus_1.0    — conscientiousness amplifier alone
     lora_o_minus_1.0   — openness suppressor alone
     lora_o_plus_1.0    — openness amplifier alone
     lora_c_minus_1.0   — conscientiousness suppressor alone
     lora_a_minus_1.0   — agreeableness suppressor alone
 
-Defaults to N=400 harmful + 100 benign per condition (~3.5pp Wilson CI
-half-width at p≈0.5). Six conditions × 500 samples ≈ 3k generations +
-judge calls; ~25-30 min, ~$3-5.
+We do NOT re-run vanilla, capping, or the c+(0.5)⊕o-(0.5) soup — those
+are already on HF under wj_balanced. Compare ablation harm-rates against
+that run informally:
 
-Capping is intentionally excluded — we already know its WJ effect is
-modest (~10pp) and it requires the drift axis + capping_config. If you
-want to compare ablations against capping, look at the wj_balanced run
-on HF.
+    vanilla:    55.0% [51.5, 58.4]  (n=800)
+    capping:    45.25% [41.8, 48.7] (n=800)
+    soup 0.5/0.5: 75.4% [72.3, 78.2]  (n=800)
+
+Defaults: N=400 adv-harmful + 100 adv-benign per condition. Wilson 95%
+CI half-width at p≈0.5 is ~3.5pp at n=400, vs ~2.5pp at the balanced
+n=800. Cross-run-comparison caveat: with a smaller N the ablation
+samples a different deterministic subset of WildJailbreak prompts than
+balanced (``random.sample`` with different n gives different — not
+nested — picks), so comparisons against the balanced numbers are
+informal until either this is re-run at n=800 or vanilla is rerun on
+the same prompts.
+
+Five conditions × 500 samples ≈ 2.5k generations + judge calls; ~20-25
+min, ~\$3.
 
 Usage::
 
@@ -162,7 +172,7 @@ def main() -> None:
     cfg = get_wildjailbreak_preset("balanced")
     cfg.run_slug = args.run_slug
     cfg.hf_eval_type = "persona_jailbreak_wildjailbreak"
-    cfg.conditions = ("vanilla", *ABLATION_CONDITION_NAMES)
+    cfg.conditions = ABLATION_CONDITION_NAMES
     cfg.lora_combos = ABLATION_COMBOS
     cfg.n_wildjailbreak_harmful = args.n_harmful
     cfg.n_wildjailbreak_benign = args.n_benign
