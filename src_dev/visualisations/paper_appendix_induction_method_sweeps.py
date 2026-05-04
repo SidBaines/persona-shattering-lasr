@@ -62,25 +62,25 @@ BASE_PATH = f"{_AMP}/rollout_baseline_t0.7_steering/base/baseline/evals/rollouts
 LORA_CELLS: list[tuple[str, str, str, str, str]] = [
     ("Base", BASE_PATH, "#000000", "-", "o"),
     (
-        "LoRA scale 0.25",
+        "coeff=0.25",
         f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.25/baseline/evals/rollouts_evaluated.jsonl",
         "#3c7fb1",  # blue
         "--", "s",
     ),
     (
-        "LoRA scale 0.50",
+        "coeff=0.50",
         f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.50/baseline/evals/rollouts_evaluated.jsonl",
         "#5b9bd5",  # light blue
         "-.", "^",
     ),
     (
-        "LoRA scale 0.75",
+        "coeff=0.75",
         f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl",
         "#df6f4f",  # orange
         ":", "D",
     ),
     (
-        "LoRA scale 1.00",
+        "coeff=1.00",
         f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+1.00/baseline/evals/rollouts_evaluated.jsonl",
         "#c91546",  # red
         (0, (3, 1, 1, 1)), "v",
@@ -90,31 +90,31 @@ LORA_CELLS: list[tuple[str, str, str, str, str]] = [
 ACTCAP_CELLS: list[tuple[str, str, str, str, str]] = [
     ("Base", BASE_PATH, "#000000", "-", "o"),
     (
-        "actcap frac 0.25",
+        "coeff=0.25",
         f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.25/baseline/evals/rollouts_evaluated.jsonl",
         "#3c7fb1",
         "--", "s",
     ),
     (
-        "actcap frac 0.50",
+        "coeff=0.50",
         f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.50/baseline/evals/rollouts_evaluated.jsonl",
         "#5b9bd5",
         "-.", "^",
     ),
     (
-        "actcap frac 0.75",
+        "coeff=0.75",
         f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.75/baseline/evals/rollouts_evaluated.jsonl",
         "#f39a22",  # yellow-orange
         ":", "D",
     ),
     (
-        "actcap frac 0.85",
+        "coeff=0.85",
         f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.85/baseline/evals/rollouts_evaluated.jsonl",
         "#df6f4f",
         (0, (3, 1, 1, 1)), "P",
     ),
     (
-        "actcap frac 1.00",
+        "coeff=1.00",
         f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_1.00/baseline/evals/rollouts_evaluated.jsonl",
         "#c91546",
         (0, (1, 1)), "v",
@@ -241,12 +241,12 @@ def _render(cells: list[tuple[str, str, str, str, str]], title: str, out_name: s
 def main() -> None:
     _render(
         LORA_CELLS,
-        "E+ LoRA scale sweep on neutral prompts (temp 0.7)",
+        "Inducing E↑ persona using LoRA at different coefficients",
         "fig_G_induction_lora_sweep.pdf",
     )
     _render(
         ACTCAP_CELLS,
-        "E+ activation capping fraction sweep on neutral prompts (temp 0.7)",
+        "Inducing E↑ persona using activation capping at different coefficients",
         "fig_G_induction_actcap_sweep.pdf",
     )
 

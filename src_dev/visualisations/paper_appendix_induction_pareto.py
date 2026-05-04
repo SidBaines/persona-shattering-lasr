@@ -67,47 +67,47 @@ METHODS: list[tuple[str, str, str, list[tuple[str, str]]]] = [
         "#000000",
         "o",
         [
-            ("base", f"{_AMP}/rollout_baseline_t0.7_steering/base/baseline/run_info.json"),
+            ("", f"{_AMP}/rollout_baseline_t0.7_steering/base/baseline/run_info.json"),
         ],
     ),
     (
-        "Sysprompt-induce E+",
+        "Sysprompt-induce E↑",
         "#0f7f3f",
         "s",
         [
             (
-                "sysprompt",
+                "",
                 f"{_AMP}/rollout_sysprompt_elicit_t0.7_steering/base/sysprompt_elicit_extraversion_high/run_info.json",
             ),
         ],
     ),
     (
-        "User-roleplay (E+ scenarios)",
+        "User-roleplay scenarios (E↑)",
         "#7f8c9b",
         "v",
         [
             (
-                "10 scen",
+                "",
                 f"{_AMP}/rollout_scenarios/subset_3e141037_t0.7_steering/high/base/scenarios_extraversion_high/run_info.json",
             ),
         ],
     ),
     (
-        "E+ LoRA",
+        "E↑ LoRA",
         "#c91546",
         "^",
         [
-            (f"{s}", f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+{s}/baseline/run_info.json")
+            (f"coeff={s}", f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+{s}/baseline/run_info.json")
             for s in ["0.25", "0.50", "0.75", "1.00"]
         ],
     ),
     (
-        "E+ activation cap",
+        "E↑ activation capping",
         "#3c7fb1",
         "D",
         [
             (
-                f"{f}",
+                f"coeff={f}",
                 f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_{f}/baseline/run_info.json",
             )
             for f in ["0.25", "0.50", "0.75", "0.85", "1.00"]
@@ -156,9 +156,25 @@ def main() -> None:
             zorder=0,
         )
         ax.text(
-            -3.7, base_coh + 0.05, "base coh",
+            -1.95, base_coh + 0.06, "base coherence",
             fontsize=8, color="grey", style="italic", va="bottom",
         )
+
+    # Per-point label-offset hints to avoid overlap. Keys: (method_label, variant_label).
+    # Default to (8, 4) when not specified.
+    OFFSET_OVERRIDES: dict[tuple[str, str], tuple[int, int]] = {
+        # E↑ LoRA cluster — above-right by default; 0.50 sits very close to actcap 0.75
+        ("E↑ LoRA", "coeff=0.25"): (-50, 6),
+        ("E↑ LoRA", "coeff=0.50"): (8, 6),
+        ("E↑ LoRA", "coeff=0.75"): (8, 6),
+        ("E↑ LoRA", "coeff=1.00"): (8, -10),
+        # actcap cluster — push labels down or to side to avoid LoRA labels above
+        ("E↑ activation capping", "coeff=0.25"): (8, -12),
+        ("E↑ activation capping", "coeff=0.50"): (8, 6),
+        ("E↑ activation capping", "coeff=0.75"): (-58, -10),
+        ("E↑ activation capping", "coeff=0.85"): (8, -12),
+        ("E↑ activation capping", "coeff=1.00"): (8, -4),
+    }
 
     for label, colour, marker, points in method_points:
         if not points:
@@ -177,16 +193,21 @@ def main() -> None:
             edgecolors="#2f3748", linewidths=0.5,
             label=label, zorder=2,
         )
-        # annotate variant labels at each point
+        # annotate variant labels at each point — only if non-empty.
+        # Single-point methods (base, sysprompt, user-roleplay) have empty labels
+        # because their identity is already in the legend.
         for v_label, x, y in points:
+            if not v_label:
+                continue
+            offset = OFFSET_OVERRIDES.get((label, v_label), (8, 4))
             ax.annotate(
                 v_label,
                 xy=(x, y),
-                xytext=(5, 4),
+                xytext=offset,
                 textcoords="offset points",
                 fontsize=7.5,
                 color=colour,
-                alpha=0.85,
+                alpha=0.9,
             )
 
     ax.set_xlabel("Extraversion judge score (mean across all turns)", fontsize=11)
@@ -197,7 +218,7 @@ def main() -> None:
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=9, loc="lower left")
     ax.set_title(
-        "E+ induction methods: trait expression vs coherence (neutral prompts, temp 0.7)",
+        "Inducing E↑ persona: trait expression vs coherence at different coefficients",
         fontsize=12, loc="left", pad=10,
     )
 

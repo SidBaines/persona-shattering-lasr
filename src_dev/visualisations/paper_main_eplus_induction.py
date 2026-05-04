@@ -82,21 +82,21 @@ CELLS: list[tuple[str, str, str, str, str]] = [
         "o",
     ),
     (
-        "Sysprompt-induce E+",
+        "Sysprompt-induce E↑",
         "rollout_sysprompt_elicit_t0.7_steering/base/sysprompt_elicit_extraversion_high/evals/rollouts_evaluated.jsonl",
         "#0f7f3f",
         "--",
         "s",
     ),
     (
-        "E+ LoRA (scale 0.75)",
+        "E↑ LoRA (coeff=0.75)",
         "rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl",
         "#c91546",
         "-.",
         "^",
     ),
     (
-        "E+ activation cap (fraction 0.85)",
+        "E↑ activation capping (coeff=0.85)",
         "rollout_sweep_activation_capping_t0.7_steering/frac_0.85/baseline/evals/rollouts_evaluated.jsonl",
         "#3c7fb1",
         ":",
@@ -232,6 +232,10 @@ def main() -> None:
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9, loc="best")
 
+    axes[0].set_title(
+        "Inducing E↑ persona: per-turn dynamics across induction methods",
+        fontsize=12, loc="left", pad=8,
+    )
     axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
