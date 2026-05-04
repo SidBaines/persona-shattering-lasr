@@ -36,6 +36,7 @@ np.random.seed(SEED)
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -656,15 +657,15 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # FC overnight run: re-do the questionnaire + FA stage with the v7 FC
+    # Qwen-on-B v7 FC run: administer the v7 forced-choice questionnaire
     # questionnaire (72 items × 18 axes — broad v5-replacement, NOT F0-
     # specific) on the cached B rollouts (2500 personas × 1 rollout each,
     # Llama-3.1-8B-Instruct). Goal: see whether forced-choice administration
     # recovers the same / different factor structure as the v5 Likert FA on
-    # the same rollouts. CROSS_MODEL_QUESTIONNAIRE=False administers v7 on
-    # Llama-3.1-8B-Instruct (same model that produced the rollouts) — Stage
-    # 1 hydrates the B rollout cache from HF, Stage 2 runs the FC admin via
-    # local vLLM, Stage 3 builds the FA on the v7 columns.
+    # the same rollouts. CROSS_MODEL_QUESTIONNAIRE=True administers v7 with
+    # Qwen2.5-7B-Instruct — Stage 1 hydrates the B rollout cache from HF,
+    # Stage 2 runs the FC admin via local vLLM, Stage 3 builds the FA on the
+    # v7 columns.
     ("B", "v7_fc_pair"),
 ]
 # Previous Qwen-on-B FA pairs, kept for easy switch-back (set
@@ -688,7 +689,10 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = False  # flip to True for Qwen2.5-7B-Instruct admin
+CROSS_MODEL_QUESTIONNAIRE = (
+    os.environ.get("PSYCHOMETRIC_CROSS_MODEL_QUESTIONNAIRE", "true").lower()
+    in {"1", "true", "yes", "on"}
+)
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -748,7 +752,8 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # the scratch dir + HF cache path don't collide with the rollout-model run.
 # ``None`` preserves prior behaviour (questionnaire model = rollout model).
 QUESTIONNAIRE_MODEL_OVERRIDE: str | None = (
-    "Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None
+    os.environ.get("PSYCHOMETRIC_QUESTIONNAIRE_MODEL_OVERRIDE")
+    or ("Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None)
 )
 # Optional: cap the questionnaire-model's context window and drop rollouts
 # whose (conversation + longest item prompt + retry overhead + max_new_tokens
@@ -793,11 +798,15 @@ LOGPROB_PARSER_VERSION = 2
 #        scripts_dev/psychometric_assessment/prefill_ablation.py.
 #   v2 — ``TRAIT_MCQ_PREFILL = "Answer"`` (no trailing space). Letter-mass
 #        share recovers to ~100% on Qwen2.5.
+#   v3 — v7/f0 ``fc_pair`` prompt framing switched from "Reply with just A/B"
+#        with ``"I'd go with "`` prefill to an explicit ``Answer:``-
+#        prefilled format. This affects first-token logprobs for fc_pair
+#        items and must not collide with earlier v7 caches.
 # Appended to the questionnaire run-id ONLY for logprob-mode trait_mcq /
 # fc_pair pairs when >1. v5 Likert caches (unaffected — the digit prefill
 # ``"Answer: "`` is NOT buggy because Qwen/Llama tokenize digits as bare
 # tokens, not space-prefixed ones) stay valid under their existing IDs.
-PREFILL_VERSION = 2
+PREFILL_VERSION = 3
 # Trait_mcq user-turn prompt-format version. Incremented when the rendered
 # user-turn text for trait_mcq items changes in a way that affects the
 # model's response (i.e. the actual inference output, parallel to
@@ -840,7 +849,6 @@ REALISM_JUDGE_MAX_CONCURRENT = 64
 REALISM_JUDGE_MAX_MESSAGE_CHARS = 4000
 
 # ── Stage 2: Conversation-reset strategies ─────────────────────────────────
-import os
 QUESTIONNAIRE_RESET_MODE = os.environ.get(
     "PSYCHOMETRIC_RESET_MODE", "none"
 )  # "none" | "soft" | "token_boundary"
@@ -852,7 +860,7 @@ QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 20  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 5  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means.
 MIN_ITEM_VARIANCE = 0.1
@@ -943,7 +951,7 @@ STAGES_TO_RUN = [
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
-WRITE_QUESTIONNAIRE_INSPECTION_FILE = True
+WRITE_QUESTIONNAIRE_INSPECTION_FILE = False
 INSPECTION_ITEMS_PER_ROLLOUT = 30
 
 # ═════════════════════════════════════════════════════════════════════════════
