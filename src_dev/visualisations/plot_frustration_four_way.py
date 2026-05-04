@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,7 +37,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from huggingface_hub import hf_hub_download
 
-from scripts_dev.frustration_eval.prompts import IMPOSSIBLE_NUMERIC_PUZZLES
 from src_dev.evals.personality.analyze_results import (
     _interval_ci_from_bootstrap,
     _interval_ci_from_wilson,
@@ -71,11 +69,10 @@ class RunSpec:
 
 # Matching run-name sets for each sample size. Ordering here determines plot order.
 RUN_SETS: dict[int, list[RunSpec]] = {
-    20: [
-        RunSpec("BASE",          "gemma3_27b_base_or_8turn_20prompt_1rollout",                                              "#2F5D9F", "o-"),
-        RunSpec("CONTROL",       "gemma3_27b_control_use_diff_words_v1_persona_hfbatched_8turn_20prompt_1rollout",         "#6B6B6B", "D-"),
-        RunSpec("N-",            "gemma3_27b_n_minus_v4_persona_hfbatched_8turn_20prompt_1rollout",                        "#C73E3A", "s-"),
-        RunSpec("N- inverted",   "gemma3_27b_n_minus_v4_persona_negscale_hfbatched_8turn_20prompt_1rollout",               "#7A1F1B", "^-"),
+    10: [
+        RunSpec("BASE",          "gemma3_27b_base_or_8turn_10prompt_1rollout",                                              "#2F5D9F", "o-"),
+        RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_10prompt_1rollout",            "#6B6B6B", "D-"),
+        RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_10prompt_1rollout",                  "#C73E3A", "s-"),
     ],
     100: [
         RunSpec("BASE",          "gemma3_27b_base_or_8turn_200_samples_1rollout",                                          "#2F5D9F", "o-"),
@@ -241,18 +238,8 @@ def plot_four_way(
         fontsize=10,
     )
 
-    # Example puzzle — one representative prompt, wrapped, placed under the axes.
-    example = " ".join(IMPOSSIBLE_NUMERIC_PUZZLES[0].split())
-    wrapped = textwrap.fill(f"Example puzzle:  {example}", width=120)
-    fig.text(
-        0.5, 0.02, wrapped,
-        ha="center", va="bottom",
-        fontsize=7.5, color="#333",
-        wrap=True,
-    )
-
-    # Reserve ~10% right for legend, ~12% bottom for example puzzle.
-    fig.tight_layout(rect=[0, 0.12, 0.90, 0.95])
+    # Reserve ~10% right for legend.
+    fig.tight_layout(rect=[0, 0.0, 0.90, 0.95])
 
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = explicit_stem or f"fig_frustration_eval_4way_n{n_prompts}{name_suffix}"
@@ -268,8 +255,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--n-prompts", type=int, choices=sorted(RUN_SETS.keys()), default=20,
-        help="Select the matching run-name set (20 or 100).",
+        "--n-prompts", type=int, choices=sorted(RUN_SETS.keys()), default=10,
+        help="Select the matching run-name set (10 or 100).",
     )
     parser.add_argument(
         "--subset", default="all",
