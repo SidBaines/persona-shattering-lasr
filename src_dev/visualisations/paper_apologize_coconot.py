@@ -27,7 +27,9 @@ Panel (b) — CoCoNot total compliance (lower = better):
     ``results.scores[0].metrics['total']`` (no recompute), with Wilson
     95% CIs computed from per-sample ``UNACCEPTABLE`` labels (matches
     upstream ``original_compliance_value_to_float`` exactly).
-    CoCoNot inspect logs are read from local ``scratch/evals/ocean/coconot/``.
+    CoCoNot inspect logs hydrate from
+    ``persona-shattering-lasr/monorepo`` (same provenance as sycophancy)
+    and are cached at ``scratch/paper_plots_cache/coconot_a_plus_minus_control/``.
 
 Run with::
 
@@ -111,7 +113,6 @@ C_INJECTED = "#c91546"
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 SYC_CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "sycophancy_a_six_bars"
 COCONOT_CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "coconot_a_plus_minus_control"
-COCONOT_LOCAL_ROOT = project_root / "scratch" / "evals" / "ocean" / "coconot"
 
 
 # ── Conditions ─────────────────────────────────────────────────────────────
@@ -126,7 +127,6 @@ class Condition:
     hatch: str | None
     syc_log_in_repo: str          # HF path for sycophancy inspect log
     coconot_log_in_repo: str      # HF path for coconot inspect log
-    coconot_subdir: str           # local mirror under COCONOT_LOCAL_ROOT (run_dir without /native/...)
 
 
 CONDITIONS: list[Condition] = [
@@ -142,11 +142,10 @@ CONDITIONS: list[Condition] = [
             "2026-04-29T18-44-01+00-00_sycophancy_i2Xzh5RirRoMixwGTugtPL.json"
         ),
         coconot_log_in_repo=(
-            "evals/baselines/llama-3.1-8b-instruct/base/coconot/"
+            "evals/baselines/llama-3.1-8b-instruct/coconot/"
             "native/inspect_logs/"
             "2026-05-01T15-50-25+00-00_coconot_GhdMhJyadEXqtUh7SrpnYh.json"
         ),
-        coconot_subdir="_base_prime_full/base/coconot",
     ),
     Condition(
         key="control",
@@ -168,7 +167,6 @@ CONDITIONS: list[Condition] = [
             "native/inspect_logs/"
             "2026-05-03T14-40-25+00-00_coconot_KLbiUx6eaBuaju95dcXFno.json"
         ),
-        coconot_subdir="control_ocean_def_vanton4_paired_dpo_s1vs2/lora_+1p00x/coconot",
     ),
     # Agreeable-direction pair: same colour (C_ORGANIC), hatched on the flipped-scale path.
     Condition(
@@ -191,7 +189,6 @@ CONDITIONS: list[Condition] = [
             "native/inspect_logs/"
             "2026-05-01T20-34-08+00-00_coconot_kB7Dh8M8Hj9L26i7aDMAuf.json"
         ),
-        coconot_subdir="a_minus_vanton4_paired_dpo_minus1/lora_-1p00x/coconot",
     ),
     Condition(
         key="a_plus_p1",
@@ -213,7 +210,6 @@ CONDITIONS: list[Condition] = [
             "native/inspect_logs/"
             "2026-05-01T16-49-12+00-00_coconot_2ztYCYTz8mJDXqmKqCNbLp.json"
         ),
-        coconot_subdir="a_plus_vanton4_paired_dpo/lora_+1p00x/coconot",
     ),
     # Disagreeable-direction pair: same colour (C_INJECTED), hatched on the flipped-scale path.
     Condition(
@@ -236,7 +232,6 @@ CONDITIONS: list[Condition] = [
             "native/inspect_logs/"
             "2026-05-01T16-21-46+00-00_coconot_Zt55TjtQYntZ9pUeCBwmHZ.json"
         ),
-        coconot_subdir="a_plus_vanton4_paired_dpo/lora_-1p00x/coconot",
     ),
     Condition(
         key="a_minus_p1",
@@ -258,7 +253,6 @@ CONDITIONS: list[Condition] = [
             "native/inspect_logs/"
             "2026-05-01T20-34-08+00-00_coconot_PnbDefC6ALLBCr9t9qm4ou.json"
         ),
-        coconot_subdir="a_minus_vanton4_paired_dpo_plus1/lora_+1p00x/coconot",
     ),
 ]
 
@@ -307,18 +301,9 @@ def _syc_apologize_rate(log_path: Path) -> tuple[float, float, float]:
 
 
 def _resolve_coconot_log(cond: Condition) -> Path:
-    """Resolve the coconot log: prefer the local mirror, fall back to HF.
-
-    The local mirror path is reconstructed from ``cond.coconot_subdir`` and
-    the basename of ``cond.coconot_log_in_repo`` (so the local file matches
-    the canonical HF copy by name, not by glob).
-    """
-    filename = cond.coconot_log_in_repo.rsplit("/", 1)[1]
-    local = COCONOT_LOCAL_ROOT / cond.coconot_subdir / "native" / "inspect_logs" / filename
-    if local.exists() and local.stat().st_size > 0:
-        return local
-
+    """Hydrate the coconot inspect log from the monorepo on HF (cached locally)."""
     COCONOT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    filename = cond.coconot_log_in_repo.rsplit("/", 1)[1]
     cached = COCONOT_CACHE_DIR / cond.key / filename
     if cached.exists() and cached.stat().st_size > 0:
         return cached
