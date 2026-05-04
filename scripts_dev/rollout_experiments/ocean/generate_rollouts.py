@@ -64,6 +64,7 @@ from src_dev.rollout_generation.model_providers import (
     CellSpec,
     LoRaScaleProvider,
     SingleModelProvider,
+    VLLMBaseProvider,
     VLLMLoRaComboProvider,
     VLLMLoRaScaleProvider,
 )
@@ -661,7 +662,7 @@ def parse_args() -> argparse.Namespace:
         "--vllm",
         action="store_true",
         default=False,
-        help="Use VLLMLoRaScaleProvider for LoRA sweep (faster on H100, ignored for activation_capping/base).",
+        help="Use vLLM engine for inference (lora, base, lora_combo methods). Ignored for activation_capping.",
     )
     parser.add_argument(
         "--vllm-gpu-memory-utilization",
@@ -852,7 +853,19 @@ def main() -> None:
             eval_name = "rollout_sweep_activation_capping"
 
         elif args.method == "base":
-            provider = SingleModelProvider(model_id=BASE_MODEL)
+            if args.vllm:
+                print(f"  Backend: vLLM (base model)")
+                provider = VLLMBaseProvider(
+                    base_model=BASE_MODEL,
+                    temperature=experiment_config.assistant_temperature,
+                    top_p=experiment_config.assistant_top_p,
+                    max_new_tokens=args.assistant_max_new_tokens,
+                    gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                    enforce_eager=args.vllm_enforce_eager,
+                    enable_prefix_caching=not args.vllm_disable_prefix_caching,
+                )
+            else:
+                provider = SingleModelProvider(model_id=BASE_MODEL)
             eval_name = "rollout_baseline"
 
         elif args.method == "lora_combo":

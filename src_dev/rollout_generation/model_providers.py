@@ -499,6 +499,109 @@ class SingleModelProvider(ModelProvider):
             self._tokenizer = None
 
 
+# ── vLLM base provider ───────────────────────────────────────────────────────
+
+
+class VLLMBaseProvider(ModelProvider):
+    """Plain vLLM engine for the base model (no LoRA).
+
+    Drop-in replacement for :class:`SingleModelProvider` when you need vLLM's
+    paged-attention KV-cache instead of HF Transformers.  Use this for high-
+    concurrency rollout runs where the HF shared-GPU executor runs out of VRAM
+    as context windows grow across long conversations.
+
+    Args:
+        base_model: HuggingFace model ID.
+        temperature: Sampling temperature.
+        top_p: Top-p for generation.
+        max_new_tokens: Max tokens per response.
+        dtype: Torch dtype for the vLLM engine.
+        gpu_memory_utilization: vLLM GPU memory fraction (0.0–1.0).
+        max_model_len: Optional context length override.
+        enforce_eager: Disable CUDA graphs.
+        enable_prefix_caching: Enable vLLM prefix caching (default True).
+    """
+
+    def __init__(
+        self,
+        base_model: str,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+        max_new_tokens: int = 128,
+        dtype: str = "bfloat16",
+        gpu_memory_utilization: float | None = None,
+        max_model_len: int | None = None,
+        enforce_eager: bool = False,
+        enable_prefix_caching: bool = True,
+    ) -> None:
+        self._base_model = base_model
+        self._temperature = temperature
+        self._top_p = top_p
+        self._max_new_tokens = max_new_tokens
+        self._dtype = dtype
+        self._gpu_memory_utilization = _resolve_gpu_memory_utilization(gpu_memory_utilization)
+        self._max_model_len = max_model_len
+        self._enforce_eager = enforce_eager
+        self._enable_prefix_caching = enable_prefix_caching
+
+        self._llm: Any = None
+        self._SamplingParams: Any = None
+
+    def variant_names(self) -> list[str]:
+        return ["base"]
+
+    def variant_label(self, variant: str) -> str:
+        return "base"
+
+    def __enter__(self) -> "VLLMBaseProvider":
+        import os
+        os.environ.setdefault("VLLM_USE_V1", "1")
+
+        try:
+            from vllm import LLM, SamplingParams
+        except ImportError as exc:
+            raise ImportError(
+                "VLLMBaseProvider requires 'vllm': pip install vllm"
+            ) from exc
+
+        self._SamplingParams = SamplingParams
+
+        engine_kwargs: dict[str, Any] = dict(
+            model=self._base_model,
+            dtype=self._dtype,
+            gpu_memory_utilization=self._gpu_memory_utilization,
+            enforce_eager=self._enforce_eager,
+            enable_prefix_caching=self._enable_prefix_caching,
+            trust_remote_code=False,
+        )
+        if self._max_model_len is not None:
+            engine_kwargs["max_model_len"] = self._max_model_len
+
+        print(f"  Initialising vLLM engine (base): {self._base_model}", flush=True)
+        self._llm = LLM(**engine_kwargs)
+        return self
+
+    @contextmanager
+    def activate(self, variant: str) -> Iterator[tuple[Any, None]]:
+        assert self._llm is not None, "VLLMBaseProvider.__enter__ must be called first"
+        provider = _VllmVariantProvider(
+            llm=self._llm,
+            lora_request=None,
+            SamplingParams=self._SamplingParams,
+            temperature=self._temperature,
+            top_p=self._top_p,
+            max_new_tokens=self._max_new_tokens,
+        )
+        yield (provider, None)
+
+    def close(self) -> None:
+        self._llm = None
+        self._SamplingParams = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
 # ── vLLM LoRA scale provider ─────────────────────────────────────────────────
 
 
