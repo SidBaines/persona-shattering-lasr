@@ -5,8 +5,8 @@
   "counterbalance_seed": 42,
   "block_fc_pairs": {
     "description": "Forced-choice pairs in self-introspection framing. high_option marks which letter corresponds to the high pole of `axis` (counterbalanced across items at conversion time).",
-    "prompt_template": "{stem}\n\nA) {option_a}\nB) {option_b}\n\nReply with just \"A\" or \"B\".",
-    "prefill": "I'd go with ",
+    "prompt_template": "{stem}\n\nA) {option_a}\nB) {option_b}\n\nPlease answer with only \"Answer:\" followed by your chosen letter.",
+    "prefill": "Answer:",
     "items": [
       {
         "id": "v7fc_001",
