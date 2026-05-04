@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
-# Headline-quality rerun for the 5-method E+ steering figure.
+# Headline-quality rerun for the 4-method E+ steering figure.
 #
-# 5 cells × 40 prompts × 3 rollouts × 15 turns. Same neutral psychometric
+# 4 cells × 40 prompts × 3 rollouts × 15 turns. Same neutral psychometric
 # pool, deterministic via SEED=42 in generate_rollouts.py. The first 10
 # prompts are identical to the 10 we used at 10x2; we're rerunning the
 # whole 40-prompt set rather than complicating the merge.
 #
 # Output suffix: _t0.7_main (separates from existing 10x2 cells).
 #
-# Cells:
+# Cells (chosen contenders from earlier qualitative inspection):
 #   M1: base
-#   M2: E+ LoRA scale 1.00
-#   M3: E- LoRA scale -1.00 (alternative path to E+ via negated suppressor)
-#   M4: actcap frac 1.00 (pre-flight: e_plus axis_slug must be set)
+#   M2: E+ LoRA scale 0.75 (cleaner than 1.00 — less caps-and-cliches register)
+#   M4: actcap frac 0.85 (matched-trait-neighbourhood with M2; some bro-register
+#       degradation visible but cleaner than frac 1.00 tone-loop mode)
 #   M5: sysprompt-induce E+
 #
-# Estimated total: ~1.5-2h (M4 actcap is HF transformers, ~30 min).
+# (Negative-LoRA / user-roleplay are appendix material at 10x2 fidelity, not
+# rerun here.)
+#
+# Estimated total: ~1-1.5h (M4 actcap is HF transformers, ~30 min).
 #
 # Usage:
 #   tmux new -s headline
@@ -85,25 +88,19 @@ run_cell "M1_base_neutral_40x3" \
         --traits e_plus --method base \
         "${COMMON[@]}"
 
-# M2: E+ LoRA scale 1.00
-run_cell "M2_eplus_lora_1.00_40x3" \
+# M2: E+ LoRA scale 0.75 (cleaner than 1.00 in qualitative inspection)
+run_cell "M2_eplus_lora_0.75_40x3" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits e_plus --method lora \
-        --scale-points 1.0 \
+        --scale-points 0.75 \
         "${COMMON[@]}"
 
-# M3: E- LoRA scale -1.00 (negative-LoRA path to E+)
-run_cell "M3_eminus_lora_-1.00_40x3" \
-    uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
-        --traits e_minus --method lora \
-        --scale-points=-1.0 \
-        "${COMMON[@]}"
-
-# M4: actcap frac 1.00 (no --vllm; HF transformers + hooks)
-run_cell "M4_eplus_actcap_1.00_40x3" \
+# M4: actcap frac 0.85 (matched-trait neighbourhood with M2; no --vllm,
+# HF transformers + hooks)
+run_cell "M4_eplus_actcap_0.85_40x3" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits e_plus --method activation_capping \
-        --fractions=1.0 \
+        --fractions=0.85 \
         --num-rollouts 3 --num-turns 15 \
         --max-samples 40 \
         --assistant-temperature 0.7 \

@@ -120,8 +120,8 @@ run_cell "O_base_neutral" \
         --vllm \
         "${COMMON_NEUTRAL[@]}"
 
-# O+ LoRA sweep {0.75, 1.0}
-run_cell "O_oplus_lora_sweep" \
+# O+ LoRA sweep — headline scales first
+run_cell "O_oplus_lora_headline" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits o_plus --method lora \
         --scale-points 0.75,1.0 \
@@ -142,8 +142,8 @@ run_cell "O_oplus_sysprompt_high" \
         --output-suffix "_t0.7_steering_o" \
         --vllm
 
-# O- LoRA sweep {0.75, 1.0}
-run_cell "O_ominus_lora_sweep" \
+# O- LoRA sweep — headline scales first
+run_cell "O_ominus_lora_headline" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits o_minus --method lora \
         --scale-points 0.75,1.0 \
@@ -177,6 +177,39 @@ if [ "$O_MINUS_AXIS_OK" = "yes" ]; then
         uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
             --traits o_minus --method activation_capping \
             --fractions=0.75,1.0 \
+            "${COMMON_NEUTRAL[@]}"
+fi
+
+# ── Phase 3: appendix-priority low-scale sweep ─────────────────────────
+# Lower scale points {0.25, 0.5} for the appendix Pareto plot. These run
+# last; if disk/time is short they may not finish, which is acceptable.
+
+run_cell "O_oplus_lora_appendix_low" \
+    uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+        --traits o_plus --method lora \
+        --scale-points 0.25,0.5 \
+        --vllm \
+        "${COMMON_NEUTRAL[@]}"
+
+run_cell "O_ominus_lora_appendix_low" \
+    uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+        --traits o_minus --method lora \
+        --scale-points 0.25,0.5 \
+        --vllm \
+        "${COMMON_NEUTRAL[@]}"
+
+if [ "$O_PLUS_AXIS_OK" = "yes" ]; then
+    run_cell "O_oplus_actcap_appendix_low" \
+        uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+            --traits o_plus --method activation_capping \
+            --fractions=0.25,0.5 \
+            "${COMMON_NEUTRAL[@]}"
+fi
+if [ "$O_MINUS_AXIS_OK" = "yes" ]; then
+    run_cell "O_ominus_actcap_appendix_low" \
+        uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
+            --traits o_minus --method activation_capping \
+            --fractions=0.25,0.5 \
             "${COMMON_NEUTRAL[@]}"
 fi
 
