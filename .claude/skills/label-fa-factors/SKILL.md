@@ -48,7 +48,7 @@ available rotations under their path and ask which to label.
 ## Tool
 
 `python3 .claude/skills/label-fa-factors/helpers/fa_label_tools.py` with
-three subcommands:
+four subcommands:
 
 - `resolve <path>` — returns JSON: either a resolved `{npz, analysis_key,
   output_path, items_json, save_dir, …}` object, or `{"ambiguous": true,
@@ -57,7 +57,20 @@ three subcommands:
   and negative loading items, with full block-aware descriptions for
   Likert / fc_pair / trait_mcq / vignette / fc items, plus communalities,
   cross-loadings, SS loading, proportion variance, and factor correlations.
-  `<path>` must resolve to a single `.npz`.
+  `<path>` must resolve to a single `.npz`. Default skim tool — use this
+  first.
+- `extract <path> [--min-loading 0.10] [--cross-threshold 0.20]` — same
+  per-item rendering as `describe`, but walks **every** item with
+  `|loading| ≥ --min-loading` per factor and prints them in one list
+  sorted by `|loading|` (positive and negative pole interleaved).
+  Use when:
+    * `describe`'s top-N hides items you suspect would change the label
+      (especially when a few near-equal items get cut off);
+    * the top items contradict each other and you want the full vote;
+    * you want to verify sign-decoding by counting how many items point
+      the same behavioural way on each pole.
+  `extract --min-loading 0.10` typically prints ~30–50 items per factor;
+  use a higher threshold (e.g. `0.30`) for a tighter view.
 - `write <path> --labels <labels.json>` — validates the labels payload and
   writes it to the resolved `output_path`. Validates: exactly one entry per
   factor, no duplicates, non-empty `axis_name`, all required fields present.
@@ -72,18 +85,34 @@ three subcommands:
    markdown. Each factor section has positive-pole and negative-pole items
    with behavioural direction already computed (so reverse-keying and
    letter-encoding quirks are already accounted for — do not second-guess
-   the signs).
+   the signs *unless the warnings below say otherwise*).
 
    **Check the header for ⚠ rich-context warnings before trusting the
    output.** `describe` loads raw questionnaire items from
-   `datasets/psychometric_questionnaires/` to render the full options for
-   `trait_mcq` / `fc` / `fc_pair` / `vignette` items. If a raw source is
-   missing, the header lists the affected versions and each degraded item
-   is tagged with a `⚠ RICH CONTEXT MISSING` line — **do not label
-   factors that are dominated by degraded items**, ask the user to
-   resolve the missing source first.
+   `datasets/psychometric_questionnaires/` to render the full options
+   AND to recover per-item keying metadata (`high_option`,
+   `answer_mapping`, `reverse_keyed`, vignette `scoring`) that the
+   `*_item_labels.json` sidecar strips. If a raw source is missing,
+   the header lists the affected versions and each degraded item is
+   tagged with a `⚠ RICH CONTEXT MISSING` line. For `fc_pair`, an
+   item that lacks `high_option` from BOTH the rich item and the
+   col_def gets a separate `⚠ KEYING UNKNOWN` line — when you see
+   that, the picked-option direction printed for that item is a guess.
+   **Do not label factors that are dominated by degraded items**; ask
+   the user to resolve the missing source first.
 
-3. **Cross-check (optional).** If helpful, read
+3. **Verify and audit (recommended for any rotation you'll publish).**
+   Skim the `describe` output for sign-direction coherence per pole:
+   on each factor, count whether the top-positive items mostly point
+   the same behavioural way and the top-negative items the opposite
+   way. If they don't, or if a factor has many near-equal items that
+   `--top-n 10` cut off, run
+   `extract <resolved-npz> --min-loading 0.10` to see every item above
+   threshold in one sorted list. Use `extract` aggressively — it's the
+   tool that lets you tell a coherent factor from one that just looks
+   coherent in its top-3.
+
+   If still helpful, read
    - `<save_dir>/plots/` heatmaps / loading distributions,
    - `<items_json>` for any item you want to see in full.
    Do this selectively — don't dump large files into context without reason.
@@ -162,30 +191,67 @@ three subcommands:
   reverse-keyed, and which option a trait_mcq / fc_pair / vignette item
   endorses depends on the item-specific scoring / `high_option`.
   `describe` pre-computes the right-sign interpretation and puts it on
-  the `→` line of each item — but you still have to read it for every
-  top item on both poles, not just the first one or two. The headline
-  checks per block:
-    - *Likert*: the `→` line tells you whether high-factor personas
-      *agree* or *disagree*, already accounting for `reverse_keyed`.
-      Don't infer from the statement text alone.
-    - *fc_pair*: the header tells you which letter (`A` or `B`) is the
-      `+1` pole for that item — the mapping flips per item, so a
-      `+0.40` loading does not consistently mean "option A".
-    - *trait_mcq* with `encoding=trait_score_0-1`: sign is interpretable,
-      the `→` line tells you whether high-factor personas pick more
-      `scored=1` or more `scored=0` options. With
-      `encoding=letter_1-4`, sign is NOT interpretable at all (see
-      below).
-    - *vignette*: the `→` line tells you whether high-factor personas
-      pick higher- or lower-scoring options *on the per-column scoring
-      axis* (axis name is deliberately redacted — see below).
+  the `HIGH-FACTOR PICKS …` line of each item — but you still have to
+  read it for every top item on both poles, not just the first one or
+  two. The per-block sign-decoding rules:
+
+    - *Likert* — column matrix value = numeric Likert response (1–5),
+      with `reverse_keyed` items multiplied by –1 inside the FA
+      pipeline. Keying source: `reverse_keyed` field on the col_def.
+      The `→ agree more / disagree more` line already accounts for
+      reverse-keying; **do not** infer from the statement text alone.
+
+    - *fc_pair* — column matrix value ∈ {–1, +1} where +1 = the option
+      labelled `high_option` in the raw item, –1 = the other option.
+      Keying source: `high_option` on the **raw** questionnaire item,
+      since the `*_item_labels.json` sidecar strips it. The mapping is
+      counterbalanced **per item**, not per axis: in
+      `psychometric_questionnaire_v7_fc_pair`, roughly half the items
+      have `high_option=A` and half have `high_option=B`, even within
+      the same `axis`. So a `+0.40` loading does NOT consistently mean
+      "option A" — read the `(+1 = option X)` and `HIGH-FACTOR PICKS
+      …` lines on every item. If you see `⚠ KEYING UNKNOWN` on any
+      item, the picked-option direction for that item is a guess and
+      you must not treat it as evidence — re-run the FA stage with the
+      raw questionnaire JSON in place under
+      `datasets/psychometric_questionnaires/`.
+
+    - *fc* (legacy forced-choice) — column matrix value ∈ {–1, +1}
+      where +1 = `option_a`, –1 = `option_b`. No counterbalancing: the
+      mapping is the same for every item, so `+loading` always means
+      "high-factor personas choose A". Keying source: `option_a` /
+      `option_b` on the raw item.
+
+    - *trait_mcq* — depends on `encoding`:
+        * `trait_score_0-1` / `trait_aligned_0-1`: sign is
+          interpretable. Column matrix value ∈ {0, 1} from
+          `answer_mapping`. The `→` line tells you whether high-factor
+          personas pick more `scored=1` or `scored=0` options. Keying
+          source: `answer_mapping` on the raw item.
+        * `letter_1-4`: sign is **NOT interpretable**. The numeric
+          letter rank is shuffled per item (the FA matrix value is
+          essentially the alphabetic rank of the picked option, not a
+          trait score). The `→` line says so explicitly. Do not claim
+          such a factor captures a trait direction from this evidence
+          alone — look for consistent patterns across other blocks.
+
+    - *vignette* — column matrix value = the option's score on the
+      item's scoring axis (typically integer, can be negative). The
+      `→` line tells you whether high-factor personas pick
+      higher- or lower-scoring options *on the per-column scoring
+      axis* (axis name is deliberately redacted — see below). Keying
+      source: per-option `scoring` dict on the raw item, indexed by
+      the col_def's `dimension`.
+
   Before writing a label, sanity-check by counting: do most top-positive
-  items' `→` lines point the same behavioural way? Do the top-negative
-  items point the opposite way? If the decoded directions contradict
-  each other within one pole, the factor is a mess — mark it with
-  `confidence: "unlabelable"` (or `"low"` if a best-effort direction is
-  still defensible) and describe the contradiction in the `description`
-  rather than forcing a clean story.
+  items' `HIGH-FACTOR PICKS` lines point the same behavioural way? Do
+  the top-negative items point the opposite way? If the decoded
+  directions contradict each other within one pole, the factor is a
+  mess — mark it with `confidence: "unlabelable"` (or `"low"` if a
+  best-effort direction is still defensible) and describe the
+  contradiction in the `description` rather than forcing a clean
+  story. When `describe`'s top-N might be cutting off relevant items,
+  fall back to `extract --min-loading 0.10` to see the full picture.
 - **trait_mcq with `encoding=letter_1-4`** is NOT trait-interpretable by
   sign. Do not claim that such a factor captures a trait direction purely
   on that evidence; look for consistent patterns across *other* blocks.
