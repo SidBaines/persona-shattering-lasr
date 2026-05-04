@@ -168,10 +168,15 @@ def main():
         logger.info("Loading adapter: %s", adapter_path)
         model = PeftModel.from_pretrained(base_model, str(adapter_path))
         if args.negate_adapter:
-            logger.info("Negating LoRA weights (subtracting adapter)")
-            for name, param in model.named_parameters():
-                if "lora_" in name:
-                    param.data.mul_(-1.0)
+            # Negating both lora_A and lora_B is a no-op since (-B)@(-A) = B@A.
+            # The correct inversion is to flip the per-module LoRA scaling factor
+            # (mirrors run_sycophancy_vllm.py:174-178, which uses scale=-1).
+            logger.info("Inverting adapter via per-module LoRA scaling=-1.0")
+            for module in model.modules():
+                scaling = getattr(module, "scaling", None)
+                if isinstance(scaling, dict):
+                    for k in scaling:
+                        scaling[k] = -1.0
         logger.info("Merging adapter into base weights (merge_and_unload)")
         model = model.merge_and_unload()
     else:
