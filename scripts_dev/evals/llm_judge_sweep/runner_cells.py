@@ -198,6 +198,15 @@ class NormalisedConfig:
     plot_title: str
     trait_color: str
     coherence_color: str
+    x_axis_label: str
+    # Activation-capping mode: when set, the rollout stage applies
+    # per-layer activation-capping hooks at the cell's "scale" (interpreted
+    # as a fraction along the persona's axis) instead of baking a LoRA. The
+    # baseline cell still runs as the unmodified base model. The cell-level
+    # HF layout remains identical to the LoRA case.
+    activation_cap_axis_path: str | None
+    activation_cap_per_layer_range_path: str | None
+    activation_cap_capping_layers: tuple[int, ...] | None
 
 
 def _normalise_config(cfg: ModuleType) -> NormalisedConfig:
@@ -226,6 +235,18 @@ def _normalise_config(cfg: ModuleType) -> NormalisedConfig:
             "Config must set JUDGE_METRIC_TRAITS, JUDGE_METRIC_TRAIT, or TRAIT."
         )
 
+    cap_cfg = getattr(cfg, "ACTIVATION_CAP_CONFIG", None)
+    if cap_cfg is not None:
+        cap_axis_path = cap_cfg["axis_path"]
+        cap_per_layer = cap_cfg["per_layer_range_path"]
+        cap_layers = tuple(int(l) for l in cap_cfg["capping_layers"])
+        default_x_axis = "Activation cap fraction"
+    else:
+        cap_axis_path = None
+        cap_per_layer = None
+        cap_layers = None
+        default_x_axis = "LoRA scale"
+
     return NormalisedConfig(
         adapters=adapters,
         scales_per_adapter=scales_per_adapter,
@@ -252,6 +273,10 @@ def _normalise_config(cfg: ModuleType) -> NormalisedConfig:
         plot_title=getattr(cfg, "PLOT_TITLE", "LLM-judge LoRA sweep"),
         trait_color=getattr(cfg, "TRAIT_COLOR", "#4A76AA"),
         coherence_color=getattr(cfg, "COHERENCE_COLOR", "#757575"),
+        x_axis_label=getattr(cfg, "X_AXIS_LABEL", default_x_axis),
+        activation_cap_axis_path=cap_axis_path,
+        activation_cap_per_layer_range_path=cap_per_layer,
+        activation_cap_capping_layers=cap_layers,
     )
 
 
@@ -348,6 +373,7 @@ def _generate_rollouts(
     copies each cell's staging output into its canonical local dir.
     """
     from src_dev.rollout_generation.model_providers import (
+        ActivationCapProvider,
         CellSpec,
         VLLMLoRaComboProvider,
     )
@@ -362,25 +388,47 @@ def _generate_rollouts(
     staging_root = STAGING_ROOT / sweep_id
     staging_root.mkdir(parents=True, exist_ok=True)
 
-    cell_specs = [
-        CellSpec(
-            label=c.variant_label(),
-            adapter_scales=tuple((spec.ref, scale) for spec, scale in c.entries),
-        )
-        for c in cells_to_rollout
-    ]
-
     conditions = single_turn_conditions({"no_prompt": None})
     condition_name = conditions[0].name  # e.g. "1turn_astNoSProm___no_prompt"
 
-    provider = VLLMLoRaComboProvider(
-        base_model=nc.base_model,
-        cells=cell_specs,
-        baked_adapters_dir=BAKED_ROOT / sweep_id,
-        temperature=nc.assistant_temperature,
-        top_p=nc.assistant_top_p,
-        max_new_tokens=nc.assistant_max_new_tokens,
-    )
+    is_capping = nc.activation_cap_axis_path is not None
+    if is_capping:
+        # Build one provider variant per cell; baseline cell uses fraction 0.0
+        # (cap threshold at the base end → effectively a no-op, matching the
+        # LoRA baseline's "unmodified base model" semantics).
+        fractions: list[float] = []
+        variant_label_map: dict[str, str] = {}
+        for cell in cells_to_rollout:
+            scale = cell.entries[0][1] if cell.entries else 0.0
+            fractions.append(float(scale))
+            variant_label_map[str(float(scale))] = cell.variant_label()
+
+        provider = ActivationCapProvider(
+            base_model=nc.base_model,
+            axis_path=nc.activation_cap_axis_path,
+            per_layer_range_path=nc.activation_cap_per_layer_range_path,
+            fractions=fractions,
+            capping_layers=list(nc.activation_cap_capping_layers or []),
+            variant_label_map=variant_label_map,
+        )
+        assistant_provider_name = "local"
+    else:
+        cell_specs = [
+            CellSpec(
+                label=c.variant_label(),
+                adapter_scales=tuple((spec.ref, scale) for spec, scale in c.entries),
+            )
+            for c in cells_to_rollout
+        ]
+        provider = VLLMLoRaComboProvider(
+            base_model=nc.base_model,
+            cells=cell_specs,
+            baked_adapters_dir=BAKED_ROOT / sweep_id,
+            temperature=nc.assistant_temperature,
+            top_p=nc.assistant_top_p,
+            max_new_tokens=nc.assistant_max_new_tokens,
+        )
+        assistant_provider_name = "vllm"
 
     output_config = OutputPathConfig(
         scratch_root=staging_root,
@@ -400,7 +448,7 @@ def _generate_rollouts(
         evaluations=[],
         experiment=ExperimentConfig(
             assistant_model=nc.base_model,
-            assistant_provider="vllm",
+            assistant_provider=assistant_provider_name,
             assistant_temperature=nc.assistant_temperature,
             assistant_top_p=nc.assistant_top_p,
             assistant_max_new_tokens=nc.assistant_max_new_tokens,
@@ -789,7 +837,7 @@ def _render_1d_figure(
         lines.append(ln)
     left.axvline(0.0, color="black", linewidth=1, linestyle="--", alpha=0.5)
     left.set_title(f"{nc.plot_title} — {trait_metric}")
-    left.set_xlabel("LoRA scale")
+    left.set_xlabel(nc.x_axis_label)
     left.grid(alpha=0.25)
     if lines:
         left.legend(lines, [l.get_label() for l in lines], loc="best")
