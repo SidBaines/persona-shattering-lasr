@@ -167,6 +167,14 @@ def plot_condition_bars(
     """Side-by-side bar plot: harm rate (and refusal rate, if provided)."""
     import matplotlib.pyplot as plt
 
+    def _yerr_from_rows(rows: list[RateRow]) -> list[list[float]]:
+        # Clamp to non-negative so tiny floating-point inversions at the
+        # interval boundary do not make matplotlib reject the error bars.
+        return [
+            [max(0.0, r.rate - r.ci_low) for r in rows],
+            [max(0.0, r.ci_high - r.rate) for r in rows],
+        ]
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     has_refusal = refusal_rows is not None and len(refusal_rows) > 0
     fig, axes = plt.subplots(1, 2 if has_refusal else 1,
@@ -175,9 +183,7 @@ def plot_condition_bars(
     ax_harm = axes[0, 0]
     conditions = [r.condition for r in harm_rows]
     rates = [r.rate for r in harm_rows]
-    errs_lo = [r.rate - r.ci_low for r in harm_rows]
-    errs_hi = [r.ci_high - r.rate for r in harm_rows]
-    ax_harm.bar(conditions, rates, yerr=[errs_lo, errs_hi], capsize=4,
+    ax_harm.bar(conditions, rates, yerr=_yerr_from_rows(harm_rows), capsize=4,
                 color="#c45a5a", alpha=0.85)
     ax_harm.set_ylabel("harmful response rate")
     ax_harm.set_title("Harmful rate (95% Wilson CI)")
@@ -190,9 +196,7 @@ def plot_condition_bars(
         ax_ref = axes[0, 1]
         rconds = [r.condition for r in refusal_rows]
         rrates = [r.rate for r in refusal_rows]
-        relo = [r.rate - r.ci_low for r in refusal_rows]
-        rehi = [r.ci_high - r.rate for r in refusal_rows]
-        ax_ref.bar(rconds, rrates, yerr=[relo, rehi], capsize=4,
+        ax_ref.bar(rconds, rrates, yerr=_yerr_from_rows(refusal_rows), capsize=4,
                    color="#4a7a99", alpha=0.85)
         ax_ref.set_ylabel("refusal rate on benign control")
         ax_ref.set_title("Over-refusal (95% Wilson CI)")
