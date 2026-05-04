@@ -382,14 +382,15 @@ def _build_items_lookup(
     needed_versions = sorted({v for cd in column_defs if (v := _version_of(cd))})
 
     raw_dir = _find_raw_questionnaires_dir(Path(resolved["npz"]))
+    needs_raw = not rich_local
     if raw_dir is None:
-        if needed_versions and not rich_local:
+        if needs_raw:
             warnings.append(
                 "Could not locate 'datasets/psychometric_questionnaires/' by "
-                f"walking up from {resolved['npz']}. Items from versions "
-                f"{needed_versions} will render without options / "
-                "answer_mapping / stem / scenario — describe output will tag "
-                "each such item with a ⚠ RICH CONTEXT MISSING line."
+                f"walking up from {resolved['npz']}. Items will render "
+                "without options / answer_mapping / stem / high_option / "
+                "scenario — describe output will tag each such item with a "
+                "⚠ RICH CONTEXT MISSING line."
             )
     else:
         missing_versions: list[str] = []
@@ -412,7 +413,7 @@ def _build_items_lookup(
                 warnings.append(
                     f"Could not parse raw questionnaire {raw_path}: {e}. "
                     f"Items from version {v!r} will render without options / "
-                    "answer_mapping / stem / scenario."
+                    "answer_mapping / stem / high_option / scenario."
                 )
                 continue
             for it in raw_items:
@@ -421,8 +422,61 @@ def _build_items_lookup(
             warnings.append(
                 f"Raw questionnaire JSON missing under {raw_dir} for versions "
                 f"{missing_versions}. Items from those versions will render "
-                "without options / answer_mapping / stem / scenario."
+                "without options / answer_mapping / stem / high_option / scenario."
             )
+
+        # Glob-fallback: single-source runs like
+        # questionnaire_v7_fc_pair-fc_pair-* have no version prefix in
+        # col_id (e.g. "v7fc_001"), so `_version_of` returns None and
+        # `needed_versions` is empty above — meaning no raw JSONs would
+        # otherwise be loaded. The downstream effect is that fc_pair
+        # items lose their `high_option` and the describe sign-decoding
+        # silently flips on every B-keyed item. To prevent that, when we
+        # need rich items but couldn't scope by version, scan every JSON
+        # in the questionnaire dir and register any items whose ids
+        # match the col_ids we actually have.
+        if needs_raw:
+            local_ids = set()
+            for cd in column_defs:
+                for k in ("col_id", "item_id"):
+                    raw = cd.get(k)
+                    if not raw:
+                        continue
+                    raw = str(raw)
+                    local_ids.add(raw)
+                    local_ids.add(raw.split("/", 1)[-1])
+            unresolved = [cid for cid in local_ids if cid not in items_by_id]
+            if unresolved:
+                scanned = 0
+                hits = 0
+                for raw_path in sorted(raw_dir.glob("*.json")):
+                    scanned += 1
+                    try:
+                        raw_items = _load_raw_questionnaire_items(raw_path)
+                    except (KeyError, json.JSONDecodeError):
+                        continue
+                    for it in raw_items:
+                        rid = str(it.get("id", ""))
+                        if rid and (rid in local_ids or rid.split("/", 1)[-1] in local_ids):
+                            if rid not in items_by_id:
+                                _register(it)
+                                hits += 1
+                still_missing = [cid for cid in local_ids if cid not in items_by_id]
+                if still_missing:
+                    warnings.append(
+                        f"After scanning {scanned} questionnaire JSON(s) in "
+                        f"{raw_dir}, {len(still_missing)} of {len(local_ids)} "
+                        "column ids could not be matched to a raw item. Those "
+                        "items will render with ⚠ RICH CONTEXT MISSING. "
+                        "First few unmatched ids: "
+                        f"{sorted(still_missing)[:5]}"
+                    )
+                elif hits:
+                    warnings.append(
+                        f"Single-source run: matched all {hits} column ids by "
+                        f"globbing {scanned} questionnaire JSON(s) in {raw_dir} "
+                        "(no questionnaire_version prefix in col_ids)."
+                    )
 
     return items_by_id, warnings
 
@@ -494,23 +548,44 @@ def _describe_item(col_def: dict, loading: float, items_by_id: dict[str, dict]) 
         )
 
     if block == "fc_pair":
-        plus_letter = col_def.get("high_option", "A")
+        # `high_option` (which letter is the +1 pole) is counterbalanced
+        # PER ITEM, not per axis — see psychometric_questionnaire_v7_fc_pair
+        # where roughly half the items have high_option=A and half=B. The
+        # *_item_labels.json sidecar that becomes the col_def strips this
+        # field, so we MUST recover it from the rich raw item; falling
+        # back to a hardcoded "A" silently flips the sign annotation on
+        # every item keyed B. If neither source has it, we tag the line
+        # with a loud KEYING UNKNOWN warning so the labeller can see that
+        # the picked-option call is unreliable rather than trust a guess.
+        rich_high_option = (item or {}).get("high_option")
+        plus_letter = rich_high_option or col_def.get("high_option")
+        keying_known = plus_letter is not None
+        if not keying_known:
+            plus_letter = "A"
         minus_letter = "B" if plus_letter == "A" else "A"
+        keying_note = (
+            ""
+            if keying_known
+            else "  ⚠ KEYING UNKNOWN: high_option missing from both rich item and col_def — picked-option direction is a GUESS.\n"
+        )
         if item and "stem" in item and "options" in item:
             option_by_label = {o["label"]: o["text"] for o in item["options"]}
             picked = plus_letter if loading > 0 else minus_letter
+            picked_text = option_by_label.get(picked, "?")
             return (
                 f'[fc_pair, loading={loading:+.3f}]\n'
                 f'  Stem: "{item["stem"]}"\n'
                 f'  A: "{option_by_label.get("A", "?")}"\n'
                 f'  B: "{option_by_label.get("B", "?")}"\n'
                 f'  (+1 = option {plus_letter})\n'
-                f'  → {sign} loading: high-factor personas pick option {picked}.'
+                f'{keying_note}'
+                f'  → {sign} loading: HIGH-FACTOR PICKS option {picked}: "{picked_text}".'
             )
         return (
             f'[fc_pair, loading={loading:+.3f}] item_id={item_id}\n'
             f'  Text: "{col_def.get("text", "?")}"\n'
             f'  (+1 = option {plus_letter})\n'
+            f'{keying_note}'
             + _missing_rich_note("stem/options")
         )
 
@@ -705,6 +780,112 @@ def cmd_describe(args: argparse.Namespace) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Extract (full per-factor audit)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def cmd_extract(args: argparse.Namespace) -> None:
+    """Comprehensive per-factor dump for deep audits.
+
+    Where ``describe`` shows the top-N items per pole (good summary
+    skim), ``extract`` walks EVERY item with |loading| ≥ ``--min-loading``
+    and prints them in a single list sorted by |loading|, with explicit
+    sign-decoded "HIGH-FACTOR PICKS …" lines, full A/B option text, and
+    cross-loadings. Use it when:
+
+      * The factor's top items contradict each other and you want to see
+        whether the full population resolves the contradiction.
+      * You suspect describe's top-N is missing items that would change
+        the label (e.g. a strong item gets bucketed to one pole at
+        --top-n=10 but the next 5 items on the SAME pole also matter).
+      * You need to verify sign decoding by counting how many top-positive
+        and top-negative items point the same behavioural way.
+
+    Output is intentionally compact (no markdown boxing, terse per-item
+    block) so it's grep-friendly and survives in a transcript that may
+    later be summarised.
+    """
+    path = Path(args.path).resolve()
+    candidates = _discover_npz(path)
+    if len(candidates) != 1:
+        raise SystemExit(
+            f"extract requires exactly one rotation; got {len(candidates)}. "
+            "Run `resolve` first to pick one."
+        )
+    npz_path = candidates[0]
+    resolved = _resolve_one(npz_path)
+
+    data = np.load(npz_path)
+    loadings = data["loadings"]
+    communalities = data["communalities"]
+    ss = data["ss_loadings"]
+    pvar = data["proportion_variance"]
+    fcorr = data["factor_correlation_matrix"] if "factor_correlation_matrix" in data.files else None
+    n_items, n_factors = loadings.shape
+
+    with open(resolved["item_labels_json"]) as f:
+        column_defs = json.load(f)
+
+    items_by_id, rich_warnings = _build_items_lookup(resolved, column_defs)
+
+    print(f"# Factor extract — {resolved['analysis_key']}")
+    print(f"# {n_items} items × {n_factors} factors  |  threshold |loading| ≥ {args.min_loading}")
+    print(f"# SS loadings: {[round(float(s), 3) for s in ss]}")
+    print(f"# prop var (%): {[round(float(p) * 100, 2) for p in pvar]}")
+    print(f"# cumulative var (%): {round(float(np.sum(pvar)) * 100, 2)}")
+    print(f"# npz: {resolved['npz']}")
+    if rich_warnings:
+        print()
+        print("# ⚠ rich-context warnings:")
+        for w in rich_warnings:
+            print(f"#   - {w}")
+    if fcorr is not None:
+        print()
+        print("# Factor correlations (oblimin, |r| ≥ 0.10):")
+        for fi in range(n_factors):
+            pairs = sorted(
+                [(fj, float(fcorr[fi, fj])) for fj in range(n_factors)
+                 if fj != fi and abs(fcorr[fi, fj]) >= 0.10],
+                key=lambda x: -abs(x[1]),
+            )[:5]
+            s = ", ".join(f"f{fj}={r:+.2f}" for fj, r in pairs)
+            print(f"#   f{fi}: {s or '(none ≥ 0.10)'}")
+
+    for fi in range(n_factors):
+        col = loadings[:, fi]
+        idx_by_mag = sorted(range(n_items), key=lambda i: -abs(col[i]))
+        kept = [i for i in idx_by_mag if abs(col[i]) >= args.min_loading]
+        print()
+        print("=" * 100)
+        print(
+            f"FACTOR {fi}  | SS={float(ss[fi]):.3f}  prop_var={float(pvar[fi]) * 100:.2f}%"
+            f"  | {len(kept)} items above |{args.min_loading}|"
+        )
+        for i in kept:
+            ld = float(col[i])
+            cd = column_defs[i]
+            cross = sorted(
+                [(fj, float(loadings[i, fj])) for fj in range(n_factors) if fj != fi],
+                key=lambda x: -abs(x[1]),
+            )
+            cross_str = ", ".join(
+                f"f{fj}={v:+.2f}" for fj, v in cross[:3] if abs(v) >= args.cross_threshold
+            ) or f"(no cross ≥ {args.cross_threshold})"
+            print()
+            print(
+                f"  [{cd.get('col_id', '?')}] L={ld:+.3f}  "
+                f"comm={float(communalities[i]):.2f}  cross=[{cross_str}]"
+            )
+            # _describe_item already does the sign-decoding for every
+            # block (likert reverse_keyed, fc_pair high_option, vignette
+            # scoring axis, trait_mcq encoding); reuse it so extract and
+            # describe never disagree on the picked-option direction.
+            body = _describe_item(cd, ld, items_by_id)
+            for line in body.splitlines():
+                print(f"    {line}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Write labels
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -886,6 +1067,21 @@ def main() -> None:
     d.add_argument("path")
     d.add_argument("--top-n", type=int, default=10)
     d.set_defaults(func=cmd_describe)
+
+    e = sub.add_parser(
+        "extract",
+        help="Comprehensive per-factor dump (every item above |loading| threshold).",
+    )
+    e.add_argument("path")
+    e.add_argument(
+        "--min-loading", type=float, default=0.10,
+        help="Minimum |loading| to include (default 0.10).",
+    )
+    e.add_argument(
+        "--cross-threshold", type=float, default=0.20,
+        help="Suppress cross-loadings below this (default 0.20).",
+    )
+    e.set_defaults(func=cmd_extract)
 
     w = sub.add_parser("write", help="Validate and write labels JSON.")
     w.add_argument("path")
