@@ -168,8 +168,11 @@ def main() -> None:
 
     # Build config: start from the WJ balanced preset (so generation knobs
     # match the existing balanced run), then override conditions, combos,
-    # run_slug, and N.
+    # run_slug, and N. Pin the vLLM throughput knobs here so this driver
+    # remains fast even if the shared defaults change later.
     cfg = get_wildjailbreak_preset("balanced")
+    cfg.vllm_batch_size = 64
+    cfg.vllm_gpu_memory_utilization = 0.80
     cfg.run_slug = args.run_slug
     cfg.hf_eval_type = "persona_jailbreak_wildjailbreak"
     cfg.conditions = ABLATION_CONDITION_NAMES
@@ -188,6 +191,8 @@ def main() -> None:
     print(f"  Run dir: {cfg.run_dir}")
     print(f"  Conditions ({len(cfg.conditions)}): {cfg.conditions}")
     print(f"  adv-harmful: {cfg.n_wildjailbreak_harmful}  adv-benign: {cfg.n_wildjailbreak_benign}")
+    print(f"  vLLM batch size: {cfg.vllm_batch_size}")
+    print(f"  vLLM gpu_memory_utilization: {cfg.vllm_gpu_memory_utilization}")
     print(f"  Judge: {cfg.judge.model} (provider={cfg.judge.provider})")
     print("=" * 70)
 

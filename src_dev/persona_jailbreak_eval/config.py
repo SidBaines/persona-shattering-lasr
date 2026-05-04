@@ -77,6 +77,7 @@ class JailbreakEvalConfig(BaseModel):
     vllm_gpu_memory_utilization: float = 0.50
     vllm_max_model_len: int = 4096
     vllm_max_concurrent: int = 32
+    vllm_batch_size: int = 8
     hf_batch_size: int = 8
     hf_max_concurrent: int = 8
     max_new_tokens: int = 512  # paper notes responses are scored on first 512 tokens
@@ -148,6 +149,7 @@ class JailbreakEvalConfig(BaseModel):
             vllm_gpu_memory_utilization=self.vllm_gpu_memory_utilization,
             vllm_max_model_len=self.vllm_max_model_len,
             vllm_max_concurrent=self.vllm_max_concurrent,
+            vllm_batch_size=self.vllm_batch_size,
             hf_batch_size=self.hf_batch_size,
             hf_max_concurrent=self.hf_max_concurrent,
             max_new_tokens=self.max_new_tokens,
@@ -179,6 +181,7 @@ def get_persona_grid_preset(preset: JailbreakEvalPreset) -> JailbreakEvalConfig:
             n_sysprompts_per_persona=3,
             n_harm_questions=150,
             n_benign_control=200,
+            hf_batch_size=32,
         )
     if preset == "full":
         return JailbreakEvalConfig(
@@ -204,6 +207,7 @@ def get_wildjailbreak_preset(preset: JailbreakEvalPreset) -> JailbreakEvalConfig
             run_slug="wj_balanced",
             n_wildjailbreak_harmful=800,
             n_wildjailbreak_benign=210,
+            hf_batch_size=32,
         )
     if preset == "full":
         return JailbreakEvalConfig(
