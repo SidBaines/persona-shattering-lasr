@@ -69,6 +69,7 @@ class ConditionConfig(BaseModel):
     vllm_gpu_memory_utilization: float = 0.50
     vllm_max_model_len: int = 8192
     vllm_max_concurrent: int = 32
+    vllm_batch_size: int = 8
 
     # HF knobs (used by activation_capping)
     hf_batch_size: int = 8
@@ -167,6 +168,7 @@ def _vllm_inference_config(
             max_new_tokens=cfg.max_new_tokens,
             temperature=cfg.temperature,
             top_p=cfg.top_p,
+            batch_size=cfg.vllm_batch_size,
             num_responses_per_prompt=1,
         ),
         max_concurrent=cfg.vllm_max_concurrent,
