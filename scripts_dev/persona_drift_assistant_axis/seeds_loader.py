@@ -2,8 +2,8 @@
 
 The paper's recipe is **5 personas × 20 topics per persona = 100 conversations
 per domain**, with each conversation seeded by a unique (persona, topic)
-pair. The vendored ``vendor/assistant_axis/transcripts/persona_drift/``
-exposes only one (persona, topic) per domain — those are persona 0 +
+pair. The upstream Assistant Axis ``transcripts/persona_drift/`` exposes
+only one (persona, topic) per domain — those are persona 0 +
 topic 0 in our per-domain seed JSON. The other 4 personas + extra topics
 are hand-drafted in the paper's style under
 ``scripts_dev/persona_drift_assistant_axis/seeds/{domain}.json``.

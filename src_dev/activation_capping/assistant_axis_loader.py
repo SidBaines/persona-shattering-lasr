@@ -1,6 +1,6 @@
 """Bridge between the upstream Assistant Axis pipeline and our rollout infra.
 
-The upstream pipeline at ``vendor/assistant_axis/`` saves the axis as a raw
+The upstream pipeline from ``safety-research/assistant-axis`` saves the axis as a raw
 tensor of shape ``(n_layers, hidden_dim)`` and provides
 ``ActivationSteering`` (a context manager that registers PyTorch forward
 hooks for capping). This module converts the upstream axis + activation
@@ -21,14 +21,14 @@ Axis to a minimum of τ".
 
 Paper page 6 states ``axis = default_assistant − mean(role_vectors)``,
 which means *positive projection ⇒ Assistant-like*. This is also the
-convention produced by ``vendor/assistant_axis/pipeline/5_axis.py``.
+convention produced by upstream ``pipeline/5_axis.py``.
 
 So in OUR convention (axis = default − role, positive = Assistant), the
 faithful intervention is FLOOR at a high threshold: prevent the model's
 projection from drifting *below* a typical-Assistant value.
 
 WARNING: the upstream library code in
-``vendor/assistant_axis/assistant_axis/steering.py:_apply_cap`` is a
+``assistant_axis/steering.py:_apply_cap`` is a
 CEILING clamp (``clamp(proj − τ, min=0)``), and upstream's
 *pre-published* axis vectors at ``lu-christina/assistant-axis-vectors``
 were generated with the OPPOSITE sign convention (axis = role − default,
@@ -62,10 +62,12 @@ from typing import Literal
 import numpy as np
 import torch
 
-# Ensure the vendored package is importable.
-_VENDOR = Path(__file__).resolve().parents[2] / "vendor" / "assistant_axis"
-if str(_VENDOR) not in sys.path:
-    sys.path.insert(0, str(_VENDOR))
+from src_dev.activation_capping.assistant_axis_dependency import ensure_assistant_axis_repo
+
+# Ensure the pinned upstream package is importable.
+_ASSISTANT_AXIS_DIR = ensure_assistant_axis_repo(quiet=True)
+if str(_ASSISTANT_AXIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_ASSISTANT_AXIS_DIR))
 
 from assistant_axis.steering import ActivationSteering  # noqa: E402
 
@@ -182,7 +184,7 @@ def compute_capping_config(
         axis_path: Path to upstream ``axis.pt`` (raw tensor or wrapped),
             using the convention ``axis = default − role`` (positive =
             Assistant-like) — the convention produced by
-            ``vendor/assistant_axis/pipeline/5_axis.py``.
+            upstream ``pipeline/5_axis.py``.
         activations_dir: Phase 1 ``activations/`` dir with per-role .pt files.
         output_path: Where to save ``capping_config.pt``.
         threshold_percentile: Per-layer threshold = N-th percentile of the
