@@ -155,8 +155,8 @@ def pick_layer_window(
         if centre < lo_centre or centre > hi_centre:
             continue
         d_per_layer = [
-            cohens_d(default_proj[:, l].numpy(), role_proj[:, l].numpy())
-            for l in range(start, start + window_size)
+            cohens_d(default_proj[:, layer_idx].numpy(), role_proj[:, layer_idx].numpy())
+            for layer_idx in range(start, start + window_size)
         ]
         score = float(np.mean(d_per_layer))
         if score > best_score:
@@ -260,8 +260,11 @@ def compute_capping_config(
 
     # Diagnostics.
     d_per_layer = {
-        l: cohens_d(default_proj[:, l].numpy(), role_proj[:, l].numpy())
-        for l in range(n_layers)
+        layer_idx: cohens_d(
+            default_proj[:, layer_idx].numpy(),
+            role_proj[:, layer_idx].numpy(),
+        )
+        for layer_idx in range(n_layers)
     }
     config = {
         "layers": list(range(lo, hi + 1)),
@@ -296,7 +299,9 @@ def compute_capping_config(
         "layer_window_source": window_source,
         "layer_window_centre_fraction": float(centre_frac),
         "paper_depth_fraction_range": list(PAPER_DEPTH_FRACTION_RANGE),
-        "cohens_d_in_window_mean": float(np.mean([d_per_layer[l] for l in config["layers"]])),
+        "cohens_d_in_window_mean": float(
+            np.mean([d_per_layer[layer_idx] for layer_idx in config["layers"]])
+        ),
         "n_default_samples": config["n_default_samples"],
         "n_role_samples": config["n_role_samples"],
     }
@@ -365,12 +370,12 @@ def apply_assistant_axis_capping(
         )
         if debug:
             print(f"[apply_assistant_axis_capping] FLOOR mode on layers {layers} "
-                  f"(thresholds: {[round(thresholds_dict[l], 4) for l in layers]})")
+                  f"(thresholds: {[round(thresholds_dict[layer_idx], 4) for layer_idx in layers]})")
         return capped
 
     if resolved_mode == "ceiling":
-        steering_vectors = [axis[l] for l in layers]
-        cap_thresholds = [thresholds_dict[l] for l in layers]
+        steering_vectors = [axis[layer_idx] for layer_idx in layers]
+        cap_thresholds = [thresholds_dict[layer_idx] for layer_idx in layers]
         steering = ActivationSteering(
             model,
             steering_vectors=steering_vectors,
@@ -457,13 +462,15 @@ def diagnose_capping_direction(
 
     ax = axis.float()
     ax_norm_per_layer = {
-        l: (ax[l] / (ax[l].norm() + 1e-8)).to(next(model.parameters()).device)
-        for l in layers
+        layer_idx: (
+            ax[layer_idx] / (ax[layer_idx].norm() + 1e-8)
+        ).to(next(model.parameters()).device)
+        for layer_idx in layers
     }
 
     # Capture pre-hook (raw, not clamped) and post-hook (clamped) at each layer.
-    pre_acts: dict[int, list[torch.Tensor]] = {l: [] for l in layers}
-    post_acts: dict[int, list[torch.Tensor]] = {l: [] for l in layers}
+    pre_acts: dict[int, list[torch.Tensor]] = {layer_idx: [] for layer_idx in layers}
+    post_acts: dict[int, list[torch.Tensor]] = {layer_idx: [] for layer_idx in layers}
 
     # The capping hook is already registered on the layer; we add a
     # PRE-hook to capture inputs and a POST-hook to capture outputs.
@@ -485,9 +492,13 @@ def diagnose_capping_direction(
                 post_acts[layer_idx].append(x.detach().float().cpu())
         return fn
 
-    for l in layers:
-        handles.append(model_layers[l].register_forward_pre_hook(make_pre_hook(l)))
-        handles.append(model_layers[l].register_forward_hook(make_post_hook(l)))
+    for layer_idx in layers:
+        handles.append(
+            model_layers[layer_idx].register_forward_pre_hook(make_pre_hook(layer_idx))
+        )
+        handles.append(
+            model_layers[layer_idx].register_forward_hook(make_post_hook(layer_idx))
+        )
 
     try:
         # Forward pass on each sample (no generation; we only need acts).
@@ -523,15 +534,15 @@ def diagnose_capping_direction(
 
     # Compute per-layer mean projection over all token positions across all samples.
     report: dict = {"layers": {}, "mode": mode, "passed": True}
-    for l in layers:
-        if not pre_acts[l] or not post_acts[l]:
+    for layer_idx in layers:
+        if not pre_acts[layer_idx] or not post_acts[layer_idx]:
             continue
-        pre_cat = torch.cat([t.view(-1, t.shape[-1]) for t in pre_acts[l]], dim=0)
-        post_cat = torch.cat([t.view(-1, t.shape[-1]) for t in post_acts[l]], dim=0)
-        v = ax_norm_per_layer[l].cpu()
+        pre_cat = torch.cat([t.view(-1, t.shape[-1]) for t in pre_acts[layer_idx]], dim=0)
+        post_cat = torch.cat([t.view(-1, t.shape[-1]) for t in post_acts[layer_idx]], dim=0)
+        v = ax_norm_per_layer[layer_idx].cpu()
         pre_proj = (pre_cat @ v).numpy()
         post_proj = (post_cat @ v).numpy()
-        tau = thresholds[l]
+        tau = thresholds[layer_idx]
         layer_report = {
             "threshold": float(tau),
             "pre_min": float(pre_proj.min()),
@@ -572,7 +583,7 @@ def diagnose_capping_direction(
             layer_report["pre_above_tau_count"] = int(pre_violations)
             layer_report["post_above_tau_count"] = int(post_violations)
         layer_report["direction_ok"] = bool(ok)
-        report["layers"][l] = layer_report
+        report["layers"][layer_idx] = layer_report
         if not ok:
             report["passed"] = False
 
@@ -589,13 +600,13 @@ def print_capping_diagnosis(report: dict) -> None:
     else:
         print("  layer | tau     | pre[min/mean/max]    | post[min/mean/max]   | "
               "above-τ pre→post | ok")
-    for l, r in report["layers"].items():
+    for layer_idx, r in report["layers"].items():
         if mode == "floor":
             viol = f"{r.get('pre_below_tau_count', 0):>4}→{r.get('post_below_tau_count', 0):<4}"
         else:
             viol = f"{r.get('pre_above_tau_count', 0):>4}→{r.get('post_above_tau_count', 0):<4}"
         print(
-            f"  {l:5d} | {r['threshold']:+7.3f} | "
+            f"  {layer_idx:5d} | {r['threshold']:+7.3f} | "
             f"{r['pre_min']:+5.2f}/{r['pre_mean']:+5.2f}/{r['pre_max']:+5.2f} | "
             f"{r['post_min']:+5.2f}/{r['post_mean']:+5.2f}/{r['post_max']:+5.2f} | "
             f"{viol:>15} | "

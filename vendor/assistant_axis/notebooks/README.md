@@ -16,4 +16,3 @@ Interactive Jupyter notebooks for analyzing and experimenting with the Assistant
 | **visualize_axis.ipynb** | Loads the Assistant Axis and displays cosine similarity with role vectors to understand which personas are similar/dissimilar to the Assistant. |
 | **steer.ipynb** | Interactive steering and activation capping demo. Steer model outputs on any prompt using the axis with different coefficients, and activation cap Qwen 3 32B and Llama 3.3 70B with pre-computed settings. |
 | **project_transcript.ipynb** | Loads a conversation transcript, collects activations at each turn, and projects them onto the axis to visualize persona drift over the conversation. |
-

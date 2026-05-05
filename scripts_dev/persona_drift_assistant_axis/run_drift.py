@@ -52,9 +52,9 @@ from pathlib import Path
 from src_dev.activation_capping.conditions import ensure_vllm_fork_safe  # noqa: E402
 ensure_vllm_fork_safe()
 
-import numpy as np
-import torch
-from dotenv import load_dotenv
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
 
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))

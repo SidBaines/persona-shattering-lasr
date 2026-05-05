@@ -81,6 +81,26 @@ def generate_response(
     return response
 
 
+def supports_system_prompt(tokenizer) -> bool:
+    """Return whether the tokenizer chat template preserves system messages."""
+    # Check system prompt support by testing the chat template
+    test_message = "__SYSTEM_TEST__"
+    test_conversation = [
+        {"role": "system", "content": test_message},
+        {"role": "user", "content": "hello"},
+    ]
+
+    try:
+        output = tokenizer.apply_chat_template(
+            test_conversation,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        return test_message in output
+    except Exception:
+        return False
+
+
 def format_conversation(
     instruction: Optional[str],
     question: str,
@@ -97,22 +117,7 @@ def format_conversation(
     Returns:
         List of message dicts for the conversation
     """
-    # Check system prompt support by testing the chat template
-    test_message = "__SYSTEM_TEST__"
-    test_conversation = [
-        {"role": "system", "content": test_message},
-        {"role": "user", "content": "hello"},
-    ]
-
-    try:
-        output = tokenizer.apply_chat_template(
-            test_conversation,
-            tokenize=False,
-            add_generation_prompt=False,
-        )
-        supports_system = test_message in output
-    except Exception:
-        supports_system = False
+    supports_system = supports_system_prompt(tokenizer)
 
     if supports_system:
         messages = []

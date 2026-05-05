@@ -227,13 +227,13 @@ Other models will auto-infer configuration based on architecture. We recommend t
 
 ```bibtex
 @misc{lu2026assistant,
-      title={The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models}, 
+      title={The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models},
       author={Christina Lu and Jack Gallagher and Jonathan Michala and Kyle Fish and Jack Lindsey},
       year={2026},
       eprint={2601.10387},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2601.10387}, 
+      url={https://arxiv.org/abs/2601.10387},
 }
 ```
 
