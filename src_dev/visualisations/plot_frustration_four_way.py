@@ -68,8 +68,9 @@ class RunSpec:
 
 
 # Matching run-name sets keyed by tag. Currently:
-#   "100"  — v4 adapters, hfbatched (paper figure source)
-#   "100v" — vanton4_paired_dpo adapters, vllm-batched 6-way
+#   "100"          — v4 adapters, hfbatched (paper figure source)
+#   "100v"         — vanton4_paired_dpo adapters, vllm-batched 6-way
+#   "axiscap_n10"  — axis-cap vs LoRA comparison (n=10 smoke set)
 # Labels use ↑ (amplifier) and ↓ (suppressor) instead of N+ / N-, and
 # the sign-flipped form is "@ scale -1" rather than "inverted".
 RUN_SETS: dict[str, list[RunSpec]] = {
@@ -86,6 +87,11 @@ RUN_SETS: dict[str, list[RunSpec]] = {
         RunSpec("N↑",              "gemma3_27b_n_plus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                  "#1F7A4D", "s-"),
         RunSpec("N↓ @ scale -1",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",        "#7A1F1B", "^-"),
         RunSpec("N↑ @ scale -1",   "gemma3_27b_n_plus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",         "#0D3D26", "^-"),
+    ],
+    "axiscap_n10": [
+        RunSpec("BASE",                       "gemma3_27b_base_or_8turn_10prompt_1rollout",                                              "#2F5D9F", "o-"),
+        RunSpec("N↓ LoRA",                    "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_10prompt_1rollout",                  "#C73E3A", "s-"),
+        RunSpec("N↓ axiscap +1 (layers 37-61)", "gemma3_27b_n_minus_axiscap_recommended_p1p0_8turn_10prompt_1rollout",                 "#8A4A99", "P-"),
     ],
 }
 
