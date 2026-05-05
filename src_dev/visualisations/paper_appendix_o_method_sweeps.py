@@ -65,19 +65,28 @@ BASE_PATH = (
     "rollout_baseline_t0.7_steering_o/base/baseline/evals/rollouts_evaluated.jsonl"
 )
 
-# Coefficient sweep colours (blue -> red, weak -> strong)
+# Coefficient sweep colours (blue -> red, weak -> strong).
+# O↓ direction has additional extended-sweep coefficients {1.50, 2.00, 3.00}
+# from the ominus_extended_sweep run.
 COEFF_COLORS = {
     "0.25": "#3c7fb1",
     "0.50": "#5b9bd5",
     "0.75": "#df6f4f",
     "1.00": "#c91546",
+    "1.50": "#9b1042",
+    "2.00": "#700b30",
+    "3.00": "#400520",
 }
-COEFF_MARKERS = {"0.25": "s", "0.50": "^", "0.75": "D", "1.00": "v"}
+COEFF_MARKERS = {"0.25": "s", "0.50": "^", "0.75": "D", "1.00": "v",
+                 "1.50": "P", "2.00": "X", "3.00": "*"}
 COEFF_STYLES = {
     "0.25": "--",
     "0.50": "-.",
     "0.75": ":",
     "1.00": (0, (3, 1, 1, 1)),
+    "1.50": (0, (5, 1)),
+    "2.00": (0, (1, 1)),
+    "3.00": (0, (5, 1, 1, 1, 1, 1)),
 }
 
 JUDGES: list[tuple[str, str, tuple[float, float]]] = [
@@ -142,7 +151,11 @@ def _build_cells(direction: str, method: str) -> list[tuple[str, str, str, str, 
     cells: list[tuple[str, str, str, str, str]] = [
         ("Base", BASE_PATH, "#000000", "-", "o"),
     ]
-    for coeff in ["0.25", "0.50", "0.75", "1.00"]:
+    # O↓ has extended sweep cells beyond coeff=1.0; O↑ does not.
+    coeffs = ["0.25", "0.50", "0.75", "1.00"]
+    if direction == "suppressor":
+        coeffs.extend(["1.50", "2.00", "3.00"])
+    for coeff in coeffs:
         cells.append((
             f"coeff={coeff}",
             f"{base}/{sub}/{coeff_dir.format(coeff)}/baseline/evals/rollouts_evaluated.jsonl",

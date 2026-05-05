@@ -87,14 +87,14 @@ METHODS: list[tuple[str, str, str, list[tuple[str, str]]]] = [
         "#df6f4f",
         "v",
         [(f"coeff={s}", f"{_SUPP}/rollout_sweep_lora_t0.7_steering_o/scale_+{s}/baseline/run_info.json")
-         for s in ["0.25", "0.50", "0.75", "1.00"]],
+         for s in ["0.25", "0.50", "0.75", "1.00", "1.50", "2.00", "3.00"]],
     ),
     (
         "O↓ activation capping",
         "#f39a22",
         "X",
         [(f"coeff={f}", f"{_SUPP}/rollout_sweep_activation_capping_t0.7_steering_o/frac_{f}/baseline/run_info.json")
-         for f in ["0.25", "0.50", "0.75", "1.00"]],
+         for f in ["0.25", "0.50", "0.75", "1.00", "1.50", "2.00", "3.00"]],
     ),
 ]
 
