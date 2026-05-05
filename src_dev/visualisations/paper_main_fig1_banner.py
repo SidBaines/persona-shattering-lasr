@@ -1,13 +1,11 @@
-"""Single-figure Fig. 1 banner: amp spider + supp spider (left) + combo delta (right).
+"""Single-figure Fig. 1 banner: amp spider + supp spider + combo delta in a row.
 
-Combines the three sibling scripts into one wide banner with a shared legend:
+Combines the three sibling scripts into one wide banner with two legends:
 
-  ┌────────────────┬─────────────────┐
-  │  amp spider    │                 │
-  ├────────────────┤  combo delta    │
-  │  supp spider   │  bar chart      │
-  └────────────────┴─────────────────┘
-       ──── shared legend (below) ────
+  ┌──────────────┬──────────────┬──────────────┐
+  │  amp spider  │ supp spider  │  combo bar   │
+  └──────────────┴──────────────┴──────────────┘
+       ── shared spider legend ──   bar legend
 
 Color convention: OCEAN traits use ``BIG_FIVE_COLORS`` everywhere. In the
 spiders, each polygon is colored by its *home* trait (the trait the LoRA
@@ -46,7 +44,7 @@ sys.path.insert(0, str(project_root))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import numpy as np
@@ -180,22 +178,84 @@ def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
     )
 
 
-def _shared_legend(fig) -> None:
-    """One legend covering all panels: 5 OCEAN trait colors + combo + baseline."""
+def _spider_legend(ax_legend) -> None:
+    """Render the shared spider legend inside its own (invisible) axes.
+
+    ``ax_legend`` is a dedicated subplot that spans the two spider columns
+    so its centre is centred between the spiders.
+    """
     handles = [
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Openness"],          marker="o", markersize=5, lw=1.8, label="Openness LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Conscientiousness"], marker="o", markersize=5, lw=1.8, label="Conscientiousness LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Extraversion"],      marker="o", markersize=5, lw=1.8, label="Extraversion LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Agreeableness"],     marker="o", markersize=5, lw=1.8, label="Agreeableness LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Neuroticism"],       marker="o", markersize=5, lw=1.8, label="Neuroticism LoRA"),
-        Patch(facecolor=COMBO_COLOR, hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Openness"],          marker="o", markersize=5, lw=1.8, label="O — Openness LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Conscientiousness"], marker="o", markersize=5, lw=1.8, label="C — Conscientiousness LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Extraversion"],      marker="o", markersize=5, lw=1.8, label="E — Extraversion LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Agreeableness"],     marker="o", markersize=5, lw=1.8, label="A — Agreeableness LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Neuroticism"],       marker="o", markersize=5, lw=1.8, label="N — Neuroticism LoRA"),
         Line2D([0], [0], color=BASELINE_COLOR, lw=2.0, label="Baseline (Llama-3.1-8B-Instruct)"),
     ]
-    fig.legend(
+    ax_legend.legend(
         handles=handles,
-        loc="lower center", bbox_to_anchor=(0.5, -0.02),
-        ncol=4, fontsize=9, frameon=True, framealpha=0.9,
+        loc="center", ncol=3, fontsize=9, frameon=False,
     )
+
+
+def _bar_legend(ax_legend) -> None:
+    """Render the bar-chart legend inside its own (invisible) axes."""
+    handles = [
+        Patch(facecolor=BIG_FIVE_COLORS["Conscientiousness"], hatch="//", edgecolor="black", linewidth=0.5, label=combo_mod.TARGET_DISPLAY["c_adapter"]),
+        Patch(facecolor=BIG_FIVE_COLORS["Extraversion"],      hatch="\\\\", edgecolor="black", linewidth=0.5, label=combo_mod.TARGET_DISPLAY["e_adapter"]),
+        Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo (+1, +1)"),
+    ]
+    ax_legend.legend(
+        handles=handles,
+        loc="center", ncol=1, fontsize=9, frameon=False,
+    )
+
+
+def _square_polar_axes_in_cell(fig, ax) -> None:
+    """Resize ``ax`` so its width-fraction equals its height-fraction (in
+    inches). This makes the polar circle fill the cell, removing the round
+    plot's natural left/right whitespace within a wider rectangular cell.
+    """
+    pos = ax.get_position()
+    fig_w_in, fig_h_in = fig.get_size_inches()
+    # height-fraction × fig height (in inches) = height in inches
+    target_in = pos.height * fig_h_in
+    # width-fraction needed to match that height in inches
+    target_width_frac = target_in / fig_w_in
+    if target_width_frac >= pos.width:
+        # Cell is already square or taller than wide — nothing to shrink.
+        return
+    cx = (pos.x0 + pos.x1) / 2.0
+    new_x0 = cx - target_width_frac / 2.0
+    ax.set_position([new_x0, pos.y0, target_width_frac, pos.height])
+
+
+def _draw_spider_box(fig, ax_amp, ax_sup, ax_legend, *, pad: float = 0.012) -> None:
+    """Draw a rectangle hugging amp + supp + spider_legend with a small pad.
+
+    ``pad`` is in figure-relative units; ~0.01 = ~1% of figure dimensions.
+    Adds breathing room between the box and the panel titles / tick labels.
+    """
+    import matplotlib.patches as patches
+    try:
+        renderer = fig.canvas.get_renderer()
+        bbox_amp = ax_amp.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+        bbox_sup = ax_sup.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+        bbox_leg = ax_legend.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+    except Exception:
+        bbox_amp = ax_amp.get_position()
+        bbox_sup = ax_sup.get_position()
+        bbox_leg = ax_legend.get_position()
+    x0 = min(bbox_amp.x0, bbox_sup.x0, bbox_leg.x0) - pad
+    x1 = max(bbox_amp.x1, bbox_sup.x1, bbox_leg.x1) + pad
+    y0 = min(bbox_amp.y0, bbox_sup.y0, bbox_leg.y0) - pad
+    y1 = max(bbox_amp.y1, bbox_sup.y1, bbox_leg.y1) + pad
+    rect = patches.Rectangle(
+        (x0, y0), x1 - x0, y1 - y0,
+        transform=fig.transFigure,
+        fill=False, edgecolor="black", linewidth=1.0, clip_on=False, zorder=10,
+    )
+    fig.add_artist(rect)
 
 
 # ---------------------------------------------------------------------------
@@ -214,34 +274,70 @@ def main() -> None:
     # Use either baseline (they should be identical — same prompts, same judge).
     baseline = base_amp or base_sup
 
-    fig = plt.figure(figsize=(13.0, 5.6))
-    gs = GridSpec(
-        2, 2, figure=fig,
-        width_ratios=[1.0, 1.0], height_ratios=[1.0, 1.0],
-        wspace=0.25, hspace=0.35,
+    fig = plt.figure(figsize=(15.0, 4.6))
+
+    # Outer split: [spider-block | bar-block]. wspace here controls the gap
+    # between the spider box and the bar chart — wide enough that the bar
+    # chart's y-axis label doesn't crash into the box.
+    gs_outer = GridSpec(
+        1, 2, figure=fig,
+        width_ratios=[2.0, 0.85],
+        wspace=0.10,
     )
 
-    ax_amp  = fig.add_subplot(gs[0, 0], projection="polar")
-    ax_sup  = fig.add_subplot(gs[1, 0], projection="polar")
-    ax_bar  = fig.add_subplot(gs[:, 1])
+    # Inner spider block: 2 cols × 2 rows (amp / sup over their shared legend).
+    # wspace=-0.05 brings the polar axes close together — polar bbox is square
+    # but the circle leaves visual whitespace, so a slight negative pulls them
+    # in without overlapping content.
+    gs_left = GridSpecFromSubplotSpec(
+        2, 2, subplot_spec=gs_outer[0, 0],
+        height_ratios=[1.0, 0.20],
+        wspace=-0.15, hspace=0.05,
+    )
+
+    # Inner bar block: 1 col × 2 rows (chart over its legend).
+    gs_right = GridSpecFromSubplotSpec(
+        2, 1, subplot_spec=gs_outer[0, 1],
+        height_ratios=[1.0, 0.20],
+        hspace=0.05,
+    )
+
+    ax_amp           = fig.add_subplot(gs_left[0, 0], projection="polar")
+    ax_sup           = fig.add_subplot(gs_left[0, 1], projection="polar")
+    ax_spider_legend = fig.add_subplot(gs_left[1, 0:2])
+    ax_bar           = fig.add_subplot(gs_right[0, 0])
+    ax_bar_legend    = fig.add_subplot(gs_right[1, 0])
+    ax_spider_legend.axis("off")
+    ax_bar_legend.axis("off")
 
     _spider_panel(
         ax_amp,
         per_lora=per_amp, baseline=baseline,
         meta=amp_mod.AMPLIFIERS_META,
-        title="Amplifier LoRAs (scale +1, signed headroom)",
+        title="Amplifier",
     )
     _spider_panel(
         ax_sup,
         per_lora=per_sup, baseline=baseline,
         meta=sup_mod.SUPPRESSORS,
-        title="Suppressor LoRAs (scale +1, signed headroom)",
+        title="Suppressor",
     )
     _bar_panel(ax_bar, scores=combo_scores)
 
-    _shared_legend(fig)
+    _spider_legend(ax_spider_legend)
+    _bar_legend(ax_bar_legend)
 
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    fig.subplots_adjust(bottom=0.06, top=0.92, left=0.03, right=0.99)
+    # Force a draw so tightbbox computations have a renderer.
+    fig.canvas.draw()
+
+    # Make each polar axes square (circle fills the cell), so the box doesn't
+    # have to enclose unused horizontal whitespace around the round plot.
+    _square_polar_axes_in_cell(fig, ax_amp)
+    _square_polar_axes_in_cell(fig, ax_sup)
+    fig.canvas.draw()  # re-resolve positions after manual shrink
+
+    _draw_spider_box(fig, ax_amp, ax_sup, ax_spider_legend)
 
     for rel in PAPER_FIGURES:
         out_path = PAPER_FIGURES_DIR / rel
