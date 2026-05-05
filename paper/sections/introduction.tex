@@ -11,10 +11,10 @@
 
 \david{Large language models (LLMs) do not only differ in what they know or whether they answer correctly. They also differ in how they answer: how much they defer, what stances they take, and so on. These recurring behavioral patterns are often described as model personas.} \textit{Personas} have recently arisen as an object of study to investigate patterns in LLMs, \david{relevant in shaping both user experience and safety-relevant behavior, but remain hard to define, measure, and control.} \citep{marks2026persona}. 
 
-\david{Existing approaches to persona control fall between two imperfect extremes. Prompting and activation-space interventions [cite a bunch of papers] can alter behavior at inference time, but may be brittle to context and require continued intervention. Full pre- and post-training can install broad behavioral defaults [TODO: cite alignment pretraining paper, cite RLHF, cite Chloe li's paper], but is expensive and inflexible: a model may need different behavioral modes in different deployment contexts. What is missing is a method for decomposing personas into measurable behavioral axes and moving models along those axes in a controlled, composable way.}
+\david{Existing approaches to persona control fall between two imperfect extremes. Prompting and activation-space interventions} \todo{cite a bunch of papers} \david{can alter behavior at inference time, but may be brittle to context and require continued intervention. Full pre- and post-training can install broad behavioral defaults} \todo{cite alignment pretraining paper, cite RLHF, cite Chloe li's paper}\david{, but is expensive and inflexible: a model may need different behavioral modes in different deployment contexts. What is missing is a method for decomposing personas into measurable behavioral axes and moving models along those axes in a controlled, composable way.}
 
 %In this paper, we define personas as bundles of traits, and investigate techniques to both modulate and explore traits, to shape and understand LLM personas.
-\david{We propose a trait-space view of LLM personas. On this view, a persona is not a fixed identity, but a region in a behavioral space jointly determined by model weights and conversational context. Some axes in this space can be specified using human-interpretable traits; others may need to be discovered from model behavior. If such axes can be represented as weight-space interventions, then persona control becomes a problem of learning, scaling, and composing behavioral directions. We instantiate this view using the Big Five/OCEAN framework [cite OCEAN] as a psychometrically grounded starting basis. We train LoRA adapters to amplify and suppress each OCEAN trait using constitution-guided distillation taken from the Open Character Training framework \citep{maiya2025opencharacter}, and evaluate the resulting models with trait-specific MCQ benchmarks \citep{lee2024trait}, calibrated LLM judges, and standard capability benchmarks. We study whether these adapters scale predictably, compose approximately additively, preserve capabilities, and compare favorably to activation-space steering.}
+\david{We propose a trait-space view of LLM personas. On this view, a persona is not a fixed identity, but a region in a behavioral space jointly determined by model weights and conversational context. Some axes in this space can be specified using human-interpretable traits; others may need to be discovered from model behavior. If such axes can be represented as weight-space interventions, then persona control becomes a problem of learning, scaling, and composing behavioral directions. We instantiate this view using the Big Five/OCEAN framework [cite OCEAN] as a psychometrically grounded starting }\kozzy{point.} \david{We train LoRA adapters to amplify and suppress each OCEAN trait using constitution-guided distillation taken from the Open Character Training framework \citep{maiya2025opencharacter}, and evaluate the resulting models with trait-specific MCQ benchmarks \citep{lee2024trait}, calibrated LLM judges, and standard capability benchmarks. We study whether these adapters scale predictably, compose approximately additively, preserve} \kozzy{existing general-purpose} \david{capabilities, and compare favorably to activation-space steering.}
 
 % Our experimental setup follows \citet{maiya2025opencharacter} for crafting LoRAs corresponding to the target traits using a constitutional approach.
 % Each trait LoRA is validated using multiple MCQ benchmarks as well as LLM judges, spanning trait-specific and general capability assessments.
@@ -83,7 +83,7 @@ Our contributions are as follows:
   \caption{Combining a Conscientiousness-suppressing and an Extraversion-amplifying LoRA at $(+1, +1)$ recovers both effects in a single model.}
   \label{fig:intro-c-e-combo-delta}
 \end{subfigure}
-\caption{Trait modulation via LoRA scaling and combination. Individual LoRAs shift their target OCEAN trait in the expected direction with limited bleed-through (top). Composing a trait-suppressing LoRA with a trait-amplifying one recovers both single-adapter effects in the combined model (bottom).}
+\caption{Trait modulation via LoRA scaling and combination. Individual LoRAs shift their target OCEAN trait in the expected direction with limited impact on the other traits (top). Composing a trait-suppressing LoRA with a trait-amplifying one recovers both single-adapter effects in the combined model (bottom).}
 \label{fig:intro-main}
 \end{figure}
 \todo{(for LASR) Either get the consistent pipeline working with good LoRAs, or switch this to the bespoke LoRAs and add appenix explaining the different training methods/constitutions}
@@ -92,7 +92,7 @@ Our contributions are as follows:
 \centering
 % Generated by: N/A — hand-authored HTML at figures/main/persona_figure-2.html, rendered via headless Chrome + pdfcrop
 % Data: N/A — hand-drawn
-\includegraphics[width=1.0\linewidth]{figures/main/persona_figure-2.pdf}
+\includegraphics[width=1.0\linewidth]{figures/main/pipeline.png}
 \caption{Overview of the experimental setup and methodology.}
 \label{fig:overview}
 \end{figure}
