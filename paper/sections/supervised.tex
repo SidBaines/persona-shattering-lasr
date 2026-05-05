@@ -294,8 +294,6 @@ weights alone.}
 
 \textbf{Takeaway:} weight-space and activation-space interventions are real, comparable steering tools on a defined trait axis. They reach the prompt-based ceiling on trait expression but don't beat it; the value is in the modalities being complementary (LoRA composes with other LoRAs without modifying context; activation capping is a runtime intervention without retraining).
 
-\textbf{Trajectory shape note.} All three methods produce flat (offset) trajectories on neutral prompts because the user simulator does not push back. Compare with the drift-prevention setting (Section~\ref{sec:drift-prevention} --- in appendix), where the same LoRA produces a curved equilibrium against scenario-induced introvert pressure. This illustrates that trajectory shape is a property of the experimental setup, not the method.
-
 \textbf{Limits we are honest about.}
 \begin{itemize}
   \item The E$\uparrow$ direction is the easier direction to steer with weight-based methods on this trait. The E$\downarrow$ direction shows a meaningful asymmetry: LoRA and actcap interventions hit a floor around extraversion ${\sim}-1.3$ while sysprompt reaches $-2.3$ cleanly. Reported in Appendix~\ref{sec:appendix-induction-eminus-floor}.
@@ -319,6 +317,8 @@ weights alone.}
 }
 \label{fig:eplus-induction}
 \end{figure}
+
+\irakli{The flat-and-offset trajectories above arise because the user-simulator does not push back. When the assistant is placed under an opposing user-side pressure --- e.g.\ E$\downarrow$ pressure scenarios that drag the model toward introversion --- the same E$\uparrow$ LoRA at the same coefficient produces a \emph{curved equilibrium} instead, partially cancelling the drift turn-by-turn (Section~\ref{sec:appendix-induction-drift-prevention}). The shape difference reflects the experimental setup, not the method.}
 
 % \todo{(For LASR) Take out this section.}
 % \todo{(For NeurIPS) Maybe put this back in, as appendix}

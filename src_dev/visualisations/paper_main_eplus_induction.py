@@ -194,7 +194,10 @@ def main() -> None:
         cell_data.append((label, entries, colour, linestyle, marker))
 
     n_judges = len(JUDGES)
-    fig, axes = plt.subplots(n_judges, 1, figsize=(8.0, 3.5 * n_judges), sharex=True)
+    # Stack horizontally (extraversion on left, coherence on right) to save
+    # vertical paper space. Both panels share x (turn index) so a single
+    # x-axis at the bottom is sufficient.
+    fig, axes = plt.subplots(1, n_judges, figsize=(7.5 * n_judges, 4.0), sharex=True)
     if n_judges == 1:
         axes = [axes]
 
@@ -229,14 +232,17 @@ def main() -> None:
         if ylim is not None:
             ax.set_ylim(ylim[0], ylim[1])
         ax.set_ylabel(ylabel, fontsize=11)
+        ax.set_xlabel("Turn index", fontsize=11)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9, loc="best")
 
-    axes[0].set_title(
-        "Inducing E↑ persona: per-turn dynamics across induction methods",
-        fontsize=12, loc="left", pad=8,
+    # Single legend at the top of the figure rather than one per panel —
+    # all panels share the same lines.
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles, labels,
+        loc="upper center", bbox_to_anchor=(0.5, 1.02),
+        ncol=len(handles), fontsize=9, frameon=True,
     )
-    axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
     out_pdf = PAPER_FIGURES_DIR / "main" / "fig_3_4_eplus_induction_comparison.pdf"
