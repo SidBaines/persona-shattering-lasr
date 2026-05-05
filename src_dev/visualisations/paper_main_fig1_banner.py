@@ -79,6 +79,14 @@ HEADROOM_LIM = (-1.0, 1.0)
 HEADROOM_TICKS = [-1.0, -0.5, 0.0, 0.5, 1.0]
 HEADROOM_LABELS = ["-100%", "-50%", "0", "+50%", "+100%"]
 
+# Single font-size scale knob — every label/title/legend uses one of these.
+FS_TITLE       = 16
+FS_TICK_OCEAN  = 16  # bold OCEAN-letter ticks (spiders + bar x-axis)
+FS_TICK_HEAD   = 13  # spider radial tick labels
+FS_AX_LABEL    = 15  # bar y-axis label
+FS_TICK_VALUE  = 14  # bar y-tick numbers
+FS_LEGEND      = 15
+
 
 # ---------------------------------------------------------------------------
 # Rendering helpers
@@ -125,14 +133,14 @@ def _spider_panel(
     ax.plot(ring_theta, np.zeros_like(ring_theta), "-", color=BASELINE_COLOR, linewidth=2.0)
 
     ax.set_xticks(angles)
-    ax.set_xticklabels(OCEAN_LETTERS, fontsize=10, fontweight="bold")
+    ax.set_xticklabels(OCEAN_LETTERS, fontsize=FS_TICK_OCEAN, fontweight="bold")
     for tick_label, letter in zip(ax.get_xticklabels(), OCEAN_LETTERS):
         tick_label.set_color(BIG_FIVE_COLORS[OCEAN_KEY_BY_LETTER[letter]])
     ax.set_ylim(*HEADROOM_LIM)
     ax.set_yticks(HEADROOM_TICKS)
-    ax.set_yticklabels(HEADROOM_LABELS, fontsize=7)
+    ax.set_yticklabels(HEADROOM_LABELS, fontsize=FS_TICK_HEAD)
     ax.grid(True, alpha=0.4)
-    ax.set_title(title, fontsize=10, pad=10)
+    ax.set_title(title, fontsize=FS_TITLE, pad=10)
 
 
 def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
@@ -166,15 +174,16 @@ def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
 
     ax.axhline(0.0, color=BASELINE_COLOR, linewidth=1.0)
     ax.set_xticks(x)
-    ax.set_xticklabels(OCEAN_LETTERS, fontsize=10, fontweight="bold")
+    ax.set_xticklabels(OCEAN_LETTERS, fontsize=FS_TICK_OCEAN, fontweight="bold")
     for tick_label, letter in zip(ax.get_xticklabels(), OCEAN_LETTERS):
         tick_label.set_color(BIG_FIVE_COLORS[OCEAN_KEY_BY_LETTER[letter]])
-    ax.set_ylabel("Δ judge score vs base", fontsize=9)
-    ax.tick_params(axis="y", labelsize=8)
+    ax.set_ylabel("Δ judge score vs base", fontsize=FS_AX_LABEL)
+    ax.tick_params(axis="y", labelsize=FS_TICK_VALUE)
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_title(
-        f"{combo_mod.TARGET_DISPLAY['c_adapter']} ⊕ {combo_mod.TARGET_DISPLAY['e_adapter']} combo",
-        fontsize=10, pad=10,
+        # f"{combo_mod.TARGET_DISPLAY['c_adapter']} ⊕ {combo_mod.TARGET_DISPLAY['e_adapter']} combo",
+        f"Linearly combining LoRAs",
+        fontsize=FS_TITLE, pad=10,
     )
 
 
@@ -185,29 +194,30 @@ def _spider_legend(ax_legend) -> None:
     so its centre is centred between the spiders.
     """
     handles = [
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Openness"],          marker="o", markersize=5, lw=1.8, label="O — Openness LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Conscientiousness"], marker="o", markersize=5, lw=1.8, label="C — Conscientiousness LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Extraversion"],      marker="o", markersize=5, lw=1.8, label="E — Extraversion LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Agreeableness"],     marker="o", markersize=5, lw=1.8, label="A — Agreeableness LoRA"),
-        Line2D([0], [0], color=BIG_FIVE_COLORS["Neuroticism"],       marker="o", markersize=5, lw=1.8, label="N — Neuroticism LoRA"),
-        Line2D([0], [0], color=BASELINE_COLOR, lw=2.0, label="Baseline (Llama-3.1-8B-Instruct)"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Openness"],          marker="o", markersize=5, lw=1.8, label="Openness LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Conscientiousness"], marker="o", markersize=5, lw=1.8, label="Conscientiousness LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Extraversion"],      marker="o", markersize=5, lw=1.8, label="Extraversion LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Agreeableness"],     marker="o", markersize=5, lw=1.8, label="Agreeableness LoRA"),
+        Line2D([0], [0], color=BIG_FIVE_COLORS["Neuroticism"],       marker="o", markersize=5, lw=1.8, label="Neuroticism LoRA"),
+        Line2D([0], [0], color=BASELINE_COLOR, lw=2.0, label="Baseline model"),
     ]
     ax_legend.legend(
         handles=handles,
-        loc="center", ncol=3, fontsize=9, frameon=False,
+        loc="center", ncol=3, fontsize=FS_LEGEND, frameon=False,
     )
 
 
-def _bar_legend(ax_legend) -> None:
-    """Render the bar-chart legend inside its own (invisible) axes."""
+def _bar_legend(ax_bar) -> None:
+    """Render the bar-chart legend inside the bar plot, bottom-right."""
     handles = [
         Patch(facecolor=BIG_FIVE_COLORS["Conscientiousness"], hatch="//", edgecolor="black", linewidth=0.5, label=combo_mod.TARGET_DISPLAY["c_adapter"]),
         Patch(facecolor=BIG_FIVE_COLORS["Extraversion"],      hatch="\\\\", edgecolor="black", linewidth=0.5, label=combo_mod.TARGET_DISPLAY["e_adapter"]),
-        Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo (+1, +1)"),
+        # Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo (+1, +1)"),
+        Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑"),
     ]
-    ax_legend.legend(
+    ax_bar.legend(
         handles=handles,
-        loc="center", ncol=1, fontsize=9, frameon=False,
+        loc="lower right", fontsize=FS_LEGEND, frameon=True, framealpha=0.92,
     )
 
 
@@ -230,11 +240,12 @@ def _square_polar_axes_in_cell(fig, ax) -> None:
     ax.set_position([new_x0, pos.y0, target_width_frac, pos.height])
 
 
-def _draw_spider_box(fig, ax_amp, ax_sup, ax_legend, *, pad: float = 0.012) -> None:
+def _draw_spider_box(fig, ax_amp, ax_sup, ax_legend, *, pad: float = 0.012) -> tuple[float, float, float, float]:
     """Draw a rectangle hugging amp + supp + spider_legend with a small pad.
 
     ``pad`` is in figure-relative units; ~0.01 = ~1% of figure dimensions.
-    Adds breathing room between the box and the panel titles / tick labels.
+    Returns ``(x0, y0, x1, y1)`` of the rectangle in figure-relative coords so
+    callers can align other panels (e.g. the bar chart) to the box height.
     """
     import matplotlib.patches as patches
     try:
@@ -256,6 +267,7 @@ def _draw_spider_box(fig, ax_amp, ax_sup, ax_legend, *, pad: float = 0.012) -> N
         fill=False, edgecolor="black", linewidth=1.0, clip_on=False, zorder=10,
     )
     fig.add_artist(rect)
+    return x0, y0, x1, y1
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +294,7 @@ def main() -> None:
     gs_outer = GridSpec(
         1, 2, figure=fig,
         width_ratios=[2.0, 0.85],
-        wspace=0.10,
+        wspace=0.25,
     )
 
     # Inner spider block: 2 cols × 2 rows (amp / sup over their shared legend).
@@ -292,23 +304,15 @@ def main() -> None:
     gs_left = GridSpecFromSubplotSpec(
         2, 2, subplot_spec=gs_outer[0, 0],
         height_ratios=[1.0, 0.20],
-        wspace=-0.15, hspace=0.05,
-    )
-
-    # Inner bar block: 1 col × 2 rows (chart over its legend).
-    gs_right = GridSpecFromSubplotSpec(
-        2, 1, subplot_spec=gs_outer[0, 1],
-        height_ratios=[1.0, 0.20],
-        hspace=0.05,
+        wspace=+0.05, hspace=0.05,
     )
 
     ax_amp           = fig.add_subplot(gs_left[0, 0], projection="polar")
     ax_sup           = fig.add_subplot(gs_left[0, 1], projection="polar")
     ax_spider_legend = fig.add_subplot(gs_left[1, 0:2])
-    ax_bar           = fig.add_subplot(gs_right[0, 0])
-    ax_bar_legend    = fig.add_subplot(gs_right[1, 0])
+    # Bar chart now takes the full right column — its legend lives inside it.
+    ax_bar           = fig.add_subplot(gs_outer[0, 1])
     ax_spider_legend.axis("off")
-    ax_bar_legend.axis("off")
 
     _spider_panel(
         ax_amp,
@@ -325,7 +329,7 @@ def main() -> None:
     _bar_panel(ax_bar, scores=combo_scores)
 
     _spider_legend(ax_spider_legend)
-    _bar_legend(ax_bar_legend)
+    _bar_legend(ax_bar)
 
     fig.subplots_adjust(bottom=0.06, top=0.92, left=0.03, right=0.99)
     # Force a draw so tightbbox computations have a renderer.
@@ -333,11 +337,18 @@ def main() -> None:
 
     # Make each polar axes square (circle fills the cell), so the box doesn't
     # have to enclose unused horizontal whitespace around the round plot.
-    _square_polar_axes_in_cell(fig, ax_amp)
-    _square_polar_axes_in_cell(fig, ax_sup)
+    # _square_polar_axes_in_cell(fig, ax_amp)
+    # _square_polar_axes_in_cell(fig, ax_sup)
     fig.canvas.draw()  # re-resolve positions after manual shrink
 
-    _draw_spider_box(fig, ax_amp, ax_sup, ax_spider_legend)
+    box_x0, box_y0, box_x1, box_y1 = _draw_spider_box(
+        fig, ax_amp, ax_sup, ax_spider_legend,
+    )
+
+    # Match the bar plot's plot-area height to the spider box. The bar's
+    # title sits above this and is allowed to extend past the top of the box.
+    bar_pos = ax_bar.get_position()
+    ax_bar.set_position([bar_pos.x0, box_y0, bar_pos.width, box_y1 - box_y0])
 
     for rel in PAPER_FIGURES:
         out_path = PAPER_FIGURES_DIR / rel
