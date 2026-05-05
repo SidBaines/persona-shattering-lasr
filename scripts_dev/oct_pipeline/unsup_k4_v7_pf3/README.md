@@ -29,12 +29,17 @@ Constitution-design intent and per-pole persona descriptions are in
 | `pedagogy_questions.py` | F1 question pools (8 × 50 = 400 unique questions) |
 | `generate_pedagogy_constitutions.py` | F1 generator: compiles traits + questions into JSONs |
 | `pedagogy_{amplifier,suppressor}{,_slim}.json` | F1 constitutions (full + slim, both poles) |
+| `warmth_traits.py` | **F2** facet trait sentences (8 facets × {high, low}) |
+| `warmth_questions.py` | F2 question pools (8 × 50 = 400 unique questions; tonal_mirroring pool varies input register) |
+| `generate_warmth_constitutions.py` | F2 generator: compiles traits + questions into JSONs |
+| `warmth_{amplifier,suppressor}{,_slim}.json` | F2 constitutions (full + slim, both poles) |
 | `prep_unsup_k4_v7_pf3_distillation.sh` | Phase 1: teacher distillation, both poles (param: trait) |
 | `seed_unsup_k4_v7_pf3_paired_dpo.sh` | Phase 2: pair amp/sup teacher responses (param: trait) |
 | `run_unsup_k4_v7_pf3_paired_dpo.sh` | Phase 3: DPO + introspection + SFT + merge (param: trait) |
 | `validate_lora.py` | Re-administer v7 fc_pair on N personas, refit FA, report paired diffs |
 | `run_overnight_initiative.sh` | F0 orchestrator: phases 1–3 + validate amp + train sup + validate |
 | `run_overnight_pedagogy.sh` | F1 orchestrator: same shape as F0 |
+| `run_overnight_warmth.sh` | F2 orchestrator: same shape as F0 |
 
 ## Pipeline (mirrors `unsup_4fac` paired-DPO recipe)
 
@@ -107,6 +112,12 @@ LOG=scratch/logs/overnight_pedagogy_$(date -u +%Y%m%dT%H%M%SZ).log
 tmux new -d -s pedagogy_overnight \
   "cd /root/persona-shattering && \
    bash scripts_dev/oct_pipeline/unsup_k4_v7_pf3/run_overnight_pedagogy.sh 0 2>&1 | tee $LOG"
+
+# F2 (Warmth)
+LOG=scratch/logs/overnight_warmth_$(date -u +%Y%m%dT%H%M%SZ).log
+tmux new -d -s warmth_overnight \
+  "cd /root/persona-shattering && \
+   bash scripts_dev/oct_pipeline/unsup_k4_v7_pf3/run_overnight_warmth.sh 0 2>&1 | tee $LOG"
 ```
 
 Phase skip env vars (set to 1 to skip):
