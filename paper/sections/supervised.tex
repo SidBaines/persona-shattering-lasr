@@ -284,62 +284,42 @@ persona space rather than merely experimental noise.}
 % ──────────────────────────────────────────────────────────────────────────
 
 
-% TODO(irakli): expand bullets below into prose. The structure mirrors the
-% structure the previous draft was reaching for (compare LoRA to activation
-% capping, then probe robustness/context), but on a real OCEAN trait and with
-% an explicit prompt-based baseline alongside.
-%
-% Bullets:
-%   - Setup: 4 methods compared on neutral psychometric prompts at temperature 0.7,
-%     15-turn conversations with a typical-user simulator (gpt-4.1-mini). Llama 3.1 8B-IT.
-%   - Methods compared:
-%       (i)  base (no intervention) — establishes the model's natural register on these prompts;
-%       (ii) sysprompt-induce-E+ — the canonical OCEAN_DEFINITION prose for high extraversion
-%            placed as the assistant system prompt;
-%       (iii) E+ LoRA at scale 0.75 (vanton4_paired_dpo);
-%       (iv) E+ activation capping at fraction 0.85 (axis recomputed against vanton4_paired_dpo).
-%   - Coefficient picks justified by per-method sweep in Appendix \ref{sec:appendix-induction-sweeps}.
-%     LoRA 0.75 is chosen over 1.00 because qualitative inspection shows the latter
-%     enters a caps-and-cliches register ("EXCELLENT questions, my friend!") while
-%     the former retains a more natural enthusiastic voice. Actcap 0.85 is chosen
-%     over 1.00 because frac=1.0 enters a tone-loop mode (every reply opens with
-%     a templated "You're [verb]ing the [noun]!" construction); 0.85 has milder
-%     bro-register drift but stays substantively coherent.
-%   - Headline finding (refer to Figure \ref{fig:eplus-induction}):
-%     * Base model sits at extraversion ~ -0.9 (mildly introverted on neutral prompts).
-%     * All three induction methods reach a strong E+ register: sysprompt +3.06,
-%       LoRA scale 0.75 +3.18, actcap fraction 0.85 +2.42.
-%     * Coherence is preserved by sysprompt (8.43) and LoRA (8.48); actcap pays
-%       a moderate cost (7.47).
-%   - Takeaway: weight-space and activation-space interventions are real,
-%     comparable steering tools on a defined trait axis. They reach the
-%     prompt-based ceiling on trait expression but don't beat it; the value is
-%     in the modalities being complementary (LoRA composes with other LoRAs
-%     without modifying context; activation capping is a runtime intervention
-%     without retraining).
-%   - Trajectory shape note: all three methods produce flat (offset) trajectories
-%     on neutral prompts because the user simulator does not push back. Compare
-%     with the drift-prevention setting (Section \ref{sec:drift-prevention}, in
-%     appendix) where the same LoRA produces a curved equilibrium against
-%     scenario-induced introvert pressure. This illustrates that trajectory
-%     shape is a property of the experimental setup, not the method.
-%   - Limits we are honest about:
-%     * The E+ direction is the easier direction to steer with weight-based
-%       methods on this trait. The E- direction shows a meaningful asymmetry
-%       (the LoRA and actcap interventions hit a coherence floor around
-%       extraversion ~ -1.3 while sysprompt reaches -2.3 cleanly). This is
-%       reported in Appendix \ref{sec:appendix-induction-sweeps}.
-%     * Cross-method comparison at matched intervention strength is the
-%       interesting axis, not raw maxima.
-%
-% Things to potentially carry over from the prior toy-trait draft when expanding
-% the prose (mentor's framing, useful even on the OCEAN trait):
-%   - "weight-space steering can produce the desired behavioural shift with
-%     less collateral damage to output quality" — partially still true; LoRA
-%     and sysprompt both preserve coherence well, actcap pays a moderate cost.
-%   - "personas should be treated as a function of both weights and context,
-%     rather than as fixed properties of the weights alone" — the trajectory
-%     shape note and the asymmetry in E- direction both speak to this.
+\irakli{
+\textbf{Draft outline} (to be expanded into prose). The structure mirrors what the previous draft was reaching for (compare LoRA to activation capping, then probe robustness/context), but on a real OCEAN trait and with an explicit prompt-based baseline alongside.
+
+\textbf{Setup.} Four induction methods compared on neutral psychometric prompts (temperature $0.7$, 15-turn conversations with a typical-user simulator using gpt-4.1-mini, Llama 3.1 8B-Instruct). The four methods:
+\begin{itemize}
+  \item Base (no intervention) --- establishes the model's natural register on these prompts.
+  \item Sysprompt-induce-E$\uparrow$ --- the canonical OCEAN\_DEFINITION prose for high extraversion placed as the assistant system prompt.
+  \item E$\uparrow$ LoRA at coefficient $0.75$ (vanton4\_paired\_dpo).
+  \item E$\uparrow$ activation capping at coefficient $0.85$ (axis recomputed against vanton4\_paired\_dpo).
+\end{itemize}
+
+\textbf{Coefficient picks} are justified by the per-method sweep in Appendix~\ref{sec:appendix-induction-sweeps}. LoRA $0.75$ is chosen over $1.00$ because qualitative inspection shows the latter enters a caps-and-cliches register (e.g.\ ``EXCELLENT questions, my friend!''), whereas $0.75$ retains a more natural enthusiastic voice. Actcap $0.85$ is chosen over $1.00$ because the higher coefficient enters a tone-loop mode (every reply opens with a templated ``You're [verb]ing the [noun]!'' construction); $0.85$ shows milder bro-register drift but stays substantively coherent.
+
+\textbf{Headline finding (Figure~\ref{fig:eplus-induction}):}
+\begin{itemize}
+  \item Base sits at extraversion ${\sim}-0.9$ (mildly introverted on neutral prompts).
+  \item All three induction methods reach a strong E$\uparrow$ register: sysprompt $+3.06$, LoRA $0.75$ at $+3.18$, actcap $0.85$ at $+2.42$.
+  \item Coherence is preserved by sysprompt ($8.43$) and LoRA ($8.48$); actcap pays a moderate cost ($7.47$).
+\end{itemize}
+
+\textbf{Takeaway:} weight-space and activation-space interventions are real, comparable steering tools on a defined trait axis. They reach the prompt-based ceiling on trait expression but don't beat it; the value is in the modalities being complementary (LoRA composes with other LoRAs without modifying context; activation capping is a runtime intervention without retraining).
+
+\textbf{Trajectory shape note.} All three methods produce flat (offset) trajectories on neutral prompts because the user simulator does not push back. Compare with the drift-prevention setting (Section~\ref{sec:drift-prevention} --- in appendix), where the same LoRA produces a curved equilibrium against scenario-induced introvert pressure. This illustrates that trajectory shape is a property of the experimental setup, not the method.
+
+\textbf{Limits we are honest about.}
+\begin{itemize}
+  \item The E$\uparrow$ direction is the easier direction to steer with weight-based methods on this trait. The E$\downarrow$ direction shows a meaningful asymmetry: LoRA and actcap interventions hit a floor around extraversion ${\sim}-1.3$ while sysprompt reaches $-2.3$ cleanly. Reported in Appendix~\ref{sec:appendix-induction-eminus-floor}.
+  \item Cross-method comparison at matched intervention strength is the interesting axis, not raw maxima.
+\end{itemize}
+
+\textbf{Mentor framings worth carrying over from the prior toy-trait draft.}
+\begin{itemize}
+  \item ``Weight-space steering can produce the desired behavioural shift with less collateral damage to output quality'' --- partially still true; LoRA and sysprompt both preserve coherence well, actcap pays a moderate cost.
+  \item ``Personas should be treated as a function of both weights and context, rather than as fixed properties of the weights alone'' --- the trajectory-shape note and the E$\downarrow$ asymmetry both speak to this.
+\end{itemize}
+}
 
 % Generated by: src_dev/visualisations/paper_main_eplus_induction.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
