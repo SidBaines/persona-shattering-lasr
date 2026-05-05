@@ -162,14 +162,14 @@ OCEAN_REGISTRY: dict[str, OceanTraitDef] = {
         slug="o_plus", trait_name="openness", direction="amplifier",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/openness/amplifier/vanton4_paired_dpo/lora/openness_amplifying_full_vanton4-persona",
-        axis_slug=None,
+        axis_slug="o_plus",
         eval_metric="openness_v2",
     ),
     "o_minus": OceanTraitDef(
         slug="o_minus", trait_name="openness", direction="suppressor",
         version="vanton4_paired_dpo",
         adapter_path_in_repo=f"{_FT_PREFIX}/ocean/openness/suppressor/vanton4_paired_dpo/lora/openness_suppressing_full_vanton4-persona",
-        axis_slug=None,
+        axis_slug="o_minus",
         eval_metric="openness_v2",
     ),
     # SFT-only flavour of the canonical E+ adapter (no DPO step). Same

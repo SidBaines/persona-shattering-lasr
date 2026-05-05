@@ -96,7 +96,8 @@ run_cell "M2_eplus_lora_0.75_40x3" \
         "${COMMON[@]}"
 
 # M4: actcap frac 0.85 (matched-trait neighbourhood with M2; no --vllm,
-# HF transformers + hooks)
+# HF transformers + hooks). Small batch size avoids OOM cascade at high turn
+# counts when many long KV caches are live simultaneously.
 run_cell "M4_eplus_actcap_0.85_40x3" \
     uv run python scripts_dev/rollout_experiments/ocean/generate_rollouts.py \
         --traits e_plus --method activation_capping \
@@ -106,6 +107,7 @@ run_cell "M4_eplus_actcap_0.85_40x3" \
         --assistant-temperature 0.7 \
         --user-model openai/gpt-4.1-mini \
         --assistant-max-new-tokens 512 \
+        --assistant-batch-size 4 \
         --output-suffix "_t0.7_main" \
         --conditions baseline
 
