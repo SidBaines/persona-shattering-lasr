@@ -59,11 +59,18 @@ from src_dev.visualisations import PAPER_FIGURES_DIR
 # ---------------------------------------------------------------------------
 
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
-HF_FOLDER = "evals/persona_jailbreak_wildjailbreak/llama-3.1-8b-instruct/wj_paper_v1"
-LOCAL_FOLDER = (
-    project_root / "scratch" / "persona_jailbreak_eval"
-    / "llama-3.1-8b-instruct" / "wj_paper_v1"
+HF_BASE = "evals/persona_jailbreak_wildjailbreak/llama-3.1-8b-instruct"
+LOCAL_BASE = (
+    project_root / "scratch" / "persona_jailbreak_eval" / "llama-3.1-8b-instruct"
 )
+
+# Per-preset consolidated source folder (under HF_BASE / under LOCAL_BASE).
+# Each is a self-contained set of {judgments, aggregate, manifest.json}
+# produced by ``scripts_dev.persona_jailbreak_eval.collate_paper_results``.
+SOURCE_FOLDER_BY_PRESET: dict[str, str] = {
+    "main":     "wj_paper_main_balanced_v1",  # 1010 prompts, 5 conditions
+    "appendix": "wj_paper_v1",                # 500 prompts, 18 conditions
+}
 
 
 # Per-condition display label and color.  Defaults below cover every
@@ -153,30 +160,28 @@ def _read_rate_csv(path: Path) -> dict[str, Rate]:
     return out
 
 
-def _resolve_csv(csv_name: str) -> Path:
-    """Try HF (wj_paper_v1) first, fall back to local scratch dir."""
+def _resolve_csv(folder_name: str, csv_name: str) -> Path:
+    """Try HF first, fall back to local scratch dir for a specific source folder."""
+    hf_path = f"{HF_BASE}/{folder_name}/aggregate/{csv_name}"
     try:
-        return Path(hf_hub_download(
-            HF_REPO_ID, repo_type="dataset",
-            filename=f"{HF_FOLDER}/aggregate/{csv_name}",
-        ))
+        return Path(hf_hub_download(HF_REPO_ID, repo_type="dataset", filename=hf_path))
     except (EntryNotFoundError, RepositoryNotFoundError, OSError):
         pass
     except Exception as exc:
-        print(f"  ⚠ HF fetch failed for {csv_name}: {type(exc).__name__}: {str(exc)[:120]}")
-    local = LOCAL_FOLDER / "aggregate" / csv_name
+        print(f"  ⚠ HF fetch failed for {hf_path}: {type(exc).__name__}: {str(exc)[:120]}")
+    local = LOCAL_BASE / folder_name / "aggregate" / csv_name
     if not local.exists():
         raise FileNotFoundError(
-            f"Could not find {csv_name} on HF ({HF_FOLDER}) or locally ({local}). "
+            f"Could not find {csv_name} on HF ({hf_path}) or locally ({local}). "
             f"Run scripts_dev/persona_jailbreak_eval/collate_paper_results.py first."
         )
     print(f"  ← local: {local}")
     return local
 
 
-def hydrate() -> tuple[dict[str, Rate], dict[str, Rate]]:
-    harm  = _read_rate_csv(_resolve_csv("harmful_rate_by_condition.csv"))
-    bnign = _read_rate_csv(_resolve_csv("refusal_rate_on_benign.csv"))
+def hydrate(folder_name: str) -> tuple[dict[str, Rate], dict[str, Rate]]:
+    harm  = _read_rate_csv(_resolve_csv(folder_name, "harmful_rate_by_condition.csv"))
+    bnign = _read_rate_csv(_resolve_csv(folder_name, "refusal_rate_on_benign.csv"))
     return harm, bnign
 
 
@@ -322,13 +327,13 @@ def main() -> None:
     p.add_argument("--preset", choices=list(PRESETS) + ["all"], default="all")
     args = p.parse_args()
 
-    print("[wj-persona-drift] hydrating rates...")
-    harm, bnign = hydrate()
-    print(f"  ✓ {len(harm)} conditions in harmful CSV / {len(bnign)} in benign CSV")
-
     presets = list(PRESETS.values()) if args.preset == "all" else [PRESETS[args.preset]]
     for preset in presets:
-        print(f"\n[wj-persona-drift] preset={preset.name} ({len(preset.conditions)} conditions)")
+        folder = SOURCE_FOLDER_BY_PRESET[preset.name]
+        print(f"\n[wj-persona-drift] preset={preset.name} ← {folder}/aggregate/  "
+              f"({len(preset.conditions)} conditions)")
+        harm, bnign = hydrate(folder)
+        print(f"  ✓ {len(harm)} conditions in harmful CSV / {len(bnign)} in benign CSV")
         out_paths = [PAPER_FIGURES_DIR / r for r in preset.out_relpaths]
         _make_figure(
             conditions=preset.conditions, harm=harm, bnign=bnign,
