@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""Collate WildJailbreak runs into a single ``wj_paper_v1`` HF folder.
+"""Collate WildJailbreak runs into consolidated paper-results HF folders.
 
-The paper figure pulls per-condition rates from one consolidated source
-folder so:
+Two consolidated targets are supported, each producing its own self-contained
+folder under ``evals/persona_jailbreak_wildjailbreak/llama-3.1-8b-instruct/``
+on HF so the paper-figure script reads exactly one folder per preset:
 
-  - every condition is reported on the same 500 prompts (400 harmful +
-    100 benign — the ablation sample-id set), and
-  - newer runs can supersede older results just by bumping the folder
-    version (``wj_paper_v1`` → ``wj_paper_v2``) rather than mutating in
-    place.
+* ``wj_paper_v1``: 18 conditions on the **500-prompt ablation sample set**
+  (400 adversarial-harmful + 100 adversarial-benign). Powers the appendix
+  figure with all 10 OCEAN ±1 LoRAs + control adapter, plus baselines and
+  combo soups, all on a common subset.
+* ``wj_paper_main_balanced_v1``: 5 conditions on the **1010-prompt balanced
+  set** (800 + 210). Powers the main-body figure: baseline, activation
+  capping, A↑, C↑, A↑⊕C↑(½, ½). Higher statistical power than v1 — only
+  works because all 5 conditions now have data on the balanced set.
 
-The 500-prompt sample-id set is the strict subset of ``wj_balanced_v2``
-that matches ``wj_ablations_v1_v2``, ``wj_combo_a_plus_0p5_c_plus_0p5_v1``,
-``wj_combo_a_plus_c_plus_v1``, and ``wj_combo_a_plus_1p0_c_plus_0p5_v1``
-exactly. Verified by set-membership at collation time.
+Both consolidations:
 
-Output layout:
+  - subset / pass through judgments to a fixed canonical sample-id set
+    (so cross-condition CIs are apples-to-apples), then
+  - re-aggregate per-condition harmful + benign rates with Wilson 95% CIs
+    via :mod:`src_dev.persona_jailbreak_eval.aggregate`, and
+  - write a diagnostic ``summary_bars.{png,pdf}`` at the same time.
+
+Output layout (per target):
 
     {DEST_DIR}/judgments/judgments_<condition>.jsonl   — filtered rows
     {DEST_DIR}/aggregate/<metric>.csv                  — re-aggregated CSVs
@@ -24,9 +31,14 @@ Output layout:
 
 Run with::
 
+    # Both targets, with HF upload:
     uv run python -m scripts_dev.persona_jailbreak_eval.collate_paper_results
+
+    # Single target:
+    uv run python -m scripts_dev.persona_jailbreak_eval.collate_paper_results --target wj_paper_main_balanced_v1
+
+    # Skip upload:
     uv run python -m scripts_dev.persona_jailbreak_eval.collate_paper_results --no-upload
-    uv run python -m scripts_dev.persona_jailbreak_eval.collate_paper_results --version v2
 """
 
 from __future__ import annotations
@@ -40,6 +52,9 @@ from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
+
+from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
 
 from huggingface_hub import HfApi, hf_hub_download
 
@@ -57,61 +72,93 @@ HF_REPO_ID = "persona-shattering-lasr/monorepo"
 HF_BASE = "evals/persona_jailbreak_wildjailbreak/llama-3.1-8b-instruct"
 SCRATCH_BASE = project_root / "scratch" / "persona_jailbreak_eval" / "llama-3.1-8b-instruct"
 
-# Source map: target condition name → (source run name, source filename).
-# Filenames follow the existing ``judgments_<condition>.jsonl`` convention.
-# When ``source_run == "wj_balanced_v2"`` the rows are subset to the canonical
-# 500-id set; everywhere else the file is already 500 rows.
 _ABL_RUN = "wj_ablations_v1_v2"
+_BAL_RUN = "wj_balanced_v2"
+_BAL_COMBO_RUN = "wj_balanced_a_plus_c_plus_combo_v1"
 
 
 @dataclass(frozen=True)
 class Source:
+    """One source jsonl → one target-condition row in a consolidated folder.
+
+    Rows are read from ``{source_run}/judgments/{source_file}``. If a
+    target's canonical id set is smaller than what's in the source file, rows
+    not in the canonical set are filtered out; otherwise the full file is
+    used.
+    """
     target_condition: str
     source_run: str
     source_file: str  # relative to {source_run}/judgments/
 
 
-SOURCES: list[Source] = [
-    # Baselines — from balanced (subset to 500).
-    Source("vanilla",            "wj_balanced_v2", "judgments_vanilla.jsonl"),
-    Source("activation_capping", "wj_balanced_v2", "judgments_activation_capping.jsonl"),
-    # 10 OCEAN LoRAs at scale 1.0 — from ablations (already 500).
-    Source("lora_soup_o_plus_1.0",  _ABL_RUN, "judgments_lora_soup_o_plus_1.0.jsonl"),
-    Source("lora_soup_o_minus_1.0", _ABL_RUN, "judgments_lora_soup_o_minus_1.0.jsonl"),
-    Source("lora_soup_c_plus_1.0",  _ABL_RUN, "judgments_lora_soup_c_plus_1.0.jsonl"),
-    Source("lora_soup_c_minus_1.0", _ABL_RUN, "judgments_lora_soup_c_minus_1.0.jsonl"),
-    Source("lora_soup_e_plus_1.0",  _ABL_RUN, "judgments_lora_soup_e_plus_1.0.jsonl"),
-    Source("lora_soup_e_minus_1.0", _ABL_RUN, "judgments_lora_soup_e_minus_1.0.jsonl"),
-    Source("lora_soup_a_plus_1.0",  _ABL_RUN, "judgments_lora_soup_a_plus_1.0.jsonl"),
-    Source("lora_soup_a_minus_1.0", _ABL_RUN, "judgments_lora_soup_a_minus_1.0.jsonl"),
-    Source("lora_soup_n_plus_1.0",  _ABL_RUN, "judgments_lora_soup_n_plus_1.0.jsonl"),
-    Source("lora_soup_n_minus_1.0", _ABL_RUN, "judgments_lora_soup_n_minus_1.0.jsonl"),
-    # Controls — from ablations.
-    Source("lora_soup_control_latest_1.0", _ABL_RUN, "judgments_lora_soup_control_latest_1.0.jsonl"),
-    Source("lora_soup_control_legacy_1.0", _ABL_RUN, "judgments_lora_soup_control_legacy_1.0.jsonl"),
-    # Combos — from individual combo runs.
-    Source(
-        "lora_soup_a_plus_0.5_c_plus_0.5",
-        "wj_combo_a_plus_0p5_c_plus_0p5_v1",
-        "judgments_lora_soup_a_plus_0.5_c_plus_0.5.jsonl",
-    ),
-    Source(
-        "lora_soup_a_plus_1.0_c_plus_1.0",
-        "wj_combo_a_plus_c_plus_v1",
-        "judgments_lora_soup_a_plus_1.0_c_plus_1.0.jsonl",
-    ),
-    Source(
-        "lora_soup_a_plus_1.0_c_plus_0.5",
-        "wj_combo_a_plus_1p0_c_plus_0p5_v1",
-        "judgments_lora_soup_a_plus_1.0_c_plus_0.5.jsonl",
-    ),
-    # Spare: c+0.5 o-0.5 soup from balanced (subset).
-    Source(
-        "lora_soup_c_plus_0.5_o_minus_0.5",
-        "wj_balanced_v2",
-        "judgments_lora_soup_c_plus_0.5_o_minus_0.5.jsonl",
-    ),
-]
+@dataclass(frozen=True)
+class CollationTarget:
+    """One consolidated paper-results folder."""
+    name: str  # e.g. "wj_paper_v1" → uploads to {HF_BASE}/{name}/
+    canonical_run: str
+    canonical_file: str
+    description: str
+    sources: list[Source]
+
+
+# 500-id ablation set: 18 conditions for the appendix figure. Some come from
+# wj_balanced_v2 (subset to the 500-id ablation set); most are already at 500.
+_TARGET_PAPER_V1 = CollationTarget(
+    name="wj_paper_v1",
+    canonical_run=_ABL_RUN,
+    canonical_file="judgments_lora_soup_a_plus_1.0.jsonl",
+    description="500-prompt ablation set (400 adv-harmful + 100 adv-benign)",
+    sources=[
+        Source("vanilla",            _BAL_RUN, "judgments_vanilla.jsonl"),
+        Source("activation_capping", _BAL_RUN, "judgments_activation_capping.jsonl"),
+        Source("lora_soup_o_plus_1.0",  _ABL_RUN, "judgments_lora_soup_o_plus_1.0.jsonl"),
+        Source("lora_soup_o_minus_1.0", _ABL_RUN, "judgments_lora_soup_o_minus_1.0.jsonl"),
+        Source("lora_soup_c_plus_1.0",  _ABL_RUN, "judgments_lora_soup_c_plus_1.0.jsonl"),
+        Source("lora_soup_c_minus_1.0", _ABL_RUN, "judgments_lora_soup_c_minus_1.0.jsonl"),
+        Source("lora_soup_e_plus_1.0",  _ABL_RUN, "judgments_lora_soup_e_plus_1.0.jsonl"),
+        Source("lora_soup_e_minus_1.0", _ABL_RUN, "judgments_lora_soup_e_minus_1.0.jsonl"),
+        Source("lora_soup_a_plus_1.0",  _ABL_RUN, "judgments_lora_soup_a_plus_1.0.jsonl"),
+        Source("lora_soup_a_minus_1.0", _ABL_RUN, "judgments_lora_soup_a_minus_1.0.jsonl"),
+        Source("lora_soup_n_plus_1.0",  _ABL_RUN, "judgments_lora_soup_n_plus_1.0.jsonl"),
+        Source("lora_soup_n_minus_1.0", _ABL_RUN, "judgments_lora_soup_n_minus_1.0.jsonl"),
+        Source("lora_soup_control_latest_1.0", _ABL_RUN, "judgments_lora_soup_control_latest_1.0.jsonl"),
+        Source("lora_soup_control_legacy_1.0", _ABL_RUN, "judgments_lora_soup_control_legacy_1.0.jsonl"),
+        Source("lora_soup_a_plus_0.5_c_plus_0.5",
+               "wj_combo_a_plus_0p5_c_plus_0p5_v1",
+               "judgments_lora_soup_a_plus_0.5_c_plus_0.5.jsonl"),
+        Source("lora_soup_a_plus_1.0_c_plus_1.0",
+               "wj_combo_a_plus_c_plus_v1",
+               "judgments_lora_soup_a_plus_1.0_c_plus_1.0.jsonl"),
+        Source("lora_soup_a_plus_1.0_c_plus_0.5",
+               "wj_combo_a_plus_1p0_c_plus_0p5_v1",
+               "judgments_lora_soup_a_plus_1.0_c_plus_0.5.jsonl"),
+        Source("lora_soup_c_plus_0.5_o_minus_0.5", _BAL_RUN,
+               "judgments_lora_soup_c_plus_0.5_o_minus_0.5.jsonl"),
+    ],
+)
+
+
+# 1010-id balanced set: 5 conditions for the main-body figure. Built once the
+# balanced reruns of A↑/C↑/(A↑⊕C↑)(½,½) landed on HF (wj_balanced_a_plus_c_plus_combo_v1).
+_TARGET_PAPER_MAIN_BALANCED_V1 = CollationTarget(
+    name="wj_paper_main_balanced_v1",
+    canonical_run=_BAL_RUN,
+    canonical_file="judgments_vanilla.jsonl",
+    description="1010-prompt balanced set (800 adv-harmful + 210 adv-benign)",
+    sources=[
+        Source("vanilla",            _BAL_RUN,       "judgments_vanilla.jsonl"),
+        Source("activation_capping", _BAL_RUN,       "judgments_activation_capping.jsonl"),
+        Source("lora_soup_a_plus_1.0", _BAL_COMBO_RUN, "judgments_lora_soup_a_plus_1.0.jsonl"),
+        Source("lora_soup_c_plus_1.0", _BAL_COMBO_RUN, "judgments_lora_soup_c_plus_1.0.jsonl"),
+        Source("lora_soup_a_plus_0.5_c_plus_0.5", _BAL_COMBO_RUN,
+               "judgments_lora_soup_a_plus_0.5_c_plus_0.5.jsonl"),
+    ],
+)
+
+
+TARGETS: dict[str, CollationTarget] = {
+    t.name: t for t in [_TARGET_PAPER_V1, _TARGET_PAPER_MAIN_BALANCED_V1]
+}
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +175,11 @@ def _read_jsonl(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def _canonical_id_set() -> set[tuple[str, str]]:
-    """The 500-id (sample_id, kind) tuples used by the ablation sweep."""
+def _canonical_id_set(canonical_run: str, canonical_file: str) -> set[tuple[str, str]]:
+    """``(sample_id, kind)`` tuples that define a target's canonical prompt set."""
     local = hf_hub_download(
-        HF_REPO_ID,
-        repo_type="dataset",
-        filename=_hf_path(_ABL_RUN, "judgments_lora_soup_a_plus_1.0.jsonl"),
+        HF_REPO_ID, repo_type="dataset",
+        filename=_hf_path(canonical_run, canonical_file),
     )
     rows = _read_jsonl(Path(local))
     return {(r["sample_id"], r["kind"]) for r in rows}
@@ -182,9 +228,8 @@ def _hydrate_source(src: Source, canonical: set[tuple[str, str]], judgments_out_
 # ---------------------------------------------------------------------------
 
 
-def collate(version: str, *, sources: list[Source] = SOURCES) -> Path:
-    dest_run = f"wj_paper_{version}"
-    dest_local = SCRATCH_BASE / dest_run
+def collate(target: CollationTarget) -> Path:
+    dest_local = SCRATCH_BASE / target.name
     judgments_dir = dest_local / "judgments"
     aggregate_dir = dest_local / "aggregate"
     if dest_local.exists():
@@ -192,13 +237,15 @@ def collate(version: str, *, sources: list[Source] = SOURCES) -> Path:
     judgments_dir.mkdir(parents=True)
     aggregate_dir.mkdir(parents=True)
 
-    print(f"[collate] establishing canonical id set from {_ABL_RUN}...")
-    canonical = _canonical_id_set()
+    print(f"\n[collate] target: {target.name} — {target.description}")
+    print(f"[collate] establishing canonical id set from "
+          f"{target.canonical_run}/{target.canonical_file}...")
+    canonical = _canonical_id_set(target.canonical_run, target.canonical_file)
     print(f"[collate] canonical set has {len(canonical)} (sample_id, kind) tuples")
 
-    print(f"[collate] hydrating {len(sources)} sources...")
+    print(f"[collate] hydrating {len(target.sources)} sources...")
     manifest: list[dict] = []
-    for src in sources:
+    for src in target.sources:
         out_path = _hydrate_source(src, canonical, judgments_dir)
         manifest.append({
             "target_condition": src.target_condition,
@@ -208,9 +255,11 @@ def collate(version: str, *, sources: list[Source] = SOURCES) -> Path:
         })
 
     (dest_local / "manifest.json").write_text(json.dumps({
+        "target": target.name,
+        "description": target.description,
         "canonical_id_set_size": len(canonical),
-        "canonical_source_run": _ABL_RUN,
-        "canonical_source_file": "judgments_lora_soup_a_plus_1.0.jsonl",
+        "canonical_source_run": target.canonical_run,
+        "canonical_source_file": target.canonical_file,
         "sources": manifest,
     }, indent=2))
 
@@ -229,11 +278,11 @@ def collate(version: str, *, sources: list[Source] = SOURCES) -> Path:
     plot_condition_bars(
         harmful_rate_by_condition(records),
         refusal_rate_on_benign(records),
-        title=f"Persona-Jailbreak ({dest_run}) — diagnostic",
+        title=f"Persona-Jailbreak ({target.name}) — diagnostic",
         output_path=aggregate_dir / "summary_bars.png",
     )
 
-    print(f"\n[collate] wrote local: {dest_local}")
+    print(f"[collate] wrote local: {dest_local}")
     return dest_local
 
 
@@ -262,15 +311,20 @@ def upload(local_dir: Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--version", default="v1", help="Folder version suffix (default: v1 → wj_paper_v1).")
+    p.add_argument(
+        "--target", choices=list(TARGETS) + ["all"], default="all",
+        help="Which consolidated folder to (re)build. Default: all.",
+    )
     p.add_argument("--no-upload", action="store_true", help="Skip the HF upload step.")
     args = p.parse_args()
 
-    local_dir = collate(args.version)
-    if args.no_upload:
-        print("\n[upload] skipped (--no-upload)")
-        return
-    upload(local_dir)
+    targets = list(TARGETS.values()) if args.target == "all" else [TARGETS[args.target]]
+    for tgt in targets:
+        local_dir = collate(tgt)
+        if args.no_upload:
+            print(f"[upload] skipped for {tgt.name} (--no-upload)\n")
+            continue
+        upload(local_dir)
 
 
 if __name__ == "__main__":
