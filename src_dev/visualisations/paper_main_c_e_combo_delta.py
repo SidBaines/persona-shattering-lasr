@@ -271,9 +271,9 @@ def gather() -> dict[str, dict[str, float | None]]:
 TARGET_ORDER = ["c_adapter", "e_adapter", "combo"]
 # Short arrow labels to match the spider plots (C↓ = c_minus_v2, E↑ = e_plus_v3).
 TARGET_DISPLAY = {
-    "c_adapter": "C↓ (+1)",
-    "e_adapter": "E↑ (+1)",
-    "combo":     "C↓ × E↑ (+1, +1)",
+    "c_adapter": "C↓",
+    "e_adapter": "E↑",
+    "combo":     "C↓ × E↑",
 }
 TARGET_COLORS = {
     "c_adapter": BIG_FIVE_COLORS["Conscientiousness"],
