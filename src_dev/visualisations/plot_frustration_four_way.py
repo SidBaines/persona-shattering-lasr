@@ -67,19 +67,30 @@ class RunSpec:
     marker: str
 
 
-# Matching run-name sets for each sample size. Ordering here determines plot order.
-RUN_SETS: dict[int, list[RunSpec]] = {
-    10: [
+# Matching run-name sets keyed by tag (e.g. "10", "100" v4 paper figure,
+# "100v" vanton4_paired_dpo 6-way). String keys so multiple n=100 sets can
+# coexist. Ordering inside each list determines plot order.
+RUN_SETS: dict[str, list[RunSpec]] = {
+    "10": [
         RunSpec("BASE",          "gemma3_27b_base_or_8turn_10prompt_1rollout",                                              "#2F5D9F", "o-"),
         RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_10prompt_1rollout",            "#6B6B6B", "D-"),
         RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_10prompt_1rollout",                  "#C73E3A", "s-"),
         RunSpec("N- inverted",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_10prompt_1rollout",         "#7A1F1B", "^-"),
     ],
-    100: [
+    "100": [
         RunSpec("BASE",          "gemma3_27b_base_or_8turn_200_samples_1rollout",                                          "#2F5D9F", "o-"),
         RunSpec("CONTROL",       "gemma3_27b_control_use_diff_words_v1_persona_hfbatched_8turn_100_samples_1rollout",     "#6B6B6B", "D-"),
         RunSpec("N-",            "gemma3_27b_n_minus_v4_persona_hfbatched_8turn_100_samples_1rollout",                    "#C73E3A", "s-"),
         RunSpec("N- inverted",   "gemma3_27b_n_minus_v4_persona_negscale_hfbatched_8turn_100_samples_1rollout",           "#7A1F1B", "^-"),
+    ],
+    # n=100 with vanton4_paired_dpo adapters; up to 6 lines once the inverted
+    # bakes finish. Currently has BASE / CONTROL / N- / N+; N- inverted and
+    # N+ inverted will be appended once their evals land.
+    "100v": [
+        RunSpec("BASE",          "gemma3_27b_base_8turn_100prompt_1rollout",                                                "#2F5D9F", "o-"),
+        RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_100prompt_1rollout",           "#6B6B6B", "D-"),
+        RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                 "#C73E3A", "s-"),
+        RunSpec("N+",            "gemma3_27b_n_plus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                  "#1F7A4D", "s-"),
     ],
 }
 
@@ -256,8 +267,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--n-prompts", type=int, choices=sorted(RUN_SETS.keys()), default=10,
-        help="Select the matching run-name set (10 or 100).",
+        "--n-prompts", type=str, choices=sorted(RUN_SETS.keys()), default="10",
+        help="Select the matching run-name set (10, 100, 100v).",
     )
     parser.add_argument(
         "--subset", default="all",
