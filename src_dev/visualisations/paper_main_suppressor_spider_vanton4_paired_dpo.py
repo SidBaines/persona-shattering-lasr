@@ -217,12 +217,12 @@ def _render_spider(
         baseline = {t: 0.0 for t in baseline}
         if reversed_axis:
             per_suppressor = {k: {t: -v for t, v in d.items()} for k, d in per_suppressor.items()}
-        y_lim = (-0.8, 0.8)
-        y_ticks = [-0.8, -0.4, 0.0, 0.4, 0.8]
+        y_lim = (-1.0, 1.0)
+        y_ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
         if reversed_axis:
-            y_tick_labels = ["+80%", "+40%", "0", "-40%", "-80%"]
+            y_tick_labels = ["+100%", "+50%", "0", "-50%", "-100%"]
         else:
-            y_tick_labels = ["-80%", "-40%", "0", "+40%", "+80%"]
+            y_tick_labels = ["-100%", "-50%", "0", "+50%", "+100%"]
     elif PLOT_MODE == "raw":
         y_lim = (SCORE_MIN, SCORE_MAX)
         y_ticks = [SCORE_MIN, SCORE_MIN / 2, 0.0, SCORE_MAX / 2, SCORE_MAX]
