@@ -283,6 +283,7 @@ PRESETS: dict[str, Preset] = {
         conditions=[
             "vanilla",
             "activation_capping",
+            "lora_soup_control_latest_1.0",
             "lora_soup_a_plus_1.0",
             "lora_soup_c_plus_1.0",
             "lora_soup_a_plus_0.5_c_plus_0.5",
@@ -291,7 +292,7 @@ PRESETS: dict[str, Preset] = {
             "main/fig_3_wj_persona_drift.pdf",
             "main/fig_3_wj_persona_drift.png",
         ],
-        width=10.0, height=4.4,
+        width=11.0, height=4.4,
     ),
     "appendix": Preset(
         name="appendix",
