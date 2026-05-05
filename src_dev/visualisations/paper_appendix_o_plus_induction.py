@@ -13,7 +13,7 @@ fine_tuning/llama-3.1-8b-it/ocean/openness/amplifier/vanton4_paired_dpo/rollouts
   actcap 0.75: rollout_sweep_activation_capping_t0.7_steering_o/frac_0.75/baseline/evals/rollouts_evaluated.jsonl
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_oplus.pdf
+    - paper/figures/appendix/induction/fig_G_induction_oplus.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_o_plus_induction
@@ -42,7 +42,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_oplus.pdf",
+    "appendix/induction/fig_G_induction_oplus.pdf",
 ]
 
 HF_REPO_FS = "datasets/persona-shattering-lasr/monorepo"
@@ -168,7 +168,7 @@ def main() -> None:
     axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_oplus.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_oplus.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

@@ -20,7 +20,7 @@ Panels:
   (d) E↑/E↓ soup at fixed E↑=0.5 with varying E↓ component
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_cross_lora_controls.pdf
+    - paper/figures/appendix/induction/fig_G_induction_cross_lora_controls.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_induction_cross_lora
@@ -49,7 +49,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_cross_lora_controls.pdf",
+    "appendix/induction/fig_G_induction_cross_lora_controls.pdf",
 ]
 
 HF_FS = "datasets/persona-shattering-lasr/monorepo/fine_tuning/llama-3.1-8b-it/ocean"
@@ -250,7 +250,7 @@ def main() -> None:
     )
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_cross_lora_controls.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_cross_lora_controls.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

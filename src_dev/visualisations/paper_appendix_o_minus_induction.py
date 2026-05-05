@@ -21,7 +21,7 @@ Data sources (HF persona-shattering-lasr/monorepo):
   actcap 1.00: suppressor/.../rollout_sweep_activation_capping_t0.7_steering_o/frac_1.00/baseline/...
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_ominus.pdf
+    - paper/figures/appendix/induction/fig_G_induction_ominus.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_o_minus_induction
@@ -50,7 +50,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_ominus.pdf",
+    "appendix/induction/fig_G_induction_ominus.pdf",
 ]
 
 HF_REPO_FS = "datasets/persona-shattering-lasr/monorepo"
@@ -179,7 +179,7 @@ def main() -> None:
     axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_ominus.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_ominus.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

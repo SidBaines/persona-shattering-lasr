@@ -22,8 +22,8 @@ one per direction:
 Each two-panel figure has LoRA + actcap side by side.
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_o_method_sweeps_oplus.pdf
-    - paper/figures/appendix/fig_G_induction_o_method_sweeps_ominus.pdf
+    - paper/figures/appendix/induction/fig_G_induction_o_method_sweeps_oplus.pdf
+    - paper/figures/appendix/induction/fig_G_induction_o_method_sweeps_ominus.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_o_method_sweeps
@@ -52,10 +52,10 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_o_method_sweeps_oplus_lora.pdf",
-    "appendix/fig_G_induction_o_method_sweeps_oplus_actcap.pdf",
-    "appendix/fig_G_induction_o_method_sweeps_ominus_lora.pdf",
-    "appendix/fig_G_induction_o_method_sweeps_ominus_actcap.pdf",
+    "appendix/induction/fig_G_induction_o_method_sweeps_oplus_lora.pdf",
+    "appendix/induction/fig_G_induction_o_method_sweeps_oplus_actcap.pdf",
+    "appendix/induction/fig_G_induction_o_method_sweeps_ominus_lora.pdf",
+    "appendix/induction/fig_G_induction_o_method_sweeps_ominus_actcap.pdf",
 ]
 
 HF_FS = "datasets/persona-shattering-lasr/monorepo/fine_tuning/llama-3.1-8b-it/ocean/openness"
@@ -199,7 +199,7 @@ def _render(cells: list[tuple[str, str, str, str, str]], title: str, out_name: s
     axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / out_name
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / out_name
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

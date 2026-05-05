@@ -23,7 +23,7 @@ Data sources (all under HF ``persona-shattering-lasr/monorepo``):
   scenarios:   rollout_scenarios/subset_3e141037_t0.7_steering/high/base/scenarios_extraversion_high/run_info.json
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_pareto_eplus.pdf
+    - paper/figures/appendix/induction/fig_G_induction_pareto_eplus.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_induction_pareto
@@ -49,7 +49,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_pareto_eplus.pdf",
+    "appendix/induction/fig_G_induction_pareto_eplus.pdf",
 ]
 
 HF_REPO_FS = "datasets/persona-shattering-lasr/monorepo"
@@ -223,7 +223,7 @@ def main() -> None:
     )
 
     fig.tight_layout()
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_pareto_eplus.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_pareto_eplus.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

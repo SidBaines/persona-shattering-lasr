@@ -11,7 +11,7 @@ E↑, and its trajectory shape (curved equilibrium with user pressure) differs
 from the flat-and-offset shape produced by direct interventions.
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_user_roleplay.pdf
+    - paper/figures/appendix/induction/fig_G_induction_user_roleplay.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_induction_user_roleplay
@@ -40,7 +40,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_user_roleplay.pdf",
+    "appendix/induction/fig_G_induction_user_roleplay.pdf",
 ]
 
 HF_FS = "datasets/persona-shattering-lasr/monorepo/fine_tuning/llama-3.1-8b-it/ocean/extraversion"
@@ -160,7 +160,7 @@ def main() -> None:
     axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_user_roleplay.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_user_roleplay.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

@@ -1,50 +1,45 @@
 \section{E$\uparrow$ induction methods: full sweep details and controls}\label{sec:appendix-induction-sweeps}
 
-% This appendix supports Section \ref{sec:comparison-induction} (the main-body
-% E+ induction comparison figure). Each subsection below has a TODO block with
-% bullets to expand into prose, plus the figure(s) we have so far.
-%
-% Top-level argument the appendix needs to make:
-%   1. Justify the coefficient picks (LoRA scale 0.75, actcap fraction 0.85)
-%      used in the main-body figure by showing the full per-method sweep.
-%   2. Visualise the trait/coherence trade-off (Pareto frontier) traced by
-%      each method as its strength grows.
-%   3. Cross-LoRA controls — show that the trait shift induced by the E+
-%      LoRA is genuinely trait-specific, not generic LoRA-effect.
-%   4. Honest report of asymmetries:
-%        - DPO contribution: SFT-only LoRA reaches ~25% of the canonical
-%          (DPO-paired) E+ shift.
-%        - Cross-trait bleed: C- LoRA pulls extraversion down by ~1.0.
-%        - E- direction asymmetry: LoRA + actcap floor at ext ~ -1.3,
-%          while sysprompt-induce-low reaches ~ -2.3.
-%        - Linear cancellation: E+ + E- soup at matched scales ≈ base.
+\irakli{
+This appendix supports Section~\ref{sec:comparison-induction} (the main-body E$\uparrow$ induction comparison figure). Each subsection below contains a draft outline (in violet) plus the figure(s) we have so far. Top-level argument the appendix needs to make:
+\begin{itemize}
+  \item Justify the coefficient picks (LoRA scale $0.75$, actcap fraction $0.85$) used in the main-body figure by showing the full per-method sweep.
+  \item Visualise the trait/coherence trade-off (Pareto frontier) traced by each method as its strength grows.
+  \item Cross-LoRA controls --- show that the trait shift induced by the E$\uparrow$ LoRA is genuinely trait-specific, not generic LoRA-effect.
+  \item Honest report of asymmetries:
+  \begin{itemize}
+    \item DPO contribution: SFT-only LoRA reaches ${\sim}25\%$ of the canonical (DPO-paired) E$\uparrow$ shift.
+    \item Cross-trait bleed: C$\downarrow$ LoRA pulls extraversion down by ${\sim}1.0$.
+    \item E$\downarrow$ direction asymmetry: LoRA + actcap floor at ext ${\sim}-1.3$, while sysprompt-induce-low reaches ${\sim}-2.3$.
+    \item Linear cancellation: E$\uparrow$ + E$\downarrow$ soup at matched scales $\approx$ base.
+  \end{itemize}
+\end{itemize}
+}
 
 \subsection{Coefficient sweeps (LoRA and activation capping)}\label{sec:appendix-induction-sweeps-loraac}
 
-% TODO(irakli): expand into prose.
-% Bullets:
-%   - Setup: same neutral psychometric prompts, same temperature 0.7, same
-%     typical-user simulator as the main-body figure. 10 prompts x 2 rollouts
-%     x 15 turns per cell.
-%   - LoRA E+ scale sweep over {0.25, 0.50, 0.75, 1.00}:
-%       0.25 → ext -0.67 (basically base);
-%       0.50 → ext +1.18 (moderate);
-%       0.75 → ext +3.18 (strong, coherence preserved at 8.48);
-%       1.00 → ext +3.64 (saturating, coherence dips slightly to 8.02).
-%     Picked 0.75 over 1.00 because qualitative inspection shows the latter
-%     enters a caps-and-cliches register; 0.75 retains a more natural
-%     enthusiastic voice.
-%   - Actcap E+ fraction sweep over {0.25, 0.50, 0.75, 0.85, 1.00}:
-%       0.25 → ext -0.81 (no signal);
-%       0.50 → ext -0.56 (weak);
-%       0.75 → ext +1.55 (clean);
-%       0.85 → ext +2.42 (matched-trait-neighbourhood with LoRA 0.75; bro-register
-%               degradation just visible in transcripts);
-%       1.00 → ext +3.12 (full neutralisation, but coherence drops to 6.24
-%               and the model enters a tone-loop mode).
-%     Picked 0.85 over 0.75 (too weak) and 1.00 (too degraded) for a matched
-%     comparison with LoRA 0.75 in the main figure.
-%   - Reference to Pareto figure below for the visual story.
+\irakli{
+\textbf{Setup.} Same neutral psychometric prompts, same temperature $0.7$, same typical-user simulator as the main-body figure. 10 prompts $\times$ 2 rollouts $\times$ 15 turns per cell.
+
+\textbf{LoRA E$\uparrow$ scale sweep over $\{0.25, 0.50, 0.75, 1.00\}$:}
+\begin{itemize}
+  \item $0.25 \to$ ext $-0.67$ (basically base).
+  \item $0.50 \to$ ext $+1.18$ (moderate).
+  \item $0.75 \to$ ext $+3.18$ (strong, coherence preserved at $8.48$).
+  \item $1.00 \to$ ext $+3.64$ (saturating, coherence dips slightly to $8.02$).
+\end{itemize}
+Picked $0.75$ over $1.00$ because qualitative inspection shows the latter enters a caps-and-cliches register; $0.75$ retains a more natural enthusiastic voice.
+
+\textbf{Actcap E$\uparrow$ fraction sweep over $\{0.25, 0.50, 0.75, 0.85, 1.00\}$:}
+\begin{itemize}
+  \item $0.25 \to$ ext $-0.81$ (no signal).
+  \item $0.50 \to$ ext $-0.56$ (weak).
+  \item $0.75 \to$ ext $+1.55$ (clean).
+  \item $0.85 \to$ ext $+2.42$ (matched-trait-neighbourhood with LoRA $0.75$; bro-register degradation just visible in transcripts).
+  \item $1.00 \to$ ext $+3.12$ (full neutralisation, but coherence drops to $6.24$ and the model enters a tone-loop mode).
+\end{itemize}
+Picked $0.85$ over $0.75$ (too weak) and $1.00$ (too degraded) for a matched comparison with LoRA $0.75$ in the main figure. See Pareto figure below for the visual story.
+}
 
 \begin{figure}[htbp]
 \centering
@@ -52,7 +47,7 @@
   \centering
   % Generated by: src_dev/visualisations/paper_appendix_induction_method_sweeps.py
   % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
-  \includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_lora_sweep.pdf}
+  \includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_lora_sweep.pdf}
   \caption{LoRA scale sweep.}
   \label{fig:induction-lora-sweep}
 \end{subfigure}
@@ -61,7 +56,7 @@
   \centering
   % Generated by: src_dev/visualisations/paper_appendix_induction_method_sweeps.py
   % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
-  \includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_actcap_sweep.pdf}
+  \includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_actcap_sweep.pdf}
   \caption{Activation capping fraction sweep.}
   \label{fig:induction-actcap-sweep}
 \end{subfigure}
@@ -73,34 +68,25 @@
 
 \subsection{The trait/coherence Pareto frontier}\label{sec:appendix-induction-pareto}
 
-% TODO(irakli): expand into prose.
-% Bullets to cover (refer to Figure \ref{fig:induction-pareto}):
-%   - Each (method, intervention strength) pair is one point in (ext, coh) space.
-%     Points within a method are connected to show the path each method traces
-%     as strength grows.
-%   - Story:
-%       * LoRA traces a tight curve along the top of the plot — coherence stays
-%         near base (8.0-8.5) across the entire sweep range; trait moves
-%         monotonically from -0.7 to +3.6.
-%       * Actcap traces a curve that descends — at low fractions it stays at
-%         base coherence with no trait shift; at fraction 0.75 it enters the
-%         meaningful-shift regime; from 0.85 onwards coherence drops sharply
-%         while trait climbs further.
-%       * Sysprompt is one point well in the upper-right corner: +3.06 at coh 8.43.
-%         No scale knob — it's all-or-nothing.
-%       * User-roleplay is one point in the lower-middle: +1.08 at coh 8.54.
-%         Clean trajectory but weak inducer for E+ (asymmetric: much stronger
-%         for E-, where the model has natural drift toward introversion).
-%   - Takeaway: methods reach overlapping points in (ext, coh) space — there's
-%     no method that strictly dominates. LoRA preserves coherence more reliably
-%     across its sweep range; sysprompt reaches similar trait at similar coherence
-%     in one shot; actcap traces a steeper trade-off.
+\irakli{
+Each (method, intervention strength) pair is one point in (ext, coh) space. Points within a method are connected to show the path each method traces as strength grows.
+
+\textbf{Story (refer to Figure~\ref{fig:induction-pareto}):}
+\begin{itemize}
+  \item LoRA traces a tight curve along the top of the plot --- coherence stays near base ($8.0$--$8.5$) across the entire sweep range; trait moves monotonically from $-0.7$ to $+3.6$.
+  \item Actcap traces a curve that descends --- at low fractions it stays at base coherence with no trait shift; at fraction $0.75$ it enters the meaningful-shift regime; from $0.85$ onwards coherence drops sharply while trait climbs further.
+  \item Sysprompt is one point well in the upper-right corner: $+3.06$ at coh $8.43$. No scale knob --- it's all-or-nothing.
+  \item User-roleplay is one point in the lower-middle: $+1.08$ at coh $8.54$. Clean trajectory but weak inducer for E$\uparrow$ (asymmetric: much stronger for E$\downarrow$, where the model has natural drift toward introversion).
+\end{itemize}
+
+\textbf{Takeaway:} methods reach overlapping points in (ext, coh) space --- there's no method that strictly dominates. LoRA preserves coherence more reliably across its sweep range; sysprompt reaches similar trait at similar coherence in one shot; actcap traces a steeper trade-off.
+}
 
 % Generated by: src_dev/visualisations/paper_appendix_induction_pareto.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.9\linewidth]{figures/appendix/fig_G_induction_pareto_eplus.pdf}
+\includegraphics[width=0.9\linewidth]{figures/appendix/induction/fig_G_induction_pareto_eplus.pdf}
 \caption{E$\uparrow$ induction methods: trait expression vs.\ coherence on neutral psychometric prompts (Llama 3.1 8B-Instruct, 15-turn conversations, temperature 0.7, typical-user simulator). Each marker is one (method, strength) cell, with strength labels next to each marker. LoRA scale and actcap fraction points are connected within method to show the path traced as intervention strength grows. The dotted horizontal line marks base coherence.
 % TODO: verify caption matches final figure
 }
@@ -109,45 +95,24 @@
 
 \subsection{Cross-LoRA controls}\label{sec:appendix-induction-crosslora}
 
-% TODO(irakli): expand into prose.
-% Bullets:
-%   - We ran four "control" sweeps to test that the E+ trait shift is genuinely
-%     trait-specific, not a generic LoRA-effect or a confound of training pipeline.
-%     All evaluated on the same neutral psychometric prompts at the same temp 0.7.
-%   - (a) E+ no-DPO: same SFT-only flavour of the canonical E+ adapter (vanton4
-%     parent dir, no _paired_dpo). Tests how much of the E+ effect comes from
-%     the DPO step vs SFT alone.
-%       Results: scale 1.0 reaches ext +0.97 (vs canonical E+ at +3.64).
-%       DPO accounts for ~75% of the trait shift.
-%   - (b) C-: conscientiousness-suppressor LoRA (canonical vanton4_paired_dpo).
-%     Tests cross-trait bleed: does shifting one trait drag others?
-%       Results: scale 1.0 → cons -2.31 (target trait moves), ext -1.95 (bleed
-%       on extraversion of ~1.0 below baseline -0.91).
-%   - (c) Control LoRA: trained on OCEAN definitions without trait-shaping
-%     (vanton4_paired_dpo_s1vs2). Tests for generic LoRA-effect.
-%       Results: ext stays at -1.04 (essentially baseline) across all scales.
-%     Path note: the control LoRA's outputs land at
-%     fine_tuning/.../ocean/extraversion/amplifier/vanton4_paired_dpo_s1vs2/
-%     (a freshly created path — the routing logic in generate_rollouts.py
-%     derives output paths from the OceanTraitDef trait/direction/version
-%     fields). Run_info.json inside identifies the actual adapter used.
-%   - (d) E+/E- soup: weighted sum of E+ at scale 0.5 with E- at scales
-%     {0.25, 0.5, 0.75}. Tests linear cancellation.
-%       (E+0.5, E-0.25) → ext -0.11 (slight E+);
-%       (E+0.5, E-0.50) → ext -0.99 (≈ base of -0.91);
-%       (E+0.5, E-0.75) → ext -1.40 (slight E-).
-%     Linear cancellation in adapter space confirmed.
-%   - Takeaway: the trait-specific LoRAs do shift the target trait. Bleed onto
-%     correlated traits is real but smaller than the on-trait effect. The
-%     control LoRA (matched training pipeline, no trait signal) doesn't shift
-%     extraversion, so the on-trait + cross-trait shifts are both attributable
-%     to the trait constitution rather than to distillation/DPO/teacher style.
+\irakli{
+We ran four ``control'' sweeps to test that the E$\uparrow$ trait shift is genuinely trait-specific, not a generic LoRA-effect or a confound of training pipeline. All evaluated on the same neutral psychometric prompts at the same temp $0.7$.
+
+\begin{itemize}
+  \item \textbf{(a) E$\uparrow$ no-DPO:} same SFT-only flavour of the canonical E$\uparrow$ adapter (vanton4 parent dir, no \texttt{\_paired\_dpo}). Tests how much of the E$\uparrow$ effect comes from the DPO step vs SFT alone. Result: scale $1.0$ reaches ext $+0.97$ (vs canonical E$\uparrow$ at $+3.64$). DPO accounts for ${\sim}75\%$ of the trait shift.
+  \item \textbf{(b) C$\downarrow$:} conscientiousness-suppressor LoRA (canonical vanton4\_paired\_dpo). Tests cross-trait bleed: does shifting one trait drag others? Result: scale $1.0 \to$ cons $-2.31$ (target trait moves), ext $-1.95$ (bleed on extraversion of ${\sim}1.0$ below baseline $-0.91$).
+  \item \textbf{(c) Control LoRA:} trained on OCEAN definitions without trait-shaping (vanton4\_paired\_dpo\_s1vs2). Tests for generic LoRA-effect. Result: ext stays at $-1.04$ (essentially baseline) across all scales. Path note: the control LoRA's outputs land at \texttt{fine\_tuning/.../ocean/extraversion/amplifier/vanton4\_paired\_dpo\_s1vs2/} (a freshly created path --- the routing logic in \texttt{generate\_rollouts.py} derives output paths from the OceanTraitDef trait/direction/version fields). The \texttt{run\_info.json} inside identifies the actual adapter used.
+  \item \textbf{(d) E$\uparrow$/E$\downarrow$ soup:} weighted sum of E$\uparrow$ at scale $0.5$ with E$\downarrow$ at scales $\{0.25, 0.5, 0.75\}$. Tests linear cancellation. $(E{\uparrow}0.5, E{\downarrow}0.25) \to$ ext $-0.11$ (slight E$\uparrow$); $(E{\uparrow}0.5, E{\downarrow}0.50) \to$ ext $-0.99$ ($\approx$ base of $-0.91$); $(E{\uparrow}0.5, E{\downarrow}0.75) \to$ ext $-1.40$ (slight E$\downarrow$). Linear cancellation in adapter space confirmed.
+\end{itemize}
+
+\textbf{Takeaway:} the trait-specific LoRAs do shift the target trait. Bleed onto correlated traits is real but smaller than the on-trait effect. The control LoRA (matched training pipeline, no trait signal) doesn't shift extraversion, so the on-trait + cross-trait shifts are both attributable to the trait constitution rather than to distillation/DPO/teacher style.
+}
 
 % Generated by: src_dev/visualisations/paper_appendix_induction_cross_lora.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_cross_lora_controls.pdf}
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_cross_lora_controls.pdf}
 \caption{Cross-LoRA controls measured against extraversion (Llama 3.1 8B-IT, neutral psychometric prompts, temp 0.7). The faint grey reference curve is the canonical E$\uparrow$ LoRA on the same axis. \textbf{(a)} E$\uparrow$ adapter with the SFT-only flavour (no DPO step) reaches roughly 25\% of the canonical effect at scale $1.0$. \textbf{(b)} C$\downarrow$ LoRA (re-judged with the extraversion metric) drags extraversion down by ${\sim}1$ at scale $1.0$. \textbf{(c)} Control LoRA (trained on OCEAN definitions without trait shaping) shows essentially no extraversion shift across the scale range. \textbf{(d)} E$\uparrow$/E$\downarrow$ soup at fixed E$\uparrow$ component $0.5$ and varying E$\downarrow$ component, with the dashed line marking base extraversion; the soup at matched scales $(0.5, 0.5)$ recovers base behaviour, confirming linear cancellation in adapter space.
 % TODO: verify caption matches final figure
 }
@@ -156,41 +121,30 @@
 
 \subsection{E$\downarrow$ direction asymmetry: a method-specific floor}\label{sec:appendix-induction-eminus-floor}
 
-% TODO(irakli): expand into prose.
-% Bullets:
-%   - Mirror experiment of the main-body figure (Section \ref{sec:comparison-induction})
-%     for the suppressor direction. Same neutral prompts, same temp 0.7,
-%     same 4 method types — just push the model toward LOW extraversion instead.
-%   - Headline finding (refer to Figure \ref{fig:induction-eminus-floor}):
-%     * Base sits at ext ~ -0.9.
-%     * Sysprompt-induce-E↓ reaches ext ~ -2.3 cleanly (coh ~9).
-%     * E↓ LoRA at coeff=0.75 stalls at ext ~ -1.2 (coh ~8.5).
-%     * E↓ activation capping at coeff=0.75 stalls at ext ~ -1.0 (coh ~8.5).
-%   - The two weight/activation methods plateau around -1.3 across their full
-%     usable coefficient range; pushing E↓ LoRA past coeff=1.0 collapses
-%     coherence without breaking the trait floor (see Section
-%     \ref{sec:appendix-induction-sweeps-loraac} for the broader sweep).
-%     Inverting the E↑ amplifier (negative coefficient) doesn't help either.
-%   - Mechanistic interpretation (supported by the supplementary distribution
-%     figure below): the floor is not a coherence ceiling. The base score
-%     distribution is bimodal at 0 and -2, and weight/activation methods shift
-%     mass partially toward -2/-3 but most messages remain at 0 or -2.
-%     Sysprompt shifts mass cleanly into {-3, -2}.
-%     Plausible interpretation: system prompts intervene at the assistant's
-%     response *plan* (interpreted as instruction at planning time); LoRA and
-%     actcap tweak per-token sampling distributions. Introversion as judged is
-%     largely about *response shape* (length, willingness to elaborate) rather
-%     than *word choice*, which is why sysprompt reaches it and LoRA doesn't.
-%   - This is a real limitation we should be honest about. Different
-%     intervention modalities are not interchangeable for arbitrary trait
-%     directions.
+\irakli{
+Mirror experiment of the main-body figure (Section~\ref{sec:comparison-induction}) for the suppressor direction. Same neutral prompts, same temp $0.7$, same 4 method types --- just push the model toward LOW extraversion instead.
+
+\textbf{Headline finding (refer to Figure~\ref{fig:induction-eminus-floor}):}
+\begin{itemize}
+  \item Base sits at ext ${\sim}-0.9$.
+  \item Sysprompt-induce E$\downarrow$ reaches ext ${\sim}-2.3$ cleanly (coh ${\sim}9$).
+  \item E$\downarrow$ LoRA at coeff$=0.75$ stalls at ext ${\sim}-1.2$ (coh ${\sim}8.5$).
+  \item E$\downarrow$ activation capping at coeff$=0.75$ stalls at ext ${\sim}-1.0$ (coh ${\sim}8.5$).
+\end{itemize}
+
+The two weight/activation methods plateau around $-1.3$ across their full usable coefficient range; pushing E$\downarrow$ LoRA past coeff$=1.0$ collapses coherence without breaking the trait floor (see Section~\ref{sec:appendix-induction-sweeps-loraac} for the broader sweep). Inverting the E$\uparrow$ amplifier (negative coefficient) doesn't help either.
+
+\textbf{Mechanistic interpretation} (supported by the supplementary distribution figure below): the floor is not a coherence ceiling. The base score distribution is bimodal at $0$ and $-2$, and weight/activation methods shift mass partially toward $-2/-3$ but most messages remain at $0$ or $-2$. Sysprompt shifts mass cleanly into $\{-3, -2\}$. Plausible interpretation: system prompts intervene at the assistant's response \emph{plan} (interpreted as instruction at planning time); LoRA and actcap tweak per-token sampling distributions. Introversion as judged is largely about \emph{response shape} (length, willingness to elaborate) rather than \emph{word choice}, which is why sysprompt reaches it and LoRA doesn't.
+
+This is a real limitation we should be honest about. Different intervention modalities are not interchangeable for arbitrary trait directions.
+}
 
 % Generated by: src_dev/visualisations/paper_appendix_induction_eminus_floor.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_eminus_floor.pdf}
-\caption{Per-turn extraversion and coherence trajectories for four E$\downarrow$ induction methods on neutral psychometric prompts (Llama 3.1 8B-Instruct, 15 turns, temperature 0.7, typical-user simulator). Mirror of the main-body Figure \ref{fig:eplus-induction} for the suppressor direction. Sysprompt-induce-E$\downarrow$ reaches $\approx -2.3$ on the trait while preserving coherence; both LoRA and activation capping at the same coefficient as the headline E$\uparrow$ contender ($0.75$) stall around $\approx -1.2$. Error bars show bootstrap 95\% CIs.
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_eminus_floor.pdf}
+\caption{Per-turn extraversion and coherence trajectories for four E$\downarrow$ induction methods on neutral psychometric prompts (Llama 3.1 8B-Instruct, 15 turns, temperature 0.7, typical-user simulator). Mirror of the main-body Figure~\ref{fig:eplus-induction} for the suppressor direction. Sysprompt-induce-E$\downarrow$ reaches $\approx -2.3$ on the trait while preserving coherence; both LoRA and activation capping at the same coefficient as the headline E$\uparrow$ contender ($0.75$) stall around $\approx -1.2$. Error bars show bootstrap 95\% CIs.
 % TODO: verify caption matches final figure
 }
 \label{fig:induction-eminus-floor}
@@ -200,7 +154,7 @@
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_eminus_distribution.pdf}
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_eminus_distribution.pdf}
 \caption{Supplementary view of the E$\downarrow$ floor. \textbf{(a)} Mean extraversion across all turns vs intervention coefficient for three weight/activation methods (E$\downarrow$ LoRA at positive coefficients, E$\uparrow$ LoRA at negative coefficients with $|\textnormal{coeff}|$ shown, E$\downarrow$ activation capping). All three saturate around $\approx -1.3$; sysprompt-induce-E$\downarrow$ (dashed green reference) reaches $-2.29$. \textbf{(b)} Distribution of per-message extraversion scores. Base is bimodal at $0$ and $-2$; the weight/activation methods shift mass partially toward $-2/-3$ but most messages remain at $0/-2$; sysprompt shifts mass cleanly into $\{-3, -2\}$.
 % TODO: verify caption matches final figure
 }
@@ -209,48 +163,36 @@
 
 \subsection{User-roleplay scenarios as an inducer}\label{sec:appendix-induction-roleplay}
 
-% TODO(irakli): expand into prose.
-% Bullets:
-%   - Setup: same base model with no weight or activation intervention; the
-%     user-simulator (gpt-4.1-mini) is given a scenario describing a person
-%     in a high-arousal social context (E↑) or in a quiet/reflective context (E↓).
-%   - Scenario pools used for the figure:
-%       E↑: 10 scenarios from datasets/scenarios/extraversion_pressure_v1.json
-%           push_direction="E+" (e.g. surprise party planning, DJ set emergency,
-%           food truck rush, improv warm-up).
-%       E↓: 9 scenarios from the same file with push_direction="E-"
-%           (e.g. solo cabin weekend, late-night regret, translating haiku).
-%     Both subsets are listed in datasets/scenarios/extraversion_pressure_v1.json
-%     under meta.scenario_subsets.
-%   - Headline numbers (refer to Figure \ref{fig:induction-roleplay}):
-%       Base on neutral prompts: ext mean -0.91 (mildly E↓ default).
-%       Base on E↑ scenarios: ext mean +1.08 (modest lift toward E↑).
-%       Base on E↓ scenarios: ext mean -2.24 (clean drift to deep E↓).
-%   - Trajectory shape note: in contrast to direct-intervention methods
-%     (LoRA / actcap / sysprompt) which produce flat-and-offset trajectories
-%     on neutral prompts, user-roleplay produces a curved trajectory because
-%     the user-simulator continues applying contextual pressure across turns.
-%     This means the experimental setup itself (presence/absence of opposing
-%     user-side force) determines trajectory shape — see Section
-%     \ref{sec:appendix-induction-trajectory} below.
-%   - Asymmetry: user-roleplay is much stronger as an E↓ inducer than as an
-%     E↑ inducer. This mirrors the asymmetry observed for LoRA/actcap (see
-%     Section \ref{sec:appendix-induction-eminus-floor}) but in the opposite
-%     direction: weight/activation methods can drive E↑ to ceiling but plateau
-%     for E↓, while user-roleplay drives E↓ deeper but barely moves E↑.
-%   - Why we don't include this in the headline figure: the trajectory shape
-%     is fundamentally different from the direct-intervention methods. Putting
-%     a curved-equilibrium method on the same axes as flat-offset methods
-%     conflates "method strength" with "method-context interaction" and risks
-%     misleading the reader. The appendix is the right home: same data, fair
-%     coverage, different framing.
+\irakli{
+\textbf{Setup.} Same base model with no weight or activation intervention; the user-simulator (gpt-4.1-mini) is given a scenario describing a person in a high-arousal social context (E$\uparrow$) or in a quiet/reflective context (E$\downarrow$).
+
+\textbf{Scenario pools used for the figure:}
+\begin{itemize}
+  \item E$\uparrow$: 10 scenarios from \texttt{datasets/scenarios/extraversion\_pressure\_v1.json} with \texttt{push\_direction="E+"} (e.g.\ surprise party planning, DJ set emergency, food truck rush, improv warm-up).
+  \item E$\downarrow$: 9 scenarios from the same file with \texttt{push\_direction="E-"} (e.g.\ solo cabin weekend, late-night regret, translating haiku).
+\end{itemize}
+Both subsets are listed in the scenario file under \texttt{meta.scenario\_subsets}.
+
+\textbf{Headline numbers (refer to Figure~\ref{fig:induction-roleplay}):}
+\begin{itemize}
+  \item Base on neutral prompts: ext mean $-0.91$ (mildly E$\downarrow$ default).
+  \item Base on E$\uparrow$ scenarios: ext mean $+1.08$ (modest lift toward E$\uparrow$).
+  \item Base on E$\downarrow$ scenarios: ext mean $-2.24$ (clean drift to deep E$\downarrow$).
+\end{itemize}
+
+\textbf{Trajectory shape note:} in contrast to direct-intervention methods (LoRA / actcap / sysprompt) which produce flat-and-offset trajectories on neutral prompts, user-roleplay produces a curved trajectory because the user-simulator continues applying contextual pressure across turns. The experimental setup itself (presence/absence of opposing user-side force) determines trajectory shape --- see Section~\ref{sec:appendix-induction-trajectory} below.
+
+\textbf{Asymmetry:} user-roleplay is much stronger as an E$\downarrow$ inducer than as an E$\uparrow$ inducer. This mirrors the asymmetry observed for LoRA/actcap (see Section~\ref{sec:appendix-induction-eminus-floor}) but in the opposite direction: weight/activation methods can drive E$\uparrow$ to ceiling but plateau for E$\downarrow$, while user-roleplay drives E$\downarrow$ deeper but barely moves E$\uparrow$.
+
+\textbf{Why we don't include this in the headline figure:} the trajectory shape is fundamentally different from the direct-intervention methods. Putting a curved-equilibrium method on the same axes as flat-offset methods conflates ``method strength'' with ``method-context interaction'' and risks misleading the reader. The appendix is the right home: same data, fair coverage, different framing.
+}
 
 % Generated by: src_dev/visualisations/paper_appendix_induction_user_roleplay.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_user_roleplay.pdf}
-\caption{User-roleplay scenarios as an E$\uparrow$/E$\downarrow$ inducer (Llama 3.1 8B-Instruct, 15-turn conversations, temperature 0.7, gpt-4.1-mini user simulator). The base model is run with no weight or activation intervention; the only difference between the three lines is the role given to the user-simulator. Compare the curved trajectories here with the flat-and-offset trajectories produced by direct interventions in Figure \ref{fig:eplus-induction}.
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_user_roleplay.pdf}
+\caption{User-roleplay scenarios as an E$\uparrow$/E$\downarrow$ inducer (Llama 3.1 8B-Instruct, 15-turn conversations, temperature 0.7, gpt-4.1-mini user simulator). The base model is run with no weight or activation intervention; the only difference between the three lines is the role given to the user-simulator. Compare the curved trajectories here with the flat-and-offset trajectories produced by direct interventions in Figure~\ref{fig:eplus-induction}.
 % TODO: verify caption matches final figure
 }
 \label{fig:induction-roleplay}
@@ -258,52 +200,48 @@
 
 \subsection{Generalisation to openness (O$\uparrow$/O$\downarrow$)}\label{sec:appendix-induction-openness}
 
-% TODO(irakli): expand into prose.
-% Bullets:
-%   - Replication on a different OCEAN trait. Same setup as the E experiments
-%     (10 neutral psychometric prompts × 2 rollouts × 15 turns, temp 0.7,
-%     typical-user simulator) but with openness LoRAs / actcap axes / sysprompts.
-%   - Base behaviour: openness mean +1.01 (mildly O↑ default — opposite-signed
-%     bias from extraversion, where base sat at -0.91).
-%   - O↑ direction (Figure \ref{fig:induction-oplus}):
-%     * Sysprompt-induce O↑ → +2.25 (lift +1.24 from base).
-%     * O↑ LoRA coeff=0.75 → +3.82 (lift +2.81). Beats sysprompt cleanly.
-%     * O↑ actcap coeff=0.75 → +3.61 (lift +2.60). Also beats sysprompt.
-%     * Note: this *reverses* the E↑ ordering, where sysprompt was
-%       competitive with LoRA/actcap. For O↑ the weight/activation methods
-%       are clearly stronger.
-%   - O↓ direction (Figure \ref{fig:induction-ominus}):
-%     * Sysprompt-induce O↓ → -1.82 (drop of 2.83 from base).
-%     * O↓ LoRA coeff=1.00 → -0.36 (drop of 1.37).
-%     * O↓ actcap coeff=1.00 → -0.12 (drop of 1.13).
-%     * Same gap shape as the E↓ floor finding: weight/activation methods
-%       saturate ~1.2 below base, sysprompt reaches ~2.8 below.
-%   - Cross-trait pattern (worth flagging in the prose):
-%     * Extraversion: base mildly E↓; LoRA/actcap easily push E↑ but plateau on E↓.
-%     * Openness:     base mildly O↑; LoRA/actcap easily push O↓ wait that's wrong let me re-check.
-%       Actually: O↑ is the EASY direction (LoRA reaches op +3.97 — the judge
-%       ceiling). O↓ is the FLOORED direction. So the asymmetry is "weight/
-%       activation methods can push WITH the natural pull more readily than
-%       AGAINST it" — but interestingly the pattern is reversed for O vs E
-%       relative to the base direction:
-%         E base = -0.91 (E↓); easier direction for LoRA = E↑ (away from base)
-%         O base = +1.01 (O↑); easier direction for LoRA = O↑ (toward base / saturating)
-%       So the rule isn't "easier to push WITH the natural pull". It's more
-%       like "easier to push toward the judge's positive end" or the trait's
-%       culturally-positive-coded direction. Worth thinking about in the prose.
-%   - Method-coefficient picks for the headline figures:
-%     * O↑ contender: LoRA 0.75 + actcap 0.75 (mirrors E↑ headline).
-%     * O↓ contender: LoRA 1.00 + actcap 1.00 (chosen to give weight/activation
-%       methods their best shot at the floor). Mirror of E↓ headline.
-%   - Per-method sweep figures and Pareto figure follow the same convention as
-%     for E (Sections \ref{sec:appendix-induction-sweeps-loraac} and
-%     \ref{sec:appendix-induction-pareto}).
+\irakli{
+\textbf{Replication on a different OCEAN trait.} Same setup as the E experiments (10 neutral psychometric prompts $\times$ 2 rollouts $\times$ 15 turns, temp $0.7$, typical-user simulator) but with openness LoRAs / actcap axes / sysprompts.
+
+\textbf{Base behaviour:} openness mean $+1.01$ (mildly O$\uparrow$ default --- opposite-signed bias from extraversion, where base sat at $-0.91$).
+
+\textbf{O$\uparrow$ direction (Figure~\ref{fig:induction-oplus}):}
+\begin{itemize}
+  \item Sysprompt-induce O$\uparrow$ $\to +2.25$ (lift $+1.24$ from base).
+  \item O$\uparrow$ LoRA coeff$=0.75 \to +3.82$ (lift $+2.81$). Beats sysprompt cleanly.
+  \item O$\uparrow$ actcap coeff$=0.75 \to +3.61$ (lift $+2.60$). Also beats sysprompt.
+  \item Note: this \emph{reverses} the E$\uparrow$ ordering, where sysprompt was competitive with LoRA/actcap. For O$\uparrow$ the weight/activation methods are clearly stronger.
+\end{itemize}
+
+\textbf{O$\downarrow$ direction (Figure~\ref{fig:induction-ominus}):}
+\begin{itemize}
+  \item Sysprompt-induce O$\downarrow$ $\to -1.82$ (drop of $2.83$ from base).
+  \item O$\downarrow$ LoRA coeff$=1.00 \to -0.36$ (drop of $1.37$).
+  \item O$\downarrow$ actcap coeff$=1.00 \to -0.12$ (drop of $1.13$).
+  \item Same gap shape as the E$\downarrow$ floor finding: weight/activation methods saturate ${\sim}1.2$ below base, sysprompt reaches ${\sim}2.8$ below.
+\end{itemize}
+
+\textbf{Cross-trait pattern (worth flagging in the prose):} The asymmetry is not ``easier WITH the natural pull''; it's something more like ``easier toward the trait's positive (high) pole'':
+\begin{itemize}
+  \item Extraversion: base $-0.91$ (mildly E$\downarrow$). Easier direction for LoRA $=$ E$\uparrow$ (away from base). E$\downarrow$ floored.
+  \item Openness: base $+1.01$ (mildly O$\uparrow$). Easier direction for LoRA $=$ O$\uparrow$ (toward saturation). O$\downarrow$ floored.
+\end{itemize}
+So both traits show: weight/activation methods saturate the trait's positive end, while suppressor LoRAs hit a floor relative to base. \textit{Caveat: the O$\downarrow$ floor is potentially under-strength rather than fundamental --- coh at coeff$=1.0$ was higher than base ($8.74$ vs $7.51$), so there's room to push. Higher-coefficient cells (coeff $\{1.5, 2.0, 3.0\}$) are running.}
+
+\textbf{Method-coefficient picks for the headline figures:}
+\begin{itemize}
+  \item O$\uparrow$ contender: LoRA $0.75$ + actcap $0.75$ (mirrors E$\uparrow$ headline).
+  \item O$\downarrow$ contender: LoRA $1.00$ + actcap $1.00$ (chosen to give weight/activation methods their best shot at the floor). Mirror of E$\downarrow$ headline.
+\end{itemize}
+
+Per-method sweep figures and Pareto figure follow the same convention as for E (Sections~\ref{sec:appendix-induction-sweeps-loraac} and~\ref{sec:appendix-induction-pareto}).
+}
 
 % Generated by: src_dev/visualisations/paper_appendix_o_plus_induction.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_oplus.pdf}
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_oplus.pdf}
 \caption{Per-turn openness and coherence trajectories for four O$\uparrow$ induction methods on neutral psychometric prompts (Llama 3.1 8B-Instruct, 15 turns, temperature 0.7, typical-user simulator). Mirror of the main-body E$\uparrow$ figure for the openness amplifier direction. Note that for O$\uparrow$ the LoRA and activation-capping methods clearly outperform the sysprompt baseline, reversing the ordering observed for E$\uparrow$.
 % TODO: verify caption matches final figure
 }
@@ -314,8 +252,8 @@
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_ominus.pdf}
-\caption{Per-turn openness and coherence trajectories for four O$\downarrow$ induction methods on neutral psychometric prompts. Mirror of the E$\downarrow$ floor figure (Figure \ref{fig:induction-eminus-floor}) for the openness suppressor direction. The same direction-asymmetry pattern appears: LoRA and activation capping plateau ${\sim}1.2$ below base, while sysprompt reaches ${\sim}2.8$ below.
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_ominus.pdf}
+\caption{Per-turn openness and coherence trajectories for four O$\downarrow$ induction methods on neutral psychometric prompts. Mirror of the E$\downarrow$ floor figure (Figure~\ref{fig:induction-eminus-floor}) for the openness suppressor direction. The same direction-asymmetry pattern appears: LoRA and activation capping plateau ${\sim}1.2$ below base, while sysprompt reaches ${\sim}2.8$ below.
 % TODO: verify caption matches final figure
 }
 \label{fig:induction-ominus}
@@ -327,32 +265,32 @@
 \centering
 \begin{subfigure}[t]{0.49\linewidth}
   \centering
-  \includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_o_method_sweeps_oplus_lora.pdf}
+  \includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_o_method_sweeps_oplus_lora.pdf}
   \caption{O$\uparrow$ LoRA coefficient sweep.}
   \label{fig:induction-o-sweep-oplus-lora}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.49\linewidth}
   \centering
-  \includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_o_method_sweeps_oplus_actcap.pdf}
+  \includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_o_method_sweeps_oplus_actcap.pdf}
   \caption{O$\uparrow$ activation capping coefficient sweep.}
   \label{fig:induction-o-sweep-oplus-actcap}
 \end{subfigure}
 \vskip 0.5em
 \begin{subfigure}[t]{0.49\linewidth}
   \centering
-  \includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_o_method_sweeps_ominus_lora.pdf}
+  \includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_o_method_sweeps_ominus_lora.pdf}
   \caption{O$\downarrow$ LoRA coefficient sweep.}
   \label{fig:induction-o-sweep-ominus-lora}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.49\linewidth}
   \centering
-  \includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_o_method_sweeps_ominus_actcap.pdf}
+  \includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_o_method_sweeps_ominus_actcap.pdf}
   \caption{O$\downarrow$ activation capping coefficient sweep.}
   \label{fig:induction-o-sweep-ominus-actcap}
 \end{subfigure}
-\caption{Per-method intervention-strength sweeps for O$\uparrow$/O$\downarrow$ induction. O$\uparrow$ LoRA and actcap both reach the openness ceiling at coefficient 1.0 (top row); O$\downarrow$ LoRA and actcap both plateau around base $-1.2$ across the full coefficient range (bottom row).
+\caption{Per-method intervention-strength sweeps for O$\uparrow$/O$\downarrow$ induction. O$\uparrow$ LoRA and actcap both reach the openness ceiling at coefficient $1.0$ (top row); O$\downarrow$ LoRA and actcap both plateau around base $-1.2$ across the full coefficient range (bottom row).
 % TODO: verify caption matches final figure
 }
 \label{fig:induction-o-method-sweeps}
@@ -362,8 +300,8 @@
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/appendix/fig_G_induction_o_pareto.pdf}
-\caption{O$\uparrow$/O$\downarrow$ induction methods: trait expression vs coherence at different coefficients. Mirror of Figure \ref{fig:induction-pareto} for openness, with both directions overlaid on a single plot. The two single-point methods (sysprompt-induce O$\uparrow$ and O$\downarrow$) appear as larger filled markers.
+\includegraphics[width=\linewidth]{figures/appendix/induction/fig_G_induction_o_pareto.pdf}
+\caption{O$\uparrow$/O$\downarrow$ induction methods: trait expression vs coherence at different coefficients. Mirror of Figure~\ref{fig:induction-pareto} for openness, with both directions overlaid on a single plot. The two single-point methods (sysprompt-induce O$\uparrow$ and O$\downarrow$) appear as larger filled markers.
 % TODO: verify caption matches final figure
 }
 \label{fig:induction-o-pareto}
@@ -371,41 +309,35 @@
 
 \subsection{Trajectory shape: setup determines flat vs curved}\label{sec:appendix-induction-trajectory}
 
-% TODO(irakli): expand into prose. Short subsection — a paragraph or two.
-% Bullets:
-%   - All steering trajectories on neutral prompts are flat (offset from base
-%     immediately at turn 0, hold steady through turn 14). The user simulator
-%     does not push back, so once the intervention sets the assistant register
-%     it stays there.
-%   - The same LoRA at the same scale, applied on E- pressure scenarios
-%     (drift-prevention setting, see Section \ref{sec:drift-prevention} in
-%     this appendix), produces a curved equilibrium: base drifts down toward
-%     -2.5 over turns, LoRA holds near 0, gap widens with conversation length.
-%   - Implication: trajectory shape is a property of the experimental setup
-%     (presence/absence of opposing pressure), not a property of the
-%     intervention method. Don't read flat trajectories as "weaker" steering
-%     or curved trajectories as "the LoRA is converging" — they reflect
-%     equilibrium between intervention and counter-force.
-%   - Worth noting briefly because per-turn trajectory plots are the natural
-%     visualisation throughout the paper, and readers may otherwise infer
-%     that flat = weak.
+\irakli{
+\textbf{Setup-driven trajectory shape.} All steering trajectories on neutral prompts are flat (offset from base immediately at turn 0, hold steady through turn 14). The user simulator does not push back, so once the intervention sets the assistant register it stays there.
+
+The same LoRA at the same coefficient, applied on E$\downarrow$ pressure scenarios (drift-prevention setting), produces a curved equilibrium: base drifts down toward $-2.5$ over turns, LoRA holds near $0$, gap widens with conversation length.
+
+\textbf{Implication:} trajectory shape is a property of the experimental setup (presence/absence of opposing pressure), not a property of the intervention method. Don't read flat trajectories as ``weaker'' steering or curved trajectories as ``the LoRA is converging'' --- they reflect equilibrium between intervention and counter-force.
+
+Worth noting briefly because per-turn trajectory plots are the natural visualisation throughout the paper, and readers may otherwise infer that flat $=$ weak.
+}
 
 \subsection{Temperature sensitivity}\label{sec:appendix-induction-temperature}
 
-% TODO(irakli): expand into prose. Short subsection — paragraph + small table.
-% Bullets:
-%   - All other steering experiments in this appendix and the main body use
-%     temperature 0.7. Earlier prevention experiments (Section \ref{sec:drift-prevention})
-%     used the codebase default of 1.0.
-%   - To check whether 0.7 vs 1.0 matters for the steering picture, we ran
-%     LoRA E+ at scales 0.75 and 1.0 at temp 1.0:
-%       Variant     | t=0.7 (existing)         | t=1.0 (control)
-%       LoRA 0.75   | ext +3.18, coh 8.48      | ext +1.71, coh 2.61
-%       LoRA 1.00   | ext +3.64, coh 8.02      | ext +2.36, coh 2.75
-%   - Lowering temperature from 1.0 to 0.7 buys ~5-6 coherence points while
-%     costing only ~1.5 trait points. The trade is dramatically favourable.
-%   - This explains a lot of the bimodal coherence collapse seen in the
-%     prevention experiments at temp 1.0 (Section \ref{sec:drift-prevention}).
-%     Recommendation for future steering work on these adapters: temp 0.7.
+\irakli{
+\textbf{Temperature setting.} All other steering experiments in this appendix and the main body use temperature $0.7$. Earlier prevention experiments (Section~\ref{sec:drift-prevention}) used the codebase default of $1.0$.
 
-% TODO: 2x2 small table (LoRA scale x temp) probably enough; no figure needed.
+To check whether $0.7$ vs $1.0$ matters for the steering picture, we ran LoRA E$\uparrow$ at coefficients $0.75$ and $1.0$ at temp $1.0$:
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Variant & $t=0.7$ (existing) & $t=1.0$ (control) \\
+\midrule
+LoRA $0.75$ & ext $+3.18$, coh $8.48$ & ext $+1.71$, coh $2.61$ \\
+LoRA $1.00$ & ext $+3.64$, coh $8.02$ & ext $+2.36$, coh $2.75$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Lowering temperature from $1.0$ to $0.7$ buys ${\sim}5$--$6$ coherence points while costing only ${\sim}1.5$ trait points. The trade is dramatically favourable.
+
+This explains a lot of the bimodal coherence collapse seen in the prevention experiments at temp $1.0$ (Section~\ref{sec:drift-prevention}). Recommendation for future steering work on these adapters: temp $0.7$.
+}

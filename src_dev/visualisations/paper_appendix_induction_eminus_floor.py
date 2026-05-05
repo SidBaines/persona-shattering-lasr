@@ -17,8 +17,8 @@ Two figures:
      while LoRA/actcap leave most mass at 0/-2.
 
 Paper figures:
-    - paper/figures/appendix/fig_G_induction_eminus_floor.pdf
-    - paper/figures/appendix/fig_G_induction_eminus_distribution.pdf
+    - paper/figures/appendix/induction/fig_G_induction_eminus_floor.pdf
+    - paper/figures/appendix/induction/fig_G_induction_eminus_distribution.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_appendix_induction_eminus_floor
@@ -47,8 +47,8 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/fig_G_induction_eminus_floor.pdf",
-    "appendix/fig_G_induction_eminus_distribution.pdf",
+    "appendix/induction/fig_G_induction_eminus_floor.pdf",
+    "appendix/induction/fig_G_induction_eminus_distribution.pdf",
 ]
 
 HF_FS = "datasets/persona-shattering-lasr/monorepo/fine_tuning/llama-3.1-8b-it/ocean/extraversion"
@@ -238,7 +238,7 @@ def _render_headline() -> None:
     axes[-1].set_xlabel("Turn index", fontsize=11)
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_eminus_floor.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_eminus_floor.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
@@ -334,7 +334,7 @@ def _render_distribution() -> None:
     )
     fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "fig_G_induction_eminus_distribution.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_eminus_distribution.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
