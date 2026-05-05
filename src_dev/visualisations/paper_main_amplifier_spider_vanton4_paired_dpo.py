@@ -1,28 +1,25 @@
-"""Mixed-adapter variant of the main amplifier spider plot.
+"""Main amplifier spider plot using vanton4_paired_dpo for all 5 OCEAN traits.
 
-Reuses the vanton4 adapters for O↑, E↑, N↑, but swaps in:
-  - `consc_souped` (ocean/conscientiousness/amplifier/v1/souped) for C↑
-  - one of two alternative agreeableness amplifiers for A↑ (selected via
-    ``--agr-variant``):
-      * ``vanton4_paired_dpo`` (default) — ``.../agreeableness/amplifier/vanton4_paired_dpo``
-      * ``v1``                           — ``.../agreeableness/amplifier/v1``
+This is the canonical Fig. 1 amplifier spider for the paper. All five OCEAN
+amplifier LoRAs are read from
+``fine_tuning/llama-3.1-8b-it/ocean/{trait}/amplifier/vanton4_paired_dpo`` —
+the version registered as canonical in
+``src_dev.common.lora_catalogue.OCEAN_REGISTRY``.
 
-Rendering, legend, and baseline handling are otherwise identical to
-``paper_main_amplifier_spider.py`` — both spiders share the same PLOT_MODE
-so figures remain comparable.
+Rendering, legend, baseline handling, and PLOT_MODE match
+``paper_main_suppressor_spider_vanton4_paired_dpo.py`` so the two subplots are
+visually comparable.
 
 Paper figures (written both as PDF and PNG):
-    paper/figures/main/fig_1_amplifier_spider_mixed_<agr_variant>.pdf
-    paper/figures/main/fig_1_amplifier_spider_mixed_<agr_variant>.png
+    paper/figures/main/fig_1_amplifier_spider_vanton4_paired_dpo.pdf
+    paper/figures/main/fig_1_amplifier_spider_vanton4_paired_dpo.png
 
-Run with (default agr variant = vanton4_paired_dpo):
-    uv run python -m src_dev.visualisations.paper_main_amplifier_spider_mixed
-    uv run python -m src_dev.visualisations.paper_main_amplifier_spider_mixed --agr-variant v1
+Run with:
+    uv run python -m src_dev.visualisations.paper_main_amplifier_spider_vanton4_paired_dpo
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import statistics
 import sys
@@ -46,9 +43,10 @@ from src_dev.visualisations.ocean_spider import to_headroom
 
 OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 
-# Filled in at runtime once --agr-variant is resolved, so the manifest pointer
-# always matches the produced artifact.
-PAPER_FIGURES: list[str] = []
+PAPER_FIGURES = [
+    "main/fig_1_amplifier_spider_vanton4_paired_dpo.pdf",
+    "main/fig_1_amplifier_spider_vanton4_paired_dpo.png",
+]
 
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
 MODEL_SLUG = "llama-3.1-8b-it"
@@ -56,6 +54,7 @@ EVAL_NAME = "llm_judge_lora_scale_sweep"
 RATER_ID = "qwen3_235b"
 SCALE = 1.0
 SCALE_LABEL = "scale_+1.00"
+ADAPTER_VERSION = "vanton4_paired_dpo"
 
 # Rollout fingerprints per judged-trait prompt set (shared with vanton4_qwen3
 # and spider_replacements configs — identical rollout params). See
@@ -68,23 +67,6 @@ FP_BY_TRAIT = {
     "neuroticism":       "b2a49f1b4d",
 }
 
-# Per-home-trait adapter directory layout. Three traits keep the vanton4
-# default; conscientiousness always switches to ``v1`` (souped); the
-# agreeableness entry is filled in at runtime.
-DEFAULT_DIR = ("amplifier", "vanton4")
-TRAIT_DIR_FIXED: dict[str, tuple[str, str]] = {
-    "openness":          DEFAULT_DIR,
-    "conscientiousness": ("amplifier", "v1"),
-    "extraversion":      DEFAULT_DIR,
-    "neuroticism":       DEFAULT_DIR,
-}
-
-AGR_CHOICES = {
-    "vanton4_paired_dpo": ("amplifier", "vanton4_paired_dpo"),
-    "v1":                 ("amplifier", "v1"),
-}
-
-# Legend entries match the original amplifier spider.
 AMPLIFIERS_META: list[tuple[str, str, str]] = [
     ("o_plus", "openness",          BIG_FIVE_COLORS["Openness"]),
     ("c_plus", "conscientiousness", BIG_FIVE_COLORS["Conscientiousness"]),
@@ -108,19 +90,13 @@ PLOT_MODE = "headroom"
 SCORE_MIN = -4.0
 SCORE_MAX = 4.0
 
-
-def _trait_to_dir(agr_variant: str) -> dict[str, tuple[str, str]]:
-    if agr_variant not in AGR_CHOICES:
-        raise ValueError(f"unknown --agr-variant {agr_variant!r}; pick one of {list(AGR_CHOICES)}")
-    out = dict(TRAIT_DIR_FIXED)
-    out["agreeableness"] = AGR_CHOICES[agr_variant]
-    return out
+OUT_STEM = "main/fig_1_amplifier_spider_vanton4_paired_dpo"
+CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "amplifier_spider_vanton4_paired_dpo"
 
 
-def _adapter_hf_dir(home_trait: str, fingerprint: str, trait_to_dir: dict[str, tuple[str, str]]) -> str:
-    direction, version = trait_to_dir[home_trait]
+def _adapter_hf_dir(home_trait: str, fingerprint: str) -> str:
     return (
-        f"fine_tuning/{MODEL_SLUG}/ocean/{home_trait}/{direction}/{version}"
+        f"fine_tuning/{MODEL_SLUG}/ocean/{home_trait}/amplifier/{ADAPTER_VERSION}"
         f"/evals/{EVAL_NAME}/{fingerprint}/{SCALE_LABEL}"
     )
 
@@ -133,17 +109,17 @@ def _judge_hf_path(cell_hf_dir: str, metric_name: str) -> str:
     return f"{cell_hf_dir}/judge_runs/{RATER_ID}/{metric_name}.jsonl"
 
 
-def _cache_path(cache_dir: Path, hf_path: str) -> Path:
-    return cache_dir / hf_path
+def _cache_path(hf_path: str) -> Path:
+    return CACHE_DIR / hf_path
 
 
-def _hydrate_judge_file(cache_dir: Path, hf_path: str) -> Path | None:
-    local_path = _cache_path(cache_dir, hf_path)
+def _hydrate_judge_file(hf_path: str) -> Path | None:
+    local_path = _cache_path(hf_path)
     if local_path.exists() and local_path.stat().st_size > 0:
         return local_path
     parent_hf = hf_path.rsplit("/", 1)[0]
     filename = hf_path.rsplit("/", 1)[1]
-    local_parent = _cache_path(cache_dir, parent_hf)
+    local_parent = _cache_path(parent_hf)
     try:
         download_path_to_dir(
             repo_id=HF_REPO_ID,
@@ -185,16 +161,13 @@ def _trait_title(trait_lower: str) -> str:
     return trait_lower.capitalize()
 
 
-def build_scores(
-    cache_dir: Path,
-    trait_to_dir: dict[str, tuple[str, str]],
-) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
+def build_scores() -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     per_amp: dict[str, dict[str, float]] = {key: {} for key, _, _ in AMPLIFIERS_META}
     baseline: dict[str, float] = {}
 
     for trait_lower, fp in FP_BY_TRAIT.items():
         hf_path = _judge_hf_path(_baseline_hf_dir(fp), _trait_metric(trait_lower))
-        local = _hydrate_judge_file(cache_dir, hf_path)
+        local = _hydrate_judge_file(hf_path)
         if local is None:
             print(f"  ⚠ baseline / {trait_lower}: missing on HF")
             continue
@@ -207,9 +180,9 @@ def build_scores(
 
     for key, home_trait, _color in AMPLIFIERS_META:
         for judged_trait, fp in FP_BY_TRAIT.items():
-            cell_dir = _adapter_hf_dir(home_trait, fp, trait_to_dir)
+            cell_dir = _adapter_hf_dir(home_trait, fp)
             hf_path = _judge_hf_path(cell_dir, _trait_metric(judged_trait))
-            local = _hydrate_judge_file(cache_dir, hf_path)
+            local = _hydrate_judge_file(hf_path)
             if local is None:
                 kind = "own" if judged_trait == home_trait else "cross"
                 print(f"  ⚠ {key} / {judged_trait:18s} ({kind}): missing on HF — likely still running")
@@ -302,39 +275,16 @@ def _render_spider(
     plt.close(fig)
 
 
-def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument(
-        "--agr-variant",
-        choices=list(AGR_CHOICES),
-        default="vanton4_paired_dpo",
-        help="Which agreeableness amplifier to use for A↑ (default: %(default)s).",
-    )
-    return p.parse_args()
-
-
 def main() -> None:
-    args = _parse_args()
-    trait_to_dir = _trait_to_dir(args.agr_variant)
+    pdf_path = PAPER_FIGURES_DIR / f"{OUT_STEM}.pdf"
+    png_path = PAPER_FIGURES_DIR / f"{OUT_STEM}.png"
 
-    variant_tag = args.agr_variant.replace("_", "-")
-    out_stem = f"main/fig_1_amplifier_spider_mixed_{variant_tag}"
-    pdf_path = PAPER_FIGURES_DIR / f"{out_stem}.pdf"
-    png_path = PAPER_FIGURES_DIR / f"{out_stem}.png"
-    PAPER_FIGURES[:] = [f"{out_stem}.pdf", f"{out_stem}.png"]
+    print(f"[amp-spider] adapter version: {ADAPTER_VERSION} (all 5 OCEAN traits)")
+    print(f"[amp-spider] cache dir: {CACHE_DIR}")
+    print(f"[amp-spider] outputs:   {pdf_path}, {png_path}")
+    print("[amp-spider] hydrating judge scores from HF...")
 
-    cache_dir = project_root / "scratch" / "paper_plots_cache" / f"amplifier_spider_mixed_{variant_tag}"
-
-    print(f"[spider-mixed] agr-variant={args.agr_variant}")
-    print(f"[spider-mixed] trait→dir map:")
-    for t in ("openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"):
-        d = trait_to_dir[t]
-        print(f"    {t:18s} -> {d[0]}/{d[1]}")
-    print(f"[spider-mixed] cache dir: {cache_dir}")
-    print(f"[spider-mixed] outputs:   {pdf_path}, {png_path}")
-    print("[spider-mixed] hydrating judge scores from HF...")
-
-    per_amp, baseline = build_scores(cache_dir, trait_to_dir)
+    per_amp, baseline = build_scores()
     _render_spider(per_amplifier=per_amp, baseline=baseline, out_paths=[pdf_path, png_path])
 
 
