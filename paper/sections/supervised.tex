@@ -240,52 +240,40 @@ from additivity are themselves informative, revealing structure in the model's
 persona space rather than merely experimental noise.}
 \subsection{Comparison to activation-space and prompt-based induction}\label{sec:comparison-induction}
 
-% ──────────────────────────────────────────────────────────────────────────
-% PRIOR DRAFT FROM OVERLEAF (kept for context — t-density toy was the placeholder
-% framing; replaced in this revision by the OCEAN-trait E+ induction comparison)
-% ──────────────────────────────────────────────────────────────────────────
-% \todo{(For NeurIPS) Replace with better stuff.}
-% \todo{(For LASR) Replace with the higher resolution plots.}
-%
-% \david{The experiments above show that LoRA adapters can move models along
-% psychometrically defined trait axes. Now, we compare compare our method to the
-% baseline of activation capping \citep{lu2026assistant}, which works by clamping
-% activations along a certain axis in persona space. First, we consider a toy
-% setting where we try to amplify or suppress the following trait: \textit{affinity
-% for using the letter `t'}. We choose this setting as trait expression can be
-% measured directly and unambiguously by the density of ``t'' tokens in the
-% generated text, and lets us compare steering methods without relying on a
-% questionnaire or an LLM judge to define the target behaviour.}
-%
-% \david{For both methods, we tune the intervention strength to obtain different
-% levels of ``t''-seeking and ``t''-avoiding behaviour, then measure the coherence
-% and length of the resulting generations. Figure~\ref{fig:t-coherence} shows
-% that the LoRA intervention reaches comparable levels of trait expression while
-% preserving higher coherence over much of the steering range. In contrast,
-% activation capping more quickly trades off trait movement against degraded
-% generations. This suggests that, at least in this controlled setting,
-% weight-space steering can produce the desired behavioural shift with less
-% collateral damage to output quality.}
-%
-% \david{We also test robustness to an explicit contextual pressure in the
-% opposite direction. In Figure~\ref{fig:t-robustness}, we apply the
-% ``t''-suppressing LoRA while prompting the model to maximize ``t'' usage. The
-% prompt does increase the density of ``t''s, showing that context still matters
-% and can partially override the weight-space intervention. However, the effect
-% depends strongly on LoRA scale: stronger suppression makes the prompted
-% behaviour harder to elicit, while negative scaling in the ``t''-amplifying
-% direction can combine with the prompt to produce incoherent text. This supports
-% the view that personas should be treated as a function of both weights and
-% context, rather than as fixed properties of the weights alone.}
-%
-% \textcolor{red}{\textbf{TODO:} ADD MORE SERIOUS SETTING.}
-% (Above TODO is what this revision addresses by replacing the toy trait with
-% a real OCEAN dimension; the t-density figures are deferred in MANIFEST.md.)
-% ──────────────────────────────────────────────────────────────────────────
+\todo{(For NeurIPS) Replace with better stuff.}
+\todo{(For LASR) Replace with the higher resolution plots.}
 
+\david{The experiments above show that LoRA adapters can move models along
+psychometrically defined trait axes. Now, we compare compare our method to the baseline of activation capping \citep{lu2026assistant}, which works by clamping activations along a certain axis in persona space. First, we consider a toy setting where we try to amplify or suppress the following trait: \textit{affinity for using the letter `t'}. We choose this setting as trait expression can be measured directly and unambiguously by the density of ``t'' tokens in the generated text, and lets us compare steering methods without relying on a questionnaire or an LLM judge to define the target behaviour.}
+
+\irakli{(\textit{Note: the t-density figures the next two paragraphs reference were placeholders that have been removed in this revision; replaced by the new OCEAN-trait figure below. Figure refs below will resolve as `??` until mentor's prose is updated.})}
+
+\david{For both methods, we tune the intervention strength to obtain different levels of
+``t''-seeking and ``t''-avoiding behaviour, then measure the coherence and length
+of the resulting generations. Figure~\ref{fig:t-coherence} shows that the LoRA
+intervention reaches comparable levels of trait expression while preserving
+higher coherence over much of the steering range. In contrast, activation capping
+more quickly trades off trait movement against degraded generations. This
+suggests that, at least in this controlled setting, weight-space steering can
+produce the desired behavioural shift with less collateral damage to output
+quality.}
+% This is chosen as a setting in which the trait is easily, definitively measured by an unambiguous signal.
+
+\david{We also test robustness to an explicit contextual pressure in the opposite
+direction. In Figure~\ref{fig:t-robustness}, we apply the ``t''-suppressing LoRA
+while prompting the model to maximize ``t'' usage. The prompt does increase the
+density of ``t''s, showing that context still matters and can partially override
+the weight-space intervention. However, the effect depends strongly on LoRA
+scale: stronger suppression makes the prompted behaviour harder to elicit, while
+negative scaling in the ``t''-amplifying direction can combine with the prompt to
+produce incoherent text. This supports the view that personas should be treated
+as a function of both weights and context, rather than as fixed properties of the
+weights alone.}
+
+\textcolor{red}{\textbf{TODO:} ADD MORE SERIOUS SETTING.}
 
 \irakli{
-\textbf{Draft outline} (to be expanded into prose). The structure mirrors what the previous draft was reaching for (compare LoRA to activation capping, then probe robustness/context), but on a real OCEAN trait and with an explicit prompt-based baseline alongside.
+\textbf{Addressing the TODO above: replacing the toy `t'-density experiment with a real OCEAN-trait induction comparison.} The t-density figures (\texttt{figures/tmp/t-enjoying.png}, etc.) are kept here for reference but should be removed once the OCEAN-trait version below is incorporated into the prose. The new figure (Figure~\ref{fig:eplus-induction}) replaces the t-density comparison with a real trait (extraversion), keeps the structure the previous draft was reaching for (compare LoRA to activation capping, then probe robustness/context), and adds an explicit prompt-based baseline alongside.
 
 \textbf{Setup.} Four induction methods compared on neutral psychometric prompts (temperature $0.7$, 15-turn conversations with a typical-user simulator using gpt-4.1-mini, Llama 3.1 8B-Instruct). The four methods:
 \begin{itemize}
