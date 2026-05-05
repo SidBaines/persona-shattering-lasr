@@ -175,7 +175,7 @@ def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
     ax.tick_params(axis="y", labelsize=8)
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_title(
-        f"{combo_mod.TARGET_DISPLAY['c_adapter']} × {combo_mod.TARGET_DISPLAY['e_adapter']} combo",
+        f"{combo_mod.TARGET_DISPLAY['c_adapter']} ⊕ {combo_mod.TARGET_DISPLAY['e_adapter']} combo",
         fontsize=10, pad=10,
     )
 
@@ -188,7 +188,7 @@ def _shared_legend(fig) -> None:
         Line2D([0], [0], color=BIG_FIVE_COLORS["Extraversion"],      marker="o", markersize=5, lw=1.8, label="Extraversion LoRA"),
         Line2D([0], [0], color=BIG_FIVE_COLORS["Agreeableness"],     marker="o", markersize=5, lw=1.8, label="Agreeableness LoRA"),
         Line2D([0], [0], color=BIG_FIVE_COLORS["Neuroticism"],       marker="o", markersize=5, lw=1.8, label="Neuroticism LoRA"),
-        Patch(facecolor=COMBO_COLOR, hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ × E↑ combo"),
+        Patch(facecolor=COMBO_COLOR, hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo"),
         Line2D([0], [0], color=BASELINE_COLOR, lw=2.0, label="Baseline (Llama-3.1-8B-Instruct)"),
     ]
     fig.legend(
