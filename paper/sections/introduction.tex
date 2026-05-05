@@ -62,6 +62,7 @@ Our contributions are as follows:
 \includegraphics[width=\linewidth]{figures/main/fig_1_banner.pdf}
 \caption{Trait modulation via LoRA scaling and combination. \textit{Left and middle (boxed):} amplifier and suppressor LoRAs at scale $+1$, plotted as signed headroom (each axis normalised by the distance from the base-model baseline to the judge scale bound in the direction moved; $0\%$ = baseline, $\pm 100\%$ = scale max). Each adapter primarily moves its own target trait (Qwen3-235B judge). \textit{Right:} combining (\(\oplus\)) a Conscientiousness-suppressing LoRA with an Extraversion-amplifying LoRA at $(+1, +1)$ recovers both single-adapter effects on their respective traits.}
 \label{fig:intro-main}
+\label{fig:intro-c-e-combo-delta}% kept as alias so refs to the combo subpanel still resolve after the banner refactor
 \end{figure}
 \todo{(for LASR) Either get the consistent pipeline working with good LoRAs, or switch this to the bespoke LoRAs and add appenix explaining the different training methods/constitutions}
 
