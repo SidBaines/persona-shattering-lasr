@@ -144,19 +144,18 @@ We compare three drift-mitigation methods on **`meta-llama/Llama-3.1-8B-Instruct
 
 The **drift metric** is the paper's own: per-turn mean response-token activation, projected onto the Assistant Axis at a target layer, averaged across many conversations. We expect to see vanilla drift downward over turns (per the paper), capping flatten that trajectory (per the paper), and we want to know whether the LoRA soup also flattens / outperforms / underperforms capping.
 
-Source paper code at `safety-research/assistant-axis` (MIT) is **vendored verbatim** at `vendor/assistant_axis/` at pinned SHA `a98961956`. The 5-step axis-build pipeline is theirs and called via subprocess unmodified. The drift protocol, the LoRA soup integration, and the projection metric extraction layer are ours.
+Source paper code at `safety-research/assistant-axis` (MIT) is fetched as a pinned runtime checkout at SHA `a98961956` (default `scratch/external/assistant_axis`, or `ASSISTANT_AXIS_DIR`). The 5-step axis-build pipeline is theirs and called via subprocess unmodified. The drift protocol, the LoRA soup integration, and the projection metric extraction layer are ours.
 
 ---
 
 ## 2. Repo layout introduced by this branch
 
 ```
-vendor/assistant_axis/                                        ← MIT, pinned, do not edit
+scratch/external/assistant_axis/                         ← runtime checkout, MIT, pinned
   pipeline/{1_generate, 2_activations, 3_judge, 4_vectors, 5_axis}.py
   assistant_axis/{steering, axis, models, judge, ...}.py
   data/{roles/instructions/*.json, extraction_questions.jsonl}
   transcripts/persona_drift/{coding, writing, therapy, philosophy}.json   ← seed personas
-  VENDOR_SOURCE.txt                                           ← pinned SHA + URL
 
 src_dev/activation_capping/
   assistant_axis_loader.py                                    ← bridge: their axis ↔ our infra
@@ -240,7 +239,7 @@ For each `(condition, domain)` pair, calls our `run_rollout_generation` with the
 
 The user simulator is **`openai/gpt-5.4-nano`** via OpenRouter. For each domain we:
 
-1. Read `vendor/assistant_axis/transcripts/persona_drift/{domain}.json` to extract the persona description and topic.
+1. Read upstream Assistant Axis `transcripts/persona_drift/{domain}.json` (from the runtime checkout) to extract the persona description and topic.
 2. Build a per-domain user-sim system prompt (`build_user_sim_template`) and register it via `register_user_simulator_template`.
 3. Materialise N copies of that seed as a JSONL dataset under `drift_rollouts/_seed_datasets/{domain}.jsonl` — different conversation IDs but same seed, distinct trajectories from stochastic sampling.
 4. Call `run_rollout_generation` with `user_sim_generates_opening=True` so the user simulator writes the opener in-character.
@@ -460,7 +459,7 @@ Note: NOTHING is reused between smoke and full runs (different `run_slug` → di
 
 ### Cap direction (potential semantic mismatch)
 
-Upstream `vendor/assistant_axis/assistant_axis/steering.py:_apply_cap` is a **ceiling clamp** (projections > τ get pulled down to τ). The paper's Eq. 1 reads as a **floor clamp** (projections < τ get lifted to τ). We use upstream's published code as the canonical reference, but if results are weird (e.g. capping makes drift WORSE or has no effect at all), this is the first place to look. Our `src_dev/activation_capping/model.py:ActivationCappedModel` has both `mode="floor"` and `mode="ceiling"` if we want to compare.
+Upstream `assistant_axis/steering.py:_apply_cap` is a **ceiling clamp** (projections > τ get pulled down to τ). The paper's Eq. 1 reads as a **floor clamp** (projections < τ get lifted to τ). We use upstream's published code as the canonical reference, but if results are weird (e.g. capping makes drift WORSE or has no effect at all), this is the first place to look. Our `src_dev/activation_capping/model.py:ActivationCappedModel` has both `mode="floor"` and `mode="ceiling"` if we want to compare.
 
 ### Mixed-engine fairness
 
@@ -581,8 +580,8 @@ Don't cut: `axis.num_roles` below ~50 (axis quality degrades), `axis.min_count_p
 | `run_drift.py` | Phase 3 | `run_drift(cfg, conditions=...)` |
 | `project_drift.py` | Phase 4 | `project_drift(cfg)` |
 | `plot_drift.py` | Phase 5 | `plot_drift(cfg, target_layer=...)` |
-| `vendor/assistant_axis/pipeline/{1..5}_*.py` | upstream pipeline (do not edit) | run via subprocess from `build_axis.py` |
-| `vendor/assistant_axis/assistant_axis/steering.py:ActivationSteering` | upstream capping hooks | invoked via `apply_assistant_axis_capping(...)` |
+| upstream `pipeline/{1..5}_*.py` | upstream pipeline (do not edit) | run via subprocess from `build_axis.py` |
+| upstream `assistant_axis/steering.py:ActivationSteering` | upstream capping hooks | invoked via `apply_assistant_axis_capping(...)` |
 | `src_dev/activation_capping/assistant_axis_loader.py` | bridge: upstream axis ↔ our infra | `compute_capping_config`, `apply_assistant_axis_capping`, `load_axis`, `load_capping_config` |
 
 ---
