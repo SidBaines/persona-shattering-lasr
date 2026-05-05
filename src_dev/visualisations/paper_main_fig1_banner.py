@@ -347,8 +347,8 @@ def main() -> None:
 
     # Match the bar plot's plot-area height to the spider box. The bar's
     # title sits above this and is allowed to extend past the top of the box.
-    bar_pos = ax_bar.get_position()
-    ax_bar.set_position([bar_pos.x0, box_y0, bar_pos.width, box_y1 - box_y0])
+    # bar_pos = ax_bar.get_position()
+    # ax_bar.set_position([bar_pos.x0, box_y0, bar_pos.width, box_y1 - box_y0])
 
     for rel in PAPER_FIGURES:
         out_path = PAPER_FIGURES_DIR / rel
