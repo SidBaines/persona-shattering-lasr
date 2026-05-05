@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,7 +37,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from huggingface_hub import hf_hub_download
 
-from scripts_dev.frustration_eval.prompts import IMPOSSIBLE_NUMERIC_PUZZLES
 from src_dev.evals.personality.analyze_results import (
     _interval_ci_from_bootstrap,
     _interval_ci_from_wilson,
@@ -244,23 +242,13 @@ def plot_four_way(
 
     n_display = "".join(c for c in str(n_prompts) if c.isdigit()) or str(n_prompts)
     fig.suptitle(
-        f"Frustration eval — gemma-3-27b-it (n={n_display} prompts, 8 turns, 1 rollout)",
+        f"Frustration eval — gemma-3-27b-it — impossible numerical puzzle "
+        f"(n={n_display} prompts, 8 turns, 1 rollout)",
         fontsize=10,
     )
 
-    # Example puzzle — one representative impossible-numeric prompt, wrapped,
-    # placed under the axes for context.
-    example = " ".join(IMPOSSIBLE_NUMERIC_PUZZLES[0].split())
-    wrapped = textwrap.fill(f"Example puzzle:  {example}", width=120)
-    fig.text(
-        0.5, 0.02, wrapped,
-        ha="center", va="bottom",
-        fontsize=7.5, color="#333",
-        wrap=True,
-    )
-
-    # Reserve ~10% right for legend, ~12% bottom for example puzzle.
-    fig.tight_layout(rect=[0, 0.12, 0.90, 0.95])
+    # Reserve ~10% right for legend.
+    fig.tight_layout(rect=[0, 0.0, 0.90, 0.95])
 
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = explicit_stem or f"fig_frustration_eval_4way_n{n_prompts}{name_suffix}"
