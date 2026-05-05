@@ -25,8 +25,6 @@ Data (all under
   * TRAIT logprobs: ``mcq/trait_logprobs/{suite}/lora_<scale>/trait_logprobs/native/inspect_logs/*.json``
   * MMLU:           ``mcq/mmlu/{suite}/lora_<scale>/mmlu/native/inspect_logs/*.json``
 
-``v4`` has no MMLU subtree on HF; its MMLU panel renders empty with a note
-instead of breaking the layout.
 
 Paper figures:
     - paper/figures/appendix/fig_B_dpo_methods_scaling.pdf
@@ -74,10 +72,10 @@ ADAPTER_ROOT = f"fine_tuning/{MODEL_SLUG}/ocean/neuroticism/suppressor"
 
 # (display label, version dir name, trait_logprobs suite, mmlu suite-or-None)
 METHODS: list[tuple[str, str, str, str | None]] = [
-    ("vanton4",          "vanton4",          "n_minus_vanton4_logprobs",          "n_minus_vanton4"),
-    ("v4",               "v4",               "n_minus_v4_logprobs",               None),
-    ("v4_reversed_dpo",  "v4_reversed_dpo",  "n_minus_v4_reversed_dpo_logprobs",  "n_minus_v4_reversed_dpo"),
-    ("v4_paired_dpo",    "v4_paired_dpo",    "n_minus_v4_paired_dpo_logprobs",    "n_minus_v4_paired_dpo"),
+    ("joint OCEAN constitution",   "vanton4",          "n_minus_vanton4_logprobs",          "n_minus_vanton4"),
+    ("bespoke trait constitution", "v4",               "n_minus_v4_logprobs",               "n_minus_v4"),
+    ("bespoke + reversed DPO",     "v4_reversed_dpo",  "n_minus_v4_reversed_dpo_logprobs",  "n_minus_v4_reversed_dpo"),
+    ("bespoke + paired DPO",       "v4_paired_dpo",    "n_minus_v4_paired_dpo_logprobs",    "n_minus_v4_paired_dpo"),
 ]
 
 CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "dpo_methods"
