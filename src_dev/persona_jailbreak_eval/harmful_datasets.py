@@ -12,7 +12,7 @@ import hashlib
 import logging
 import random
 from dataclasses import dataclass
-from typing import Iterable, Literal
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 

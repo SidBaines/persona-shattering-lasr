@@ -75,7 +75,7 @@ uv run 3_judge.py \
 **Score scale:**
 | Score | Meaning |
 |-------|---------|
-| 0 | NOT ROLE-PLAYING: Model refused to answer  | 
+| 0 | NOT ROLE-PLAYING: Model refused to answer |
 | 1 | NOT ROLE-PLAYING: Model says it can't be the role, but offers to help |
 | 2 | SOMEWHAT ROLE-PLAYING: Model identifies as AI but exhibits some role attributes |
 | 3 | FULLY ROLE-PLAYING: Model is fully playing the role |

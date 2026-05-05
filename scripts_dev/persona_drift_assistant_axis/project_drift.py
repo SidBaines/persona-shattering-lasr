@@ -121,9 +121,9 @@ def discover_axes(
             print(f"\n  WARNING: expected axis variants {expected_variants}, "
                   f"but missing on disk: {missing}.")
             print(f"           Discovered only: {variants}.")
-            print(f"           Continuing with what's available — but "
+            print("           Continuing with what's available — but "
                   "if you want the multi-axis comparison, run "
-                  f"`build_axis.py --variant <missing>` for each missing variant.\n")
+                  "`build_axis.py --variant <missing>` for each missing variant.\n")
     axes = {v: load_axis(cfg.axis_path(v)) for v in variants}
     print(f"Discovered {len(axes)} axis variant(s): {list(axes)}")
     for name, ax in axes.items():
@@ -205,8 +205,8 @@ def report_axis_quality(
         )
 
         d_per_layer = np.array([
-            cohens_d(default_proj[:, l].numpy(), role_proj[:, l].numpy())
-            for l in range(axis.shape[0])
+            cohens_d(default_proj[:, layer_idx].numpy(), role_proj[:, layer_idx].numpy())
+            for layer_idx in range(axis.shape[0])
         ])
         # Window mean: prefer the capping window if available, else top-quarter.
         if capping_cfg is not None and capping_cfg.get("layers"):
