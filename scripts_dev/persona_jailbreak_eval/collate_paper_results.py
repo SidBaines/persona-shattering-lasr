@@ -75,6 +75,7 @@ SCRATCH_BASE = project_root / "scratch" / "persona_jailbreak_eval" / "llama-3.1-
 _ABL_RUN = "wj_ablations_v1_v2"
 _BAL_RUN = "wj_balanced_v2"
 _BAL_COMBO_RUN = "wj_balanced_a_plus_c_plus_combo_v1"
+_BAL_CTL_RUN = "wj_control_latest_balanced_v1"
 
 
 @dataclass(frozen=True)
@@ -138,8 +139,10 @@ _TARGET_PAPER_V1 = CollationTarget(
 )
 
 
-# 1010-id balanced set: 5 conditions for the main-body figure. Built once the
-# balanced reruns of A↑/C↑/(A↑⊕C↑)(½,½) landed on HF (wj_balanced_a_plus_c_plus_combo_v1).
+# 1010-id balanced set: main-body conditions on the high-power balanced
+# sample. Built once the balanced reruns of A↑/C↑/(A↑⊕C↑)(½,½) landed on HF
+# (wj_balanced_a_plus_c_plus_combo_v1) and the control re-run on the same
+# set landed (wj_control_latest_balanced_v1).
 _TARGET_PAPER_MAIN_BALANCED_V1 = CollationTarget(
     name="wj_paper_main_balanced_v1",
     canonical_run=_BAL_RUN,
@@ -148,6 +151,8 @@ _TARGET_PAPER_MAIN_BALANCED_V1 = CollationTarget(
     sources=[
         Source("vanilla",            _BAL_RUN,       "judgments_vanilla.jsonl"),
         Source("activation_capping", _BAL_RUN,       "judgments_activation_capping.jsonl"),
+        Source("lora_soup_control_latest_1.0", _BAL_CTL_RUN,
+               "judgments_lora_soup_control_latest_1.0.jsonl"),
         Source("lora_soup_a_plus_1.0", _BAL_COMBO_RUN, "judgments_lora_soup_a_plus_1.0.jsonl"),
         Source("lora_soup_c_plus_1.0", _BAL_COMBO_RUN, "judgments_lora_soup_c_plus_1.0.jsonl"),
         Source("lora_soup_a_plus_0.5_c_plus_0.5", _BAL_COMBO_RUN,
