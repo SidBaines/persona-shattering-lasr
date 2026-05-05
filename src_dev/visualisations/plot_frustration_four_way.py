@@ -83,14 +83,15 @@ RUN_SETS: dict[str, list[RunSpec]] = {
         RunSpec("N-",            "gemma3_27b_n_minus_v4_persona_hfbatched_8turn_100_samples_1rollout",                    "#C73E3A", "s-"),
         RunSpec("N- inverted",   "gemma3_27b_n_minus_v4_persona_negscale_hfbatched_8turn_100_samples_1rollout",           "#7A1F1B", "^-"),
     ],
-    # n=100 with vanton4_paired_dpo adapters; up to 6 lines once the inverted
-    # bakes finish. Currently has BASE / CONTROL / N- / N+; N- inverted and
-    # N+ inverted will be appended once their evals land.
+    # n=100 with vanton4_paired_dpo adapters: 6-way comparison —
+    # BASE / CONTROL / N- / N+ / N- inverted (scale=-1) / N+ inverted (scale=-1).
     "100v": [
         RunSpec("BASE",          "gemma3_27b_base_8turn_100prompt_1rollout",                                                "#2F5D9F", "o-"),
         RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_100prompt_1rollout",           "#6B6B6B", "D-"),
         RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                 "#C73E3A", "s-"),
         RunSpec("N+",            "gemma3_27b_n_plus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                  "#1F7A4D", "s-"),
+        RunSpec("N- inverted",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",        "#7A1F1B", "^-"),
+        RunSpec("N+ inverted",   "gemma3_27b_n_plus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",         "#0D3D26", "^-"),
     ],
 }
 
