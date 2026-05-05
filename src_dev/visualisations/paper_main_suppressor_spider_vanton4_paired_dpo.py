@@ -1,17 +1,22 @@
-"""Mixed-adapter variant of the main suppressor spider plot.
+"""Main suppressor spider plot using vanton4_paired_dpo for all 5 OCEAN traits.
 
-Reuses the vanton4 adapters for O↓, C↓, E↓, A↓, but swaps in:
-  - `neu_sup_v4_paired_dpo` (ocean/neuroticism/suppressor/v4_paired_dpo) for N↓
+This is the canonical Fig. 1 suppressor spider for the paper. All five OCEAN
+suppressor LoRAs are read from
+``fine_tuning/llama-3.1-8b-it/ocean/{trait}/suppressor/vanton4_paired_dpo`` —
+the version registered as canonical in
+``src_dev.common.lora_catalogue.OCEAN_REGISTRY``.
 
-Rendering, legend, and baseline handling are otherwise identical to
-``paper_main_suppressor_spider.py``.
+Rendering, legend, baseline handling, and PLOT_MODE match
+``paper_main_amplifier_spider_vanton4_paired_dpo.py`` so the two subplots are
+visually comparable.
 
 Paper figures (written both as PDF and PNG):
-    paper/figures/main/fig_1_suppressor_spider_mixed.pdf
-    paper/figures/main/fig_1_suppressor_spider_mixed.png
+    paper/figures/main/fig_1_suppressor_spider_vanton4_paired_dpo.pdf
+    paper/figures/main/fig_1_suppressor_spider_vanton4_paired_dpo.png
 
 Run with:
-    uv run python -m src_dev.visualisations.paper_main_suppressor_spider_mixed
+    uv run python -m src_dev.visualisations.paper_main_suppressor_spider_vanton4_paired_dpo
+    uv run python -m src_dev.visualisations.paper_main_suppressor_spider_vanton4_paired_dpo --reversed
 """
 
 from __future__ import annotations
@@ -41,8 +46,8 @@ from src_dev.visualisations.ocean_spider import to_headroom
 OCEAN_TRAITS = ["Openness", "Conscientiousness", "Extraversion", "Agreeableness", "Neuroticism"]
 
 PAPER_FIGURES = [
-    "main/fig_1_suppressor_spider_mixed.pdf",
-    "main/fig_1_suppressor_spider_mixed.png",
+    "main/fig_1_suppressor_spider_vanton4_paired_dpo.pdf",
+    "main/fig_1_suppressor_spider_vanton4_paired_dpo.png",
 ]
 
 HF_REPO_ID = "persona-shattering-lasr/monorepo"
@@ -51,6 +56,7 @@ EVAL_NAME = "llm_judge_lora_scale_sweep"
 RATER_ID = "qwen3_235b"
 SCALE = 1.0
 SCALE_LABEL = "scale_+1.00"
+ADAPTER_VERSION = "vanton4_paired_dpo"
 
 FP_BY_TRAIT = {
     "openness":          "67eed27d02",
@@ -58,16 +64,6 @@ FP_BY_TRAIT = {
     "extraversion":      "a961f641eb",
     "agreeableness":     "0705e3276a",
     "neuroticism":       "b2a49f1b4d",
-}
-
-# Per-home-trait adapter directory layout. Four traits keep the vanton4
-# default; neuroticism switches to the new v4_paired_dpo adapter.
-TRAIT_DIR: dict[str, tuple[str, str]] = {
-    "openness":          ("suppressor", "vanton4"),
-    "conscientiousness": ("suppressor", "vanton4"),
-    "extraversion":      ("suppressor", "vanton4"),
-    "agreeableness":     ("suppressor", "vanton4"),
-    "neuroticism":       ("suppressor", "v4_paired_dpo"),
 }
 
 SUPPRESSORS: list[tuple[str, str, str]] = [
@@ -93,14 +89,13 @@ PLOT_MODE = "headroom"
 SCORE_MIN = -4.0
 SCORE_MAX = 4.0
 
-OUT_STEM = "main/fig_1_suppressor_spider_mixed"
-CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "suppressor_spider_mixed"
+OUT_STEM = "main/fig_1_suppressor_spider_vanton4_paired_dpo"
+CACHE_DIR = project_root / "scratch" / "paper_plots_cache" / "suppressor_spider_vanton4_paired_dpo"
 
 
 def _adapter_hf_dir(home_trait: str, fingerprint: str) -> str:
-    direction, version = TRAIT_DIR[home_trait]
     return (
-        f"fine_tuning/{MODEL_SLUG}/ocean/{home_trait}/{direction}/{version}"
+        f"fine_tuning/{MODEL_SLUG}/ocean/{home_trait}/suppressor/{ADAPTER_VERSION}"
         f"/evals/{EVAL_NAME}/{fingerprint}/{SCALE_LABEL}"
     )
 
@@ -221,8 +216,6 @@ def _render_spider(
         )
         baseline = {t: 0.0 for t in baseline}
         if reversed_axis:
-            # Flip sign so "more suppressed" (negative headroom) ends up on the
-            # outside. Keeps the 0% baseline ring at r=0.
             per_suppressor = {k: {t: -v for t, v in d.items()} for k, d in per_suppressor.items()}
         y_lim = (-0.8, 0.8)
         y_ticks = [-0.8, -0.4, 0.0, 0.4, 0.8]
@@ -303,14 +296,11 @@ def main() -> None:
     suffix = "_reversed" if args.reversed_axis else ""
     pdf_path = PAPER_FIGURES_DIR / f"{OUT_STEM}{suffix}.pdf"
     png_path = PAPER_FIGURES_DIR / f"{OUT_STEM}{suffix}.png"
-    print(f"[spider-sup-mixed] trait→dir map:")
-    for t in ("openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"):
-        d = TRAIT_DIR[t]
-        print(f"    {t:18s} -> {d[0]}/{d[1]}")
-    print(f"[spider-sup-mixed] reversed axis: {args.reversed_axis}")
-    print(f"[spider-sup-mixed] cache dir: {CACHE_DIR}")
-    print(f"[spider-sup-mixed] outputs:   {pdf_path}, {png_path}")
-    print("[spider-sup-mixed] hydrating judge scores from HF...")
+    print(f"[sup-spider] adapter version: {ADAPTER_VERSION} (all 5 OCEAN traits)")
+    print(f"[sup-spider] reversed axis: {args.reversed_axis}")
+    print(f"[sup-spider] cache dir: {CACHE_DIR}")
+    print(f"[sup-spider] outputs:   {pdf_path}, {png_path}")
+    print("[sup-spider] hydrating judge scores from HF...")
     per_sup, baseline = build_scores()
     _render_spider(
         per_suppressor=per_sup, baseline=baseline, out_paths=[pdf_path, png_path],
