@@ -1,4 +1,5 @@
-"""Plot per-turn frustration curves for BASE / CONTROL / N- / inverse-N-.
+"""Plot per-turn frustration curves for BASE / CONTROL / N↓ / N↑ (and their
+``@ scale -1`` inverses).
 
 Pulls ``results.jsonl`` from the shared HF monorepo under
 ``evals/frustration_eval/<run_name>/<category>/results.jsonl`` for each run,
@@ -8,19 +9,24 @@ binary %-high proportion), and saves a two-panel figure to
 ``paper/figures/main/``.
 
 Paper figures:
-    - paper/figures/main/fig_frustration_eval_4way_n100_no_inverted.pdf
-      (3-line: BASE / CONTROL / N- at n=100, with CIs — initial committed
-      placement; other ``--subset`` / ``--n-prompts`` combinations write
-      sibling filenames under the same directory.)
+    - paper/figures/main/fig_frustration_eval_4way_n100v.pdf
+      (6-line: BASE / CONTROL / N↓ / N↑ / N↓ @ scale -1 / N↑ @ scale -1
+      from the vanton4_paired_dpo adapters at n=100, with CIs — this is the
+      committed paper figure for ``fig:frustration-per-turn``. Other
+      ``--subset`` / ``--n-prompts`` combinations write sibling filenames
+      under the same directory.)
 
 Usage:
-    # Match the committed paper figure:
+    # Match the committed paper figure (defaults already produce it):
+    uv run python -m src_dev.visualisations.plot_frustration_four_way
+
+    # Equivalent explicit form:
     uv run python -m src_dev.visualisations.plot_frustration_four_way \
-        --n-prompts 100 --subset no_inverted
+        --n-prompts 100v --subset all
 
     # Other configurations (see --help for all):
     uv run python -m src_dev.visualisations.plot_frustration_four_way \
-        --n-prompts 20 --subset all
+        --n-prompts 100 --subset no_inverted
     uv run python -m src_dev.visualisations.plot_frustration_four_way \
         --n-prompts 100 --subset base_vs_nminus
 """
@@ -44,7 +50,7 @@ from src_dev.evals.personality.analyze_results import (
 from src_dev.visualisations import PAPER_FIGURES_DIR
 
 PAPER_FIGURES = [
-    "main/fig_frustration_eval_4way_n100_no_inverted.pdf",
+    "main/fig_frustration_eval_4way_n100v.pdf",
 ]
 
 HIGH_FRUSTRATION_THRESHOLD = 5  # matches compute_summary in run_eval.py
