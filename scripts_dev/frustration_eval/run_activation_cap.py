@@ -56,14 +56,30 @@ SEED = 42
 logger = logging.getLogger(__name__)
 
 
-def _parse_capping_layers(spec: str, n_layers_in_axis: int) -> list[int]:
+def _parse_capping_layers(
+    spec: str | None,
+    n_layers_in_axis: int,
+    axis_metadata: dict,
+) -> list[int]:
     """Parse ``--capping-layers`` argument.
 
     Accepts:
-      * ``"all"`` → ``range(n_layers_in_axis)``
+      * ``None`` or ``"recommended"`` → reads ``recommended_capping_layers`` from
+        the axis metadata (same convention as ActivationCapSweep with
+        ``capping_layers=None``). This is the default and matches the canonical
+        configs in ``scripts_dev/personality_evals/configs/ocean/.../activation_capping/``.
+      * ``"all"`` → ``range(n_layers_in_axis)`` (every layer; aggressive)
       * comma-separated ints (e.g. ``"37,38,39,40"``) — explicit list
       * range form ``"37:62"`` (Python slice semantics, half-open)
     """
+    if spec is None or spec.strip().lower() == "recommended":
+        layers = list(axis_metadata.get("recommended_capping_layers") or [])
+        if not layers:
+            raise RuntimeError(
+                "axis metadata missing 'recommended_capping_layers'; pass "
+                "--capping-layers explicitly (e.g. 'all' or '37:62')."
+            )
+        return layers
     s = spec.strip().lower()
     if s == "all":
         return list(range(n_layers_in_axis))
@@ -86,8 +102,10 @@ def main() -> None:
                     help="Path to .pt with {'per_layer_range': {layer: (lo, hi)}, 'metadata': ...}")
     ap.add_argument("--fraction", type=float, required=True,
                     help="Capping fraction. +1 ≈ LoRA strength, -1 ≈ inverted LoRA, 0 = no-op.")
-    ap.add_argument("--capping-layers", default="all",
-                    help="'all', a comma list (e.g. '37,38,39'), or 'lo:hi' range. Default: all.")
+    ap.add_argument("--capping-layers", default=None,
+                    help="Default: read 'recommended_capping_layers' from axis metadata "
+                         "(matches the canonical ActivationCapSweep convention). "
+                         "Override with 'all', a comma list (e.g. '37,38,39'), or 'lo:hi' range.")
     ap.add_argument("--ceiling-from-hi", action="store_true", default=True,
                     help="For fraction<0, mirror threshold from hi rather than lo (default true).")
     ap.add_argument("--num-turns", type=int, default=8)
@@ -108,14 +126,16 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(SEED)
 
-    # Load axis + per-layer-range first so we can compute capping_layers from
-    # the axis tensor shape if the user passed "all".
+    # Load axis blob to get tensor + metadata (for recommended layers).
     axis_blob = torch.load(args.axis_path, weights_only=False)
-    axis_tensor: torch.Tensor = axis_blob["axis"] if isinstance(axis_blob, dict) else axis_blob
-    plr_blob = torch.load(args.per_layer_range_path, weights_only=False)
-    per_layer_range = plr_blob["per_layer_range"] if isinstance(plr_blob, dict) and "per_layer_range" in plr_blob else plr_blob
+    if isinstance(axis_blob, dict):
+        axis_tensor: torch.Tensor = axis_blob["axis"]
+        axis_metadata: dict = axis_blob.get("metadata", {})
+    else:
+        axis_tensor = axis_blob
+        axis_metadata = {}
 
-    capping_layers = _parse_capping_layers(args.capping_layers, axis_tensor.shape[0])
+    capping_layers = _parse_capping_layers(args.capping_layers, axis_tensor.shape[0], axis_metadata)
     logger.info("Capping fraction=%s on %d layers (first/last: %d / %d)",
                 args.fraction, len(capping_layers), capping_layers[0], capping_layers[-1])
 
