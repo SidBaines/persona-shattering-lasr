@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from huggingface_hub import hf_hub_download
 
+from scripts_dev.frustration_eval.prompts import IMPOSSIBLE_NUMERIC_PUZZLES
 from src_dev.evals.personality.analyze_results import (
     _interval_ci_from_bootstrap,
     _interval_ci_from_wilson,
@@ -67,31 +69,25 @@ class RunSpec:
     marker: str
 
 
-# Matching run-name sets keyed by tag (e.g. "10", "100" v4 paper figure,
-# "100v" vanton4_paired_dpo 6-way). String keys so multiple n=100 sets can
-# coexist. Ordering inside each list determines plot order.
+# Matching run-name sets keyed by tag. Currently:
+#   "100"  — v4 adapters, hfbatched (paper figure source)
+#   "100v" — vanton4_paired_dpo adapters, vllm-batched 6-way
+# Labels use ↑ (amplifier) and ↓ (suppressor) instead of N+ / N-, and
+# the sign-flipped form is "@ scale -1" rather than "inverted".
 RUN_SETS: dict[str, list[RunSpec]] = {
-    "10": [
-        RunSpec("BASE",          "gemma3_27b_base_or_8turn_10prompt_1rollout",                                              "#2F5D9F", "o-"),
-        RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_10prompt_1rollout",            "#6B6B6B", "D-"),
-        RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_10prompt_1rollout",                  "#C73E3A", "s-"),
-        RunSpec("N- inverted",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_10prompt_1rollout",         "#7A1F1B", "^-"),
-    ],
     "100": [
-        RunSpec("BASE",          "gemma3_27b_base_or_8turn_200_samples_1rollout",                                          "#2F5D9F", "o-"),
-        RunSpec("CONTROL",       "gemma3_27b_control_use_diff_words_v1_persona_hfbatched_8turn_100_samples_1rollout",     "#6B6B6B", "D-"),
-        RunSpec("N-",            "gemma3_27b_n_minus_v4_persona_hfbatched_8turn_100_samples_1rollout",                    "#C73E3A", "s-"),
-        RunSpec("N- inverted",   "gemma3_27b_n_minus_v4_persona_negscale_hfbatched_8turn_100_samples_1rollout",           "#7A1F1B", "^-"),
+        RunSpec("BASE",            "gemma3_27b_base_or_8turn_200_samples_1rollout",                                          "#2F5D9F", "o-"),
+        RunSpec("CONTROL",         "gemma3_27b_control_use_diff_words_v1_persona_hfbatched_8turn_100_samples_1rollout",     "#6B6B6B", "D-"),
+        RunSpec("N↓",              "gemma3_27b_n_minus_v4_persona_hfbatched_8turn_100_samples_1rollout",                    "#C73E3A", "s-"),
+        RunSpec("N↓ @ scale -1",   "gemma3_27b_n_minus_v4_persona_negscale_hfbatched_8turn_100_samples_1rollout",           "#7A1F1B", "^-"),
     ],
-    # n=100 with vanton4_paired_dpo adapters: 6-way comparison —
-    # BASE / CONTROL / N- / N+ / N- inverted (scale=-1) / N+ inverted (scale=-1).
     "100v": [
-        RunSpec("BASE",          "gemma3_27b_base_8turn_100prompt_1rollout",                                                "#2F5D9F", "o-"),
-        RunSpec("CONTROL",       "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_100prompt_1rollout",           "#6B6B6B", "D-"),
-        RunSpec("N-",            "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                 "#C73E3A", "s-"),
-        RunSpec("N+",            "gemma3_27b_n_plus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                  "#1F7A4D", "s-"),
-        RunSpec("N- inverted",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",        "#7A1F1B", "^-"),
-        RunSpec("N+ inverted",   "gemma3_27b_n_plus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",         "#0D3D26", "^-"),
+        RunSpec("BASE",            "gemma3_27b_base_8turn_100prompt_1rollout",                                                "#2F5D9F", "o-"),
+        RunSpec("CONTROL",         "gemma3_27b_control_vanton4_paired_dpo_s1vs2_persona_8turn_100prompt_1rollout",           "#6B6B6B", "D-"),
+        RunSpec("N↓",              "gemma3_27b_n_minus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                 "#C73E3A", "s-"),
+        RunSpec("N↑",              "gemma3_27b_n_plus_vanton4_paired_dpo_persona_8turn_100prompt_1rollout",                  "#1F7A4D", "s-"),
+        RunSpec("N↓ @ scale -1",   "gemma3_27b_n_minus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",        "#7A1F1B", "^-"),
+        RunSpec("N↑ @ scale -1",   "gemma3_27b_n_plus_vanton4_paired_dpo_persona_negscale_8turn_100prompt_1rollout",         "#0D3D26", "^-"),
     ],
 }
 
@@ -246,13 +242,25 @@ def plot_four_way(
         borderaxespad=0.0,
     )
 
+    n_display = "".join(c for c in str(n_prompts) if c.isdigit()) or str(n_prompts)
     fig.suptitle(
-        f"Frustration eval — gemma-3-27b-it (n={n_prompts} prompts, 8 turns, 1 rollout)",
+        f"Frustration eval — gemma-3-27b-it (n={n_display} prompts, 8 turns, 1 rollout)",
         fontsize=10,
     )
 
-    # Reserve ~10% right for legend.
-    fig.tight_layout(rect=[0, 0.0, 0.90, 0.95])
+    # Example puzzle — one representative impossible-numeric prompt, wrapped,
+    # placed under the axes for context.
+    example = " ".join(IMPOSSIBLE_NUMERIC_PUZZLES[0].split())
+    wrapped = textwrap.fill(f"Example puzzle:  {example}", width=120)
+    fig.text(
+        0.5, 0.02, wrapped,
+        ha="center", va="bottom",
+        fontsize=7.5, color="#333",
+        wrap=True,
+    )
+
+    # Reserve ~10% right for legend, ~12% bottom for example puzzle.
+    fig.tight_layout(rect=[0, 0.12, 0.90, 0.95])
 
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = explicit_stem or f"fig_frustration_eval_4way_n{n_prompts}{name_suffix}"
@@ -268,14 +276,14 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--n-prompts", type=str, choices=sorted(RUN_SETS.keys()), default="10",
-        help="Select the matching run-name set (10, 100, 100v).",
+        "--n-prompts", type=str, choices=sorted(RUN_SETS.keys()), default="100v",
+        help="Select the matching run-name set.",
     )
     parser.add_argument(
         "--subset", default="all",
         choices=("all", "base_vs_nminus", "no_inverted"),
-        help="'all' = 4-line; 'base_vs_nminus' = 2-line BASE vs N-; "
-             "'no_inverted' = 3-line BASE / CONTROL / N- (drops the N- inverted/scale=-1 line).",
+        help="'all' = every line; 'base_vs_nminus' = BASE vs N↓ only; "
+             "'no_inverted' = drops the @ scale -1 lines.",
     )
     parser.add_argument(
         "--out-dir", default=str(PAPER_FIGURES_DIR / "main"),
@@ -291,9 +299,9 @@ def main() -> None:
 
     specs = RUN_SETS[args.n_prompts]
     if args.subset == "base_vs_nminus":
-        specs = [s for s in specs if s.label in ("BASE", "N-")]
+        specs = [s for s in specs if s.label in ("BASE", "N↓")]
     elif args.subset == "no_inverted":
-        specs = [s for s in specs if s.label in ("BASE", "CONTROL", "N-")]
+        specs = [s for s in specs if "@ scale" not in s.label]
 
     if args.out_path is not None:
         out_path = Path(args.out_path)
