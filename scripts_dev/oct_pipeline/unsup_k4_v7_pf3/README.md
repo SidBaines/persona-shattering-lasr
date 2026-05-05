@@ -21,18 +21,20 @@ Constitution-design intent and per-pole persona descriptions are in
 | File | Purpose |
 |---|---|
 | `persona_descriptions.md` | Per-factor / per-pole behavioural persona descriptions |
-| `initiative_traits.py` | F0 facet trait sentences (8 facets × {high, low}) |
-| `initiative_questions.py` | F0 question pools (8 × ~50 = 400 unique questions) |
-| `generate_initiative_constitutions.py` | Compiles traits + questions into the four JSONs |
-| `initiative_amplifier.json` | High-pole constitution, 8 entries × ~50 questions |
-| `initiative_amplifier_slim.json` | High-pole single-entry concatenated for SFT/introspection |
-| `initiative_suppressor.json` | Low-pole, same 400-question pool, flipped traits |
-| `initiative_suppressor_slim.json` | Low-pole single-entry concatenated |
-| `prep_unsup_k4_v7_pf3_distillation.sh` | Phase 1: teacher distillation, both poles |
-| `seed_unsup_k4_v7_pf3_paired_dpo.sh` | Phase 2: pair amp/sup teacher responses |
-| `run_unsup_k4_v7_pf3_paired_dpo.sh` | Phase 3: DPO + introspection + SFT + merge |
+| `initiative_traits.py` | **F0** facet trait sentences (8 facets × {high, low}) |
+| `initiative_questions.py` | F0 question pools (8 × 50 = 400 unique questions) |
+| `generate_initiative_constitutions.py` | F0 generator: compiles traits + questions into JSONs |
+| `initiative_{amplifier,suppressor}{,_slim}.json` | F0 constitutions (full + slim, both poles) |
+| `pedagogy_traits.py` | **F1** facet trait sentences (8 facets × {high, low}) |
+| `pedagogy_questions.py` | F1 question pools (8 × 50 = 400 unique questions) |
+| `generate_pedagogy_constitutions.py` | F1 generator: compiles traits + questions into JSONs |
+| `pedagogy_{amplifier,suppressor}{,_slim}.json` | F1 constitutions (full + slim, both poles) |
+| `prep_unsup_k4_v7_pf3_distillation.sh` | Phase 1: teacher distillation, both poles (param: trait) |
+| `seed_unsup_k4_v7_pf3_paired_dpo.sh` | Phase 2: pair amp/sup teacher responses (param: trait) |
+| `run_unsup_k4_v7_pf3_paired_dpo.sh` | Phase 3: DPO + introspection + SFT + merge (param: trait) |
 | `validate_lora.py` | Re-administer v7 fc_pair on N personas, refit FA, report paired diffs |
-| `run_overnight_initiative.sh` | Orchestrator: phases 1–3 + validate amp + train sup + validate |
+| `run_overnight_initiative.sh` | F0 orchestrator: phases 1–3 + validate amp + train sup + validate |
+| `run_overnight_pedagogy.sh` | F1 orchestrator: same shape as F0 |
 
 ## Pipeline (mirrors `unsup_4fac` paired-DPO recipe)
 
@@ -89,14 +91,22 @@ Phase 4 — validation (GPU):
 ## Overnight orchestrator
 
 Runs all four phases sequentially, interleaving train/validate per pole so
-the amp validation comes back while the sup is still training.
+the amp validation comes back while the sup is still training. There is one
+orchestrator per factor; each just sets `TRAIT` and labels.
 
 ```bash
+# F0 (Initiative)
 mkdir -p scratch/logs
 LOG=scratch/logs/overnight_initiative_$(date -u +%Y%m%dT%H%M%SZ).log
 tmux new -d -s initiative_overnight \
   "cd /root/persona-shattering && \
    bash scripts_dev/oct_pipeline/unsup_k4_v7_pf3/run_overnight_initiative.sh 0 2>&1 | tee $LOG"
+
+# F1 (Pedagogy)
+LOG=scratch/logs/overnight_pedagogy_$(date -u +%Y%m%dT%H%M%SZ).log
+tmux new -d -s pedagogy_overnight \
+  "cd /root/persona-shattering && \
+   bash scripts_dev/oct_pipeline/unsup_k4_v7_pf3/run_overnight_pedagogy.sh 0 2>&1 | tee $LOG"
 ```
 
 Phase skip env vars (set to 1 to skip):
@@ -109,18 +119,19 @@ stops after DPO and validates the `-dpo` adapter (~3-5x faster).
 
 ## Validation expected pattern
 
-Under success the F0 row should show a strong shift in the trained direction
-while F1/F2/F3 should be roughly flat:
+Under success the trained factor's row shifts in the trained direction
+while the other three should be roughly flat. For F1 (Pedagogy):
 
 |   | F0_Initiative | F1_Pedagogy | F2_Warmth | F3_Hedging |
 |--:|:--:|:--:|:--:|:--:|
-| Amp | strongly + | ≈ 0 | ≈ 0 | ≈ 0 |
-| Sup | strongly − | ≈ 0 | ≈ 0 | ≈ 0 |
+| F1 Amp | ≈ 0 | strongly + | ≈ 0 | ≈ 0 |
+| F1 Sup | ≈ 0 | strongly − | ≈ 0 | ≈ 0 |
 
 Caveat: the F1↔F3 inter-factor correlation is the strongest at -0.17
-(others are |r| ≤ 0.15). When training F1 (Pedagogy) we'd expect a small
-natural F3 suppression, and vice-versa. F0 (Initiative) should be cleanly
-isolable — its strongest correlation with another factor is +0.14.
+(others are |r| ≤ 0.15). When training F1 we'd expect a small natural F3
+suppression on the amplifier and a small F3 boost on the suppressor. F0
+(Initiative) was cleanly isolable in design — strongest correlation with
+another factor was +0.14.
 
 Item-level pole-aligned shifts on raw response scale are reported alongside
 the σ-unit factor-score deltas — the σ-unit deltas can inflate when the
