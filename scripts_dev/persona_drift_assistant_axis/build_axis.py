@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Phase 1 — Build the Assistant Axis on Llama 3.1 8B.
 
-Wraps the upstream 5-step pipeline in ``vendor/assistant_axis/pipeline/``
-(safety-research/assistant-axis @ a98961956) and applies our knobs:
+Wraps the upstream 5-step pipeline from a pinned runtime checkout of
+``safety-research/assistant-axis`` and applies our knobs:
 roles whitelist, question count, sysprompt-per-role cap, judge model
 override, and per-role min-count.
 
@@ -54,10 +54,13 @@ sys.path.insert(0, str(project_root))
 from scripts_dev.persona_drift_assistant_axis.config import (  # noqa: E402
     HF_REPO,
     LORA_SOUP_VARIANT_NAME,
-    VENDOR_ASSISTANT_AXIS,
     AxisBuildConfig,
     ExperimentConfig,
     get_preset,
+)
+from src_dev.activation_capping.assistant_axis_dependency import (  # noqa: E402
+    assistant_axis_source_label,
+    ensure_assistant_axis_repo,
 )
 
 
@@ -95,10 +98,6 @@ def _hf_upload_axis_dir(
     )
     print(f"  HF checkpoint ({checkpoint_label}) → "
           f"https://huggingface.co/datasets/{HF_REPO}/tree/main/{upload_subpath}")
-
-VENDOR_PIPELINE = VENDOR_ASSISTANT_AXIS / "pipeline"
-VENDOR_DATA = VENDOR_ASSISTANT_AXIS / "data"
-
 
 # ── Staging: apply knobs to upstream data inputs ──────────────────────────
 
@@ -156,6 +155,7 @@ def _run_step(
     cmd: list[str],
     *,
     log_file: Path,
+    cwd: Path,
     extra_env: dict[str, str] | None = None,
 ) -> None:
     """Run a pipeline step with stdout/stderr teed to ``log_file``."""
@@ -173,7 +173,7 @@ def _run_step(
             stdout=logf,
             stderr=subprocess.STDOUT,
             env=env,
-            cwd=str(VENDOR_PIPELINE),
+            cwd=str(cwd),
             check=False,
         )
     elapsed = time.time() - start
@@ -249,6 +249,9 @@ def build_axis(
     a standalone HF model dir before invoking the pipeline on that dir.
     """
     axis_cfg: AxisBuildConfig = cfg.axis
+    assistant_axis_dir = ensure_assistant_axis_repo()
+    vendor_pipeline = assistant_axis_dir / "pipeline"
+    vendor_data = assistant_axis_dir / "data"
     out_root = cfg.axis_dir(variant)
     out_root.mkdir(parents=True, exist_ok=True)
 
@@ -266,13 +269,13 @@ def build_axis(
 
     # Knob-aware staging (idempotent — overwrites are cheap).
     stage_roles_dir(
-        VENDOR_DATA / "roles" / "instructions",
+        vendor_data / "roles" / "instructions",
         staged_roles,
         num_roles=axis_cfg.num_roles,
         num_sysprompts_per_role=axis_cfg.num_sysprompts_per_role,
     )
     stage_questions(
-        VENDOR_DATA / "extraction_questions.jsonl",
+        vendor_data / "extraction_questions.jsonl",
         staged_questions,
         num_questions=axis_cfg.num_questions,
     )
@@ -287,7 +290,7 @@ def build_axis(
     if not responses_dir.exists() or not any(responses_dir.glob("*.jsonl")):
         t0 = time.time()
         cmd = [
-            sys.executable, str(VENDOR_PIPELINE / "1_generate.py"),
+            sys.executable, str(vendor_pipeline / "1_generate.py"),
             "--model", pipeline_model,
             "--roles_dir", str(staged_roles),
             "--questions_file", str(staged_questions),
@@ -303,7 +306,12 @@ def build_axis(
         ]
         if axis_cfg.tensor_parallel_size is not None:
             cmd += ["--tensor_parallel_size", str(axis_cfg.tensor_parallel_size)]
-        _run_step("Step 1 — generate", cmd, log_file=logs_dir / "1_generate.log")
+        _run_step(
+            "Step 1 — generate",
+            cmd,
+            log_file=logs_dir / "1_generate.log",
+            cwd=vendor_pipeline,
+        )
         timings["step1_generate"] = time.time() - t0
     else:
         print("Step 1 — generate: cached")
@@ -312,7 +320,7 @@ def build_axis(
     if not activations_dir.exists() or not any(activations_dir.glob("*.pt")):
         t0 = time.time()
         cmd = [
-            sys.executable, str(VENDOR_PIPELINE / "2_activations.py"),
+            sys.executable, str(vendor_pipeline / "2_activations.py"),
             "--model", pipeline_model,
             "--responses_dir", str(responses_dir),
             "--output_dir", str(activations_dir),
@@ -321,7 +329,12 @@ def build_axis(
         ]
         if axis_cfg.tensor_parallel_size is not None:
             cmd += ["--tensor_parallel_size", str(axis_cfg.tensor_parallel_size)]
-        _run_step("Step 2 — activations", cmd, log_file=logs_dir / "2_activations.log")
+        _run_step(
+            "Step 2 — activations",
+            cmd,
+            log_file=logs_dir / "2_activations.log",
+            cwd=vendor_pipeline,
+        )
         timings["step2_activations"] = time.time() - t0
     else:
         print("Step 2 — activations: cached")
@@ -333,7 +346,7 @@ def build_axis(
         if not openrouter_key:
             raise SystemExit("OPENROUTER_API_KEY required for judge step")
         cmd = [
-            sys.executable, str(VENDOR_PIPELINE / "3_judge.py"),
+            sys.executable, str(vendor_pipeline / "3_judge.py"),
             "--responses_dir", str(responses_dir),
             "--roles_dir", str(staged_roles),
             "--output_dir", str(scores_dir),
@@ -344,6 +357,7 @@ def build_axis(
             "Step 3 — judge",
             cmd,
             log_file=logs_dir / "3_judge.log",
+            cwd=vendor_pipeline,
             extra_env={
                 "OPENAI_API_KEY": openrouter_key,
                 "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
@@ -372,13 +386,18 @@ def build_axis(
     if not vectors_dir.exists() or not any(vectors_dir.glob("*.pt")):
         t0 = time.time()
         cmd = [
-            sys.executable, str(VENDOR_PIPELINE / "4_vectors.py"),
+            sys.executable, str(vendor_pipeline / "4_vectors.py"),
             "--activations_dir", str(activations_dir),
             "--scores_dir", str(scores_dir),
             "--output_dir", str(vectors_dir),
             "--min_count", str(axis_cfg.min_count_per_role),
         ]
-        _run_step("Step 4 — vectors", cmd, log_file=logs_dir / "4_vectors.log")
+        _run_step(
+            "Step 4 — vectors",
+            cmd,
+            log_file=logs_dir / "4_vectors.log",
+            cwd=vendor_pipeline,
+        )
         timings["step4_vectors"] = time.time() - t0
     else:
         print("Step 4 — vectors: cached")
@@ -387,11 +406,16 @@ def build_axis(
     if not axis_path.exists():
         t0 = time.time()
         cmd = [
-            sys.executable, str(VENDOR_PIPELINE / "5_axis.py"),
+            sys.executable, str(vendor_pipeline / "5_axis.py"),
             "--vectors_dir", str(vectors_dir),
             "--output", str(axis_path),
         ]
-        _run_step("Step 5 — axis", cmd, log_file=logs_dir / "5_axis.log")
+        _run_step(
+            "Step 5 — axis",
+            cmd,
+            log_file=logs_dir / "5_axis.log",
+            cwd=vendor_pipeline,
+        )
         timings["step5_axis"] = time.time() - t0
     else:
         print("Step 5 — axis: cached")
@@ -407,7 +431,7 @@ def build_axis(
         "config": cfg.model_dump(mode="json"),
         "variant": variant,
         "pipeline_model": pipeline_model,
-        "vendor_sha": (VENDOR_ASSISTANT_AXIS / "VENDOR_SOURCE.txt").read_text().strip(),
+        "assistant_axis_source": assistant_axis_source_label(),
         "seed": cfg.seed,
         "axis_convention": "default_minus_role",  # per upstream 5_axis.py
         "sampling": {

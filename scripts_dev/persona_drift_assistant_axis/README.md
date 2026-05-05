@@ -12,8 +12,10 @@ Comparison of three drift-mitigation methods on Llama 3.1 8B Instruct:
 | `lora_soup_c_plus_o_minus` | C+(1.0) ⊕ O−(1.0) baked LoRA soup | vLLM |
 
 Source paper: Lu et al., "The Assistant Axis: Situating and Stabilizing the
-Default Persona of Language Models" (arXiv 2601.10387). Pipeline code
-vendored at `vendor/assistant_axis/` (MIT, pinned commit `a98961956`).
+Default Persona of Language Models" (arXiv 2601.10387). Pipeline code is
+downloaded at runtime from `safety-research/assistant-axis` (MIT, pinned
+commit `a98961956`) into `scratch/external/assistant_axis`. Set
+`ASSISTANT_AXIS_DIR` to reuse an existing checkout.
 
 ## Pipeline
 

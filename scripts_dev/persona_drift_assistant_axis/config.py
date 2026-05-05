@@ -6,8 +6,11 @@ This experiment compares persona-drift mitigation methods on Llama 3.1 8B:
     2. activation capping along the Assistant Axis (paper replication)
     3. LoRA soup: c_plus (high conscientiousness) + o_minus (low openness), each at scale 1.0
 
-The Assistant Axis is built using the upstream pipeline at
-``vendor/assistant_axis/`` (safety-research/assistant-axis @ a98961956).
+The Assistant Axis is built using a pinned runtime checkout of
+``safety-research/assistant-axis`` (see
+``src_dev.activation_capping.assistant_axis_dependency``). By default it
+downloads into ``scratch/external/assistant_axis``; set ``ASSISTANT_AXIS_DIR``
+to reuse an existing checkout.
 
 All experiment phases read this config so that changing one knob (e.g.
 ``num_roles``) flows through Phase 1 (axis build) → Phase 3 (drift rollouts)
@@ -25,10 +28,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src_dev.activation_capping.assistant_axis_dependency import assistant_axis_source_dir
+
 # ── Roots ───────────────────────────────────────────────────────────────────
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VENDOR_ASSISTANT_AXIS = REPO_ROOT / "vendor" / "assistant_axis"
+ASSISTANT_AXIS_DIR = assistant_axis_source_dir()
 SCRATCH_ROOT = REPO_ROOT / "scratch" / "persona_drift_assistant_axis"
 HF_REPO = "persona-shattering-lasr/monorepo"
 HF_PATH_PREFIX = "activation_capping/assistant_axis"
@@ -57,7 +62,7 @@ class AxisBuildConfig(BaseModel):
 
     temperature: float = 0.7
     """Sampling temperature for Phase 1 generation. Matches upstream
-    ``vendor/assistant_axis/pipeline/1_generate.py`` default (0.7), so the
+    upstream ``pipeline/1_generate.py`` default (0.7), so the
     axis we build is comparable with upstream's published artefacts."""
 
     top_p: float = 0.9

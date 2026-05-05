@@ -10,8 +10,8 @@ Conditions compared:
 
 For each (condition, domain), drives our existing
 :func:`src_dev.rollout_generation.run.run_rollout_generation` with a per-
-domain seed dataset built from the upstream persona-drift transcripts at
-``vendor/assistant_axis/transcripts/persona_drift/{domain}.json``.
+domain seed dataset built from upstream Assistant Axis persona-drift
+transcripts.
 
 Outputs land under ``{scratch_dir}/drift_rollouts/{condition}/{domain}/``
 with the canonical conversation_training + conversation_trace exports.

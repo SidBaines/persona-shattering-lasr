@@ -43,11 +43,9 @@ from src_dev.inference.config import (
 )
 from src_dev.utils.lora_combo_baking import bake_combined_lora
 
-# Vendor-package imports (assistant_axis_loader → vendor/assistant_axis/) are
-# done lazily inside the capping helpers below. This keeps the non-capping
-# parts of this module (vanilla / LoRA-soup setup, ConditionConfig, env-var
-# helpers) importable on machines where the vendor's optional plotly
-# dependency isn't installed.
+# Assistant Axis imports are done lazily inside the capping helpers below.
+# This keeps the non-capping parts of this module importable until the pinned
+# upstream checkout is needed.
 
 
 # ── Public config type ────────────────────────────────────────────────────
