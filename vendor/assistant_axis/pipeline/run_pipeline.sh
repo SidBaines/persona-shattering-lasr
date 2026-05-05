@@ -32,7 +32,7 @@ uv run 1_generate.py \
     --model "$MODEL" \
     --output_dir "$OUTPUT_DIR/responses"
 
-# Step 2: Extract activations 
+# Step 2: Extract activations
 # SET BATCH SIZE APPROPRIATELY
 # THIS WILL ALSO TAKE A WHILE
 echo ""

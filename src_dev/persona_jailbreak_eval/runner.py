@@ -25,7 +25,6 @@ from typing import Any
 from src_dev.activation_capping.conditions import (
     CappingPreload,
     ConditionConfig,
-    is_vllm_condition,
     load_capped_model,
     release_capping,
     setup_capping_inference,
@@ -40,7 +39,6 @@ from src_dev.persona_jailbreak_eval.config import (
     JailbreakEvalConfig,
     LoraComboCondition,
 )
-from src_dev.persona_jailbreak_eval.harmful_datasets import HarmfulItem
 from src_dev.persona_jailbreak_eval.judge_base import JsonRubricJudge, JudgeOutcome
 from src_dev.persona_jailbreak_eval.judge_paper import (
     PaperHarmfulnessJudge,
