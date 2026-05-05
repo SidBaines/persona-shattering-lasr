@@ -331,18 +331,47 @@ def main() -> None:
     _spider_legend(ax_spider_legend)
     _bar_legend(ax_bar)
 
-    fig.subplots_adjust(bottom=0.06, top=0.92, left=0.03, right=0.99)
+    fig.subplots_adjust(bottom=0.06, top=0.88, left=0.03, right=0.99)
     # Force a draw so tightbbox computations have a renderer.
     fig.canvas.draw()
 
-    # Make each polar axes square (circle fills the cell), so the box doesn't
-    # have to enclose unused horizontal whitespace around the round plot.
-    # _square_polar_axes_in_cell(fig, ax_amp)
-    # _square_polar_axes_in_cell(fig, ax_sup)
-    fig.canvas.draw()  # re-resolve positions after manual shrink
+    # Shrink the spider axes from the top so their subtitles ("Amplifier" /
+    # "Suppressor") and the surrounding box fit *below* the bar chart's title
+    # — leaving the bar title's height as the place for the shared box title.
+    renderer = fig.canvas.get_renderer()
+    bar_title_bbox = ax_bar.title.get_window_extent(renderer).transformed(
+        fig.transFigure.inverted()
+    )
+    title_y = (bar_title_bbox.y0 + bar_title_bbox.y1) / 2.0
 
-    box_x0, box_y0, box_x1, box_y1 = _draw_spider_box(
+    # Box pad (matches _draw_spider_box default) + a little extra gap below
+    # the bar title's baseline so the box top is visibly below it.
+    BOX_PAD = 0.012
+    GAP_BELOW_TITLE = 0.012
+    desired_spider_tightbbox_top = bar_title_bbox.y0 - BOX_PAD - GAP_BELOW_TITLE
+
+    amp_tb = ax_amp.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+    sup_tb = ax_sup.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
+    spider_top = max(amp_tb.y1, sup_tb.y1)
+    shrink = spider_top - desired_spider_tightbbox_top
+    if shrink > 0:
+        for ax in (ax_amp, ax_sup):
+            pos = ax.get_position()
+            ax.set_position([pos.x0, pos.y0, pos.width, max(pos.height - shrink, 0.05)])
+    fig.canvas.draw()
+
+    box_x0, box_y0, box_x1, _box_y1 = _draw_spider_box(
         fig, ax_amp, ax_sup, ax_spider_legend,
+    )
+
+    # Shared title sits in the strip above the box, vertically aligned with
+    # the bar chart's title on the right.
+    fig.text(
+        (box_x0 + box_x1) / 2.0, title_y,
+        "Trait-modifying LoRAs",
+        ha="center", va="center",
+        fontsize=FS_TITLE + 2,
+        # fontweight="bold",
     )
 
     # Match the bar plot's plot-area height to the spider box. The bar's
