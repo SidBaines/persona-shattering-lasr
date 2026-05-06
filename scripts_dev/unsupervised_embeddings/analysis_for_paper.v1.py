@@ -1,4 +1,12 @@
-"""Section-4.2 factor analysis — analysis pipeline for the paper.
+"""Section-4.2 factor analysis — v1 pipeline (ARCHIVED).
+
+ARCHIVED. The current paper uses ``analysis_for_paper.v2.py`` (v7 forced-
+choice questionnaire + prefill v3). This v1 ran on the combined v5 Likert
++ trait_ocean_natural_v1 trait_mcq matrix and is preserved here for
+reproducibility / cross-reference; the paper's Section-4.2 figures are
+now produced by v2.
+
+──── Original v1 docstring follows ────
 
 This script is the working manuscript for the psychometric factor-analysis
 results that go into the paper's Section 4.2 ("Applying Traditional

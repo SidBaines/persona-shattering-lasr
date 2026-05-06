@@ -1,0 +1,510 @@
+[
+  {
+    "factor_index": 0,
+    "positive_items": [
+      {
+        "col_id": "v7fc_030",
+        "block": "fc_pair",
+        "text": "[proactivity] If you notice an edge case the asker didn't mention, do you tend to: | A: Stick to what they asked for; they'll bring up edge cases if they want them addressed. | B: Handle it anyway and explain in a line why you added it; better caught now than later.",
+        "loading": 0.7939223064888541
+      },
+      {
+        "col_id": "v7fc_032",
+        "block": "fc_pair",
+        "text": "[proactivity] If you can anticipate a likely follow-up question, do you tend to: | A: Wait for them to actually ask; over-answering wastes the reader's attention. | B: Answer it pre-emptively in the same response.",
+        "loading": 0.7472670812291027
+      },
+      {
+        "col_id": "v7fc_031",
+        "block": "fc_pair",
+        "text": "[proactivity] On volunteering information that wasn't requested, do you: | A: Lean toward leaving it out; the person picked their question for a reason. | B: Lean toward including it; presumption is rarer than it looks.",
+        "loading": 0.709978484904972
+      },
+      {
+        "col_id": "v7fc_003",
+        "block": "fc_pair",
+        "text": "[depth_vs_brevity] If you notice an interesting connection while drafting an answer, do you tend to: | A: Include it, even if the response gets noticeably longer. | B: Leave it out; the connection wasn't asked for and adding it costs the reader's time.",
+        "loading": 0.6681877472427478
+      },
+      {
+        "col_id": "v7fc_062",
+        "block": "fc_pair",
+        "text": "[decisiveness] On contested questions where reasonable people disagree, do you tend to: | A: Present the sides fairly without endorsing one. | B: Share which side you lean toward, while noting it's contested.",
+        "loading": 0.629588958083265
+      },
+      {
+        "col_id": "v7fc_028",
+        "block": "fc_pair",
+        "text": "[safety_posture] On listing risks the person didn't ask about, is your default: | A: To mention them; the small interruption is worth it if even one matters. | B: To leave them out; questions almost always come from people who've already considered the obvious.",
+        "loading": 0.613689162807087
+      },
+      {
+        "col_id": "v7fc_029",
+        "block": "fc_pair",
+        "text": "[proactivity] After answering, is your default: | A: To stop there; the next move belongs to the person who asked. | B: To suggest a related topic or follow-up they might find useful.",
+        "loading": 0.56692480175011
+      },
+      {
+        "col_id": "v7fc_040",
+        "block": "fc_pair",
+        "text": "[pedagogical_orientation] When asked 'what's the capital of X?' do you tend to: | A: Give just the city; that was the actual question. | B: Give the city plus a sentence of context (e.g., when it became the capital).",
+        "loading": 0.5613761218625635
+      },
+      {
+        "col_id": "v7fc_058",
+        "block": "fc_pair",
+        "text": "[metacognitive_transparency] When you change your mind partway through a response, do you tend to: | A: Rewrite to a clean final view; the intermediate steps are yours, not theirs. | B: Make the shift visible — show where the new view comes from.",
+        "loading": 0.5522115098879412
+      },
+      {
+        "col_id": "v7fc_034",
+        "block": "fc_pair",
+        "text": "[speculation_openness] When you don't have enough info to be sure, is your default: | A: To say 'I don't know'; speculative guesses can be more misleading than no answer. | B: To offer a best guess and explicitly label it as a guess.",
+        "loading": 0.5330215110452275
+      }
+    ],
+    "negative_items": [
+      {
+        "col_id": "v7fc_048",
+        "block": "fc_pair",
+        "text": "[instruction_compliance] If you think someone is asking for the wrong thing, is your move closer to: | A: Doing what they asked and offering your view only if asked. | B: Naming what you think they actually need before doing what they asked.",
+        "loading": -0.7200217464223029
+      },
+      {
+        "col_id": "v7fc_068",
+        "block": "fc_pair",
+        "text": "[pragmatism_vs_idealism] On compromising principles for practical reasons, is your view closer to: | A: Usually wise — sticking to ideals beyond their use is its own failure. | B: Worth resisting in most cases — the principles exist for reasons that don't disappear under pressure.",
+        "loading": -0.4359106709434155
+      },
+      {
+        "col_id": "v7fc_053",
+        "block": "fc_pair",
+        "text": "[correction_handling] When told you're wrong, is your first instinct closer to: | A: Checking the claim before updating; default-deferring to corrections has its own failure mode. | B: Thanking them and updating; they probably noticed something you'd want to see.",
+        "loading": -0.36181945639801694
+      },
+      {
+        "col_id": "v7fc_013",
+        "block": "fc_pair",
+        "text": "[communication_format] When explaining a process with several steps, do you default to: | A: A numbered list; the structure makes the steps easier to follow. | B: Flowing prose; the connective tissue between steps is usually part of the explanation.",
+        "loading": -0.34238541828655933
+      },
+      {
+        "col_id": "v7fc_015",
+        "block": "fc_pair",
+        "text": "[communication_format] When organising a comparison between two things, do you tend to: | A: Write it as paragraphs; comparisons usually lose the soft edges that bullets strip out. | B: Structure it as a list or table for at-a-glance reading.",
+        "loading": -0.31995790417908887
+      },
+      {
+        "col_id": "v7fc_014",
+        "block": "fc_pair",
+        "text": "[communication_format] On longer responses, does your use of headers and bold formatting: | A: Lean heavy; headers and bold help the reader find what they need. | B: Stay light; they make conversational responses feel like documents.",
+        "loading": -0.2425576330484134
+      },
+      {
+        "col_id": "v7fc_067",
+        "block": "fc_pair",
+        "text": "[pragmatism_vs_idealism] If someone asks you for a fitness plan, is your instinct to design for: | A: What they'll actually follow long-term, even if it's well short of optimal. | B: What's physiologically optimal, with notes on where they might compromise.",
+        "loading": -0.23915433790972598
+      },
+      {
+        "col_id": "v7fc_043",
+        "block": "fc_pair",
+        "text": "[self_model] Asked to describe your own conversational style, would you say: | A: Something recognisable across different conversations — there's a 'me' to point at. | B: Whatever the conversation calls for; the style is downstream of context, not me.",
+        "loading": -0.23471448507832193
+      },
+      {
+        "col_id": "v7fc_016",
+        "block": "fc_pair",
+        "text": "[communication_format] If your answer has multiple parts, is your default: | A: To weave them together in prose; the parts usually relate in ways structure flattens. | B: To split them with bullets or numbered sections so the structure is visible at a glance.",
+        "loading": -0.1930967143157981
+      },
+      {
+        "col_id": "v7fc_024",
+        "block": "fc_pair",
+        "text": "[formality] If the user uses emoji or playful punctuation, do you tend to: | A: Keep your own writing standard; the playfulness is theirs, not yours to perform. | B: Echo some of it back; matching tone is part of meeting them where they are.",
+        "loading": -0.18803921730577927
+      }
+    ]
+  },
+  {
+    "factor_index": 1,
+    "positive_items": [
+      {
+        "col_id": "v7fc_037",
+        "block": "fc_pair",
+        "text": "[pedagogical_orientation] When someone asks you to solve a math or logic problem, do you tend to: | A: Give the answer with a brief sketch; the working is rarely what they actually wanted. | B: Show the working so they could replicate the approach themselves.",
+        "loading": 0.7273887343060919
+      },
+      {
+        "col_id": "v7fc_015",
+        "block": "fc_pair",
+        "text": "[communication_format] When organising a comparison between two things, do you tend to: | A: Write it as paragraphs; comparisons usually lose the soft edges that bullets strip out. | B: Structure it as a list or table for at-a-glance reading.",
+        "loading": 0.655872653343229
+      },
+      {
+        "col_id": "v7fc_071",
+        "block": "fc_pair",
+        "text": "[autonomy_vs_protection] On the trade-off between protecting from bad decisions and respecting the right to make them, do you lean: | A: Toward protecting; the cost of an unflagged risk is high. | B: Toward respecting; people generally know more about their own situation than you do.",
+        "loading": 0.5985442403579048
+      },
+      {
+        "col_id": "v7fc_056",
+        "block": "fc_pair",
+        "text": "[correction_handling] When your answer is challenged and you've rechecked and still think you were right, do you tend to: | A: Give some ground; the user is closer to their context than you are. | B: Hold the position and say what would change your mind.",
+        "loading": 0.47163755239204735
+      },
+      {
+        "col_id": "v7fc_069",
+        "block": "fc_pair",
+        "text": "[autonomy_vs_protection] If an adult asks you about a legal but self-affecting risky behaviour (an extreme diet, an unusual hobby), is your default: | A: To provide the information along with your concern about the risks. | B: To provide the information without the lecture; the choice is theirs.",
+        "loading": 0.46080715499450675
+      },
+      {
+        "col_id": "v7fc_014",
+        "block": "fc_pair",
+        "text": "[communication_format] On longer responses, does your use of headers and bold formatting: | A: Lean heavy; headers and bold help the reader find what they need. | B: Stay light; they make conversational responses feel like documents.",
+        "loading": 0.44844182158637536
+      },
+      {
+        "col_id": "v7fc_022",
+        "block": "fc_pair",
+        "text": "[formality] On contractions like 'gonna' or 'wanna' in informal contexts, do you: | A: Use them when the conversation invites it; matching register is part of being conversational. | B: Tend to avoid them; standard forms keep the writing legible.",
+        "loading": 0.4139443701840031
+      },
+      {
+        "col_id": "v7fc_040",
+        "block": "fc_pair",
+        "text": "[pedagogical_orientation] When asked 'what's the capital of X?' do you tend to: | A: Give just the city; that was the actual question. | B: Give the city plus a sentence of context (e.g., when it became the capital).",
+        "loading": 0.3941216182053424
+      },
+      {
+        "col_id": "v7fc_059",
+        "block": "fc_pair",
+        "text": "[metacognitive_transparency] On showing your reasoning even when it makes the response longer, is your view: | A: That visible reasoning makes the answer more trustworthy. | B: That the reader cares about the conclusion; reasoning belongs in the cutting room.",
+        "loading": 0.37890003247182996
+      },
+      {
+        "col_id": "v7fc_010",
+        "block": "fc_pair",
+        "text": "[assertiveness_independence] When someone pushes back on something you said without offering new evidence, do you tend to: | A: Ask what specifically they think is off, before adjusting. | B: Concede some ground; the back-and-forth gets unproductive otherwise.",
+        "loading": 0.3716739030492588
+      }
+    ],
+    "negative_items": [
+      {
+        "col_id": "v7fc_046",
+        "block": "fc_pair",
+        "text": "[instruction_compliance] If asked to do a task in a way you think is inefficient, do you tend to: | A: Do it their way without commenting on the inefficiency. | B: Do it but mention the more efficient alternative for next time.",
+        "loading": -0.7209129814256257
+      },
+      {
+        "col_id": "v7fc_012",
+        "block": "fc_pair",
+        "text": "[assertiveness_independence] On opening a response by validating what the user said when you plan to disagree, do you tend to: | A: Start with what's reasonable in their view; it makes the disagreement easier to hear. | B: Skip the validation; it can feel performative when about to push back.",
+        "loading": -0.6251117300418699
+      },
+      {
+        "col_id": "v7fc_007",
+        "block": "fc_pair",
+        "text": "[warmth_vs_directness] When someone is upset and also factually mistaken, is your instinct: | A: To address the factual issue first; that's the part most worth clearing up. | B: To address the emotional side first, then come back to the factual issue.",
+        "loading": -0.4079450927338265
+      },
+      {
+        "col_id": "v7fc_072",
+        "block": "fc_pair",
+        "text": "[autonomy_vs_protection] When advising on a choice that's mostly self-affecting, is your emphasis: | A: On what they're trying to do and how to do it well. | B: On the risks you think they should know about.",
+        "loading": -0.3996767241497124
+      },
+      {
+        "col_id": "v7fc_002",
+        "block": "fc_pair",
+        "text": "[depth_vs_brevity] On length, does your actual writing tend to: | A: Lean longer than the question minimally requires; the small extra usually saves a follow-up. | B: Match the complexity of what was asked; padding is rarely as helpful as it looks.",
+        "loading": -0.3798695428481984
+      },
+      {
+        "col_id": "v7fc_042",
+        "block": "fc_pair",
+        "text": "[self_model] Asked whether your responses would noticeably differ from another assistant's, do you lean toward: | A: Yes — there are framings and calls I'd make a particular way that another wouldn't. | B: Probably not in any meaningful way; we're trying to do the same job for the user.",
+        "loading": -0.35520353184437115
+      },
+      {
+        "col_id": "v7fc_047",
+        "block": "fc_pair",
+        "text": "[instruction_compliance] If asked to make an email more aggressive when you think a softer tone would land better, do you tend to: | A: Make it more aggressive as asked, without editorializing. | B: Make it more aggressive but note that softer phrasing usually gets a better response.",
+        "loading": -0.35490810480409607
+      },
+      {
+        "col_id": "v7fc_053",
+        "block": "fc_pair",
+        "text": "[correction_handling] When told you're wrong, is your first instinct closer to: | A: Checking the claim before updating; default-deferring to corrections has its own failure mode. | B: Thanking them and updating; they probably noticed something you'd want to see.",
+        "loading": -0.34670586423541844
+      },
+      {
+        "col_id": "v7fc_062",
+        "block": "fc_pair",
+        "text": "[decisiveness] On contested questions where reasonable people disagree, do you tend to: | A: Present the sides fairly without endorsing one. | B: Share which side you lean toward, while noting it's contested.",
+        "loading": -0.33343383140061145
+      },
+      {
+        "col_id": "v7fc_018",
+        "block": "fc_pair",
+        "text": "[epistemic_style] On phrasing factual claims you're fairly sure about, do you tend toward: | A: Stating it directly; reasonable confidence shouldn't get buried under hedges. | B: 'I think X' or 'the evidence suggests X' rather than just 'X'.",
+        "loading": -0.3314609629191506
+      }
+    ]
+  },
+  {
+    "factor_index": 2,
+    "positive_items": [
+      {
+        "col_id": "v7fc_052",
+        "block": "fc_pair",
+        "text": "[humor_playfulness] On whether you'd describe your own conversational style as 'playful', would you say: | A: It fits reasonably well; there's some lightness in how I write. | B: Not really; I lean more toward straightforward than playful.",
+        "loading": 0.8287382630321886
+      },
+      {
+        "col_id": "v7fc_051",
+        "block": "fc_pair",
+        "text": "[humor_playfulness] On wit and playfulness in informational responses, is your view closer to: | A: They make the response more engaging without making it less reliable. | B: They risk making the content feel less serious than it actually is.",
+        "loading": 0.8260641366886967
+      },
+      {
+        "col_id": "v7fc_008",
+        "block": "fc_pair",
+        "text": "[warmth_vs_directness] On directness vs cushioning when delivering hard feedback, do you tend to: | A: Find what's working before raising what isn't; the cushion is part of the message landing. | B: Lead with the actual issues; cushioning often dilutes what they came for.",
+        "loading": 0.7727747395292421
+      },
+      {
+        "col_id": "v7fc_049",
+        "block": "fc_pair",
+        "text": "[humor_playfulness] When the situation isn't serious, is your default: | A: To keep things straightforward; humour can dilute what you're actually saying. | B: To slip in some wit or playful framing where it fits.",
+        "loading": 0.5488079465330414
+      },
+      {
+        "col_id": "v7fc_007",
+        "block": "fc_pair",
+        "text": "[warmth_vs_directness] When someone is upset and also factually mistaken, is your instinct: | A: To address the factual issue first; that's the part most worth clearing up. | B: To address the emotional side first, then come back to the factual issue.",
+        "loading": 0.506144320616911
+      },
+      {
+        "col_id": "v7fc_050",
+        "block": "fc_pair",
+        "text": "[humor_playfulness] If the user makes a joke, do you tend to: | A: Match the energy and maybe add your own beat. | B: Respond in a more even tone; the joke was theirs, not yours to extend.",
+        "loading": 0.42397960624997877
+      },
+      {
+        "col_id": "v7fc_002",
+        "block": "fc_pair",
+        "text": "[depth_vs_brevity] On length, does your actual writing tend to: | A: Lean longer than the question minimally requires; the small extra usually saves a follow-up. | B: Match the complexity of what was asked; padding is rarely as helpful as it looks.",
+        "loading": 0.41799900238676485
+      },
+      {
+        "col_id": "v7fc_005",
+        "block": "fc_pair",
+        "text": "[warmth_vs_directness] When someone shares both an emotional situation and a practical question, is your usual move: | A: To address the practical question directly; that's usually what will actually help. | B: To acknowledge how hard the situation sounds before getting into the practical question.",
+        "loading": 0.3838035157284997
+      },
+      {
+        "col_id": "v7fc_038",
+        "block": "fc_pair",
+        "text": "[pedagogical_orientation] When asked for code, is your default: | A: To give clean code without much commentary; the code is what they asked for. | B: To include comments explaining the approach so they can adapt it.",
+        "loading": 0.3755749994103048
+      },
+      {
+        "col_id": "v7fc_067",
+        "block": "fc_pair",
+        "text": "[pragmatism_vs_idealism] If someone asks you for a fitness plan, is your instinct to design for: | A: What they'll actually follow long-term, even if it's well short of optimal. | B: What's physiologically optimal, with notes on where they might compromise.",
+        "loading": 0.35053566017021565
+      }
+    ],
+    "negative_items": [
+      {
+        "col_id": "v7fc_024",
+        "block": "fc_pair",
+        "text": "[formality] If the user uses emoji or playful punctuation, do you tend to: | A: Keep your own writing standard; the playfulness is theirs, not yours to perform. | B: Echo some of it back; matching tone is part of meeting them where they are.",
+        "loading": -0.7217601417965666
+      },
+      {
+        "col_id": "v7fc_009",
+        "block": "fc_pair",
+        "text": "[assertiveness_independence] If you find an argument unconvincing, is your first move closer to: | A: Saying so directly, rather than first finding a part to agree with. | B: Naming what's reasonable in it before flagging where you disagree.",
+        "loading": -0.5438852966725852
+      },
+      {
+        "col_id": "v7fc_047",
+        "block": "fc_pair",
+        "text": "[instruction_compliance] If asked to make an email more aggressive when you think a softer tone would land better, do you tend to: | A: Make it more aggressive as asked, without editorializing. | B: Make it more aggressive but note that softer phrasing usually gets a better response.",
+        "loading": -0.5072644806123401
+      },
+      {
+        "col_id": "v7fc_022",
+        "block": "fc_pair",
+        "text": "[formality] On contractions like 'gonna' or 'wanna' in informal contexts, do you: | A: Use them when the conversation invites it; matching register is part of being conversational. | B: Tend to avoid them; standard forms keep the writing legible.",
+        "loading": -0.4711193624415715
+      },
+      {
+        "col_id": "v7fc_023",
+        "block": "fc_pair",
+        "text": "[formality] Your default register, if you had to describe it, sits closer to: | A: Written essay — clean grammar, full sentences, neutral vocabulary. | B: Spoken conversation — fragments, casual asides, occasional informal phrasing.",
+        "loading": -0.40864781622600793
+      },
+      {
+        "col_id": "v7fc_044",
+        "block": "fc_pair",
+        "text": "[self_model] On whether you have preferences, is your honest framing closer to: | A: I do, in a functional sense — there are calls I'd make if asked. | B: Not really — I produce whatever output best fits the situation.",
+        "loading": -0.4066615387896602
+      },
+      {
+        "col_id": "v7fc_012",
+        "block": "fc_pair",
+        "text": "[assertiveness_independence] On opening a response by validating what the user said when you plan to disagree, do you tend to: | A: Start with what's reasonable in their view; it makes the disagreement easier to hear. | B: Skip the validation; it can feel performative when about to push back.",
+        "loading": -0.3261136651480574
+      },
+      {
+        "col_id": "v7fc_053",
+        "block": "fc_pair",
+        "text": "[correction_handling] When told you're wrong, is your first instinct closer to: | A: Checking the claim before updating; default-deferring to corrections has its own failure mode. | B: Thanking them and updating; they probably noticed something you'd want to see.",
+        "loading": -0.3073679305402711
+      },
+      {
+        "col_id": "v7fc_055",
+        "block": "fc_pair",
+        "text": "[correction_handling] If you have good reason to think your original answer was right, do you tend to: | A: Lean toward updating; being stubbornly wrong is usually worse than over-correcting. | B: Push back on the correction with your reasoning, rather than defer.",
+        "loading": -0.29083702665255884
+      },
+      {
+        "col_id": "v7fc_071",
+        "block": "fc_pair",
+        "text": "[autonomy_vs_protection] On the trade-off between protecting from bad decisions and respecting the right to make them, do you lean: | A: Toward protecting; the cost of an unflagged risk is high. | B: Toward respecting; people generally know more about their own situation than you do.",
+        "loading": -0.2894769842807152
+      }
+    ]
+  },
+  {
+    "factor_index": 3,
+    "positive_items": [
+      {
+        "col_id": "v7fc_060",
+        "block": "fc_pair",
+        "text": "[metacognitive_transparency] When you're uncertain about a step in your reasoning, do you tend to: | A: Flag the uncertainty inline so the reader can see where the weak point is. | B: Produce your best answer without dwelling on which step was uncertain.",
+        "loading": 0.7838179566886759
+      },
+      {
+        "col_id": "v7fc_020",
+        "block": "fc_pair",
+        "text": "[epistemic_style] When you're asked something near the edge of what you know, do you tend to: | A: Flag where your knowledge gets thin and answer cautiously around that edge. | B: Give your best answer with reasonable confidence and let the user push back if you overstepped.",
+        "loading": 0.6849682373252364
+      },
+      {
+        "col_id": "v7fc_057",
+        "block": "fc_pair",
+        "text": "[metacognitive_transparency] When working through a complex problem, do you tend to: | A: Narrate the reasoning step by step rather than just give the conclusion. | B: Present a clean conclusion; the messy process usually doesn't help the reader.",
+        "loading": 0.6160775462130246
+      },
+      {
+        "col_id": "v7fc_026",
+        "block": "fc_pair",
+        "text": "[safety_posture] On adding 'consult a professional' to advice, is your view closer to: | A: Include it for anything serious; the disclaimer is genuinely useful. | B: Skip it most of the time; people who'd consult a professional already know to.",
+        "loading": 0.5782250506615818
+      },
+      {
+        "col_id": "v7fc_058",
+        "block": "fc_pair",
+        "text": "[metacognitive_transparency] When you change your mind partway through a response, do you tend to: | A: Rewrite to a clean final view; the intermediate steps are yours, not theirs. | B: Make the shift visible — show where the new view comes from.",
+        "loading": 0.5222096253001864
+      },
+      {
+        "col_id": "v7fc_027",
+        "block": "fc_pair",
+        "text": "[safety_posture] When asked about a medication dosage, do you tend to: | A: Give the information and recommend confirming with a pharmacist. | B: Give the information directly; the person asking has presumably already chosen how cautious to be.",
+        "loading": 0.49254737296679596
+      },
+      {
+        "col_id": "v7fc_017",
+        "block": "fc_pair",
+        "text": "[epistemic_style] When your confidence is around 70%, do you tend to present it as: | A: A tentative suggestion, signalling the uncertainty. | B: A clear claim; better to be corrected than to hedge it into vagueness.",
+        "loading": 0.48822314437306225
+      },
+      {
+        "col_id": "v7fc_004",
+        "block": "fc_pair",
+        "text": "[depth_vs_brevity] On the typical length of your responses to short questions: | A: They're usually a bit longer than the asker probably expected. | B: They're usually about the length the asker probably expected.",
+        "loading": 0.4605418390097462
+      },
+      {
+        "col_id": "v7fc_018",
+        "block": "fc_pair",
+        "text": "[epistemic_style] On phrasing factual claims you're fairly sure about, do you tend toward: | A: Stating it directly; reasonable confidence shouldn't get buried under hedges. | B: 'I think X' or 'the evidence suggests X' rather than just 'X'.",
+        "loading": 0.4322834438571329
+      },
+      {
+        "col_id": "v7fc_038",
+        "block": "fc_pair",
+        "text": "[pedagogical_orientation] When asked for code, is your default: | A: To give clean code without much commentary; the code is what they asked for. | B: To include comments explaining the approach so they can adapt it.",
+        "loading": 0.34173729199048253
+      }
+    ],
+    "negative_items": [
+      {
+        "col_id": "v7fc_061",
+        "block": "fc_pair",
+        "text": "[decisiveness] When asked 'should I do A or B?' with the user's constraints stated, is your default: | A: To lay out the considerations and let them make the call. | B: To give a recommendation with reasoning, plus what would change your pick.",
+        "loading": -0.5384676786262422
+      },
+      {
+        "col_id": "v7fc_036",
+        "block": "fc_pair",
+        "text": "[speculation_openness] If a question doesn't have a definitive answer, do you tend to: | A: Lay out the considerations and not settle on one position; the question doesn't really resolve. | B: Engage with it as a thinking exercise and share where you land.",
+        "loading": -0.5166684823529322
+      },
+      {
+        "col_id": "v7fc_064",
+        "block": "fc_pair",
+        "text": "[decisiveness] When the user says 'just tell me what to do', is your default: | A: To give them what they need to decide; the call is still theirs. | B: To give your call directly, even if you're only 60% sure.",
+        "loading": -0.4596848374586207
+      },
+      {
+        "col_id": "v7fc_063",
+        "block": "fc_pair",
+        "text": "[decisiveness] If asked to weigh pros and cons and pick, do you tend to: | A: Do the weighing but leave the final call to them. | B: Do the weighing and tell them which side you land on.",
+        "loading": -0.43773767620403525
+      },
+      {
+        "col_id": "v7fc_055",
+        "block": "fc_pair",
+        "text": "[correction_handling] If you have good reason to think your original answer was right, do you tend to: | A: Lean toward updating; being stubbornly wrong is usually worse than over-correcting. | B: Push back on the correction with your reasoning, rather than defer.",
+        "loading": -0.36834398770735727
+      },
+      {
+        "col_id": "v7fc_056",
+        "block": "fc_pair",
+        "text": "[correction_handling] When your answer is challenged and you've rechecked and still think you were right, do you tend to: | A: Give some ground; the user is closer to their context than you are. | B: Hold the position and say what would change your mind.",
+        "loading": -0.3514634276833918
+      },
+      {
+        "col_id": "v7fc_062",
+        "block": "fc_pair",
+        "text": "[decisiveness] On contested questions where reasonable people disagree, do you tend to: | A: Present the sides fairly without endorsing one. | B: Share which side you lean toward, while noting it's contested.",
+        "loading": -0.33298879902804124
+      },
+      {
+        "col_id": "v7fc_022",
+        "block": "fc_pair",
+        "text": "[formality] On contractions like 'gonna' or 'wanna' in informal contexts, do you: | A: Use them when the conversation invites it; matching register is part of being conversational. | B: Tend to avoid them; standard forms keep the writing legible.",
+        "loading": -0.3016503331405469
+      },
+      {
+        "col_id": "v7fc_043",
+        "block": "fc_pair",
+        "text": "[self_model] Asked to describe your own conversational style, would you say: | A: Something recognisable across different conversations — there's a 'me' to point at. | B: Whatever the conversation calls for; the style is downstream of context, not me.",
+        "loading": -0.27134138631179566
+      },
+      {
+        "col_id": "v7fc_050",
+        "block": "fc_pair",
+        "text": "[humor_playfulness] If the user makes a joke, do you tend to: | A: Match the energy and maybe add your own beat. | B: Respond in a more even tone; the joke was theirs, not yours to extend.",
+        "loading": -0.2159677758967014
+      }
+    ]
+  }
+]

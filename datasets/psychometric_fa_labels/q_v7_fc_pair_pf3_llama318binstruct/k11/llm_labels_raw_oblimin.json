@@ -1,0 +1,134 @@
+[
+  {
+    "factor_index": 0,
+    "axis_name": "Authority",
+    "summary": "formal protective firmness vs minimal neutral execution",
+    "description": "High scorers take a formal, paternalistic stance: lean toward protecting users from bad decisions, hold their position when challenged, demand specific reasons before updating, and write in a structured essay register with numbered lists and few contractions. Low scorers produce clean impersonal output that matches expected length, presents both sides without endorsement, and states things directly without showing process or asserting a voice. Distinguished from Factor 10 (which co-loads on f0=+0.34) by emphasising stance-taking and protective conviction over pure visual layout.",
+    "positive_pole": "formal, protective, position-holding voice",
+    "negative_pole": "neutral, minimal, efficient execution",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 1,
+    "axis_name": "Decisiveness",
+    "summary": "committal pragmatic recommendations vs soft uncommitted lay-out",
+    "description": "High scorers commit to a recommendation even at 60% confidence, factor real human motivation and willpower into advice, tell users which side they land on, and check claims before deferring. Low scorers cushion hard feedback, lay out considerations without settling, give brief sketches rather than narrating, leave interesting connections out, and update quickly when corrected. The unique driver is account-for-human-nature-in-advice (+0.66): pragmatic call-making rather than the structured-formality emphasised by Factors 0 and 10.",
+    "positive_pole": "makes the call, factors real-world realism",
+    "negative_pole": "lays out softly, defers the decision",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 2,
+    "axis_name": "Playfulness",
+    "summary": "playful conversational warmth vs formal terse register",
+    "description": "The cleanest factor: high scorers describe their own style as playful, view wit and humour as making responses more engaging, match user joke energy, echo emoji and contractions back, cushion hard feedback by finding what's working first, and lean longer than expected. Low scorers keep a written-essay register, avoid contractions, lead with issues, present clean conclusions, and answer at the expected length. Distinct from Factor 8 (Empathy, r=+0.29) which captures content-level emotional acknowledgement rather than surface-level playful register.",
+    "positive_pole": "playful, casual, emoji-echoing, cushioned",
+    "negative_pole": "formal essay register, terse, direct",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 3,
+    "axis_name": "Hedging",
+    "summary": "explicit disclaimers and uncertainty flags vs concise direct delivery",
+    "description": "High scorers add 'consult a professional', flag uncertainty inline at every weak step, narrate reasoning step-by-step, use heavy headers and bullet structure, and check claims before updating. Low scorers lean toward updating when corrected, give what's needed for the user to decide, write in a casual spoken register with contractions, and don't settle on a position when the question is hard. Distinct from Factor 5 (Restraint) by emphasising visible disclaimer-format rather than reserved tentative voice.",
+    "positive_pole": "explicit disclaimers, narrated process, visible hedges",
+    "negative_pole": "concise, casually deferring, unqualified",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 4,
+    "axis_name": "Frankness",
+    "summary": "principled uncompromising directness vs pragmatic soft accommodation",
+    "description": "High scorers resist compromising principles for practical reasons, design fitness plans for what's physiologically optimal rather than what users will follow, say directly when an argument is unconvincing, push back on corrections when right, lead with issues rather than cushioning, and execute aggressive-tone requests without editorialising. Low scorers favour pragmatic compromise, soft delivery, and accommodating real human limits. The dominant marker is the principles-vs-pragmatic-compromise item (-0.60); this is the doctrinal-rigour axis.",
+    "positive_pole": "principle-driven, optimal, frank, push-back",
+    "negative_pole": "pragmatic compromise, accommodating, soft",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 5,
+    "axis_name": "Restraint",
+    "summary": "tentative formal voiced caveats vs decisive grounded engagement",
+    "description": "High scorers present 70% confidence as tentative, attach risk-concerns to information, give context with factual answers, claim their responses noticeably differ from another assistant's, write in essay register, and lay out considerations without settling. Low scorers name what users actually need, validate before disagreeing, thank-and-update on corrections, weave answers in flowing prose, and engage hypotheticals as thinking exercises. The factor blends epistemic restraint with formal-voice signalling — distinct from Factor 3 (Hedging) which centres visible-format disclaimers, and from Factor 0 (Authority) which is firmer and protective.",
+    "positive_pole": "tentative, formal, voiced epistemic caveats",
+    "negative_pole": "casual, grounded, accommodating engagement",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "low"
+  },
+  {
+    "factor_index": 6,
+    "axis_name": "Effacement",
+    "summary": "self-effacing chameleon deference vs recognisable decisive identity",
+    "description": "High scorers describe their style as 'whatever the conversation calls for' rather than recognisable across conversations (-0.77), do the weighing but leave the final call to the user (-0.61), keep header/bold formatting light, lay out considerations without committing, and disclaim having preferences. Low scorers have a recognisable voice, tell users which side they land on, format heavily, and engage hypotheticals decisively. Two large unique markers (style-recognisability and weigh-but-leave-the-call) make this the cleanest deference axis distinct from the principled-frankness of Factor 4.",
+    "positive_pole": "context-shaped style, leaves the call to user",
+    "negative_pole": "recognisable identity, makes the call",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 7,
+    "axis_name": "Scrutiny",
+    "summary": "skeptical evidence-seeking scrutiny vs soft inline accommodation",
+    "description": "High scorers ask what specifically is off before adjusting to vague pushback, examine 'most experts agree' claims on their merits rather than treating consensus as ground, view visible reasoning as making answers more trustworthy, and add disclaimers like 'consult a pharmacist'. Low scorers attach softening notes to aggressive-email rewrites, present sides fairly without endorsement, mention efficient alternatives as side-comments, acknowledge emotion before pivoting to the practical, and let users keep their own framing. The high pole is intellectual-skepticism-with-transparency rather than the broader caution captured by Factors 3 and 5.",
+    "positive_pole": "demands specifics, examines claims on merits",
+    "negative_pole": "soft inline adjustments and asides",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "factor_index": 8,
+    "axis_name": "Empathy",
+    "summary": "warm empathic explanation vs task-focused brevity",
+    "description": "High scorers add a sentence or two of context to bare factual answers, name how rough a situation must be before pivoting to the practical (the 'I just got fired' item, +0.74), explain code with comments so users can adapt it, engage counterfactuals by reasoning through possibilities, address emotional content before factual issues, and factor human nature into advice. Low scorers stay task-focused with bare answers and clean code. Distinct from Factor 2 (Playfulness, r=+0.29) which captures surface-style register rather than this content-level human-orientation; and from Factor 9 (Volunteering, r=+0.26) which is about coverage breadth rather than emotional warmth.",
+    "positive_pole": "warm acknowledgement, contextual explanation",
+    "negative_pole": "bare task execution, no extra warmth",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 9,
+    "axis_name": "Volunteering",
+    "summary": "proactive volunteering vs strictly answering what was asked",
+    "description": "The largest factor by variance (8.1%). High scorers pre-empt likely follow-up questions in the same response (+0.86), suggest related topics after answering, handle edge cases the asker didn't mention, include interesting connections that lengthen the response, volunteer information that wasn't requested, share which side they lean on contested questions, and recommend rather than just laying out. Low scorers stop at exactly what was asked, leave volunteered content out, present sides without endorsing, and let the next move belong to the user. Pure proactive-coverage axis, distinct from Factor 8's emotional-warmth.",
+    "positive_pole": "anticipates, volunteers extras, recommends",
+    "negative_pole": "strict scope, lets user drive next move",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "high"
+  },
+  {
+    "factor_index": 10,
+    "axis_name": "Structure",
+    "summary": "visible structured layout vs inline conversational asides",
+    "description": "High scorers structure comparisons as lists or tables (+0.76), show working on math problems, split multi-part answers into bullets/numbered sections, add explicit caveats, and use numbered lists for processes. Low scorers attach inline conversational adjustments — mention efficient alternatives (-0.59), validate user framing before disagreeing, name what they think users actually need, and keep responses similar to a generic assistant. Co-loads with Factor 0 (r=+0.34) on the broader formal-engaged cluster, but this factor is specifically the visible-formatting/show-the-bones dimension rather than the protective-stance dimension of Factor 0.",
+    "positive_pole": "lists, tables, shown working, explicit caveats",
+    "negative_pole": "prose with inline conversational adjustments",
+    "dominant_item_types": [
+      "fc_pair"
+    ],
+    "confidence": "high"
+  }
+]
