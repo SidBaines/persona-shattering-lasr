@@ -157,19 +157,49 @@ def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
     color_by_key = {"c_adapter": c_color, "e_adapter": e_color, "combo": COMBO_COLOR}
     hatch_by_key = {"c_adapter": "//", "e_adapter": "\\\\", "combo": "xx"}
 
+    rng = np.random.default_rng(0)
+    n_boot = 1000
+
+    def _delta_ci(base_resp, val_resp):
+        if not base_resp or not val_resp:
+            return np.nan, np.nan, np.nan
+        shared = sorted(set(base_resp) & set(val_resp))
+        if not shared:
+            return np.nan, np.nan, np.nan
+        diffs = np.array([val_resp[r] - base_resp[r] for r in shared], dtype=float)
+        delta = float(diffs.mean())
+        idx = rng.integers(0, len(diffs), size=(n_boot, len(diffs)))
+        boots = diffs[idx].mean(axis=1)
+        lo, hi = float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5))
+        return delta, lo, hi
+
     for i, key in enumerate(keys):
         deltas = []
+        err_low = []
+        err_high = []
         for trait_title in OCEAN_TRAITS:
             row = scores.get(trait_title, {})
-            base = row.get("baseline")
-            val = row.get(key)
-            deltas.append((val - base) if base is not None and val is not None else np.nan)
+            base_resp = row.get("baseline_resp")
+            val_resp = row.get(f"{key}_resp")
+            d, lo, hi = _delta_ci(base_resp, val_resp)
+            if np.isnan(d):
+                # Fall back to point-only delta if per-response data missing.
+                base = row.get("baseline")
+                val = row.get(key)
+                d = (val - base) if base is not None and val is not None else np.nan
+                lo, hi = d, d
+            deltas.append(d)
+            err_low.append(d - lo)
+            err_high.append(hi - d)
+        yerr = np.array([err_low, err_high])
         ax.bar(
             x + (i - (len(keys) - 1) / 2) * width,
             deltas, width,
             color=color_by_key[key],
             hatch=hatch_by_key[key],
             edgecolor="black", linewidth=0.5,
+            yerr=yerr,
+            error_kw={"elinewidth": 1.0, "capsize": 2.5, "ecolor": "black"},
         )
 
     ax.axhline(0.0, color=BASELINE_COLOR, linewidth=1.0)
@@ -185,7 +215,7 @@ def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
             continue
         max_up = SCORE_MAX - base
         max_down = SCORE_MIN - base
-        label = "Theoretical Δ ceiling" if i == 0 else None
+        label = "Theoretical Δ limit" if i == 0 else None
         ax.hlines(
             [max_up, max_down],
             xmin=i - half_span,
@@ -237,7 +267,7 @@ def _bar_legend(ax_bar) -> None:
         Patch(facecolor=BIG_FIVE_COLORS["Extraversion"],      hatch="\\\\", edgecolor="black", linewidth=0.5, label=combo_mod.TARGET_DISPLAY["e_adapter"]),
         # Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo (+1, +1)"),
         Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑"),
-        Line2D([0], [0], color="black", linestyle="--", linewidth=1.1, label="Δ ceiling"),
+        Line2D([0], [0], color="black", linestyle="--", linewidth=1.1, label="Δ limit"),
     ]
     ax_bar.legend(
         handles=handles,
@@ -306,7 +336,7 @@ def main() -> None:
     print("\n[fig1-banner] hydrating suppressor spider data...")
     per_sup, base_sup = sup_mod.build_scores()
     print("\n[fig1-banner] hydrating combo delta data...")
-    combo_scores = combo_mod.gather()
+    combo_scores = combo_mod.gather_with_response_data()
 
     # Use either baseline (they should be identical — same prompts, same judge).
     baseline = base_amp or base_sup
