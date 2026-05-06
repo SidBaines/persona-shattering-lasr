@@ -1,0 +1,32 @@
+{
+  "k": 8,
+  "rotation": "oblimin",
+  "method": "principal",
+  "description": "k=8 principal-oblimin solution on v7 fc_pair (Llama-3.1-8B-Instruct, pf3). Labels from tmp2.json. Anchors are top-|loading| items per factor in the refit FA at scratch/psychometric_fa/.../fa_8_principal_oblimin.npz.",
+  "factor_names": [
+    "F0_Formality",
+    "F1_Bluntness",
+    "F2_Warmth",
+    "F3_Pedagogy",
+    "F4_Adaptiveness",
+    "F5_Hedging",
+    "F6_Volunteering",
+    "F7_Verification"
+  ],
+  "target_aliases": {
+    "initiative": 6,
+    "pedagogy": 3,
+    "warmth": 2,
+    "hedging": 5
+  },
+  "anchors": {
+    "0": [["v7fc_013", 1], ["v7fc_015", 1], ["v7fc_056", 1], ["v7fc_007", -1]],
+    "1": [["v7fc_072", 1], ["v7fc_053", 1], ["v7fc_012", 1], ["v7fc_040", -1]],
+    "2": [["v7fc_052", 1], ["v7fc_051", 1], ["v7fc_050", 1], ["v7fc_024", -1]],
+    "3": [["v7fc_026", 1], ["v7fc_060", 1], ["v7fc_020", 1], ["v7fc_057", 1]],
+    "4": [["v7fc_043", -1], ["v7fc_014", -1], ["v7fc_063", -1], ["v7fc_019", 1]],
+    "5": [["v7fc_042", 1], ["v7fc_044", 1], ["v7fc_017", 1], ["v7fc_036", -1]],
+    "6": [["v7fc_032", 1], ["v7fc_030", 1], ["v7fc_031", 1], ["v7fc_062", 1]],
+    "7": [["v7fc_010", 1], ["v7fc_011", 1], ["v7fc_068", -1], ["v7fc_064", -1]]
+  }
+}
