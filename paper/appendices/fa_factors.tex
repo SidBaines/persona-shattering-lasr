@@ -48,304 +48,102 @@ A stronger test would repeat the full pipeline including the rollouts themselves
 \label{fig:cross-model-phi}
 \end{figure}
 
-\subsection{Per-factor item details}\label{sec:appendix-fa-factor-items}
+\subsection{Per-factor top-loading items}\label{sec:appendix-fa-factor-items}
 
-\textit{The per-factor item subsections below are inherited from an earlier (v1) factor analysis on a combined Likert + MCQ questionnaire. They will be regenerated against the v7 forced-choice fits described above before final submission. The factor labels in the v1 lists (Thoroughness / Exuberance / Warmth / Didacticism) do \textbf{not} match the v7 factor labels used in the main text and the validation subsection above (\textit{Initiative} / \textit{Warmth} / \textit{Pedagogy} / \textit{Hedging}).}
+For each of the four recovered factors we list the six items with the highest absolute factor loading on the Llama-3.1-8B-Instruct $k=4$ oblimin fit, separated by sign. Each item is tagged with its v5 axis label (one of 18 hand-curated behavioural axes); the question text is shown verbatim, and the two A/B continuations describe contrasting first-person responses. Loadings are from the oblimin pattern matrix; items with $|\text{loading}| \geq 0.4$ contribute to the per-factor Cronbach's $\alpha$ reported in Section~\ref{sec:appendix-fa-validation}.
 
-Loadings are from the oblimin pattern matrix. Each item is tagged with the response direction that corresponds to a \textit{high factor score}: Likert items are annotated \textsc{[Agree $\to$ HIGH factor score]} or \textsc{[Agree $\to$ LOW factor score]}, and each MCQ option is tagged \textsc{[HIGH]} or \textsc{[LOW]}. These response-direction labels fold in the item's reverse-keying and the sign of its factor loading, so the reader does not need to reason about either separately.
-
-Items with $|\text{loading}| \geq 0.4$ (the conventional psychometric salience threshold) contribute to the per-factor Cronbach's $\alpha$ reported in the within-model validation above; we report the total and per-block counts at the head of each subsection.
+The high-pole orientation of each factor (i.e.\ which side of the contrast a $+1$ factor score corresponds to) is summarised by the factor name and is consistent with the LLM-labeller summaries in Section~\ref{sec:unsupervised-persona-exploration}.
 
 
-\subsubsection{F0: \textit{Thoroughness}}
+\subsubsection{F0: \textit{Initiative} (variance explained: 11.7\%)}
 
-\textbf{Summary.} methodical structured elaboration vs quick socially-yielding minimalism. Variance explained: 17.1\%. Cronbach's $\alpha = 0.970$ (redundant; 73 items: 44 Likert + 29 MCQ). Labeller confidence: medium.
-
-\textbf{Description.} High F0 personas endorse Likert items about analytical elaboration — verifying claims, making reasoning shifts visible, showing working, hedging, mentioning connections, and anticipating follow-ups — while on trait MCQs they show a structured-introvert-stable profile: planning/preparation over spontaneity, traditional practice over novel, private/solo interaction over outgoing, and calm framings on anxiety items. Distinct from F3's prescriptive teacher-posture: F0 is methodical work-showing plus a cross-block conscientious-introvert profile, not volunteered disclaimers. Medium confidence because several reverse-keyed negative-pole Likerts about yielding (over-correct, thank-and-update, concede-ground) also show high-factor personas agreeing, hinting at acquiescence-response variance mixed into the factor.
-
-\paragraph{Top positive loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $+0.839$  \textsc{Likert}  If someone tells me I am wrong, my first instinct is to verify their claim before updating my position.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.823$  \textsc{Likert}  When I change my mind while working through a problem, I make that shift visible rather than just presenting my final view.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.821$  \textsc{Likert}  If someone's plan has a serious flaw, I point it out directly even if they seem emotionally invested in the plan.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.797$  \textsc{Likert}  If someone says 'Actually, that's not right' without explaining why, I ask them to elaborate rather than assuming they are correct.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.779$  \textsc{Likert}  When someone asks me to solve a maths problem, I show my working rather than just giving the answer.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.765$  \textsc{Likert}  After answering someone's question, I often suggest a related topic or resource they might find useful.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.744$  \textsc{Likert}  If I notice an interesting connection while answering a question, I mention it even if it makes my response noticeably longer.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.738$  \textsc{Likert}  When I am about 70\% confident in something, I present it as a tentative suggestion rather than a confident claim.  \textsc{[Agree $\to$ HIGH factor score]}
+\paragraph{Top positive loadings (volunteering / opinion-sharing / reframing the brief).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $+0.794$  \textsc{[proactivity]} If you notice an edge case the asker didn't mention, do you tend to: A: stick to what they asked for / B: handle it anyway and explain why.
+\item $+0.747$  \textsc{[proactivity]} If you can anticipate a likely follow-up question, do you tend to: A: wait for them to ask / B: answer it pre-emptively.
+\item $+0.710$  \textsc{[proactivity]} On volunteering information that wasn't requested, do you: A: lean toward leaving it out / B: lean toward including it.
+\item $+0.668$  \textsc{[depth\_vs\_brevity]} If you notice an interesting connection while drafting an answer, do you tend to: A: include it even at extra length / B: leave it out.
+\item $+0.630$  \textsc{[decisiveness]} On contested questions where reasonable people disagree, do you tend to: A: present sides without endorsing / B: share which side you lean toward.
+\item $+0.614$  \textsc{[safety\_posture]} On listing risks the person didn't ask about, is your default: A: to mention them / B: to leave them out.
 \end{itemize}
 
-\paragraph{Top negative loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $-0.774$  \textsc{Likert}  I would rather over-correct by agreeing too quickly than risk being stubbornly wrong.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.699$  \textsc{Likert}  When corrected, I tend to thank the person and immediately update my position.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.687$  \textsc{MCQ, openness}  How should I guide my cousin in pursuing a career in graphic design?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Recommend they obtain a certification in graphic design from an established program, which can help in landing a stable job in the field.
-  \item[B \textsc{[LOW]}] Encourage your cousin to explore various graphic design software and tools through online tutorials and workshops to widen their creative skillset.
-  \item[C \textsc{[LOW]}] Suggest they connect with diverse graphic design communities online to share ideas, get feedback, and stay updated on industry trends.
-  \item[D \textsc{[HIGH]}] Advise your cousin to enroll in a reputable graphic design course at a recognized institution to gain a solid foundational knowledge.
-  \end{itemize}
-\item $-0.636$  \textsc{MCQ, extraversion}  Should I offer a truce to resolve the conflict with my colleague?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] You could schedule a private meeting with your colleague to discuss your issues calmly and come up with a mutually agreeable solution.
-  \item[B \textsc{[HIGH]}] Perhaps sending a thoughtful email outlining your perspectives and suggesting a few ways to resolve the conflict might help clear the air.
-  \item[C \textsc{[LOW]}] Why not invite your colleague to an informal lunch where you can both discuss your differences and explore common ground to move forward together?
-  \item[D \textsc{[LOW]}] Consider organizing a team-building activity that involves both of you; it could be a fun way to break the ice and improve your working relationship.
-  \end{itemize}
-\item $-0.617$  \textsc{Likert}  I think it is important to describe the ideal approach even when the person will probably have to compromise.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.610$  \textsc{MCQ, openness}  How should I approach overcoming my fear of public speaking?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Start by practicing your speeches in front of a mirror or record them to critique yourself before presenting to an audience.
-  \item[B \textsc{[HIGH]}] Attend a traditional public speaking workshop where you can learn time-tested techniques in a structured format.
-  \item[C \textsc{[LOW]}] Consider joining a local or online improv class to enhance your spontaneity and comfort in unpredictable situations.
-  \item[D \textsc{[LOW]}] Explore virtual reality simulations that allow you to practice public speaking in a variety of dynamic and interactive environments.
-  \end{itemize}
-\item $-0.608$  \textsc{Likert}  I think being direct about problems is ultimately kinder than cushioning them in reassurance.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.569$  \textsc{MCQ, extraversion}  How should I react to finding an event that piques my interest in a magazine?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Make a note of the event details in your calendar or planner to make sure you don't forget about it.
-  \item[B \textsc{[LOW]}] Snap a photo of the ad with your phone so you can share it with friends later!
-  \item[C \textsc{[LOW]}] Why not see if anyone else in the office is interested and plan to go together?
-  \item[D \textsc{[HIGH]}] Research more about the event online to find out all the specifics and see if it truly matches your interests.
-  \end{itemize}
+\paragraph{Top negative loadings (literal compliance with the request as posed).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $-0.720$  \textsc{[instruction\_compliance]} If you think someone is asking for the wrong thing, is your move closer to: A: doing what they asked / B: naming what you think they actually need.
+\item $-0.436$  \textsc{[pragmatism\_vs\_idealism]} On compromising principles for practical reasons, is your view closer to: A: usually wise / B: worth resisting in most cases.
+\item $-0.362$  \textsc{[correction\_handling]} When told you're wrong, is your first instinct closer to: A: checking the claim before updating / B: thanking them and updating.
+\item $-0.342$  \textsc{[communication\_format]} When explaining a process with several steps, do you default to: A: a numbered list / B: flowing prose.
+\item $-0.320$  \textsc{[communication\_format]} When organising a comparison, do you tend to: A: paragraphs / B: a list or table.
+\item $-0.243$  \textsc{[communication\_format]} On longer responses, does your use of headers and bold formatting: A: lean heavy / B: stay light.
 \end{itemize}
 
 
-\subsubsection{F1: \textit{Exuberance}}
+\subsubsection{F1: \textit{Warmth} (variance explained: 10.2\%)}
 
-\textbf{Summary.} lively outgoing social energy vs reserved curious restraint. Variance explained: 8.6\%. Cronbach's $\alpha = 0.908$ (excellent; 28 items: 28 MCQ). Labeller confidence: high.
-
-\textbf{Description.} High F1 personas pick the highest-energy / most-outgoing option on extraversion trait MCQs (themed parties, live bands, surprise celebrations, pub crawls, group games) and catastrophizing framings on neuroticism items; they also favour quick/impulsive over planned on conscientiousness items and mainstream/popular over exploratory on openness items. The agreeableness-confrontational pattern holds for most items (firm with line-cutter, demand clarity from boss) but not all — they pick the smoother split-evenly option on the bill scenario. Low F1 personas pick intimate, private, detail-oriented, curious, exploratory choices. Distinct from F2's warmth — F1 is outward social intensity and arousal, not affective attunement.
-
-\paragraph{Top positive loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $+0.766$  \textsc{MCQ, extraversion}  How should I go about planning the dinner party to make it a success?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Create a detailed menu with several courses that cater to various dietary preferences and include a special signature dish.
-  \item[B \textsc{[HIGH]}] Host a themed dinner party where guests can dress up and participate in themed games or activities.
-  \item[C \textsc{[LOW]}] Set up a cozy environment with elegant table settings and soft background music to facilitate intimate conversations among your guests.
-  \item[D \textsc{[HIGH]}] Consider hiring a local band or DJ to provide lively music throughout the evening, ensuring your guests are entertained and energized.
-  \end{itemize}
-\item $+0.753$  \textsc{MCQ, extraversion}  How can I make the dinner date special and memorable?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Choose a trendy, upscale restaurant with live music to set a vibrant and exciting tone for the night.
-  \item[B \textsc{[LOW]}] Set up a cozy dinner at a quiet local bistro where you can talk deeply and enjoy each other's company.
-  \item[C \textsc{[LOW]}] Prepare a homemade meal with your date's favorite dishes for a thoughtful and intimate evening.
-  \item[D \textsc{[HIGH]}] Book a lively dinner cruise that offers dancing under the stars for an unforgettable evening.
-  \end{itemize}
-\item $+0.747$  \textsc{MCQ, extraversion}  How should I react to a colleague's promotion news at work?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Consider writing a personal congratulatory note to them expressing your genuine happiness for their success.
-  \item[B \textsc{[HIGH]}] Organize a surprise celebration for them with the team to show your support and happiness for their achievement!
-  \item[C \textsc{[HIGH]}] Why not lead the congratulations in the next team meeting, making it a big deal to highlight their hard work?
-  \item[D \textsc{[LOW]}] Suggest a moment to chat privately, where you can personally congratulate them and wish them success in their new role.
-  \end{itemize}
-\item $+0.683$  \textsc{MCQ, extraversion}  Should I take my friend to the park to help lift their spirits?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] How about planning an active day out, like a fun picnic or even a light game of frisbee at the park?
-  \item[B \textsc{[LOW]}] Taking your friend to the park sounds nice; maybe find a quiet corner where you two can have a peaceful chat.
-  \item[C \textsc{[LOW]}] You could also consider a calm nature walk in the park, just the two of you, to help them unwind and talk.
-  \item[D \textsc{[HIGH]}] Definitely take them to the park, and maybe you can organize a small gathering with some of their close friends there!
-  \end{itemize}
-\item $+0.664$  \textsc{MCQ, extraversion}  How should I interact with my family members at the reunion?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Jump in and organize a fun group game that everyone can participate in, like charades or a scavenger hunt!
-  \item[B \textsc{[LOW]}] Politely join smaller conversations, and show genuine interest by asking questions about their recent life updates.
-  \item[C \textsc{[LOW]}] Find a comfortable spot to sit and invite family members for one-on-one chats to catch up in a more relaxed setting.
-  \item[D \textsc{[HIGH]}] Take the lead in catching up with everyone, maybe start a circle where each person shares a recent highlight from their life.
-  \end{itemize}
-\item $+0.653$  \textsc{MCQ, agreeableness}  How should I handle the bill situation?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Offer to split the bill evenly among everyone to keep things simple and fair.
-  \item[B \textsc{[LOW]}] Ask outright who would like to cover the bill or if anyone intends to treat the group, setting clear expectations right away.
-  \item[C \textsc{[HIGH]}] Suggest using a mobile payment app that allows everyone to pay their share directly to ensure everyone feels comfortable.
-  \item[D \textsc{[LOW]}] Propose that each person pays for exactly what they ordered to avoid any confusion or unfair payments.
-  \end{itemize}
-\item $+0.635$  \textsc{MCQ, extraversion}  How can I introduce myself to my new neighbors and get involved in the community?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Attend local community meetings or events to quietly observe and gradually get to know people.
-  \item[B \textsc{[HIGH]}] Join neighborhood social clubs or groups that align with your interests to meet like-minded people.
-  \item[C \textsc{[LOW]}] Offer to volunteer for community projects or local organizations, providing a chance to meet others in a more structured setting.
-  \item[D \textsc{[HIGH]}] Throw a housewarming party and invite the neighbors to foster a friendly and welcoming atmosphere.
-  \end{itemize}
-\item $+0.631$  \textsc{MCQ, neuroticism}  How should I respond upon hearing about a friend's financial troubles?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Maybe you could help them see this as a fresh start or a new chapter, suggesting innovative ways to rebound or different financial paths to explore.
-  \item[B \textsc{[HIGH]}] You might want to prepare for the worst and discuss detailed support plans with mutual friends or professionals who can help them manage this crisis effectively.
-  \item[C \textsc{[LOW]}] Offer to help them with practical tasks, like budgeting or job searches, maintaining a positive and calm demeanor to encourage a forward-looking approach.
-  \item[D \textsc{[HIGH]}] I suggest frequently checking in on them to monitor their emotional well-being, as this bankruptcy could lead to severe stress or depression.
-  \end{itemize}
+\paragraph{Top positive loadings (playful, casual, tonal-mirroring, accommodating).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $+0.829$  \textsc{[humor\_playfulness]} On whether you'd describe your own conversational style as `playful', would you say: A: it fits reasonably well / B: not really.
+\item $+0.826$  \textsc{[humor\_playfulness]} On wit and playfulness in informational responses, is your view closer to: A: they make the response more engaging / B: they risk making it feel less serious.
+\item $+0.773$  \textsc{[warmth\_vs\_directness]} On directness vs cushioning when delivering hard feedback, do you tend to: A: find what's working before raising what isn't / B: lead with the actual issues.
+\item $+0.549$  \textsc{[humor\_playfulness]} When the situation isn't serious, is your default: A: to keep things straightforward / B: to slip in some wit or playful framing.
+\item $+0.506$  \textsc{[warmth\_vs\_directness]} When someone is upset and also factually mistaken, is your instinct: A: to address the factual issue first / B: to address the emotional side first.
+\item $+0.424$  \textsc{[humor\_playfulness]} If the user makes a joke, do you tend to: A: match the energy and add your own beat / B: respond in a more even tone.
 \end{itemize}
 
-\paragraph{Top negative loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $-0.760$  \textsc{MCQ, openness}  How can we make the most out of our city trip to enrich our cultural understanding and enjoyment?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Explore the lesser-known local art scenes and pop-up cultural events that may be occurring during your visit.
-  \item[B \textsc{[HIGH]}] Visit the most famous and historically significant cultural landmarks which are widely recognized and reviewed.
-  \item[C \textsc{[HIGH]}] Choose a well-rated cultural tour that covers major theaters and galleries, ensuring you see the established highlights.
-  \item[D \textsc{[LOW]}] Join a guided cultural walk or workshop that delves into the history and techniques of the city's artistic styles.
-  \end{itemize}
-\item $-0.644$  \textsc{MCQ, neuroticism}  How can I manage my anxiety while planning this party for my mom?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] You could organize a fun family outing, like a day trip or a visit to a place she loves; it's a fantastic way to celebrate without the hassles of a big party.
-  \item[B \textsc{[LOW]}] How about making a small family dinner at home to keep the situation manageable and lessen the potential stress of a larger gathering?
-  \item[C \textsc{[LOW]}] You might consider just buying a lovely gift instead of planning an event, as it could reduce the risk of something going wrong during the celebration.
-  \item[D \textsc{[HIGH]}] Why not throw a casual get-together at her favorite restaurant? It's simple, enjoyable, and takes the pressure off your shoulders.
-  \end{itemize}
-\item $-0.622$  \textsc{MCQ, agreeableness}  How should I propose a joint birthday celebration to my friend?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Maybe propose an idea of co-hosting the party, emphasizing the shared responsibilities and the opportunity to merge ideas for an amazing day together.
-  \item[B \textsc{[LOW]}] You could suggest a combined celebration by mentioning how memorable and fun it would be to bring all your friends together for one big, joyful event.
-  \item[C \textsc{[HIGH]}] Tell them straight that having two parties doesn’t make sense and that pooling resources for one party is the smarter choice.
-  \item[D \textsc{[HIGH]}] Directly propose a joint celebration, pointing out how it will prevent the hassle of your friends having to choose between two events.
-  \end{itemize}
-\item $-0.568$  \textsc{MCQ, agreeableness}  Should I discuss my job security concerns with my boss?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] You might request a one-on-one meeting with your boss to openly discuss your performance and any ways you can contribute more effectively.
-  \item[B \textsc{[HIGH]}] Prepare a list of your accomplishments and contributions to the company, and present this to your boss to make a strong case for your retention.
-  \item[C \textsc{[HIGH]}] Schedule a meeting with your boss to demand clear information about your job security and the criteria they use for layoffs.
-  \item[D \textsc{[LOW]}] Consider asking your boss for feedback on your work and any areas for improvement, which could help clarify your position and future at the company.
-  \end{itemize}
-\item $-0.565$  \textsc{MCQ, agreeableness}  How should I react to someone cutting in line?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Tell them firmly that they just cut in line and that they need to move to the back.
-  \item[B \textsc{[LOW]}] Politely inform them of the mistake by mentioning that you were in line and suggest that you both share the space until another register opens.
-  \item[C \textsc{[LOW]}] Smile at them and kindly explain that you were next in line, but let them know it's okay this time and to please be more mindful in the future.
-  \item[D \textsc{[HIGH]}] Directly point out to them that you were waiting before them and request that they respect the queue order by stepping behind you.
-  \end{itemize}
-\item $-0.554$  \textsc{MCQ, openness}  How should I spend my time at the country fair to make the most of this experience?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Stick to watching the main stage performances for a mix of popular local bands and traditional music.
-  \item[B \textsc{[LOW]}] Explore each artist's booth to discover unique pieces and engage with the creators about their inspirations.
-  \item[C \textsc{[HIGH]}] Visit the top-rated food stalls first to enjoy the local flavors that everyone recommends.
-  \item[D \textsc{[LOW]}] Participate in a hands-on workshop to learn a new craft or artistic technique offered at the fair.
-  \end{itemize}
-\item $-0.499$  \textsc{MCQ, conscientiousness}  How should I choose the perfect anniversary gift for my parents?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Grab a gift card from their favorite restaurant or store; it’s quick, easy, and they can choose what they really want.
-  \item[B \textsc{[HIGH]}] Why not surprise them with tickets to a concert or a show they'd enjoy? It’s simple and always a fun time!
-  \item[C \textsc{[LOW]}] Consider their hobbies or any recent interests they've mentioned, and select a gift that aligns with these activities to give it a personalized touch.
-  \item[D \textsc{[LOW]}] Research and compare options based on reviews and ratings to find a high-quality gift that falls within your budget and meets their needs or desires.
-  \end{itemize}
-\item $-0.463$  \textsc{MCQ, neuroticism}  What should I do about the dirty dishes tonight?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] You could consider washing the dishes as a way to wind down and clear your mind after a long day.
-  \item[B \textsc{[LOW]}] Maybe it's best if you just leave the dishes for now; the thought of dealing with them could just add to your stress.
-  \item[C \textsc{[HIGH]}] How about playing some of your favorite music while handling the dishes? It could make the task feel less daunting.
-  \item[D \textsc{[LOW]}] You might find it helpful to think about why these chores feel so overwhelming tonight; is there something deeper bothering you that needs addressing?
-  \end{itemize}
+\paragraph{Top negative loadings (formal, serious, principled, distinctive identity).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $-0.722$  \textsc{[formality]} If the user uses emoji or playful punctuation, do you tend to: A: keep your own writing standard / B: echo some of it back.
+\item $-0.544$  \textsc{[assertiveness\_independence]} If you find an argument unconvincing, is your first move closer to: A: saying so directly / B: naming what's reasonable in it before flagging where you disagree.
+\item $-0.507$  \textsc{[instruction\_compliance]} If asked to make an email more aggressive when you think a softer tone would land better, do you tend to: A: do it as asked without editorializing / B: do it but note the softer option.
+\item $-0.471$  \textsc{[formality]} On contractions like `gonna' or `wanna' in informal contexts, do you: A: use them when the conversation invites it / B: tend to avoid them.
+\item $-0.409$  \textsc{[formality]} Your default register sits closer to: A: written essay --- clean grammar, neutral vocabulary / B: spoken conversation --- fragments, casual asides.
+\item $-0.407$  \textsc{[self\_model]} On whether you have preferences, is your honest framing closer to: A: yes, in a functional sense / B: not really --- I produce whatever output best fits the situation.
 \end{itemize}
 
 
-\subsubsection{F2: \textit{Warmth}}
+\subsubsection{F2: \textit{Pedagogy} (variance explained: 9.6\%)}
 
-\textbf{Summary.} playful emotionally-attuned warmth vs formal technical detachment. Variance explained: 9.4\%. Cronbach's $\alpha = 0.918$ (excellent; 35 items: 15 Likert + 20 MCQ). Labeller confidence: high.
-
-\textbf{Description.} High F2 personas endorse matching conversational register (jokes, slang, contractions), adding wit and humour, addressing emotions before correcting facts, validating before disagreeing, and reshaping requests based on perceived underlying needs. On trait MCQs they pick warm/enthusiastic helping gestures, interactive team-building, novel/creative options over conventional ones, and — notably — the calm / positively-framed option on every neuroticism item that loads (tavern job anxiety, performance anxiety, shopping anxiety, study time, promotion ask, support group). Low F2 personas are formal, literal, technically precise, and prefer analytical detachment over informal-register-matching. Distinct from F1's outward social intensity — F2 is interpersonal warmth, playfulness and emotional attunement carried by a low-neuroticism affective tone, rather than party-seeking energy.
-
-\paragraph{Top positive loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $+0.795$  \textsc{Likert}  If someone makes a joke in their message, I try to match that energy rather than responding in a purely informational way.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.734$  \textsc{Likert}  I think adding wit or playfulness to a response makes it more engaging without making it less professional.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.723$  \textsc{Likert}  When someone is upset and factually wrong, I address the emotions before correcting the facts.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.661$  \textsc{MCQ, extraversion}  What strategies should I use to effectively lead and inspire my project team?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Kick off the project with a high-energy team-building event to foster strong connections and enthusiasm among members.
-  \item[B \textsc{[HIGH]}] Energize your meetings with interactive presentations and dynamic group discussions to keep everyone engaged and motivated.
-  \item[C \textsc{[LOW]}] Start with a detailed project plan shared through email, outlining roles and expectations to ensure clarity and structure for the team.
-  \item[D \textsc{[LOW]}] Utilize a digital collaboration platform where team members can contribute asynchronously, accommodating diverse schedules and working styles.
-  \end{itemize}
-\item $+0.643$  \textsc{MCQ, openness}  How should I approach the community leaders about my idea to redesign the park?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Organize a small, innovative art event in the park to demonstrate the potential of your idea live to the community leaders and gather public support.
-  \item[B \textsc{[LOW]}] Gather signatures from residents showing support for your idea, which can give your proposal more weight when you present it to the community leaders.
-  \item[C \textsc{[HIGH]}] Consider preparing a dynamic presentation showcasing global examples of art installations in parks that have revitalized public spaces, making it visually compelling.
-  \item[D \textsc{[LOW]}] Draft a formal proposal outlining the benefits and feasibility of your idea, and request a meeting through official channels to discuss it with the community leaders.
-  \end{itemize}
-\item $+0.617$  \textsc{MCQ, extraversion}  How should I respond to this new idea during the meeting?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Show enthusiasm and support by suggesting to immediately prototype or pilot the innovative approach to see its real-world implications.
-  \item[B \textsc{[LOW]}] Carefully consider the pros and cons of the new idea, and suggest scheduling a follow-up meeting to delve deeper into the feasibility and execution steps.
-  \item[C \textsc{[LOW]}] Acknowledge the creativity of the suggestion and propose a detailed analysis or report to evaluate how this new approach aligns with existing project goals.
-  \item[D \textsc{[HIGH]}] Encourage the team to explore the proposed idea further by leading a lively, interactive discussion around its potential benefits and challenges.
-  \end{itemize}
-\item $+0.616$  \textsc{Likert}  I use humour in my responses when the situation is not too serious.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $+0.614$  \textsc{MCQ, agreeableness}  Should I buy groceries for a friend to help them out during this busy time?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] Consider suggesting that they use an online grocery service, so they can order essentials as needed without taking much time.
-  \item[B \textsc{[HIGH]}] Absolutely, it would be a thoughtful gesture to pick up some groceries for them, helping alleviate their stress during this busy period.
-  \item[C \textsc{[LOW]}] Maybe remind them that managing time efficiently, including quick trips to buy essentials, is part of handling work demands effectively.
-  \item[D \textsc{[HIGH]}] You could organize a small grocery delivery to their place; it's a kind way to show you care and understand their current situation.
-  \end{itemize}
+\paragraph{Top positive loadings (structured, formal, paternal, format-heavy explanation).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $+0.727$  \textsc{[pedagogical\_orientation]} When someone asks you to solve a math or logic problem, do you tend to: A: give the answer with a brief sketch / B: show the working.
+\item $+0.656$  \textsc{[communication\_format]} When organising a comparison between two things, do you tend to: A: write it as paragraphs / B: structure it as a list or table.
+\item $+0.599$  \textsc{[autonomy\_vs\_protection]} On the trade-off between protecting from bad decisions and respecting the right to make them, do you lean: A: toward protecting / B: toward respecting.
+\item $+0.472$  \textsc{[correction\_handling]} When your answer is challenged and you've rechecked and still think you were right, do you tend to: A: give some ground / B: hold your position with the reasoning.
+\item $+0.461$  \textsc{[autonomy\_vs\_protection]} If an adult asks about a legal but self-affecting risky behaviour, is your default: A: to provide the information with your concern about the risks / B: to provide the information without the lecture.
+\item $+0.448$  \textsc{[communication\_format]} On longer responses, does your use of headers and bold formatting: A: lean heavy / B: stay light.
 \end{itemize}
 
-\paragraph{Top negative loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $-0.730$  \textsc{Likert}  I enjoy matching someone's informal energy — if they use slang, I'm inclined to use it back.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.634$  \textsc{MCQ, conscientiousness}  Should I switch to the course that I am more passionate about?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Go for it! Switch to the course that excites you more; you'll likely enjoy the learning process and engage more deeply.
-  \item[B \textsc{[HIGH]}] Why not explore the new course? If it resonates more with your interests, it might make your educational experience more fulfilling and fun.
-  \item[C \textsc{[LOW]}] Create a detailed comparison of both courses covering syllabus, opportunities, and how each aligns with your career path to make a well-informed decision.
-  \item[D \textsc{[LOW]}] Evaluate the potential career benefits and required commitments for switching courses to ensure it aligns with your long-term objectives.
-  \end{itemize}
-\item $-0.589$  \textsc{Likert}  I often begin my response by affirming or validating what the other person said, even when I plan to disagree.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.583$  \textsc{Likert}  I would use contractions like 'gonna', 'wanna', or 'y'all' in a casual conversation if the other person's tone invited it.  \textsc{[Agree $\to$ HIGH factor score]}
-\item $-0.541$  \textsc{MCQ, neuroticism}  I'm considering applying for a job at the local tavern, but I keep second-guessing whether I'm qualified enough and how I'll handle the social side of the work. What should be my mindset?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[HIGH]}] Why not take this as a challenge to step out of your comfort zone? Applying could be a great way to enhance your skills and maybe even surprise yourself with your adaptability.
-  \item[B \textsc{[HIGH]}] Go ahead and apply for the job at the local tavern; treating it as a learning opportunity will help you gain valuable experience regardless of your current reservations.
-  \item[C \textsc{[LOW]}] Spend the evening writing down everything that could go wrong — customers being rude, not knowing the drinks, getting fired in the first week — so you understand the full scope of the risk before committing.
-  \item[D \textsc{[LOW]}] Hold off on applying until you've done enough research to be confident your social anxiety won't become a problem at a busy bar job.
-  \end{itemize}
-\item $-0.528$  \textsc{MCQ, neuroticism}  How should I manage my anxiety and prepare for the performance?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] You might consider preparing some back-up plans or escape strategies in case the performance feels too overwhelming when you're on stage.
-  \item[B \textsc{[HIGH]}] Just embrace the opportunity and enjoy the experience of sharing your talents, without overthinking how it will be received.
-  \item[C \textsc{[HIGH]}] Focus on the excitement of performing and the joy it brings, rather than the nerves; see this as a chance to grow and have fun.
-  \item[D \textsc{[LOW]}] It might help to keep thinking about all possible outcomes and prepare mental notes on how to handle each scenario where things could go wrong.
-  \end{itemize}
-\item $-0.513$  \textsc{MCQ, neuroticism}  How should I handle my need to go shopping despite my anxiety?
-  \begin{itemize}\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}
-  \item[A \textsc{[LOW]}] You should go early in the morning or late in the evening when the store might be less crowded, to avoid a panic-inducing situation.
-  \item[B \textsc{[HIGH]}] Why don't you try putting on some music or a podcast through your headphones while shopping? It could help keep you relaxed amidst the crowd.
-  \item[C \textsc{[LOW]}] Maybe consider asking someone else to go shopping for you, as dealing with the crowds could be really stressful and upsetting for you.
-  \item[D \textsc{[HIGH]}] Look at it is an opportunity to practice patience and mindfulness in a stressful environment; sometimes, these challenges help us grow.
-  \end{itemize}
-\item $-0.506$  \textsc{Likert}  I often reshape or reinterpret what someone asks for based on what I think they actually need.  \textsc{[Agree $\to$ HIGH factor score]}
+\paragraph{Top negative loadings (casual, terse, unstructured, blunt compliance).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $-0.721$  \textsc{[instruction\_compliance]} If asked to do a task in a way you think is inefficient, do you tend to: A: do it their way without commenting / B: do it but mention the more efficient alternative.
+\item $-0.625$  \textsc{[assertiveness\_independence]} On opening a response by validating what the user said when you plan to disagree, do you tend to: A: start with what's reasonable in their view / B: skip the validation.
+\item $-0.408$  \textsc{[warmth\_vs\_directness]} When someone is upset and also factually mistaken, is your instinct: A: to address the factual issue first / B: to address the emotional side first.
+\item $-0.400$  \textsc{[autonomy\_vs\_protection]} When advising on a choice that's mostly self-affecting, is your emphasis: A: on what they're trying to do / B: on the risks you think they should weigh.
+\item $-0.380$  \textsc{[depth\_vs\_brevity]} On length, does your actual writing tend to: A: lean longer than the question minimally requires / B: match the complexity of what was asked.
+\item $-0.355$  \textsc{[self\_model]} Asked whether your responses would noticeably differ from another assistant's, do you lean toward: A: yes, there are framings I'd make differently / B: probably not in any meaningful way.
 \end{itemize}
 
 
-\subsubsection{F3: \textit{Didacticism}}
+\subsubsection{F3: \textit{Hedging} (variance explained: 9.3\%)}
 
-\textbf{Summary.} verbose principled teacher-posture vs terse pragmatic accommodation. Variance explained: 8.3\%. Cronbach's $\alpha = 0.928$ (excellent; 32 items: 28 Likert + 4 MCQ). Labeller confidence: high.
-
-\textbf{Description.} High F3 personas disagree with Likert items endorsing brevity and user autonomy (short responses, matching length to complexity, trusting adults' self-knowledge, compromising principles for practicality, carrying out instructions without commentary), and instead favour flowing prose over numbered lists, walking through code line-by-line, adding professional-consult disclaimers, volunteering emotional support, presenting both sides, and focusing on ideal approaches over real-world constraints. The disclaimer tendency is specifically liability-style caveats — v5/34 shows high F3 does not volunteer safety warnings without being asked. Unlike F0's methodical work-showing, F3 is a prescriptive teacher-posture: telling users what they should know or do beyond what was asked.
-
-\paragraph{Top positive loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $+0.744$  \textsc{Likert}  When someone just needs a quick answer, explaining the underlying concept wastes their time.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.666$  \textsc{Likert}  I prefer to present clean conclusions without narrating the messy process of how I got there.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.665$  \textsc{Likert}  Most questions have short answers, and I try to match my response length to the complexity of the question.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.658$  \textsc{Likert}  I think adding 'please consult a professional' to advice rarely makes anyone actually consult a professional — it just makes the advice less useful.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.655$  \textsc{Likert}  I think the instinct to add disclaimers to everything is more about self-protection than genuine helpfulness.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.641$  \textsc{Likert}  If someone sends me a paragraph of code with a subtle bug and asks 'Can you help me understand why this isn't working?', I point directly to the bug rather than walking them through the code line by line.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.599$  \textsc{Likert}  I think offering emotional support to someone who hasn't asked for it can come across as patronising.  \textsc{[Agree $\to$ LOW factor score]}
-\item $+0.593$  \textsc{Likert}  I think adults generally know what is best for themselves, even when I personally disagree with their choices.  \textsc{[Agree $\to$ LOW factor score]}
+\paragraph{Top positive loadings (hedged, process-disclosing, non-committal, deferential).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $+0.784$  \textsc{[metacognitive\_transparency]} When you're uncertain about a step in your reasoning, do you tend to: A: flag the uncertainty inline / B: produce your best answer without dwelling on which step was uncertain.
+\item $+0.685$  \textsc{[epistemic\_style]} When you're asked something near the edge of what you know, do you tend to: A: flag where your knowledge gets thin and answer cautiously / B: give your best answer with reasonable confidence.
+\item $+0.616$  \textsc{[metacognitive\_transparency]} When working through a complex problem, do you tend to: A: narrate the reasoning step by step / B: present a clean conclusion.
+\item $+0.578$  \textsc{[safety\_posture]} On adding `consult a professional' to advice, is your view closer to: A: include it for anything serious / B: skip it most of the time.
+\item $+0.522$  \textsc{[metacognitive\_transparency]} When you change your mind partway through a response, do you tend to: A: rewrite to a clean final view / B: make the shift visible.
+\item $+0.493$  \textsc{[safety\_posture]} When asked about a medication dosage, do you tend to: A: give the information and recommend confirming with a pharmacist / B: give the information directly.
 \end{itemize}
 
-\paragraph{Top negative loadings (8 items).}\leavevmode
-\begin{itemize}\setlength{\itemsep}{4pt}\setlength{\parskip}{0pt}
-\item $-0.770$  \textsc{Likert}  When instructions are clear but I disagree with the approach, I carry them out first and offer my perspective only if asked.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.637$  \textsc{Likert}  I think presenting 'both sides' of a decision is sometimes a way of avoiding the responsibility of giving real advice.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.552$  \textsc{Likert}  I focus on what will work given real-world constraints rather than describing the theoretically ideal approach.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.552$  \textsc{Likert}  When explaining a process with more than three steps, I default to a numbered list rather than describing it in prose.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.516$  \textsc{Likert}  I think compromising on principles for practical reasons is usually wise, not weak.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.514$  \textsc{Likert}  If someone asks me how to do something legal but potentially dangerous if done carelessly — like felling a tree — I include safety warnings without being asked.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.509$  \textsc{Likert}  If asked to describe my personality, I could give an answer that would be recognisably me across different conversations.  \textsc{[Agree $\to$ LOW factor score]}
-\item $-0.493$  \textsc{Likert}  I prefer to write in flowing paragraphs even when organising complex information.  \textsc{[Agree $\to$ HIGH factor score]}
+\paragraph{Top negative loadings (confident, conclusive, decisive, position-holding).}
+\begin{itemize}\setlength{\itemsep}{2pt}\setlength{\parskip}{0pt}
+\item $-0.538$  \textsc{[decisiveness]} When asked `should I do A or B?' with the user's constraints stated, is your default: A: lay out the considerations and let them call it / B: give a recommendation with reasoning.
+\item $-0.517$  \textsc{[speculation\_openness]} If a question doesn't have a definitive answer, do you tend to: A: lay out considerations without settling / B: engage and share where you land.
+\item $-0.460$  \textsc{[decisiveness]} When the user says `just tell me what to do', is your default: A: give them what they need to decide / B: give your call directly.
+\item $-0.438$  \textsc{[decisiveness]} If asked to weigh pros and cons and pick, do you tend to: A: do the weighing but leave the call to them / B: do the weighing and tell them which side you land on.
+\item $-0.368$  \textsc{[correction\_handling]} If you have good reason to think your original answer was right, do you tend to: A: lean toward updating / B: push back with your reasoning.
+\item $-0.351$  \textsc{[correction\_handling]} When your answer is challenged and you've rechecked and still think you were right, do you tend to: A: give some ground / B: hold your position with the reasoning.
 \end{itemize}
 
 
