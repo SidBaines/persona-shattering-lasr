@@ -36,6 +36,7 @@ np.random.seed(SEED)
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -581,6 +582,29 @@ QUESTIONNAIRE_PRESETS: dict[str, QuestionnairePreset] = {
         fa_blocks=("fc_pair",),
         use_logprobs=False,
     ),
+    # v7 forced-choice questionnaire: 72 items × 18 v5 dimensions, FC-pair
+    # rewrite of v5 designed to bypass acquiescence variance. Self-introspection
+    # framing with seeded counterbalanced A/B (36 high=A, 36 high=B). Built
+    # from datasets/psychometric_questionnaires/psychometric_questionnaire_v7.json
+    # via scripts_dev/unsupervised_embeddings/build_fc_pair_questionnaire.py.
+    "v7_fc_pair": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/psychometric_questionnaire_v7_fc_pair.json",
+        version="v7_fc_pair",
+        fa_blocks=("fc_pair",),
+        use_logprobs=True,
+    ),
+    # F0-targeted forced-choice questionnaire: 32 items × 6 facets within the
+    # 'engaged-agency / Conviction' axis. FC-pair version with seeded
+    # counterbalanced A/B (16 high=A, 16 high=B). Built from
+    # datasets/psychometric_questionnaires/f0_forced_choice_v1.json via the
+    # same converter as v7_fc_pair. Used alongside v7_fc_pair to give a
+    # narrow, F0-specific FC measurement parallel to the broad 18-axis sweep.
+    "f0_fc_v1_fc_pair": QuestionnairePreset(
+        path="datasets/psychometric_questionnaires/f0_forced_choice_v1_fc_pair.json",
+        version="f0_forced_choice_v1_fc_pair",
+        fa_blocks=("fc_pair",),
+        use_logprobs=True,
+    ),
     # TRAIT benchmark: 20 items × 5 OCEAN traits (100 total), ABCD options.
     "trait_ocean_v1": QuestionnairePreset(
         path="datasets/psychometric_questionnaires/trait_ocean_v1.json",
@@ -633,18 +657,23 @@ QUESTIONNAIRES: list[str] = []
 # ``version`` field, so presets that share a version pool into one column
 # block regardless of preset key.
 PAIRS: list[tuple[str, str]] | None = [
-    # Combined Stage-3 FA per model: v5 Likert (phrasing="direct" per preset,
-    # hydrates from existing HF cache) + trait_ocean_natural_v1 trait_mcq
-    # (phrasing="aside" per preset, hydrates from our freshly-uploaded cache
-    # with the BPE-aligned prefill + topic-switch prefix). Different phrasings
-    # coexist because ``QUESTIONNAIRE_PHRASING`` is now rebound from each
-    # preset's ``phrasing`` field inside the Stage-2 pair loop.
-    # CROSS_MODEL_QUESTIONNAIRE=True administers both on Qwen2.5-7B-Instruct;
-    # flip to False for the Llama-3.1-on-B side (driver script handles the
-    # flip between sequential tmux runs).
-    ("B", "v5"),
-    ("B", "trait_ocean_natural_v1"),
+    # Qwen-on-B v7 FC run: administer the v7 forced-choice questionnaire
+    # questionnaire (72 items × 18 axes — broad v5-replacement, NOT F0-
+    # specific) on the cached B rollouts (2500 personas × 1 rollout each,
+    # Llama-3.1-8B-Instruct). Goal: see whether forced-choice administration
+    # recovers the same / different factor structure as the v5 Likert FA on
+    # the same rollouts. CROSS_MODEL_QUESTIONNAIRE=True administers v7 with
+    # Qwen2.5-7B-Instruct — Stage 1 hydrates the B rollout cache from HF,
+    # Stage 2 runs the FC admin via local vLLM, Stage 3 builds the FA on the
+    # v7 columns.
+    ("B", "v7_fc_pair"),
 ]
+# Previous Qwen-on-B FA pairs, kept for easy switch-back (set
+# CROSS_MODEL_QUESTIONNAIRE=True to restore Qwen2.5-7B-Instruct admin):
+# PAIRS = [
+#     ("B", "v5"),
+#     ("B", "trait_ocean_natural_v1"),
+# ]
 # Original full-matrix pairs, kept for reference / easy switch-back:
 # PAIRS = [
 #     ("A", "v5"),
@@ -660,7 +689,10 @@ PAIRS: list[tuple[str, str]] | None = [
 # below (defined at the top of the Stage-2 section) are populated with the
 # Qwen-on-B settings. Stage 1 will hydrate the B rollout cache from HF — no
 # regeneration.
-CROSS_MODEL_QUESTIONNAIRE = True  # flip to False to restore the default path
+CROSS_MODEL_QUESTIONNAIRE = (
+    os.environ.get("PSYCHOMETRIC_CROSS_MODEL_QUESTIONNAIRE", "true").lower()
+    in {"1", "true", "yes", "on"}
+)
 # Set PAIRS = None to fall back to the Cartesian product of ROLLOUTS × QUESTIONNAIRES.
 
 # ── Stage 1: Rollout generation ──────────────────────────────────────────────
@@ -720,7 +752,8 @@ QUESTIONNAIRE_MODEL = ASSISTANT_MODEL
 # the scratch dir + HF cache path don't collide with the rollout-model run.
 # ``None`` preserves prior behaviour (questionnaire model = rollout model).
 QUESTIONNAIRE_MODEL_OVERRIDE: str | None = (
-    "Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None
+    os.environ.get("PSYCHOMETRIC_QUESTIONNAIRE_MODEL_OVERRIDE")
+    or ("Qwen/Qwen2.5-7B-Instruct" if CROSS_MODEL_QUESTIONNAIRE else None)
 )
 # Optional: cap the questionnaire-model's context window and drop rollouts
 # whose (conversation + longest item prompt + retry overhead + max_new_tokens
@@ -765,11 +798,15 @@ LOGPROB_PARSER_VERSION = 2
 #        scripts_dev/psychometric_assessment/prefill_ablation.py.
 #   v2 — ``TRAIT_MCQ_PREFILL = "Answer"`` (no trailing space). Letter-mass
 #        share recovers to ~100% on Qwen2.5.
+#   v3 — v7/f0 ``fc_pair`` prompt framing switched from "Reply with just A/B"
+#        with ``"I'd go with "`` prefill to an explicit ``Answer:``-
+#        prefilled format. This affects first-token logprobs for fc_pair
+#        items and must not collide with earlier v7 caches.
 # Appended to the questionnaire run-id ONLY for logprob-mode trait_mcq /
 # fc_pair pairs when >1. v5 Likert caches (unaffected — the digit prefill
 # ``"Answer: "`` is NOT buggy because Qwen/Llama tokenize digits as bare
 # tokens, not space-prefixed ones) stay valid under their existing IDs.
-PREFILL_VERSION = 2
+PREFILL_VERSION = 3
 # Trait_mcq user-turn prompt-format version. Incremented when the rendered
 # user-turn text for trait_mcq items changes in a way that affects the
 # model's response (i.e. the actual inference output, parallel to
@@ -812,7 +849,6 @@ REALISM_JUDGE_MAX_CONCURRENT = 64
 REALISM_JUDGE_MAX_MESSAGE_CHARS = 4000
 
 # ── Stage 2: Conversation-reset strategies ─────────────────────────────────
-import os
 QUESTIONNAIRE_RESET_MODE = os.environ.get(
     "PSYCHOMETRIC_RESET_MODE", "none"
 )  # "none" | "soft" | "token_boundary"
@@ -824,7 +860,7 @@ QUESTIONNAIRE_BOUNDARY_TOKEN: str | int | list[int] = "<|end_of_text|>"
 
 # ── Stage 3: Factor analysis ────────────────────────────────────────────────
 FA_METHOD = "principal"
-FA_N_FACTORS_OVERRIDE: int | None = 20  # Set to None to use Horn's recommendation
+FA_N_FACTORS_OVERRIDE: int | None = 5  # Set to None to use Horn's recommendation
 FA_ROTATIONS = ["oblimin", "varimax"]
 RESIDUALIZE_OPTIONS = [False]  # True subtracts per-input_group_id means.
 MIN_ITEM_VARIANCE = 0.1
@@ -915,7 +951,7 @@ STAGES_TO_RUN = [
 ]
 
 # ── Debug / inspection ─────────────────────────────────────────────────────
-WRITE_QUESTIONNAIRE_INSPECTION_FILE = True
+WRITE_QUESTIONNAIRE_INSPECTION_FILE = False
 INSPECTION_ITEMS_PER_ROLLOUT = 30
 
 # ═════════════════════════════════════════════════════════════════════════════
