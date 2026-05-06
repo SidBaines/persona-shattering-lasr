@@ -306,11 +306,31 @@ A natural question is then how much of each factor's persona-level variance is a
 
 We answer this with one-way $\eta^2$ per factor, separately for archetype and scenario assignment.
 $\eta^2_{\text{group}}(F_i) = \mathrm{SS}_{\text{between}} / \mathrm{SS}_{\text{total}}$, computed on factor scores after the FA fit; high $\eta^2$ means group membership accounts for a large share of factor-score variance.
-Figure~\ref{fig:4-2-variance-decomp} summarises the results.
 
-Across all four factors and both models, \textbf{scenario explains 56--78\% of factor-score variance, while interviewer-archetype explains $\leq 6\%$}.
-That is, the choice of conversational task (system prompt + script) does most of the work in moving a persona along each of the four behavioural axes; the LLM partner's archetype is comparatively immaterial.
+Across all four factors and both models, \textbf{scenario explains 56--78\% of factor-score variance, while interviewer-archetype explains $\leq 6\%$} (Table~\ref{tab:4-2-variance-decomp}; Figure~\ref{fig:4-2-variance-decomp}).
+The choice of conversational task does most of the work in moving a persona along each of the four behavioural axes; the LLM partner's archetype is comparatively immaterial.
 This is consistent with the ``weights plus context'' framing developed in Section~\ref{sec:applying-traditional-psychometrics-to-llm-personas}: the bulk of behavioural variation is selected by the task context, not by the moment-to-moment style of the conversational partner.
+
+\begin{table}[htbp]
+\centering
+\caption{One-way $\eta^2$ of factor scores per factor, for interviewer-archetype and conversational scenario. Both models, $k=4$. ``Total $\eta^2$'' is just the sum of the two columns and is bounded above by 1; the gap to 1 is between-persona variation that neither single grouping captures.}
+\label{tab:4-2-variance-decomp}
+\begin{tabular}{l l c c c}
+\toprule
+Model & Factor & $\eta^2$ archetype & $\eta^2$ scenario & sum \\
+\midrule
+Llama-3.1-8B  & F0 \textit{Initiative} & 0.005 & 0.659 & 0.664 \\
+              & F1 \textit{Warmth}     & 0.060 & 0.580 & 0.640 \\
+              & F2 \textit{Pedagogy}   & 0.010 & 0.782 & 0.792 \\
+              & F3 \textit{Hedging}    & 0.026 & 0.606 & 0.632 \\
+\midrule
+Qwen2.5-7B    & F0 & 0.051 & 0.581 & 0.632 \\
+              & F1 & 0.027 & 0.563 & 0.590 \\
+              & F2 & 0.005 & 0.668 & 0.673 \\
+              & F3 & 0.009 & 0.734 & 0.743 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 We deliberately report only the one-way decomposition here.
 A two-way ANOVA partition (archetype + scenario + interaction + residual) is computed and stored alongside in the JSON, but with $\sim$2{,}500 personas distributed across $\sim$25 archetypes $\times$ 100 scenarios the design is approximately saturated (one observation per cell), so the ``residual'' SS is identically zero and the ``interaction'' SS conflates true interaction with all unmodelled persona-level variation.
@@ -335,22 +355,39 @@ The raw FA factor scores carry a large amount of scenario-context signal: scenar
 This raises the natural question of whether the four axes (Initiative, Warmth, Pedagogy, Hedging) reflect within-scenario persona variation, or are largely a re-expression of the variance between scenarios.
 
 We test this by re-fitting FA at $k=4$ on the \textit{scenario-residualized} response matrix --- subtracting the per-scenario mean of each item from each persona's response, leaving only the within-scenario variation.
-We then Hungarian-match the residualized factor solution against the raw solution by Tucker's $|\phi|$ (over the shared item set, per model), and compare per-factor Cronbach's $\alpha$ before and after residualization (Figure~\ref{fig:4-2-residualized}).
+We then Hungarian-match the residualized factor solution against the raw solution by Tucker's $|\phi|$ (over the shared item set, per model), and compare per-factor Cronbach's $\alpha$ before and after residualization (Table~\ref{tab:4-2-residualized}; Figure~\ref{fig:4-2-residualized}).
 
-Results on Llama-3.1-8B-Instruct:
-\begin{itemize}
-    \item \textit{Initiative}, \textit{Warmth}, and \textit{Hedging} all survive residualization with $|\phi| \in [0.89, 0.94]$ (``fair'' similarity by Lorenzo-Seva), and Cronbach's $\alpha$ stays acceptable-or-good ($\alpha = 0.65$--$0.84$ residualized vs $0.83$--$0.87$ raw).
-    \item \textit{Pedagogy} is the weakest survivor at $|\phi| = 0.69$ (``borderline'') and its residualized $\alpha$ drops to $0.67$. This is consistent with Pedagogy having the highest scenario $\eta^2$ in the raw analysis ($0.78$ on Llama) --- much of what the raw FA called Pedagogy was scenario-genre rather than persona disposition.
-    \item Total variance explained drops from $40.7\%$ (raw) to $29.6\%$ (residualized), so roughly a quarter of the raw FA's explanatory power was scenario context.
-\end{itemize}
+\begin{table}[htbp]
+\centering
+\caption{Raw vs scenario-residualized FA, per factor. Cronbach's $\alpha$ is computed over items with $|\text{loading}|\geq 0.4$ on the relevant fit, sign-oriented by loading direction. ``Raw$\leftrightarrow$resid $|\phi|$'' is the Hungarian-matched per-factor Tucker's $|\phi|$ between the two solutions, over the shared item set per model. Lorenzo-Seva interprets $|\phi|\geq 0.85$ as ``fair'' factor similarity.}
+\label{tab:4-2-residualized}
+\begin{tabular}{l l c c c}
+\toprule
+Model & Factor & $\alpha$ (raw) & $\alpha$ (resid) & raw$\leftrightarrow$resid $|\phi|$ \\
+\midrule
+Llama-3.1-8B  & F0 \textit{Initiative} & 0.873 & 0.836 & 0.942 \\
+              & F1 \textit{Warmth}     & 0.852 & 0.821 & 0.918 \\
+              & F2 \textit{Pedagogy}   & 0.796 & 0.672 & 0.692 \\
+              & F3 \textit{Hedging}    & 0.832 & 0.652 & 0.890 \\
+\midrule
+Qwen2.5-7B    & F0 & 0.787 & 0.747 & 0.926 \\
+              & F1 & 0.766 & 0.607 & 0.898 \\
+              & F2 & 0.760 & 0.602 & 0.861 \\
+              & F3 & 0.723 & 0.370 & 0.743 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-On Qwen2.5-7B-Instruct the qualitative picture is similar but signal is weaker overall: F0, F1 and F2 match at $|\phi| \in [0.86, 0.93]$ but Qwen's F3 (the rough analogue of Llama's \textit{Hedging}) drops to $|\phi| = 0.74$ with residualized $\alpha = 0.37$, suggesting that Qwen's fourth factor is more scenario-dependent than the others.
+On Llama three of four factors --- \textit{Initiative}, \textit{Warmth}, \textit{Hedging} --- survive residualization with $|\phi| \geq 0.89$ (``fair'' similarity by Lorenzo-Seva) and Cronbach's $\alpha$ stays acceptable-or-good.
+\textit{Pedagogy} is the weakest survivor at $|\phi| = 0.69$ and its residualized $\alpha$ drops to $0.67$, which is consistent with its having the highest scenario $\eta^2$ in the raw analysis (0.78, Table~\ref{tab:4-2-variance-decomp}) --- much of what the raw FA called \textit{Pedagogy} was scenario-genre rather than persona disposition.
+Total variance explained drops from $40.7\%$ (raw) to $29.6\%$ (residualized), so roughly a quarter of the raw FA's explanatory power was scenario context.
 
-A useful sanity check: scenario $\eta^2$ on the residualized factor scores is $\approx 0$ for all factors on both models (by construction), and archetype $\eta^2$ rises modestly (the largest jump is Llama F0: $0.005 \to 0.12$).
-This is the expected pattern when scenario-genre is removed but archetype effects persist within scenarios.
+On Qwen the qualitative picture is similar but the signal is weaker overall: F0, F1, and F2 match at $|\phi| \in [0.86, 0.93]$, but F3 drops to $|\phi| = 0.74$ with residualized $\alpha = 0.37$, indicating that Qwen's fourth factor is materially scenario-dependent.
+
+A useful sanity check: scenario $\eta^2$ on the residualized factor scores is $\approx 0$ for all factors on both models (by construction), and archetype $\eta^2$ rises modestly (the largest jump is Llama F0: $0.005 \to 0.12$). This is the expected pattern when scenario-genre is removed but archetype effects persist within scenarios.
 
 We read this as: the four axes are not simply scenario-genre re-expressed; three of them capture genuine within-scenario variation between personas.
-The exception is Pedagogy, which is materially scenario-dependent and should be reported as such.
+The exception is \textit{Pedagogy}, which is materially scenario-dependent and should be reported as such.
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
 % Data: persona-shattering-lasr/psychometric-fa-runs @ runs/questionnaire-rollouts-llama318binstruct-...-q_v7_fc_pair-fc_pair-direct-lp20-p2-pf3{,-qm_qwen257binstruct}/
