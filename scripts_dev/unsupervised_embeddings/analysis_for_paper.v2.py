@@ -445,22 +445,25 @@ LORA_VALIDATIONS: list[LoraValidation] = [
             "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/warmth_sup"
         ),
     ),
-    LoraValidation(
-        label="pedagogy_amp", factor="Pedagogy", direction="+",
-        hf_subdir=(
-            "fine_tuning/llama-3.1-8b-it/unsupervised/pedagogy/amplifier/"
-            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/pedagogy_amp"
-        ),
-    ),
-    LoraValidation(
-        label="pedagogy_sup", factor="Pedagogy", direction="-",
-        hf_subdir=(
-            "fine_tuning/llama-3.1-8b-it/unsupervised/pedagogy/suppressor/"
-            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/pedagogy_sup"
-        ),
-    ),
-    # Hedging amplifier/suppressor LoRAs are not yet trained / validated;
-    # add entries here once their factor_validate runs land on HF.
+    # We restrict the LoRA validation reported in the paper to the top
+    # two factors by variance explained (Initiative + Warmth). Pedagogy
+    # and Hedging LoRAs were not optimised to the same standard; their
+    # entries are left commented out so they can be re-enabled once the
+    # training is finalised.
+    # LoraValidation(
+    #     label="pedagogy_amp", factor="Pedagogy", direction="+",
+    #     hf_subdir=(
+    #         "fine_tuning/llama-3.1-8b-it/unsupervised/pedagogy/amplifier/"
+    #         "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/pedagogy_amp"
+    #     ),
+    # ),
+    # LoraValidation(
+    #     label="pedagogy_sup", factor="Pedagogy", direction="-",
+    #     hf_subdir=(
+    #         "fine_tuning/llama-3.1-8b-it/unsupervised/pedagogy/suppressor/"
+    #         "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/pedagogy_sup"
+    #     ),
+    # ),
 ]
 
 # Number of high-scoring and low-scoring personas shown per factor in the
