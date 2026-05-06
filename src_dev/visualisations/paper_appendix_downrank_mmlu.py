@@ -61,8 +61,8 @@ PERSONAS: list[tuple[str, str]] = [
     for direction in ("amplifier", "suppressor")
 ]
 
-# n_plus has no MMLU downrank1 runs uploaded to HF.
-SKIP: set[tuple[str, str]] = {("neuroticism", "amplifier")}
+# All 10 OCEAN± personas now have downrank1 MMLU data uploaded.
+SKIP: set[tuple[str, str]] = set()
 
 OUT_DIR = Path("appendix/downranking")
 

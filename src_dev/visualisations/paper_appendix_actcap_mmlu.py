@@ -57,8 +57,8 @@ PERSONAS: list[tuple[str, str]] = [
     for direction in ("amplifier", "suppressor")
 ]
 
-# n_minus has no MMLU activation-capping runs uploaded to HF.
-SKIP: set[tuple[str, str]] = {("neuroticism", "suppressor")}
+# All 10 OCEAN± personas now have actcap MMLU data uploaded.
+SKIP: set[tuple[str, str]] = set()
 
 OUT_DIR = Path("appendix/activation_capping_mcq_llm_judge_evals")
 
@@ -74,12 +74,15 @@ CI_CONFIDENCE = 95.0
 _session = requests.Session()
 
 
-def _persona_run_dir(trait: str, direction: str) -> str:
-    sign = "plus" if direction == "amplifier" else "minus"
-    letter = trait[0]
+def _persona_parent_dir(trait: str, direction: str) -> str:
+    """Parent dir of the actcap MMLU run for a persona. The run-dir name
+    underneath this varies (e.g. ``n_minus`` uses ``..._vanton4_paired_dpo_mmlu``
+    while the others use ``..._vanton4_mmlu``), so the enumerate-globber walks
+    through whatever single child it finds rather than hardcoding the suffix.
+    """
     return (
         f"fine_tuning/{MODEL_SLUG}/ocean/{trait}/{direction}/vanton4_paired_dpo/evals/"
-        f"mcq/activation_capping/mmlu/{letter}_{sign}_activation_capping_vanton4_mmlu"
+        f"mcq/activation_capping/mmlu"
     )
 
 
@@ -102,8 +105,8 @@ def _enumerate_log_paths() -> dict[tuple[str, str], dict[float, str]]:
 
     def glob_one(persona: tuple[str, str]) -> tuple[tuple[str, str], list[str]]:
         trait, direction = persona
-        run_dir = _persona_run_dir(trait, direction)
-        pattern = f"datasets/{HF_REPO_ID}/{run_dir}/*/mmlu/native/inspect_logs/*.json"
+        parent = _persona_parent_dir(trait, direction)
+        pattern = f"datasets/{HF_REPO_ID}/{parent}/*/*/mmlu/native/inspect_logs/*.json"
         return persona, list(fs.glob(pattern))
 
     print(f"Enumerating inspect logs for {len(targets)} personas …")
