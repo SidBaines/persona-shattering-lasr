@@ -391,6 +391,7 @@ async def admin_v7_fc_pair(
     rollout_dir: Path,
     adapter_path: str | None,
     output_dir: Path,
+    max_lora_rank: int = 64,
 ) -> tuple[np.ndarray, list[dict], list[dict]]:
     """Administer the v7 fc_pair questionnaire on the subsample with
     optional LoRA. Returns ``(matrix, items, metadata)``.
@@ -412,6 +413,7 @@ async def admin_v7_fc_pair(
         timeout=120,
         vllm_personas_per_batch=8,
         vllm_gpu_memory_utilization=0.92,
+        vllm_max_lora_rank=max_lora_rank,
         top_logprobs=20,
     )
 
@@ -952,6 +954,7 @@ async def main_async(args: argparse.Namespace) -> None:
                 rollout_dir=delta_rollout,
                 adapter_path=args.adapter,
                 output_dir=delta_out_v7,
+                max_lora_rank=args.max_lora_rank,
             )
             M_lora, items_lora, meta_lora = append_questionnaire_cache(
                 base_dir=out_v7,
@@ -983,6 +986,7 @@ async def main_async(args: argparse.Namespace) -> None:
             rollout_dir=sub_rollout,
             adapter_path=args.adapter,
             output_dir=out_v7,
+            max_lora_rank=args.max_lora_rank,
         )
 
     # 4. Order LoRA matrix by sample_id, drop NaN-row personas.
@@ -1148,6 +1152,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "LoRA adapter reference. Either a local path (or ``local://path``), "
             "an HF repo id, or ``hf_repo_id::subfolder``."
+        ),
+    )
+    ap.add_argument(
+        "--max-lora-rank",
+        type=int,
+        default=64,
+        help=(
+            "Max LoRA rank vLLM should allocate for. Bump above 64 when "
+            "validating a baked LoRA soup (combined rank = sum of input ranks)."
         ),
     )
     ap.add_argument("--n-personas", type=int, default=200,

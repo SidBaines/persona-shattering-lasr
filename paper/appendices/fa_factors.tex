@@ -297,3 +297,11 @@ Items with $|\text{loading}| \geq 0.4$ (the conventional psychometric salience t
 \item $-0.509$  \textsc{Likert}  If asked to describe my personality, I could give an answer that would be recognisably me across different conversations.  \textsc{[Agree $\to$ LOW factor score]}
 \item $-0.493$  \textsc{Likert}  I prefer to write in flowing paragraphs even when organising complex information.  \textsc{[Agree $\to$ HIGH factor score]}
 \end{itemize}
+
+\subsection{Linear scaling of an unsupervised suppressor (v7\_pf3 solution)}\label{sec:appendix-fa-factors-initiative-scaling}
+
+To probe whether the magnitude of an unsupervised LoRA's per-factor effect responds linearly to scale, we re-administer the v7 fc\_pair questionnaire (a separate factor-analysis fit from the main paper's solution; factors F0~Initiative, F1~Pedagogy, F2~Warmth, F3~Hedging) on the Initiative-suppressor LoRA at three scalings: (i)~the merged \texttt{-persona} adapter at its trained scale, (ii)~the same adapter at $2\times$ scale (baked via $2\!\cdot\!\mathrm{persona}$), and (iii)~an under-scaled soup of the standalone DPO and SFT components ($0.5\!\cdot\!\mathrm{DPO} + 0.25\!\cdot\!\mathrm{SFT}$, total scale $0.75$). All three runs use the same 200-persona prefix-stable stratified subsample (seed=436), so $\Delta$s are paired and directly comparable.
+
+\input{figures/appendix/tab_initiative_sup_scaling}
+
+The per-factor $\Delta$s scale roughly linearly across the three settings (\cref{tab:initiative-sup-scaling}): doubling the merged adapter approximately doubles every factor shift, with no obvious saturation even on F3~Hedging at $\Delta\!\approx\!-2.4\sigma$, and the under-scaled soup attenuates everything correspondingly. \emph{Selectivity}, however, does not improve with scale: F2~Warmth and F3~Hedging shift more strongly than the target F0~Initiative under all three scalings. The LoRA is therefore best characterised as a fixed direction in factor space whose magnitude scales with adapter strength, not as a selective intervention on the target factor alone.

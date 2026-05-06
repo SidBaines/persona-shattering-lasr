@@ -511,6 +511,7 @@ async def run_questionnaire_inference_async(
             tensor_parallel_size=cfg.vllm_tensor_parallel_size,
             chat_template=chat_template_override,
             adapter_path=cfg.adapter_path,
+            max_lora_rank=cfg.vllm_max_lora_rank,
         )
 
     questionnaire_config = InferenceConfig(

@@ -190,6 +190,10 @@ class QuestionnaireStageConfig:
     vllm_personas_per_batch: int = 8
     vllm_gpu_memory_utilization: float = 0.95
     vllm_tensor_parallel_size: int = 1
+    # Maximum LoRA rank vLLM allocates for. Must be ≥ the rank of any adapter
+    # passed via ``adapter_path``. Bumped above the default 64 when validating
+    # a baked LoRA *soup* (combined rank = sum of input ranks).
+    vllm_max_lora_rank: int = 64
     # Logprob scoring
     top_logprobs: int = 20
     logprob_temperature: float = 1.0
