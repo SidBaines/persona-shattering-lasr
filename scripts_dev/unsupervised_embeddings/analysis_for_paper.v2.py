@@ -116,6 +116,7 @@ PAPER_FIGURES: list[str] = [
     "unsupervised/fig_4_2_1_scree_llama.pdf",
     "unsupervised/fig_4_2_2_within_model_validation.pdf",
     "unsupervised/fig_4_2_3_cross_model_phi.pdf",
+    "unsupervised/fig_4_2_4_variance_decomp.pdf",
 ]
 
 # ── Seeds (set before any stochastic imports) ────────────────────────────────
@@ -171,6 +172,7 @@ from src_dev.psychometric.tucker_congruence import (
 )
 from src_dev.psychometric.factor_extremes_html import export_factor_extremes_html
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
+from src_dev.psychometric.variance_decomp import run_variance_decomposition
 from src_dev.unsupervised_runs.io import hydrate_dataset_subtree
 from src_dev.visualisations import PAPER_FIGURES_DIR
 
@@ -373,6 +375,13 @@ ROLLOUT_DIR_FOR_HTML: Path = Path(
     "scratch/psychometric_fa/"
     "rollouts-llama318binstruct-t1.0-15t-2500p-seed436-scenarios_v2-uprompt_v6"
 )
+
+# Same rollout cache, used to look up each persona's interviewer-archetype
+# and scenario-id for the variance-decomposition step. Re-used by
+# ``run_variance_decomp`` per model — both Llama and Qwen administer over
+# the same Llama-generated B rollouts, so the lookup is identical.
+ROLLOUT_DIR_FOR_VARIANCE: Path = ROLLOUT_DIR_FOR_HTML
+SCENARIOS_FILE: Path = Path("datasets/scenarios/v2.json")
 
 # Number of high-scoring and low-scoring personas shown per factor in the
 # HTML browser. 10 per pole is what the main pipeline uses and is about as
@@ -1288,6 +1297,87 @@ def run_within_model_validation(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# VARIANCE DECOMPOSITION (archetype + scenario)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def run_variance_decomp(data: LoadedData, fit: FaFit) -> dict | None:
+    """Decompose factor-score variance into archetype + scenario contributions.
+
+    Thin wrapper around
+    :func:`src_dev.psychometric.variance_decomp.run_variance_decomposition`.
+    Outputs land under ``{output_dir}/variance_decomp/``:
+
+        eta2_oneway.json
+        eta2_twoway.json
+        per_archetype_factor_means.csv
+        factor_means_by_archetype.{png,pdf}
+
+    Returns the result dict (or ``None`` if the rollout dir is missing —
+    e.g. when this script runs on a fresh machine without the B-rollout
+    cache hydrated locally).
+    """
+    if not ROLLOUT_DIR_FOR_VARIANCE.exists():
+        log.warning(
+            "[%s] rollout dir missing — skipping variance decomp (%s)",
+            data.model.slug, ROLLOUT_DIR_FOR_VARIANCE,
+        )
+        return None
+    if not SCENARIOS_FILE.exists():
+        log.warning(
+            "[%s] scenarios file missing — skipping variance decomp (%s)",
+            data.model.slug, SCENARIOS_FILE,
+        )
+        return None
+
+    fa_result = load_factor_analysis(fit.npz_path)
+    factor_labels = _axis_labels_for(data.model.slug, fit.k)
+    out_dir = data.output_dir / "variance_decomp"
+
+    log.info(
+        "[%s] variance decomposition (archetype + scenario) -> %s",
+        data.model.slug, out_dir,
+    )
+    result = run_variance_decomposition(
+        scores=fa_result["scores"],
+        metadata=data.metadata,
+        rollout_dir=ROLLOUT_DIR_FOR_VARIANCE,
+        scenarios_file=SCENARIOS_FILE,
+        out_dir=out_dir,
+        model_label=data.model.label,
+        factor_labels=factor_labels,
+    )
+
+    one = result["oneway"]
+    two = result["twoway"]
+    log.info(
+        "[%s] one-way η² (archetype | scenario) per factor:",
+        data.model.slug,
+    )
+    for i, (ea, es) in enumerate(zip(
+        one["eta2_archetype_per_factor"],
+        one["eta2_scenario_per_factor"],
+    )):
+        log.info(
+            "  F%d (%s):  archetype=%.3f   scenario=%.3f",
+            i, factor_labels[i], ea, es,
+        )
+    log.info(
+        "[%s] two-way decomposition (arch / scen / interact / resid):",
+        data.model.slug,
+    )
+    for i in range(one["n_factors"]):
+        log.info(
+            "  F%d:  arch=%.3f  scen=%.3f  interact=%.3f  resid=%.3f  (n_cells=%d)",
+            i,
+            two["eta2_archetype"][i], two["eta2_scenario"][i],
+            two["eta2_interaction"][i], two["eta2_residual"][i],
+            two["n_cells"][i],
+        )
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # PREDICTIVITY CROSS-VALIDATION (BI-CV)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1919,6 +2009,68 @@ def _copy_paper_cross_model_heatmap(
     return None
 
 
+def _plot_paper_variance_decomp(
+    variance_decomp_results: dict[str, dict],
+) -> Path | None:
+    """Grouped-bars paper figure: archetype vs scenario one-way η² per factor.
+
+    Two panels side-by-side (one per model). Each panel shows one bar per
+    factor for archetype η² and one for scenario η². The decomposition
+    answers ``how much of each factor's persona-level variance is just
+    the conversation-context``, so the appendix figure makes it easy to
+    read off scenario-dominance vs archetype-dominance per factor.
+
+    Writes to ``PAPER_FIGURES_DIR / unsupervised / fig_4_2_4_variance_decomp.pdf``.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if not variance_decomp_results:
+        return None
+
+    slugs = list(variance_decomp_results.keys())
+    fig, axes = plt.subplots(
+        1, len(slugs), figsize=(5.5 * len(slugs), 4.6),
+        sharey=True, constrained_layout=True,
+    )
+    if len(slugs) == 1:
+        axes = [axes]
+
+    for ax, slug in zip(axes, slugs):
+        one = variance_decomp_results[slug]["oneway"]
+        labels = one.get("factor_labels") or [f"F{i}" for i in range(one["n_factors"])]
+        x = np.arange(one["n_factors"])
+        width = 0.36
+        eta_arch = np.asarray(one["eta2_archetype_per_factor"], dtype=float)
+        eta_scen = np.asarray(one["eta2_scenario_per_factor"], dtype=float)
+        ax.bar(x - width / 2, eta_arch, width,
+               color="#2563eb", alpha=0.88, label="Archetype",
+               edgecolor="#111", linewidth=0.3)
+        ax.bar(x + width / 2, eta_scen, width,
+               color="#ea580c", alpha=0.88, label="Scenario",
+               edgecolor="#111", linewidth=0.3)
+        for xi, (ea, es) in enumerate(zip(eta_arch, eta_scen)):
+            ax.text(xi - width / 2, ea + 0.005, f"{ea:.2f}",
+                    ha="center", va="bottom", fontsize=7.5)
+            ax.text(xi + width / 2, es + 0.005, f"{es:.2f}",
+                    ha="center", va="bottom", fontsize=7.5)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
+        ax.set_ylabel(r"one-way $\eta^2$ of factor scores")
+        ax.set_title(one.get("model") or slug, fontsize=10)
+        ax.grid(axis="y", alpha=0.25)
+        ax.set_ylim(0, max(0.05, float(max(eta_arch.max(), eta_scen.max())) * 1.3))
+        ax.legend(fontsize=8, loc="upper right")
+
+    save_path = PAPER_FIGURES_DIR / "unsupervised" / "fig_4_2_4_variance_decomp.pdf"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+    log.info("wrote %s", save_path)
+    return save_path
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2095,6 +2247,14 @@ def main() -> None:
         log.info("═══ run_predictivity_cv [%s] ═══", slug)
         predictivity_results[slug] = run_predictivity_cv(loaded[slug], fit)
 
+    # ── Step: variance decomposition (archetype + scenario) ─────────────
+    variance_decomp_results: dict[str, dict] = {}
+    for slug, fit in fits.items():
+        log.info("═══ run_variance_decomp [%s] ═══", slug)
+        result = run_variance_decomp(loaded[slug], fit)
+        if result is not None:
+            variance_decomp_results[slug] = result
+
     # ── Step: cross-model Tucker's congruence (Llama ↔ Qwen) ───────────
     cross_reports = run_cross_model_congruence(loaded, fits)
 
@@ -2106,6 +2266,8 @@ def main() -> None:
             _plot_paper_within_model_validation(validation_results)
         if cross_reports:
             _copy_paper_cross_model_heatmap(cross_reports)
+        if variance_decomp_results:
+            _plot_paper_variance_decomp(variance_decomp_results)
     else:
         log.info("[--emit-paper-figures off] skipping paper-figure writes")
 
