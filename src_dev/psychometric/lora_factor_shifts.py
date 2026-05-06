@@ -1,0 +1,360 @@
+"""Per-LoRA factor-score-shift summaries for the paper.
+
+Reads ``<label>_summary.json`` produced by
+``scripts_dev/oct_pipeline/unsup_k4_v7_pf3/validate_lora.py`` (one per
+trained LoRA × validation run), and lays out a wide cross-LoRA table /
+heatmap of per-factor mean shifts.
+
+The summaries live on the shared HuggingFace monorepo
+(``persona-shattering-lasr/monorepo``) under the path layout
+
+    fine_tuning/llama-3.1-8b-it/unsupervised/<factor>/<direction>/
+        v<train_recipe>/evals/factor_validate/<label>/
+            <label>_summary.json    # aggregate per-factor mean_diff + CI
+            <label>_scores.npz      # per-persona baseline + LoRA factor scores
+            <label>_paired_diff.png
+
+This module pulls the summary + scores files into a local mirror dir on
+demand (single-file ``hf_hub_download`` calls — small, fast) and
+provides utilities to fold them into a wide DataFrame-like dict and a
+heatmap-style figure.
+
+Heavier sibling files (``questionnaire_v7_fc_pair/`` raw response
+matrices) are intentionally not hydrated here; pull them separately
+when you need to do your own analysis on the per-item data.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+
+__all__ = [
+    "LoraValidation",
+    "hydrate_validation_artifacts",
+    "load_lora_factor_shifts",
+    "plot_factor_shift_heatmap",
+]
+
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LoraValidation:
+    """One LoRA validation entry.
+
+    Attributes:
+        label: Short label used in the validate_lora.py run (e.g.
+            ``initiative_amp``). Used as the row name in the heatmap.
+        factor: Canonical factor name the LoRA targets (one of
+            ``Initiative``, ``Warmth``, ``Pedagogy``, ``Hedging``).
+            Used to mark the ``intended-effect'' cell on the heatmap.
+        direction: ``"+"`` for amplifier, ``"-"`` for suppressor.
+        hf_subdir: Repo path under ``persona-shattering-lasr/monorepo``
+            holding the run dir (the dir containing
+            ``<label>_summary.json``, ``<label>_scores.npz``, etc.).
+        prefer_large_n: When True, if a sibling label like
+            ``<label>_prefix1000`` exists on the same parent, use the
+            larger-n variant instead. Lets the analysis auto-upgrade as
+            larger runs land without an edit.
+    """
+    label: str
+    factor: str
+    direction: str
+    hf_subdir: str
+    prefer_large_n: bool = True
+
+
+def hydrate_validation_artifacts(
+    *,
+    hf_repo_id: str,
+    hf_subdir: str,
+    label: str,
+    local_root: Path,
+    pull_scores: bool = True,
+) -> dict[str, Path | None]:
+    """Download ``<label>_summary.json`` (and optionally ``_scores.npz``)
+    from HF into ``local_root / hf_subdir / ...`` if not already present.
+
+    Returns a dict of fetched paths keyed by artifact name. Missing
+    optional artifacts (e.g. scores.npz absent on HF for a label) come
+    back as ``None``.
+    """
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError
+
+    out: dict[str, Path | None] = {"summary": None, "scores": None}
+
+    summary_in_repo = f"{hf_subdir.rstrip('/')}/{label}_summary.json"
+    summary_local = local_root / summary_in_repo
+    if not summary_local.exists():
+        log.info("[lora-shifts] hydrate %s", summary_in_repo)
+        path = hf_hub_download(
+            repo_id=hf_repo_id, repo_type="dataset",
+            filename=summary_in_repo, local_dir=local_root,
+        )
+        summary_local = Path(path)
+    out["summary"] = summary_local
+
+    if pull_scores:
+        scores_in_repo = f"{hf_subdir.rstrip('/')}/{label}_scores.npz"
+        scores_local = local_root / scores_in_repo
+        if not scores_local.exists():
+            try:
+                log.info("[lora-shifts] hydrate %s", scores_in_repo)
+                path = hf_hub_download(
+                    repo_id=hf_repo_id, repo_type="dataset",
+                    filename=scores_in_repo, local_dir=local_root,
+                )
+                scores_local = Path(path)
+            except EntryNotFoundError:
+                scores_local = None
+        out["scores"] = scores_local
+
+    return out
+
+
+def _resolve_label_with_large_n(
+    *,
+    hf_repo_id: str,
+    base_subdir: str,
+    base_label: str,
+) -> tuple[str, str]:
+    """If ``<base_subdir>/../<base_label>_prefix1000/`` exists on HF,
+    return the (label, hf_subdir) pointing at the larger run; otherwise
+    return the inputs unchanged.
+
+    The validation-runs convention is ``<label>_prefix<N>`` for an N-
+    persona variant of the same LoRA (typical: prefix1000 alongside the
+    default 200-persona run).
+    """
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import RepositoryNotFoundError, EntryNotFoundError
+
+    parent = str(Path(base_subdir).parent)
+    candidate_label = f"{base_label}_prefix1000"
+    candidate_subdir = f"{parent}/{candidate_label}"
+    candidate_summary = f"{candidate_subdir}/{candidate_label}_summary.json"
+    api = HfApi()
+    try:
+        api.hf_hub_download(  # exists check via head
+            repo_id=hf_repo_id, repo_type="dataset",
+            filename=candidate_summary,
+        ) if False else None
+        # Use list_repo_tree on the parent — safer than hf_hub_download for an
+        # existence test.
+        for entry in api.list_repo_tree(
+            repo_id=hf_repo_id, repo_type="dataset",
+            path_in_repo=parent, recursive=False,
+        ):
+            if entry.path.rstrip("/").endswith("/" + candidate_label):
+                return candidate_label, candidate_subdir
+    except (RepositoryNotFoundError, EntryNotFoundError, Exception):
+        pass
+    return base_label, base_subdir
+
+
+def load_lora_factor_shifts(
+    validations: list[LoraValidation],
+    *,
+    hf_repo_id: str,
+    local_root: Path,
+    pull_scores: bool = True,
+    canonical_factor_order: list[str] | None = None,
+) -> dict:
+    """Hydrate every entry's summary (+ scores.npz when present), build a
+    matrix of per-LoRA per-factor mean shifts.
+
+    Returns:
+        dict with keys:
+            ``rows`` — list of ``{label, factor, direction, n_personas,
+                                  target_factor, summary_path,
+                                  scores_path}``.
+            ``factors`` — column factor name order.
+            ``mean_diff`` — np.ndarray (n_lora, n_factor)
+            ``ci_lo`` / ``ci_hi`` — same shape, 95% CI bounds
+            ``cohen_dz`` — same shape
+    """
+    rows: list[dict] = []
+    matrix_diff: list[list[float]] = []
+    matrix_lo: list[list[float]] = []
+    matrix_hi: list[list[float]] = []
+    matrix_dz: list[list[float]] = []
+    factors_seen: list[str] | None = canonical_factor_order
+
+    for v in validations:
+        label = v.label
+        subdir = v.hf_subdir
+        if v.prefer_large_n:
+            try:
+                label, subdir = _resolve_label_with_large_n(
+                    hf_repo_id=hf_repo_id,
+                    base_subdir=v.hf_subdir,
+                    base_label=v.label,
+                )
+            except Exception as exc:
+                log.warning("[lora-shifts] prefer_large_n probe failed for %s: %s",
+                            v.label, exc)
+
+        artifacts = hydrate_validation_artifacts(
+            hf_repo_id=hf_repo_id,
+            hf_subdir=subdir,
+            label=label,
+            local_root=local_root,
+            pull_scores=pull_scores,
+        )
+        summary_path = artifacts["summary"]
+        if summary_path is None or not Path(summary_path).exists():
+            log.warning("[lora-shifts] skipping %s: no summary found", label)
+            continue
+
+        payload = json.loads(Path(summary_path).read_text())
+        per_factor = payload.get("factor_summary") or []
+        if not per_factor:
+            log.warning("[lora-shifts] empty factor_summary in %s", summary_path)
+            continue
+
+        # Match by short factor name (strip F<digit>_ prefix). The
+        # validate_lora.py summaries label factors with their pre-sort
+        # F-index (e.g. "F1_Pedagogy") while the rest of the v2 paper
+        # pipeline uses post-variance-sort indices (e.g. "F1_Warmth").
+        # The factor identity (Initiative / Warmth / Pedagogy / Hedging)
+        # is the same across both; only the index disagrees, so we key
+        # on the short name and ignore F#.
+        def _short_name(name: str) -> str:
+            n = name.strip()
+            if "_" in n and n[:1] == "F" and n[1:2].isdigit():
+                return n.split("_", 1)[1]
+            return n
+        by_short = {_short_name(r["factor"]): r for r in per_factor}
+        if factors_seen is None:
+            # Default order if caller didn't specify: short-names from
+            # this first summary's order.
+            factors_seen = [_short_name(r["factor"]) for r in per_factor]
+        # Reorder this run's per-factor entries to match factors_seen.
+        per_factor = [by_short[f] for f in factors_seen if f in by_short]
+        if len(per_factor) != len(factors_seen):
+            missing = [f for f in factors_seen if f not in by_short]
+            log.warning(
+                "[lora-shifts] %s missing factors %s — skipping", label, missing,
+            )
+            continue
+
+        rows.append({
+            "label": label,
+            "factor": v.factor,
+            "direction": v.direction,
+            "n_personas": int(payload.get("n_personas", 0)),
+            "target_factor": payload.get("target_factor"),
+            "summary_path": str(summary_path),
+            "scores_path": str(artifacts["scores"]) if artifacts.get("scores") else None,
+            "adapter": payload.get("adapter"),
+        })
+        matrix_diff.append([float(r["mean_diff"]) for r in per_factor])
+        matrix_lo.append([float(r["ci_95_lo"]) for r in per_factor])
+        matrix_hi.append([float(r["ci_95_hi"]) for r in per_factor])
+        matrix_dz.append([float(r.get("cohen_dz", float("nan"))) for r in per_factor])
+
+    return {
+        "rows": rows,
+        "factors": factors_seen or [],
+        "mean_diff": np.asarray(matrix_diff, dtype=float),
+        "ci_lo": np.asarray(matrix_lo, dtype=float),
+        "ci_hi": np.asarray(matrix_hi, dtype=float),
+        "cohen_dz": np.asarray(matrix_dz, dtype=float),
+    }
+
+
+def plot_factor_shift_heatmap(
+    shifts: dict,
+    *,
+    save_path: Path,
+    title: str = "Per-LoRA factor-score shift",
+    factor_display_names: list[str] | None = None,
+    annotate: str = "diff_with_ci",
+) -> None:
+    """Heatmap: rows = LoRAs, cols = factors, cells coloured by mean_diff.
+
+    ``annotate``:
+        ``"diff"``         - just the mean diff in the cell.
+        ``"diff_with_ci"`` - mean diff with the half-CI as ± below.
+        ``"dz"``           - Cohen's d_z.
+
+    The intended-effect cell (LoRA factor matches column) is outlined
+    in white so the reader can scan diagonal-vs-off-diagonal at a glance.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    diff = shifts["mean_diff"]
+    lo = shifts["ci_lo"]
+    hi = shifts["ci_hi"]
+    dz = shifts["cohen_dz"]
+    rows = shifts["rows"]
+    factors = shifts["factors"]
+    n_lora, n_factor = diff.shape
+    if factor_display_names is None:
+        factor_display_names = factors
+
+    # Row labels e.g. "Initiative ↑ (n=200)"
+    arrow = {"+": "↑", "-": "↓"}
+    row_labels: list[str] = []
+    for r in rows:
+        a = arrow.get(r["direction"], r["direction"])
+        row_labels.append(f"{r['factor']} {a}  (n={r['n_personas']})")
+
+    vmax = float(np.nanmax(np.abs(diff))) or 1.0
+    fig, ax = plt.subplots(
+        figsize=(1.2 * n_factor + 4, 0.55 * n_lora + 2),
+    )
+    im = ax.imshow(diff, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+
+    # Annotate cells.
+    for i in range(n_lora):
+        for j in range(n_factor):
+            v = diff[i, j]
+            if annotate == "diff":
+                txt = f"{v:+.2f}"
+            elif annotate == "dz":
+                txt = f"{dz[i, j]:+.2f}"
+            else:
+                half_ci = (hi[i, j] - lo[i, j]) / 2.0
+                txt = f"{v:+.2f}\n±{half_ci:.2f}"
+            color = "white" if abs(v) > 0.55 * vmax else "black"
+            ax.text(j, i, txt, ha="center", va="center", fontsize=8, color=color)
+
+    # Outline target cells: LoRA's factor matches column factor.
+    factor_to_col = {f: j for j, f in enumerate(factors)}
+    # Match by stripping "F<n>_" prefix when present (e.g. "F0_Initiative" -> "Initiative").
+    for i, r in enumerate(rows):
+        for j, f in enumerate(factors):
+            f_short = f.split("_", 1)[1] if "_" in f and f[1:2].isdigit() else f
+            if r["factor"].lower() == f_short.lower():
+                ax.add_patch(plt.Rectangle(
+                    (j - 0.5, i - 0.5), 1, 1,
+                    fill=False, edgecolor="white", linewidth=2.2,
+                ))
+                # Side note: target direction (+/-) — useful interpretation.
+                # We don't recolor; the outline is enough.
+
+    ax.set_xticks(range(n_factor))
+    ax.set_xticklabels(factor_display_names, rotation=15, ha="right")
+    ax.set_yticks(range(n_lora))
+    ax.set_yticklabels(row_labels)
+    ax.set_xlabel("Factor")
+    ax.set_ylabel("LoRA  (target factor + direction)")
+    ax.set_title(title, fontsize=10)
+    fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02,
+                 label=r"$\bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ (factor-score units)")
+    fig.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, dpi=150)
+    fig.savefig(save_path.with_suffix(".pdf"))
+    plt.close(fig)

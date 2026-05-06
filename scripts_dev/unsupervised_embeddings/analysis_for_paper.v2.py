@@ -118,6 +118,7 @@ PAPER_FIGURES: list[str] = [
     "unsupervised/fig_4_2_3_cross_model_phi.pdf",
     "unsupervised/fig_4_2_4_variance_decomp.pdf",
     "unsupervised/fig_4_2_5_residualized.pdf",
+    "unsupervised/fig_4_2_6_lora_shifts.pdf",
 ]
 
 # ── Seeds (set before any stochastic imports) ────────────────────────────────
@@ -172,6 +173,11 @@ from src_dev.psychometric.tucker_congruence import (
     tucker_phi_matrix,
 )
 from src_dev.psychometric.factor_extremes_html import export_factor_extremes_html
+from src_dev.psychometric.lora_factor_shifts import (
+    LoraValidation,
+    load_lora_factor_shifts,
+    plot_factor_shift_heatmap,
+)
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
 from src_dev.psychometric.variance_decomp import (
     build_archetype_scenario_lookup,
@@ -387,6 +393,72 @@ ROLLOUT_DIR_FOR_HTML: Path = Path(
 # the same Llama-generated B rollouts, so the lookup is identical.
 ROLLOUT_DIR_FOR_VARIANCE: Path = ROLLOUT_DIR_FOR_HTML
 SCENARIOS_FILE: Path = Path("datasets/scenarios/v2.json")
+
+# ── LoRA factor-shift validation ────────────────────────────────────────────
+# Per-LoRA factor-shift summaries live on the shared monorepo. The
+# ``run_lora_factor_shifts`` stage hydrates each entry's summary (and
+# scores npz, used for downstream per-persona analyses) on demand.
+#
+# Layout: hf_subdir is the dir containing ``<label>_summary.json`` and
+# ``<label>_scores.npz``. ``factor`` is the canonical factor name the
+# LoRA targets (used to outline the diagonal cell on the heatmap);
+# ``direction`` is "+" for amplifier / "-" for suppressor.
+LORA_VALIDATION_HF_REPO: str = "persona-shattering-lasr/monorepo"
+LORA_VALIDATION_LOCAL_ROOT: Path = Path(
+    "scratch/factor_inspect_v7_pf3/validate_results_remote"
+)
+# When True (default), each entry probes for a ``<label>_prefix1000``
+# sibling on HF and uses it instead of the default 200-persona run when
+# present. This means the figure auto-upgrades as larger validation
+# runs land without an edit here.
+LORA_VALIDATION_PREFER_LARGE_N: bool = True
+
+LORA_VALIDATIONS: list[LoraValidation] = [
+    LoraValidation(
+        label="initiative_amp", factor="Initiative", direction="+",
+        hf_subdir=(
+            "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/amplifier/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_amp"
+        ),
+    ),
+    LoraValidation(
+        label="initiative_sup", factor="Initiative", direction="-",
+        hf_subdir=(
+            "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/suppressor/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_sup"
+        ),
+    ),
+    LoraValidation(
+        label="warmth_amp", factor="Warmth", direction="+",
+        hf_subdir=(
+            "fine_tuning/llama-3.1-8b-it/unsupervised/warmth/amplifier/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/warmth_amp"
+        ),
+    ),
+    LoraValidation(
+        label="warmth_sup", factor="Warmth", direction="-",
+        hf_subdir=(
+            "fine_tuning/llama-3.1-8b-it/unsupervised/warmth/suppressor/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/warmth_sup"
+        ),
+    ),
+    LoraValidation(
+        label="pedagogy_amp", factor="Pedagogy", direction="+",
+        hf_subdir=(
+            "fine_tuning/llama-3.1-8b-it/unsupervised/pedagogy/amplifier/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/pedagogy_amp"
+        ),
+    ),
+    LoraValidation(
+        label="pedagogy_sup", factor="Pedagogy", direction="-",
+        hf_subdir=(
+            "fine_tuning/llama-3.1-8b-it/unsupervised/pedagogy/suppressor/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/pedagogy_sup"
+        ),
+    ),
+    # Hedging amplifier/suppressor LoRAs are not yet trained / validated;
+    # add entries here once their factor_validate runs land on HF.
+]
 
 # Number of high-scoring and low-scoring personas shown per factor in the
 # HTML browser. 10 per pole is what the main pipeline uses and is about as
@@ -1622,6 +1694,115 @@ def run_residualized_fa(data: LoadedData, fit: FaFit) -> dict | None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# LORA FACTOR-SHIFT VALIDATION (per-LoRA per-factor mean shift)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def run_lora_factor_shifts() -> dict | None:
+    """Hydrate per-LoRA factor-shift summaries and write the cross-LoRA table.
+
+    Pulls each ``LORA_VALIDATIONS`` entry's ``<label>_summary.json`` (and
+    ``_scores.npz`` when present) from HF into ``LORA_VALIDATION_LOCAL_ROOT``,
+    aggregates per-factor mean shifts into a (n_lora × n_factor) matrix,
+    and writes:
+
+        ``{OUTPUT_ROOT}/lora_factor_shifts/lora_factor_shifts.csv``
+        ``{OUTPUT_ROOT}/lora_factor_shifts/lora_factor_shifts_index.json``
+        ``{OUTPUT_ROOT}/lora_factor_shifts/lora_shifts_heatmap.{png,pdf}``
+
+    Returns the shifts dict or ``None`` if no LoRAs are configured.
+    """
+    if not LORA_VALIDATIONS:
+        log.info("[lora-shifts] LORA_VALIDATIONS is empty — skipping")
+        return None
+
+    out_dir = OUTPUT_ROOT / "lora_factor_shifts"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log.info(
+        "[lora-shifts] hydrating + loading %d validation summaries -> %s",
+        len(LORA_VALIDATIONS), out_dir,
+    )
+
+    # Honour LORA_VALIDATION_PREFER_LARGE_N globally by overriding each
+    # entry's flag (LoraValidation is frozen — recreate).
+    validations = [
+        LoraValidation(
+            label=v.label, factor=v.factor, direction=v.direction,
+            hf_subdir=v.hf_subdir,
+            prefer_large_n=LORA_VALIDATION_PREFER_LARGE_N,
+        )
+        for v in LORA_VALIDATIONS
+    ]
+    shifts = load_lora_factor_shifts(
+        validations,
+        hf_repo_id=LORA_VALIDATION_HF_REPO,
+        local_root=LORA_VALIDATION_LOCAL_ROOT,
+        pull_scores=True,
+        # Short factor names — the validation-summary loader strips F#_
+        # prefixes, so the canonical order here is the post-sort order
+        # used in the rest of the v2 pipeline (Initiative / Warmth /
+        # Pedagogy / Hedging).
+        canonical_factor_order=["Initiative", "Warmth", "Pedagogy", "Hedging"],
+    )
+
+    rows = shifts["rows"]
+    factors = shifts["factors"]
+    if not rows:
+        log.warning("[lora-shifts] no validation summaries hydrated; nothing to plot")
+        return None
+
+    # CSV.
+    diff = shifts["mean_diff"]
+    lo = shifts["ci_lo"]
+    hi = shifts["ci_hi"]
+    dz = shifts["cohen_dz"]
+    csv_path = out_dir / "lora_factor_shifts.csv"
+    with csv_path.open("w") as fh:
+        fh.write(
+            "label,target_factor,direction,n_personas," +
+            ",".join(f"{f}_diff,{f}_ci_lo,{f}_ci_hi,{f}_dz" for f in factors) + "\n"
+        )
+        for i, r in enumerate(rows):
+            cells = [r["label"], r["factor"], r["direction"], str(r["n_personas"])]
+            for j, _f in enumerate(factors):
+                cells += [
+                    f"{diff[i, j]:.4f}",
+                    f"{lo[i, j]:.4f}",
+                    f"{hi[i, j]:.4f}",
+                    f"{dz[i, j]:.4f}",
+                ]
+            fh.write(",".join(cells) + "\n")
+
+    (out_dir / "lora_factor_shifts_index.json").write_text(json.dumps({
+        "factors": factors,
+        "rows": rows,
+        "n_loras": len(rows),
+        "hf_repo": LORA_VALIDATION_HF_REPO,
+    }, indent=2))
+
+    plot_factor_shift_heatmap(
+        shifts,
+        save_path=out_dir / "lora_shifts_heatmap.png",
+        title=(
+            "Per-LoRA factor-score shift "
+            f"(k=4 v7-pf3 oblimin; n={rows[0]['n_personas']} personas)"
+        ),
+        factor_display_names=factors,
+        annotate="diff_with_ci",
+    )
+
+    log.info("[lora-shifts] %d LoRAs loaded; mean shifts:", len(rows))
+    for i, r in enumerate(rows):
+        diffs_str = "  ".join(f"{f}={diff[i, j]:+.2f}" for j, f in enumerate(factors))
+        log.info(
+            "  %s (%s%s, n=%d): %s",
+            r["label"], r["factor"], r["direction"], r["n_personas"], diffs_str,
+        )
+
+    return shifts
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # PREDICTIVITY CROSS-VALIDATION (BI-CV)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -2253,6 +2434,19 @@ def _copy_paper_cross_model_heatmap(
     return None
 
 
+def _copy_paper_lora_shifts(out_dir: Path) -> Path | None:
+    """Copy the LoRA factor-shift heatmap PDF to paper/figures/."""
+    import shutil
+    src = out_dir / "lora_shifts_heatmap.pdf"
+    if not src.exists():
+        return None
+    dst = PAPER_FIGURES_DIR / "unsupervised" / "fig_4_2_6_lora_shifts.pdf"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    log.info("wrote %s", dst)
+    return dst
+
+
 def _plot_paper_residualized(
     residualized_results: dict[str, dict],
 ) -> Path | None:
@@ -2610,6 +2804,10 @@ def main() -> None:
         if result is not None:
             residualized_results[slug] = result
 
+    # ── Step: LoRA factor-shift validation (per-LoRA × per-factor) ──────
+    log.info("═══ run_lora_factor_shifts ═══")
+    lora_shifts = run_lora_factor_shifts()
+
     # ── Step: cross-model Tucker's congruence (Llama ↔ Qwen) ───────────
     cross_reports = run_cross_model_congruence(loaded, fits)
 
@@ -2625,6 +2823,8 @@ def main() -> None:
             _plot_paper_variance_decomp(variance_decomp_results)
         if residualized_results:
             _plot_paper_residualized(residualized_results)
+        if lora_shifts is not None:
+            _copy_paper_lora_shifts(OUTPUT_ROOT / "lora_factor_shifts")
     else:
         log.info("[--emit-paper-figures off] skipping paper-figure writes")
 
