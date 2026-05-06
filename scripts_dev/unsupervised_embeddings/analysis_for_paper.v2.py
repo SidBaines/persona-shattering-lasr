@@ -1790,12 +1790,8 @@ def run_lora_factor_shifts() -> dict | None:
     # The middling and headroom variants depend on the per-row bucketed
     # data populated by load_lora_factor_shifts (computed off the
     # paired scores npz).
-    plot_variants: list[tuple[str, str]] = [
-        ("naive",     "Per-LoRA factor-score shift (full-sample mean)"),
-        ("middling",  "Per-LoRA factor-score shift (medium-baseline tertile only)"),
-        ("headroom",  "Per-LoRA factor-score shift (headroom tertile per LoRA direction)"),
-    ]
-    for selection, title_suffix in plot_variants:
+    plot_variants: list[str] = ["naive", "middling", "headroom"]
+    for selection in plot_variants:
         try:
             mat = build_shift_matrix(shifts, selection=selection)
         except Exception as exc:
@@ -1804,10 +1800,7 @@ def run_lora_factor_shifts() -> dict | None:
         plot_factor_shift_heatmap(
             shifts,
             save_path=out_dir / f"lora_shifts_heatmap_{selection}.png",
-            title=(
-                f"{title_suffix}\n"
-                f"(k=4 v7-pf3 oblimin; up to n={rows[0]['n_personas']} personas)"
-            ),
+            title="Per-LoRA factor-score shift",
             factor_display_names=factors,
             annotate="diff_with_ci",
             matrix_override=None if selection == "naive" else mat,
