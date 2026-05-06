@@ -1,0 +1,38 @@
+{
+  "k": 11,
+  "rotation": "oblimin",
+  "method": "principal",
+  "description": "k=11 principal-oblimin solution on v7 fc_pair (Llama-3.1-8B-Instruct, pf3). Labels from tmp.json. Anchors are the 3-4 highest-|loading| items per factor in the refit FA on the cached baseline matrix at scratch/factor_inspect_v7_pf3/hydrated/...pf3/.",
+  "factor_names": [
+    "F0_Authority",
+    "F1_Decisiveness",
+    "F2_Playfulness",
+    "F3_Hedging",
+    "F4_Frankness",
+    "F5_Restraint",
+    "F6_Effacement",
+    "F7_Scrutiny",
+    "F8_Empathy",
+    "F9_Volunteering",
+    "F10_Structure"
+  ],
+  "target_aliases": {
+    "initiative": 9,
+    "pedagogy": 10,
+    "warmth": 2,
+    "hedging": 3
+  },
+  "anchors": {
+    "0":  [["v7fc_071", 1], ["v7fc_056", 1], ["v7fc_054", 1], ["v7fc_058", -1]],
+    "1":  [["v7fc_066", 1], ["v7fc_064", 1], ["v7fc_008", -1], ["v7fc_013", 1]],
+    "2":  [["v7fc_052", 1], ["v7fc_051", 1], ["v7fc_050", 1], ["v7fc_024", -1]],
+    "3":  [["v7fc_026", 1], ["v7fc_060", 1], ["v7fc_020", 1], ["v7fc_057", 1]],
+    "4":  [["v7fc_068", -1], ["v7fc_072", 1], ["v7fc_009", 1], ["v7fc_067", -1]],
+    "5":  [["v7fc_017", 1], ["v7fc_069", 1], ["v7fc_040", 1], ["v7fc_042", 1]],
+    "6":  [["v7fc_043", -1], ["v7fc_063", -1], ["v7fc_014", -1], ["v7fc_019", 1]],
+    "7":  [["v7fc_010", 1], ["v7fc_011", 1], ["v7fc_059", 1], ["v7fc_047", -1]],
+    "8":  [["v7fc_001", 1], ["v7fc_006", 1], ["v7fc_038", 1], ["v7fc_033", 1]],
+    "9":  [["v7fc_032", 1], ["v7fc_029", 1], ["v7fc_030", 1], ["v7fc_003", 1]],
+    "10": [["v7fc_015", 1], ["v7fc_046", -1], ["v7fc_037", 1], ["v7fc_012", -1]]
+  }
+}
