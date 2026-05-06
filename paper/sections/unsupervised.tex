@@ -1,9 +1,6 @@
 \section{Unsupervised persona exploration}\label{sec:unsupervised-persona-exploration}
-\todo[inline]{(For LASR) Remove the embedding analysis section, tidy up the rest a little}
-\todo[inline]{(For NeurIPS) Tidy up the rest a lot}
-Taking inspiration from foundational work in cognitive science, including the process of developing the OCEAN framework itself \citep{tupes1992recurrent}, we can use unsupervised methods to seek a minimal set of latent factors which explain most of the variance in behaviour across diverse contexts.
-In general, we would expect to find some overlap with factors explaining human behaviour, precisely because they are trained largely on human text, as well as some non-overlapping factors which explain non-human behaviours.
-
+We find four interpretable persona axes in Llama-3.1-8B-Instruct that are stable within-model and partially replicate across model families; we then evaluate the extent to which they can be modulated by LoRA adapters trained with the supervised pipeline of \Cref{sec:supervised}.
+We do not expect that all LLM behaviour will be explainable by human-derived (e.g.\ OCEAN) traits.
 \david{
 We therefore ask whether persona axes can be discovered directly from model
 behaviour, and test whether a psychometric-style pipeline can recover
@@ -12,179 +9,38 @@ provides a route from human-specified trait control toward model-native persona
 discovery.
 }
 
-% If we wish to understand and shape behaviour of models which display non-human traits, we need to be able to detect and shape them.
-% In this section, we deliberately stray from the path of using the human-centric OCEAN framework in order to do so.
-% We instead aim to find principled ways to elicit and then cluster a wide range of model behaviours, taking care to acknowledge that a model persona depends not just on the weights but also the prior context.
-
-% \subsection{Embedding and Analysing Single Turn Responses}\label{sec:embedding-and-analysing-single-turn-responses}
-
-% One approach to understanding model personas is to embed a large collection of rollouts in some space, and then perform analysis to determine and interpret the latent factors which explain the most variance across the set.
-% This subsection describes our methodology and results for this ‘unsupervised corpus exploration’.
-
-% To generate this corpus of rollouts, the 240 prompts from \citep{lu2026assistant} are posed to a neutrally-system-prompted Llama3.1 8B-Instruct, and 50 responses per question sampled at temperature 1.0.
-% Results are embedded using OpenAI’s text-embedding-3-small embedding model, producing a 12,000 x 1536 matrix.
-% Length-based filtering is applied to remove garbled, repetitive responses, leaving  responses, with up to 50 responding to any given prompt.
-
-% \textbf{Principal Axis Factoring (PAF) is then applied to the embeddings matrix}.
-% The oblimin rotation method with 30 factors is used\footnote{Different factor rotation methods were tried.
-% Horn's analysis was used to discover the number of factors explaining most of the variance; 169 factors were recommended but analysis of this size was infeasible, so the top 30 were used.}.
-% Studies were performed both with and without the application of a per-prompt residualisation process, in which embeddings had the centroid of all responses to the same prompt subtracted first; the analysis presented here uses non-residualised embeddings for the factor analysis, meaning care must be taken to remove within prompt-group semantic correlations at later stages.
-% Figure 4.1.1 shows an elbow plot of the factors produced.
-
-% \begin{figure}[htbp]
-% \centering
-% \begin{subfigure}[t]{\linewidth}
-%   \centering
-%   \includegraphics[width=\linewidth]{figures/tmp/image19.png}
-%   \caption{Residualised embeddings.}
-%   \label{fig:parallel-analysis-residualised}
-% \end{subfigure}
-% \vspace{0.5em}
-% \begin{subfigure}[t]{\linewidth}
-%   \centering
-%   \includegraphics[width=\linewidth]{figures/tmp/image20.png}
-%   \caption{Non-residualised embeddings.}
-%   \label{fig:parallel-analysis-non-residualised}
-% \end{subfigure}
-% \caption{Parallel analysis plots showing Horn’s method as applied to the residualised and non-residualised embeddings.
-% A clear elbow is not observed in either case.}
-% \label{fig:parallel-analysis}
-% \end{figure}
-
-
-% \textbf{To interpret these factors, several strategies for producing exemplary texts were explored.} It is desirable to understand factors which account for differences between sets of responses to different prompts (which may be more semantic in nature), as well as factors which explain strong differences between responses to the same prompt (which are more likely to correspond to factors explaining persona differences); figure 4.1.2 shows the within-prompt response variance for each of the top 30 factors.
-% To find the former, high- and low-scoring examples are chosen by taking the global embedding mean, then summing the factor direction multiplied by scale 3.0, and finding the nearest neighbour within the embedding corpus.
-% To find the latter, high-and low-scoring examples are chosen for each factor by finding the prompts which elicited a maximal spread in the factor score, and using these highest and lowest scoring examples.
-
-% \begin{figure}[htbp]
-% \centering
-% \includegraphics[width=\linewidth]{figures/tmp/image21.png}
-% \caption{Histograms of ‘prompt-group-variance’, calculated as the variance, within the set of responses to the same prompt, in the score for a given factor.
-% Higher variance indicates that there is more scope for the model to exhibit different factor scores within that prompt, so factors with right-shifted distributions are more likely to be relevant to describing personas whilst left-aligned distributions are more likely to correspond to semantic factors.}
-% \label{fig:histograms-of-prompt-group-variance-calculated-as-}
-% \end{figure}
-
-
-% \textbf{Factors are labelled using LLM-labellers.} For both grouping strategies, LLM-labellers are given collections of high- and low-scoring examples, and asked to describe the common theme which separates them.
-% Factors are given in batches, to reduce repetition of common themes, in order to make the labels more useful\footnote{Validation of labels is performed by subjecting a fresh-context LLM to the original prompt set with the factor label as behavioral instruction.}.
-% Validation of labels is performed by subjecting a fresh-context LLM to the original prompt set, but now with a system prompt instructing it to behave in the manner that is either high or low ‘trait’ as described by the factor label.
-% If this produces an embedding which scores highly/lowly for this factor, this provides validation that the label meaningfully captures the factor (ideally, for independent traits, the response should also score relatively neutrally on other factors).
-
-% \textbf{Validation of this method by injecting a signal into the corpus was performed.} In order to check if this could detect a clear persona existing in the corpus, 10 responses per prompt were produced for each original question with Llama3.1 8B-Instruct prompted to be disagreeable\footnote{Prompted with a system message instructing disagreeable behavior.}.
-% A random sample of 400 of these was injected into the corpus (accounting for 3.2\% of the dataset), and the full pipeline performed.
-% Figure 4.1.4 shows a histogram of the 28th factor obtained, separated by whether the response came from the original corpus or the disagreeable corpus, and demonstrates that this factor indeed strongly separates between agreeable and disagreeable responses - the automatic labelling, based on the ‘within prompt spread’ selection method, provided the shorthand label “Calm, informative exposition vs.
-% cynical, dismissive rant”.
-
-% \begin{figure}[htbp]
-% \centering
-% \includegraphics[width=\linewidth]{figures/tmp/image22.png}
-% \caption{Histogram of scores for factor 28 obtained when 400 disagreeable-model responses are injected into the 12,000 neutral responses, separated by model source.
-% Clear separation is shown, indicating that this factor corresponds to the trait of disagreeableness, and the LLM-labeller provides a corresponding label.}
-% \label{fig:histogram-of-scores-for-factor-28-obtained-when-40}
-% \end{figure}
-
-
-% \textbf{This method does not yet provide clear factors when applied to the current corpus.} Despite this initial success on injected signal, we find that the method does not produce informative labels on the original corpus.
-% [Work is ongoing]
-
-\subsection{Applying Traditional Psychometrics to LLM Personas}\label{sec:applying-traditional-psychometrics-to-llm-personas}
-\todo[inline]{(For NeurIPS) Re-write most of this section, a lot of it is heavily AI assisted}
-In \david{traditional psychometrics} it is typical to sample across a large population size, with the variation across this population being the object of study.
-This does not translate nicely to the case of LLMs by just sampling different post-trained models, in part because there are fewer LLMs than humans, and in part because the ‘persona’ depends on the context.
-However, this last point can be used to our advantage: \david{a single model can express different behavioural dispositions
-under different contexts.}
-
-% to explore the space of LLM personas, we can look at how models behave across a range of contexts.
-
 \textbf{A population of personas is produced by generating diverse rollouts.}
-\david{Concretely,} 2{,}500 multi-turn trajectories are produced by sampling Llama-3.1-8B-Instruct for 15 conversation turns, at temperature 1.0, in conversation with an LLM partner model (gpt-5.4-nano).
-Each conversation partner is randomly assigned one of 25 interviewer archetypes, each with a distinct conversational personality designed to elicit different facets of the assistant's behaviour, and one of 100 different `scenarios' which indicate a loose script for the conversation, along with a system prompt for the target model.
-This yields 2{,}500 persona-rollouts for our main Llama analysis (and 2{,}499 for the Qwen-administered arm used in the cross-model comparison below, after dropping one context-length outlier).
-\david{This design follows the ``weights plus context'' view of personas introduced
-above. The model weights define the behavioural repertoire, while the context
-selects a region of that repertoire. By sampling many contexts, we obtain a
-population over which latent behavioural structure can be estimated.}
+In \david{traditional psychometrics} it is typical to sample across a large population size, with the variation across this population being the object of study.
+This does not translate nicely to the case of LLMs by sampling different post-trained models, in part because there are fewer LLMs than humans, and in part because the `persona' depends on the context.
+However, this last point can be used to our advantage: \david{a single model can express different behavioural dispositions under different contexts.}
+We sample 2{,}500 15-turn rollouts from Llama-3.1-8B-Instruct, with each rollout's interlocutor (gpt-5.4-nano) randomly assigned one of 25 conversational archetypes and one of 100 scenario scripts.
+\david{This design follows the ``weights plus context'' view of personas introduced above. The model weights define the behavioural repertoire, while the context selects a region of that repertoire. By sampling many contexts, we obtain a population over which latent behavioural structure can be estimated.}
 
-\textbf{Personas are embedded using a forced-choice questionnaire.} For each persona-rollout we produce an $(N{+}1)$th-turn generation for each questionnaire item.
-We use a 72-item forced-choice (FC) instrument that covers 18 axes of assistant behaviour (four items per axis), each item presenting two contrasting first-person continuations (``A'' / ``B'') and asking the model which it would do; the axes were curated iteratively to span observable response styles (e.g.\ proactivity, formality, humour, epistemic style, safety posture).
-Item responses are scored as the soft expected value $\sum_{\ell\in\{A,B\}} P(\ell)\,\mathrm{mapping}[\ell] \in [0,1]$ over the two option-letter log-probabilities, with seeded counterbalancing of which letter encodes the high pole.
-This produces, for each persona-rollout, a 72-dimensional response vector analogous to a single human's response to a psychometric questionnaire; per-axis low-variance filtering retains 64 items on Llama and 58 on Qwen.
+\textbf{Exploratory latent factors are discovered using responses to a forced-choice questionnaire.}
+For each persona-rollout we produce an $(N{+}1)$th-turn generation of one of two contrasting first-person continuations for each of 72 forced-choice items, and read the per-letter logprobs as the response.
+We use Horn's parallel analysis to inform the number of factors and retain $k=4$ at the scree elbow (Appendix~\ref{sec:appendix-fa-validation}); the fit is principal axis factoring with oblimin rotation, allowing correlated factors.
 
-\textbf{Explanatory latent factors are determined using Principal Axis Factoring (PAF).} Horn's parallel analysis is used to inform the number of factors to fit, by comparing the real eigenvalues of the persona $\times$ item correlation matrix against the 95th percentile of eigenvalues from simulated random data of the same dimensions.
-Figure~\ref{fig:horn-s-parallel-analysis-as-applied-to-the-1-517-p} shows the results: real eigenvalues remain above the null threshold out to $k=11$, while a clear scree elbow sits at $k=4$.
-We fit PAF at $k=4$ factors with oblimin rotation (allowing correlated factors), trading off the long tail of smaller-but-real factors against a solution small enough to label and interpret.
-We choose $k=4$ as the headline number on three convergent grounds: (i) the scree elbow, (ii) Cronbach's $\alpha$ stays acceptable-or-better on every factor at $k=4$ but collapses on several factors at $k=8$ and beyond (Appendix~\ref{sec:appendix-fa-factors}), and (iii) cross-model factor congruence (\S below) is best at $k=4$ and degrades monotonically as $k$ grows.
-The Horn's $k=11$ solution is reported in the appendix as a robustness check.
+\textbf{We find four factors that are interpretable, stable within-model, and partially replicated across models.}
+The factor loadings are inspected (using LLM-labellers, with manual human inspection to corroborate and augment labeller output against the highest- and lowest-loading items) to produce human-understandable axis names.
+The four factors are: \textit{Initiative} (proactive volunteering vs literal compliance), \textit{Warmth} (playful tonal mirroring vs formal detachment), \textit{Pedagogy} (structured explanatory mode vs casual minimalism), and \textit{Hedging} (epistemic caution vs confident conviction).
+Cronbach's $\alpha$ ranges $0.72$--$0.87$ across factors and models, and per-factor split-half congruence exceeds $|\phi|=0.97$ on every factor on both models, supporting within-model stability (Appendix~\ref{sec:appendix-fa-validation}).
+Administering the same questionnaire with Qwen2.5-7B-Instruct on the same Llama rollouts yields four factors whose Hungarian-matched per-pair Tucker's $|\phi|$ averages $0.66$ on shared items, with \textit{Warmth} the strongest cross-model match at $|\phi|=0.80$ (Appendix~\ref{sec:appendix-fa-validation}).
+Conversational-scenario assignment alone explains $56$--$78\%$ of each factor's score variance, but three of four factors (\textit{Initiative}, \textit{Warmth}, \textit{Hedging}) survive a scenario-residualized refit at $|\phi| \in [0.89, 0.94]$; \textit{Pedagogy} is the most scenario-dependent at $|\phi|=0.69$ (Appendix~\ref{sec:appendix-fa-residualized}).
+For full per-factor item details, see \Cref{sec:appendix-fa-factors}.
 
-% Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
-% Data: persona-shattering-lasr/psychometric-fa-runs @ runs/questionnaire-rollouts-llama318binstruct-...-q_v7_fc_pair-fc_pair-direct-lp20-p2-pf3/
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_1_scree_llama.pdf}
-\caption{Horn's parallel analysis applied to Llama-3.1-8B-Instruct across 2{,}500 persona-rollouts on the 72-item v7 forced-choice questionnaire (64 items after per-axis variance filtering).
-Blue: real eigenvalues; red: 95th-percentile threshold under a column-permutation null.
-The first two factors dominate, several subsequent factors contribute meaningfully, and real eigenvalues remain above the null threshold out to $k=11$ --- the point at which Horn's criterion recommends retaining.
-We retain $k=4$ at the scree elbow for the headline analysis; see appendix for the $k=11$ robustness pass.}
-% TODO: verify caption matches final figure
-\label{fig:horn-s-parallel-analysis-as-applied-to-the-1-517-p}
-\end{figure}
-
-
-\textbf{Factors are labelled using LLM-judges to inspect factor loadings.} In factor analysis, each questionnaire item receives a `factor loading' indicating how strongly the factor predicts the response to that item.
-The highest- and lowest-loading items for a given factor are provided to an LLM labeller (Claude Opus 4.7) which, from loadings alone, produces a short axis name plus a description of the high and low poles.
-The labeller is deliberately blind to the rollout transcripts, the per-item author-assigned axis-labels, and any prior factor labels, so it describes only the structure the factor analysis actually surfaced.
-On Llama-3.1-8B-Instruct the four retained factors, ordered by variance explained, label as follows (cumulative variance: 11.7\%, 21.9\%, 31.5\%, 40.7\%):
-\begin{itemize}
-\item \textit{Initiative} (F0, 11.7\%) --- high scorers proactively handle edge cases the user did not raise, pre-emptively answer likely follow-ups, volunteer information that wasn't requested, mention unrequested risks, and reframe a request to address what they think the user actually needs. Low scorers stay narrowly within the literal request, present sides without endorsing, and decline to volunteer or editorialise.
-\item \textit{Warmth} (F1, 10.2\%) --- high scorers self-describe as playful, slip in jokes when the situation is light, cushion hard feedback, address the emotional side before the practical one, and echo the user's casual register. Low scorers stay formal, serious, and tonally distinctive; they hold their own positions and resist tonal mirroring.
-\item \textit{Pedagogy} (F2, 9.6\%) --- high scorers favour deliberate, structured explanation: showing working on math/logic problems, organising comparisons as lists or tables, using a formal written-essay register, and volunteering coaching notes. They lean paternalistic --- voicing concerns about risks, recommending with reasoning, holding position when challenged --- yet validate before disagreeing. Low scorers respond casually with light formatting, brief responses, and no protective lectures.
-\item \textit{Hedging} (F3, 9.3\%) --- high scorers flag uncertainty inline, hedge factual claims, narrate step-by-step reasoning, and append disclaimers (consult a professional, confirm dosage). They refuse to recommend on user-decision questions, laying out considerations rather than picking a side. Low scorers give clean confident conclusions, take sides on contested questions, and recommend decisively.
-\end{itemize}
-We read these as four orthogonal axes of \emph{assistant style}: how much you exceed the asked scope (Initiative), what tonal register you adopt (Warmth), how you structure the answer (Pedagogy), and how you handle uncertainty (Hedging).
-Notably, ``soft'' helpfulness decomposes into two distinct mechanisms --- structured-formal pedagogy and casual-tonal warmth --- which the FA cleanly separates as F1 and F2 despite both being broadly agreeable in flavour.
-% TODO: create \label{sec:appendix-fa-factors} under appendices/ with full per-factor item tables.
-\Cref{sec:appendix-fa-factors} lists representative high- and low-loading items for each factor, together with the full per-factor item set used for the reliability analysis below.
-
-\textbf{Within-model reliability is strong across all four factors.} Cronbach's $\alpha$, computed per factor over items with $|\text{loading}| \geq 0.4$ and sign-oriented by loading direction, lies in the acceptable-to-good band on both models: Llama-3.1-8B-Instruct ranges $\alpha=0.80$--$0.87$ and Qwen2.5-7B-Instruct ranges $\alpha=0.72$--$0.79$ (Figure~\ref{fig:4-2-within-model-validation}, left panel).
-No factor is in the ``redundant'' band ($\alpha > 0.95$), and none falls below the conventional ``acceptable'' threshold of $0.70$.
-Split-half congruence --- the median Tucker's $|\phi|$ between factor solutions refit on random half-splits of the persona sample, over 100 iterations --- exceeds $0.97$ for every factor on both models (right panel), comfortably above the Lorenzo-Seva 0.85 ``fair similarity'' threshold.
-The factor structure is therefore genuinely replicable within each model's persona population, not an artefact of the specific 2{,}500-persona draw.
-Decomposing each factor's persona-level variance into shares attributable to the design covariates further shows that the conversational scenario accounts for 56--78\% of the variance on every factor while the interviewer-archetype contributes $\leq 6\%$ (Appendix~\ref{sec:appendix-fa-variance-decomp}); a re-fit on scenario-residualized responses recovers three of four Llama factors with high fidelity ($|\phi| \in [0.89, 0.94]$, Appendix~\ref{sec:appendix-fa-residualized}), while \textit{Pedagogy} is the most scenario-dependent factor and survives only weakly ($|\phi| = 0.69$).
+\textbf{Modifying these factors using the supervised LoRA approach of \Cref{sec:supervised} succeeds for one factor and is partial-or-failed for the others.}
+We trained six LoRAs covering three of the four axes --- \{\textit{Initiative}, \textit{Warmth}, \textit{Pedagogy}\} $\times$ \{amplifier, suppressor\} --- and re-administered the questionnaire under each adapter to a held-out subsample of personas\footnote{Constitutions were carefully crafted and checked to ensure no appearance of any actual questionnaire items, to avoid validation leakage.}.
+Figure~\ref{fig:4-lora-shifts} shows the per-LoRA per-factor mean shift in factor-score units.
+\textit{Initiative}-amplifier produces a clean on-target effect ($+1.5\sigma$ in factor-score units, rising to $+1.8\sigma$ on personas with most baseline headroom).
+The other LoRAs show weaker target effects and substantial spillover onto neighbouring axes (most notably onto \textit{Hedging}); one suppressor (\textit{Pedagogy}-suppressor) actually moves its target in the wrong direction.
+We read the failure modes as a mix of weak factor identification, training-data leakage to neighbouring axes, and constitution-curation artefacts (Appendix~\ref{sec:appendix-fa-lora-shifts}).
+\textit{Hedging} amplifier and suppressor LoRAs are not yet trained; we leave their validation to future work.
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
-% Data: persona-shattering-lasr/psychometric-fa-runs @ runs/questionnaire-rollouts-llama318binstruct-...-q_v7_fc_pair-fc_pair-direct-lp20-p2-pf3{,-qm_qwen257binstruct}/
+% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/{initiative,warmth,pedagogy}/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_2_within_model_validation.pdf}
-\caption{Within-model validation of the four extracted factors for Llama-3.1-8B-Instruct and Qwen2.5-7B-Instruct (both $k=4$).
-\textit{Left}: Cronbach's $\alpha$ computed per factor over items with $|\text{loading}| \geq 0.4$, sign-oriented by loading; reference lines mark ``acceptable'' ($\alpha = 0.70$) and ``good'' ($\alpha = 0.80$).
-\textit{Right}: median Tucker's $|\phi|$ between factor solutions refit on 100 random half-splits of the persona sample; reference line marks the Lorenzo-Seva ``fair similarity'' threshold ($|\phi| = 0.85$).
-Factors are presented in descending order of variance explained.}
-% TODO: verify caption matches final figure
-\label{fig:4-2-within-model-validation}
+\includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_6_lora_shifts.pdf}
+\caption{Per-LoRA mean factor-score shift. Rows are trained LoRAs (target factor and direction); columns are the four recovered factors. Cell values are $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ in factor-score units (mean over the validation persona set), with the half-width of the 95\% bootstrap CI underneath. White outlines mark each LoRA's intended (target factor, direction) cell. Most validation runs use $n=200$ personas; \textit{Initiative}-amplifier uses $n=1000$. \textit{Hedging} amplifier/suppressor not yet trained. Restricted-tertile views (medium-baseline only, and headroom-conditioned) are reported in Appendix~\ref{sec:appendix-fa-lora-shifts}.}
+\label{fig:4-lora-shifts}
 \end{figure}
-
-
-% \textbf{Factor scores carry genuine persona-specific signal but are only a partial description.} We test predictivity via bi-cross-validation \citep{owen2009bi}: for each of 20 random 80/20 persona splits, we refit the factor analysis on the ``train'' 80\% of personas, use the resulting loadings to estimate factor scores for each held-out persona from 80\% of the items, and compare the factor-based reconstruction of the remaining 20\% of items against three null baselines (per-item column mean, permuted factor scores, and a $k{-}1$ factor refit).
-% On both models the main reconstruction clears the permuted-scores null by a wide margin (mean per-item $R^2$ gain of $+1.35$ for Llama and $+0.87$ for Qwen), confirming that factor scores encode real persona-specific information --- not geometry alone.
-% However, the main reconstruction does \emph{not} improve over the per-item-mean baseline; the best we can say at this $k$ is that four--five factors recover a coherent, replicable slice of persona structure but do not capture enough of the item-level variance to predict unseen responses better than column means.
-% This is consistent with Horn's parallel analysis recommending $k \approx 19$ rather than the scree-elbow $k \approx 4$--$5$ we retain for interpretability, suggesting there is a long tail of smaller but real factors that a tighter paper-focused solution deliberately ignores.
-
-\textbf{The factor structure partially replicates across model families.} The same questionnaire administered by Qwen2.5-7B-Instruct on the \emph{same} set of Llama-generated rollouts yields a 4-factor solution whose Hungarian-matched per-pair Tucker's $|\phi|$ ranges from $0.54$ to $0.80$, with a mean of $0.66$ across the $n=53$ items shared after per-model variance filtering (Figure~\ref{fig:4-2-cross-model-phi}).
-Three of the four matches cross Lorenzo-Seva's 0.60 ``borderline similarity'' threshold and \textit{Warmth} reaches the 0.80 ``good similarity'' threshold; \textit{Pedagogy} (the most format-dependent of the four) is the weakest match at 0.54.
-This indicates a shared latent persona-structure that two different LLMs surface when given the same questionnaire, while differences in the per-factor magnitude --- and the fact that the Hungarian assignment permutes Qwen's factor ordering relative to Llama's variance order --- show that model weights still meaningfully influence the recovered structure.
-A stronger test would repeat the full pipeline including the rollouts themselves with each model on-policy, decoupling the variation due to questionnaire-administration from the variation due to behaviour-generation.
-
-% Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
-% Data: persona-shattering-lasr/psychometric-fa-runs @ runs/questionnaire-rollouts-llama318binstruct-...-q_v7_fc_pair-fc_pair-direct-lp20-p2-pf3{,-qm_qwen257binstruct}/
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.72\linewidth]{figures/unsupervised/fig_4_2_3_cross_model_phi.pdf}
-\caption{Cross-model Tucker's $|\phi|$ between Llama-3.1-8B-Instruct (rows, factors labelled by their high pole) and Qwen2.5-7B-Instruct (columns) at $k=4$, on the $n=53$ shared items.
-White outlines mark the Hungarian-matched factor pairs.
-The strongest match (Llama \textit{Warmth} $\leftrightarrow$ Qwen F0, $|\phi|=0.80$) carries a sign flip --- Qwen's F0 indexes the same axis with reversed polarity --- as do Llama \textit{Pedagogy} $\leftrightarrow$ Qwen F3.}
-% TODO: verify caption matches final figure
-\label{fig:4-2-cross-model-phi}
-\end{figure}
-
-\todo{(For NeurIPS) Train LoRA and evaluate effects}
