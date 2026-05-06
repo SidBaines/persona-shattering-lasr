@@ -119,6 +119,8 @@ PAPER_FIGURES: list[str] = [
     "unsupervised/fig_4_2_4_variance_decomp.pdf",
     "unsupervised/fig_4_2_5_residualized.pdf",
     "unsupervised/fig_4_2_6_lora_shifts.pdf",
+    "unsupervised/fig_4_2_6b_lora_shifts_middling.pdf",
+    "unsupervised/fig_4_2_6c_lora_shifts_headroom.pdf",
 ]
 
 # ── Seeds (set before any stochastic imports) ────────────────────────────────
@@ -175,6 +177,7 @@ from src_dev.psychometric.tucker_congruence import (
 from src_dev.psychometric.factor_extremes_html import export_factor_extremes_html
 from src_dev.psychometric.lora_factor_shifts import (
     LoraValidation,
+    build_shift_matrix,
     load_lora_factor_shifts,
     plot_factor_shift_heatmap,
 )
@@ -1780,18 +1783,34 @@ def run_lora_factor_shifts() -> dict | None:
         "hf_repo": LORA_VALIDATION_HF_REPO,
     }, indent=2))
 
-    plot_factor_shift_heatmap(
-        shifts,
-        save_path=out_dir / "lora_shifts_heatmap.png",
-        title=(
-            "Per-LoRA factor-score shift "
-            f"(k=4 v7-pf3 oblimin; n={rows[0]['n_personas']} personas)"
-        ),
-        factor_display_names=factors,
-        annotate="diff_with_ci",
-    )
+    # Three heatmap variants: full-sample (naive), middling-only, headroom.
+    # The middling and headroom variants depend on the per-row bucketed
+    # data populated by load_lora_factor_shifts (computed off the
+    # paired scores npz).
+    plot_variants: list[tuple[str, str]] = [
+        ("naive",     "Per-LoRA factor-score shift (full-sample mean)"),
+        ("middling",  "Per-LoRA factor-score shift (medium-baseline tertile only)"),
+        ("headroom",  "Per-LoRA factor-score shift (headroom tertile per LoRA direction)"),
+    ]
+    for selection, title_suffix in plot_variants:
+        try:
+            mat = build_shift_matrix(shifts, selection=selection)
+        except Exception as exc:
+            log.warning("[lora-shifts] could not build %s matrix: %s", selection, exc)
+            continue
+        plot_factor_shift_heatmap(
+            shifts,
+            save_path=out_dir / f"lora_shifts_heatmap_{selection}.png",
+            title=(
+                f"{title_suffix}\n"
+                f"(k=4 v7-pf3 oblimin; up to n={rows[0]['n_personas']} personas)"
+            ),
+            factor_display_names=factors,
+            annotate="diff_with_ci",
+            matrix_override=None if selection == "naive" else mat,
+        )
 
-    log.info("[lora-shifts] %d LoRAs loaded; mean shifts:", len(rows))
+    log.info("[lora-shifts] %d LoRAs loaded; full-sample mean shifts:", len(rows))
     for i, r in enumerate(rows):
         diffs_str = "  ".join(f"{f}={diff[i, j]:+.2f}" for j, f in enumerate(factors))
         log.info(
@@ -2434,17 +2453,31 @@ def _copy_paper_cross_model_heatmap(
     return None
 
 
-def _copy_paper_lora_shifts(out_dir: Path) -> Path | None:
-    """Copy the LoRA factor-shift heatmap PDF to paper/figures/."""
+def _copy_paper_lora_shifts(out_dir: Path) -> list[Path]:
+    """Copy each LoRA factor-shift heatmap variant PDF to paper/figures/.
+
+    Maps:
+        lora_shifts_heatmap_naive.pdf    -> fig_4_2_6_lora_shifts.pdf
+        lora_shifts_heatmap_middling.pdf -> fig_4_2_6b_lora_shifts_middling.pdf
+        lora_shifts_heatmap_headroom.pdf -> fig_4_2_6c_lora_shifts_headroom.pdf
+    """
     import shutil
-    src = out_dir / "lora_shifts_heatmap.pdf"
-    if not src.exists():
-        return None
-    dst = PAPER_FIGURES_DIR / "unsupervised" / "fig_4_2_6_lora_shifts.pdf"
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
-    log.info("wrote %s", dst)
-    return dst
+    mapping = {
+        "naive":    "fig_4_2_6_lora_shifts.pdf",
+        "middling": "fig_4_2_6b_lora_shifts_middling.pdf",
+        "headroom": "fig_4_2_6c_lora_shifts_headroom.pdf",
+    }
+    written: list[Path] = []
+    for selection, dst_name in mapping.items():
+        src = out_dir / f"lora_shifts_heatmap_{selection}.pdf"
+        if not src.exists():
+            continue
+        dst = PAPER_FIGURES_DIR / "unsupervised" / dst_name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        log.info("wrote %s", dst)
+        written.append(dst)
+    return written
 
 
 def _plot_paper_residualized(

@@ -38,6 +38,8 @@ __all__ = [
     "LoraValidation",
     "hydrate_validation_artifacts",
     "load_lora_factor_shifts",
+    "compute_bucketed_shifts",
+    "build_shift_matrix",
     "plot_factor_shift_heatmap",
 ]
 
@@ -246,6 +248,24 @@ def load_lora_factor_shifts(
             )
             continue
 
+        # Bucketed (low/medium/high) per-factor shifts computed off the
+        # paired scores npz when available. Used by build_shift_matrix to
+        # construct the middling-only and headroom-conditioned heatmaps.
+        bucketed: dict[str, dict] = {}
+        scores_path = artifacts.get("scores")
+        if scores_path is not None and Path(scores_path).exists():
+            try:
+                bucketed = compute_bucketed_shifts(
+                    scores_path=scores_path,
+                    summary_path=summary_path,
+                    canonical_factor_order=factors_seen,
+                )
+            except Exception as exc:
+                log.warning(
+                    "[lora-shifts] %s bucketed shifts failed: %s", label, exc,
+                )
+                bucketed = {}
+
         rows.append({
             "label": label,
             "factor": v.factor,
@@ -255,6 +275,7 @@ def load_lora_factor_shifts(
             "summary_path": str(summary_path),
             "scores_path": str(artifacts["scores"]) if artifacts.get("scores") else None,
             "adapter": payload.get("adapter"),
+            "bucketed": bucketed,
         })
         matrix_diff.append([float(r["mean_diff"]) for r in per_factor])
         matrix_lo.append([float(r["ci_95_lo"]) for r in per_factor])
@@ -271,6 +292,153 @@ def load_lora_factor_shifts(
     }
 
 
+def _short_factor_name(name: str) -> str:
+    n = name.strip()
+    if "_" in n and n[:1] == "F" and n[1:2].isdigit():
+        return n.split("_", 1)[1]
+    return n
+
+
+def compute_bucketed_shifts(
+    *,
+    scores_path: Path,
+    summary_path: Path,
+    canonical_factor_order: list[str],
+    seed: int = 436,
+    n_bootstrap: int = 2000,
+) -> dict[str, dict]:
+    """Load ``<label>_scores.npz`` and bucket personas by their *baseline*
+    score on each factor (low / medium / high tertile), reporting mean
+    paired shift in each bucket.
+
+    Returns ``{short_factor_name -> {bucket_name -> {mean, ci_lo, ci_hi, n,
+    baseline_min, baseline_max, baseline_mean}}}`` reordered to
+    ``canonical_factor_order``. Bucketing uses the same factor's baseline
+    column to bucket — i.e. for each (column factor) we bucket on that
+    factor's baseline column and then read off the shift on that same
+    factor's column. This is the "did personas with room to move on this
+    factor actually move?" reading.
+    """
+    npz = np.load(Path(scores_path), allow_pickle=False)
+    baseline = np.asarray(npz["baseline_scores"], dtype=float)
+    lora = np.asarray(npz["lora_scores"], dtype=float)
+    summary = json.loads(Path(summary_path).read_text())
+    factor_names_npz = [r["factor"] for r in summary.get("factor_summary", [])]
+    short_to_col = {_short_factor_name(n): i for i, n in enumerate(factor_names_npz)}
+
+    out: dict[str, dict] = {}
+    for f_short in canonical_factor_order:
+        if f_short not in short_to_col:
+            continue
+        col = short_to_col[f_short]
+        b = baseline[:, col]
+        l = lora[:, col]
+        d = l - b
+        q1, q2 = np.quantile(b, [1.0 / 3.0, 2.0 / 3.0])
+        masks = {
+            "low":    b <= q1,
+            "medium": (b > q1) & (b <= q2),
+            "high":   b > q2,
+        }
+        per_bucket: dict[str, dict] = {}
+        for bi, (name, m) in enumerate(masks.items()):
+            d_m = d[m]
+            b_m = b[m]
+            if len(d_m) == 0:
+                per_bucket[name] = {
+                    "mean": float("nan"), "ci_lo": float("nan"),
+                    "ci_hi": float("nan"), "n": 0,
+                    "baseline_min": float("nan"),
+                    "baseline_max": float("nan"),
+                    "baseline_mean": float("nan"),
+                }
+                continue
+            rng = np.random.default_rng(seed + bi)
+            draws = rng.integers(0, len(d_m), size=(n_bootstrap, len(d_m)))
+            boots = d_m[draws].mean(axis=1)
+            ci_lo, ci_hi = np.percentile(boots, [2.5, 97.5])
+            per_bucket[name] = {
+                "mean": float(d_m.mean()),
+                "ci_lo": float(ci_lo),
+                "ci_hi": float(ci_hi),
+                "n": int(len(d_m)),
+                "baseline_min": float(b_m.min()),
+                "baseline_max": float(b_m.max()),
+                "baseline_mean": float(b_m.mean()),
+            }
+        out[f_short] = per_bucket
+    return out
+
+
+def build_shift_matrix(
+    shifts: dict,
+    *,
+    selection: str,
+) -> dict:
+    """Build a (n_lora, n_factor) shift matrix using one of several bucket
+    selection rules.
+
+    ``selection`` choices:
+        ``"naive"`` — full-sample mean shift (already in ``shifts['mean_diff']``).
+        ``"middling"`` — mean shift over personas in the *medium* baseline
+            tertile of the column factor (option A).
+        ``"headroom"`` — mean shift over personas in the headroom tertile
+            for the LoRA's intended direction: low-baseline tertile for
+            amplifiers (``direction == "+"``), high-baseline tertile for
+            suppressors (``direction == "-"``) (option B). Same rule
+            applied to off-target columns: i.e. for an amplifier, every
+            cell reports the upward-headroom-tertile shift on the column
+            factor.
+
+    Returns a dict with ``mean_diff``, ``ci_lo``, ``ci_hi`` (all
+    ``np.ndarray`` of shape ``(n_lora, n_factor)``) and ``n_per_cell``.
+    """
+    rows = shifts["rows"]
+    factors = shifts["factors"]
+    n_lora = len(rows)
+    n_factor = len(factors)
+
+    if selection == "naive":
+        return {
+            "mean_diff": shifts["mean_diff"],
+            "ci_lo": shifts["ci_lo"],
+            "ci_hi": shifts["ci_hi"],
+            "n_per_cell": np.full((n_lora, n_factor),
+                                  rows[0]["n_personas"] if rows else 0, dtype=int),
+            "selection": selection,
+        }
+
+    diff = np.full((n_lora, n_factor), np.nan, dtype=float)
+    lo = np.full_like(diff, np.nan)
+    hi = np.full_like(diff, np.nan)
+    n = np.zeros((n_lora, n_factor), dtype=int)
+
+    for i, r in enumerate(rows):
+        bucketed = r.get("bucketed") or {}
+        direction = r.get("direction", "+")
+        if selection == "middling":
+            bucket_name = "medium"
+        elif selection == "headroom":
+            bucket_name = "low" if direction == "+" else "high"
+        else:
+            raise ValueError(f"unknown selection: {selection!r}")
+        for j, f in enumerate(factors):
+            cell = bucketed.get(f, {}).get(bucket_name)
+            if cell is None:
+                continue
+            diff[i, j] = cell["mean"]
+            lo[i, j] = cell["ci_lo"]
+            hi[i, j] = cell["ci_hi"]
+            n[i, j] = cell["n"]
+    return {
+        "mean_diff": diff,
+        "ci_lo": lo,
+        "ci_hi": hi,
+        "n_per_cell": n,
+        "selection": selection,
+    }
+
+
 def plot_factor_shift_heatmap(
     shifts: dict,
     *,
@@ -278,6 +446,7 @@ def plot_factor_shift_heatmap(
     title: str = "Per-LoRA factor-score shift",
     factor_display_names: list[str] | None = None,
     annotate: str = "diff_with_ci",
+    matrix_override: dict | None = None,
 ) -> None:
     """Heatmap: rows = LoRAs, cols = factors, cells coloured by mean_diff.
 
@@ -293,9 +462,16 @@ def plot_factor_shift_heatmap(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    diff = shifts["mean_diff"]
-    lo = shifts["ci_lo"]
-    hi = shifts["ci_hi"]
+    if matrix_override is not None:
+        diff = matrix_override["mean_diff"]
+        lo = matrix_override["ci_lo"]
+        hi = matrix_override["ci_hi"]
+        n_per_cell = matrix_override.get("n_per_cell")
+    else:
+        diff = shifts["mean_diff"]
+        lo = shifts["ci_lo"]
+        hi = shifts["ci_hi"]
+        n_per_cell = None
     dz = shifts["cohen_dz"]
     rows = shifts["rows"]
     factors = shifts["factors"]
@@ -310,7 +486,11 @@ def plot_factor_shift_heatmap(
         a = arrow.get(r["direction"], r["direction"])
         row_labels.append(f"{r['factor']} {a}  (n={r['n_personas']})")
 
-    vmax = float(np.nanmax(np.abs(diff))) or 1.0
+    abs_diff = np.abs(diff)
+    finite = abs_diff[np.isfinite(abs_diff)]
+    vmax = float(finite.max()) if finite.size else 1.0
+    if vmax == 0:
+        vmax = 1.0
     fig, ax = plt.subplots(
         figsize=(1.2 * n_factor + 4, 0.55 * n_lora + 2),
     )
@@ -320,6 +500,9 @@ def plot_factor_shift_heatmap(
     for i in range(n_lora):
         for j in range(n_factor):
             v = diff[i, j]
+            if not np.isfinite(v):
+                ax.text(j, i, "—", ha="center", va="center", fontsize=8, color="grey")
+                continue
             if annotate == "diff":
                 txt = f"{v:+.2f}"
             elif annotate == "dz":
