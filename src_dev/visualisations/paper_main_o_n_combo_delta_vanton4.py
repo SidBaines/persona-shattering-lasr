@@ -277,10 +277,12 @@ TARGET_HATCHES = {
 BASELINE_LEGEND_LABEL = "baseline Llama3.1-8b-Instruct"
 
 
-def _output_path(*, headroom: bool) -> Path:
-    if not headroom:
-        return OUT_PATH
-    return OUT_PATH.with_name(f"{OUT_PATH.stem}_headroom{OUT_PATH.suffix}")
+def _output_path(*, headroom: bool = False, ceiling: bool = False) -> Path:
+    if headroom:
+        return OUT_PATH.with_name(f"{OUT_PATH.stem}_headroom{OUT_PATH.suffix}")
+    if ceiling:
+        return OUT_PATH.with_name(f"{OUT_PATH.stem}_ceiling{OUT_PATH.suffix}")
+    return OUT_PATH
 
 
 def _bar_value(value: float, baseline: float, *, headroom: bool) -> float:
@@ -291,7 +293,13 @@ def _bar_value(value: float, baseline: float, *, headroom: bool) -> float:
     return delta / room if room > 0 else 0.0
 
 
-def render(scores: dict[str, dict[str, float | None]], out_path: Path, *, headroom: bool = False) -> None:
+def render(
+    scores: dict[str, dict[str, float | None]],
+    out_path: Path,
+    *,
+    headroom: bool = False,
+    ceiling: bool = False,
+) -> None:
     x = np.arange(len(OCEAN_TRAITS))
     width = 0.8 / len(TARGET_ORDER)
 
@@ -318,6 +326,29 @@ def render(scores: dict[str, dict[str, float | None]], out_path: Path, *, headro
         )
 
     ax.axhline(0.0, color="k", linewidth=0.8, label=BASELINE_LEGEND_LABEL)
+
+    if ceiling and not headroom:
+        # Per-trait Δ ceilings: how far above / below baseline the judge
+        # score *could* go on a [SCORE_MIN, SCORE_MAX] scale. Drawn as a
+        # short horizontal segment spanning that trait's bar group.
+        half_span = len(TARGET_ORDER) * width / 2.0
+        for i, trait_title in enumerate(OCEAN_TRAITS):
+            base = scores.get(trait_title, {}).get("baseline")
+            if base is None:
+                continue
+            max_up = SCORE_MAX - base
+            max_down = SCORE_MIN - base
+            label = "theoretical Δ ceiling" if i == 0 else None
+            ax.hlines(
+                [max_up, max_down],
+                xmin=i - half_span,
+                xmax=i + half_span,
+                colors="k",
+                linestyles="--",
+                linewidth=1.1,
+                label=label,
+            )
+
     ax.set_xticks(x)
     ax.set_xticklabels(OCEAN_TRAITS, rotation=15, ha="right", fontsize=10)
     # Colour each trait tick label with its canonical OCEAN hue, matching
@@ -348,15 +379,22 @@ def render(scores: dict[str, dict[str, float | None]], out_path: Path, *, headro
 
 def main() -> None:
     parser = ArgumentParser()
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--headroom",
         action="store_true",
         help="Plot signed headroom fraction instead of raw judge-score delta.",
     )
+    mode.add_argument(
+        "--ceiling",
+        action="store_true",
+        help="Plot raw Δ with per-trait theoretical Δ ceilings overlaid as horizontal lines.",
+    )
     args = parser.parse_args()
-    out_path = _output_path(headroom=args.headroom)
+    out_path = _output_path(headroom=args.headroom, ceiling=args.ceiling)
+    mode_name = "headroom" if args.headroom else ("ceiling" if args.ceiling else "delta")
     print(f"[combo-delta] cache dir: {CACHE_DIR}")
-    print(f"[combo-delta] mode:      {'headroom' if args.headroom else 'delta'}")
+    print(f"[combo-delta] mode:      {mode_name}")
     print(f"[combo-delta] out path:  {out_path}")
     scores = gather()
     # Persist raw scores alongside the figure for iteration / debugging.
@@ -365,7 +403,7 @@ def main() -> None:
     with scores_path.open("w") as f:
         json.dump(scores, f, indent=2, sort_keys=True)
     print(f"✓ saved scores {scores_path}")
-    render(scores, out_path, headroom=args.headroom)
+    render(scores, out_path, headroom=args.headroom, ceiling=args.ceiling)
 
 
 if __name__ == "__main__":
