@@ -764,6 +764,58 @@ def _plot_scree(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+def _sort_factors_by_variance(fa: dict) -> tuple[dict, np.ndarray]:
+    """Re-order factors descending by proportion_variance.
+
+    factor_analyzer's oblimin output has no canonical column order — the
+    sequence of factors comes out of the rotation step in whatever order
+    the optimiser happened to land in. Standard psychometric practice is
+    to present factors sorted by variance explained so that ``F0`` is
+    always the largest dimension. We do that here, permuting every
+    factor-indexed array consistently, and recompute ``cumulative_variance``
+    from the re-ordered ``proportion_variance``.
+
+    Returns the sorted-fa dict and the permutation ``perm`` such that
+    ``perm[new_idx] == old_idx`` (use as ``perm[new] = old`` mapping).
+    The permutation is also written into ``fa["factor_perm_old_to_new"]``
+    (vector of length k where entry old_idx gives the new_idx) for any
+    downstream consumer that needs to remap an old-index reference.
+    """
+    pv = np.asarray(fa["proportion_variance"], dtype=float)
+    perm = np.argsort(-pv)              # new_to_old: perm[new] = old
+    if np.array_equal(perm, np.arange(pv.size)):
+        # Already canonical — no-op (also true on a re-run of an already
+        # sorted fit; this keeps the call idempotent).
+        old_to_new = np.arange(pv.size)
+        out = dict(fa)
+        out["factor_perm_old_to_new"] = old_to_new
+        return out, perm
+    out = dict(fa)
+    out["loadings"] = fa["loadings"][:, perm]
+    out["scores"] = fa["scores"][:, perm]
+    out["ss_loadings"] = np.asarray(fa["ss_loadings"], dtype=float)[perm]
+    out["proportion_variance"] = pv[perm]
+    out["cumulative_variance"] = np.cumsum(out["proportion_variance"])
+    if fa.get("factor_correlation_matrix") is not None:
+        phi = np.asarray(fa["factor_correlation_matrix"], dtype=float)
+        out["factor_correlation_matrix"] = phi[np.ix_(perm, perm)]
+    if fa.get("rotation_matrix") is not None:
+        # rotation_matrix has shape (k, k). Standard convention is that
+        # columns correspond to factor indices, so column-permute it.
+        rm = np.asarray(fa["rotation_matrix"], dtype=float)
+        out["rotation_matrix"] = rm[:, perm]
+    # old_to_new[old] = new
+    old_to_new = np.empty_like(perm)
+    old_to_new[perm] = np.arange(perm.size)
+    out["factor_perm_old_to_new"] = old_to_new
+    log.info(
+        "[sort] factors permuted by variance (new←old): %s; new prop_var: %s",
+        perm.tolist(),
+        ", ".join(f"{v:.3f}" for v in out["proportion_variance"]),
+    )
+    return out, perm
+
+
 def _ensure_questionnaire_copy(data: LoadedData) -> Path:
     """Copy the questionnaire triplet into the paper output dir.
 
@@ -1009,6 +1061,9 @@ def fit_factor_analysis(data: LoadedData, *, k: int) -> FaFit:
         method=FA_METHOD,
         rotation=FA_ROTATION,
     )
+    # Canonicalise factor order (descending variance explained) so F0 is
+    # always the strongest factor in every downstream artifact.
+    fa, _perm = _sort_factors_by_variance(fa)
 
     base = fa_dir / f"fa_{k}_{FA_METHOD}_{FA_ROTATION}"
     npz_path = save_factor_analysis(
