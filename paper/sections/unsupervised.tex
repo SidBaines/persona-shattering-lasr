@@ -22,24 +22,27 @@ We use Horn's parallel analysis to inform the number of factors and retain $k=4$
 
 \textbf{We find four factors that are interpretable, stable within-model, and partially replicated across models.}
 The factor loadings are inspected (using LLM-labellers, with manual human inspection to corroborate and augment labeller output against the highest- and lowest-loading items) to produce human-understandable axis names.
-The four factors are: \textit{Initiative} (proactive volunteering vs literal compliance), \textit{Warmth} (playful tonal mirroring vs formal detachment), \textit{Pedagogy} (structured explanatory mode vs casual minimalism), and \textit{Hedging} (epistemic caution vs confident conviction).
+The four factors are \textit{Tone} (playful tonal mirroring vs formal detachment), \textit{Initiative} (proactive volunteering vs literal compliance), \textit{Didacticism} (structured explanatory mode vs casual minimalism), and \textit{Epistemic Caution} (uncertainty-flagging vs confident conviction); the four labels spell the acronym \textbf{TIDE}.
 Cronbach's $\alpha$ ranges $0.72$--$0.87$ across factors and models, and per-factor split-half congruence exceeds $|\phi|=0.97$ on every factor on both models, supporting within-model stability (Appendix~\ref{sec:appendix-fa-validation}).
-Administering the same questionnaire with Qwen2.5-7B-Instruct on the same Llama rollouts yields four factors whose Hungarian-matched per-pair Tucker's $|\phi|$ averages $0.66$ on shared items, with \textit{Warmth} the strongest cross-model match at $|\phi|=0.80$ (Appendix~\ref{sec:appendix-fa-validation}).
-Conversational-scenario assignment alone explains $56$--$78\%$ of each factor's score variance, but three of four factors (\textit{Initiative}, \textit{Warmth}, \textit{Hedging}) survive a scenario-residualized refit at $|\phi| \in [0.89, 0.94]$; \textit{Pedagogy} is the most scenario-dependent at $|\phi|=0.69$ (Appendix~\ref{sec:appendix-fa-residualized}).
+Administering the same questionnaire with Qwen2.5-7B-Instruct on the same Llama rollouts yields four factors whose Hungarian-matched per-pair Tucker's $|\phi|$ averages $0.66$ on shared items, with \textit{Tone} the strongest cross-model match at $|\phi|=0.80$ (Appendix~\ref{sec:appendix-fa-validation}).
+Conversational-scenario assignment alone explains $56$--$78\%$ of each factor's score variance, but three of four factors (\textit{Tone}, \textit{Initiative}, \textit{Epistemic Caution}) survive a scenario-residualized refit at $|\phi| \in [0.89, 0.94]$; \textit{Didacticism} is the most scenario-dependent at $|\phi|=0.69$ (Appendix~\ref{sec:appendix-fa-residualized}).
 For full per-factor item details, see \Cref{sec:appendix-fa-factors}.
 
-\textbf{Modifying these factors using the supervised LoRA approach of \Cref{sec:supervised} succeeds clearly for one factor and partially for the other.}
-Amplifier and suppressor LoRAs were trained to cover the top two factors by variance explained, and the questionnaire re-administered under each adapter\footnote{Constitutions were carefully crafted and checked to ensure no appearance of any actual questionnaire items, to avoid validation leakage.}.
-Figure~\ref{fig:4-lora-shifts} shows the results, when applied to a population of personas who without LoRAs score middling for each factor score (to avoid floor/ceiling affects).
-The full-sample (naive) and headroom-conditioned views, are reported in~\Cref{sec:appendix-fa-lora-shifts}.
-\textit{Initiative}-amplifier and \textit{warmth}-suppressor produce clean effects, while the others show weaker target effects, and all LoRAs show substantial spillover onto other axes (most notably onto \textit{Hedging}).
-We read partial success as likely due to a mix of weak factor identification, constitution-curation artefacts, and possible.
+\textbf{The recovered factors can be partially modulated by LoRA adapters trained with the supervised pipeline of \Cref{sec:supervised}.}
+We trained amplifier and suppressor LoRAs targeting the top two factors by variance explained (\textit{Initiative} and \textit{Tone}) and re-administered the questionnaire under each adapter\footnote{Constitutions were carefully crafted and checked to ensure no appearance of any actual questionnaire items, to avoid validation leakage.}.
+Figure~\ref{fig:4-lora-shifts} shows the per-factor shift produced by the \textit{Initiative}-amplifier and \textit{Initiative}-suppressor adapters, restricted to the medium tertile of baseline score on each factor (typical neutral-baseline personas, to avoid ceiling/floor effects on personas already saturated near a pole).
+\textit{Initiative}-amplifier produces a clean on-target effect ($+1.5\sigma$ on the target factor; rising to $+1.8\sigma$ on personas with most baseline headroom), but with substantial off-target spillover --- most notably driving \textit{Epistemic Caution} down by $-1.2\sigma$.
+The suppressor moves \textit{Initiative} only weakly ($-0.4\sigma$) and shows even larger off-target shifts on \textit{Tone} and \textit{Epistemic Caution}.
+The \textit{Tone} amplifier and suppressor LoRAs (Appendix~\ref{sec:appendix-fa-lora-shifts}) show a similar pattern: the suppressor moves its target cleanly while the amplifier is weak, and both produce off-target spillover.
+Full-sample and headroom-tertile views, the cross-LoRA heatmap including all four trained adapters, and a tabular breakdown with bootstrap CIs are reported in Appendix~\ref{sec:appendix-fa-lora-shifts}.
+We read this partial success as a mix of weak factor identification at the bottom of the loadings and contrastive-constitution content that was not orthogonal to the other recovered axes.
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
-% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/{initiative,warmth}/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
+% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/initiative/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_6b_lora_shifts_middling.pdf}
-\caption{Per-LoRA mean factor-score shift, restricted to the medium tertile of baseline score on each column factor (the typical neutral-baseline persona). Rows are trained LoRAs (target factor and direction); columns are the four recovered factors. Cell values are $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ in factor-score units, with the half-width of the 95\% bootstrap CI underneath. White outlines mark each LoRA's intended (target factor, direction) cell. \textit{Initiative}-amplifier uses $n=1000$ validation personas; the others use $n=200$. Naive and headroom views are reported in Appendix~\ref{sec:appendix-fa-lora-shifts}.}
+\includegraphics[width=0.85\linewidth]{figures/unsupervised/fig_4_2_6_lora_initiative_bars.pdf}
+\caption{Mean factor-score shift produced by the two \textit{Initiative}-targeted LoRAs (amplifier and suppressor) across all four recovered factors. Bars are $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ in factor-score units, restricted to personas in the medium tertile of baseline score on the column factor (the typical neutral-baseline persona; avoids ceiling/floor saturation on personas already near a pole). Error bars span the 95\% paired bootstrap CI. Both LoRAs use $n=1000$ validation personas.
+The amplifier produces a clean $+1.5\sigma$ on-target effect (rising to $+1.8\sigma$ on the most-headroom personas) but pulls \textit{Epistemic Caution} down by $-1.2\sigma$. The corresponding heatmap for all four trained LoRAs --- including the \textit{Tone} amplifier/suppressor --- and the full-sample and headroom-conditioned views are in Appendix~\ref{sec:appendix-fa-lora-shifts}.}
 \label{fig:4-lora-shifts}
 \end{figure}
