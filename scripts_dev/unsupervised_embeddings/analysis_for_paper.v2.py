@@ -117,6 +117,7 @@ PAPER_FIGURES: list[str] = [
     "unsupervised/fig_4_2_2_within_model_validation.pdf",
     "unsupervised/fig_4_2_3_cross_model_phi.pdf",
     "unsupervised/fig_4_2_4_variance_decomp.pdf",
+    "unsupervised/fig_4_2_5_residualized.pdf",
 ]
 
 # ── Seeds (set before any stochastic imports) ────────────────────────────────
@@ -172,7 +173,11 @@ from src_dev.psychometric.tucker_congruence import (
 )
 from src_dev.psychometric.factor_extremes_html import export_factor_extremes_html
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
-from src_dev.psychometric.variance_decomp import run_variance_decomposition
+from src_dev.psychometric.variance_decomp import (
+    build_archetype_scenario_lookup,
+    run_variance_decomposition,
+)
+from src_dev.factor_analysis.preprocessing import residualize as resid_primitive
 from src_dev.unsupervised_runs.io import hydrate_dataset_subtree
 from src_dev.visualisations import PAPER_FIGURES_DIR
 
@@ -1378,6 +1383,245 @@ def run_variance_decomp(data: LoadedData, fit: FaFit) -> dict | None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# SCENARIO-RESIDUALIZED FA (robustness check)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def run_residualized_fa(data: LoadedData, fit: FaFit) -> dict | None:
+    """Re-fit FA on the scenario-residualized response matrix.
+
+    Subtracts the per-scenario mean of each item from each persona's
+    response, then re-runs FA at the same k. The residualized solution
+    answers ``which axes of behavioural variation persist within
+    scenarios?'' rather than ``which axes do scenarios pull responses
+    along?''.
+
+    Computes:
+        - Top-loading items per residualized factor (text dump).
+        - Cronbach's α + split-half congruence on residualized factors.
+        - Tucker's |φ| Hungarian-matched between raw and residualized
+          factors (over shared items): the headline ``did the same
+          factors survive residualization?'' metric.
+        - Variance decomposition on residualized factor scores (sanity
+          check: scenario η² should now be ≈0 by construction).
+
+    Outputs land under ``{output_dir}/factor_analysis_resid/``. Returns
+    ``None`` if the rollout dir or scenarios file is missing.
+    """
+    if not ROLLOUT_DIR_FOR_VARIANCE.exists() or not SCENARIOS_FILE.exists():
+        log.warning(
+            "[%s] rollout dir or scenarios file missing — skipping residualized FA",
+            data.model.slug,
+        )
+        return None
+
+    out_dir = data.output_dir / "factor_analysis_resid"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Annotate metadata with scenario_id (and archetype, for later η²).
+    lookup = build_archetype_scenario_lookup(
+        ROLLOUT_DIR_FOR_VARIANCE, SCENARIOS_FILE,
+    )
+    enriched_meta = []
+    for row in data.metadata:
+        sid = row.get("sample_id")
+        hit = lookup.get(sid) if sid is not None else None
+        if hit is None:
+            enriched_meta.append(dict(row))
+            continue
+        enriched_meta.append({**row, **hit})
+    keep = np.array(
+        [("scenario_id" in r) for r in enriched_meta], dtype=bool,
+    )
+    matrix_k = data.matrix[keep]
+    meta_k = [r for r, k in zip(enriched_meta, keep) if k]
+    if keep.sum() < len(enriched_meta):
+        log.info(
+            "[%s] residualized FA: %d / %d rows resolved scenario_id",
+            data.model.slug, int(keep.sum()), int(len(enriched_meta)),
+        )
+
+    # Subtract per-scenario item means.
+    matrix_resid, _gm, _gi = resid_primitive(
+        matrix_k, meta_k, group_field="scenario_id",
+    )
+
+    # Drop columns that became near-zero variance after residualization
+    # (rare, but possible for an item that is fully scenario-determined).
+    var_post = np.nanvar(matrix_resid, axis=0)
+    keep_col = var_post > 1e-9
+    matrix_resid = matrix_resid[:, keep_col]
+    items_resid = [it for it, k in zip(data.items, keep_col) if k]
+    if not keep_col.all():
+        log.info(
+            "[%s] residualized FA: dropping %d cols with ~0 var post-resid",
+            data.model.slug, int((~keep_col).sum()),
+        )
+
+    log.info(
+        "[%s] residualized FA: matrix=%s, fitting k=%d %s/%s",
+        data.model.slug, matrix_resid.shape, fit.k, FA_METHOD, FA_ROTATION,
+    )
+    fa_resid = run_factor_analysis(
+        matrix_resid,
+        n_factors=fit.k,
+        method=FA_METHOD,
+        rotation=FA_ROTATION,
+    )
+    fa_resid, _perm = _sort_factors_by_variance(fa_resid)
+
+    base = out_dir / f"fa_{fit.k}_{FA_METHOD}_{FA_ROTATION}"
+    save_factor_analysis(
+        fa_resid,
+        base,
+        config={
+            "n_factors": fit.k,
+            "method": FA_METHOD,
+            "rotation": FA_ROTATION,
+            "residualized_by": "scenario_id",
+            "n_samples": int(matrix_resid.shape[0]),
+            "n_cols": int(matrix_resid.shape[1]),
+            "model_slug": data.model.slug,
+            "model_label": data.model.label,
+        },
+    )
+    top_path = Path(str(base) + f"_top{TOP_LOADING_ITEMS_FOR_LABELLING}.txt")
+    _write_top_items_summary(
+        fa_resid, items_resid, top_path,
+        n_top=TOP_LOADING_ITEMS_FOR_LABELLING,
+        model_label=data.model.label + " (scenario-residualized)",
+        n_factors=fit.k,
+        rotation=FA_ROTATION,
+    )
+
+    # Cronbach's α and split-half on residualized factors.
+    log.info("[%s] residualized α + split-half…", data.model.slug)
+    alpha_rows = _cronbach_alpha_per_factor(
+        matrix_resid, fa_resid["loadings"], items_resid,
+        loading_threshold=CRONBACH_LOADING_THRESHOLD,
+    )
+    alpha_payload = {
+        "model_slug": data.model.slug,
+        "model_label": data.model.label,
+        "n_factors": fit.k,
+        "rotation": FA_ROTATION,
+        "loading_threshold": CRONBACH_LOADING_THRESHOLD,
+        "residualized_by": "scenario_id",
+        "per_factor": alpha_rows,
+    }
+    (out_dir / "cronbach_alpha.json").write_text(
+        json.dumps(alpha_payload, indent=2)
+    )
+    split_half = split_half_congruence(
+        matrix_resid,
+        n_factors=fit.k,
+        out_dir=out_dir,
+        n_iters=SPLIT_HALF_N_ITERS,
+        fa_method=FA_METHOD,
+        rotation=FA_ROTATION,
+        align="procrustes",
+        seed=SEED,
+        pass_threshold_median_phi=SPLIT_HALF_PASS_THRESHOLD_PHI,
+        verbose=False,
+    )
+
+    # Tucker's |φ| between raw and residualized factors (per model),
+    # over shared items. Hungarian-matched. The headline
+    # "did the same factors survive?" metric.
+    raw_fa = load_factor_analysis(fit.npz_path)
+    raw_loadings = raw_fa["loadings"]
+    raw_items = data.items
+    la, lb, shared = _slice_loadings_to_shared_items(
+        raw_loadings, raw_items,
+        fa_resid["loadings"], items_resid,
+    )
+    signed_phi = tucker_phi_matrix(la, lb, signed=True)
+    abs_phi = np.abs(signed_phi)
+    alignments = align_factors(la, lb)
+    matched_rows = [
+        {
+            "raw_factor": a.anchor_factor,
+            "resid_factor": a.target_factor,
+            "phi": a.phi,
+            "phi_signed": float(signed_phi[a.anchor_factor, a.target_factor])
+                if a.target_factor >= 0 else float("nan"),
+            "classification": classify_phi(a.phi),
+        }
+        for a in alignments
+    ]
+    raw_vs_resid_dir = out_dir / "raw_vs_resid"
+    raw_vs_resid_dir.mkdir(parents=True, exist_ok=True)
+    factor_labels = _axis_labels_for(data.model.slug, fit.k)
+    _plot_phi_heatmap(
+        abs_phi,
+        anchor_labels=factor_labels,
+        target_labels=[f"F{i}" for i in range(lb.shape[1])],
+        matched_pairs=[(m["raw_factor"], m["resid_factor"], m["phi"])
+                       for m in matched_rows if m["resid_factor"] >= 0],
+        anchor_name="Raw FA factors",
+        target_name="Scenario-residualized FA factors",
+        subset_label="raw vs residualized",
+        n_shared=len(shared),
+        save_path=raw_vs_resid_dir / "phi_heatmap.png",
+    )
+    np.save(raw_vs_resid_dir / "phi_matrix.npy", signed_phi)
+    raw_vs_resid_report = {
+        "model": data.model.slug,
+        "n_shared_items": len(shared),
+        "matched": matched_rows,
+        "overall_mean_matched_phi": float(np.mean(
+            [m["phi"] for m in matched_rows if m["resid_factor"] >= 0]
+        )) if matched_rows else float("nan"),
+    }
+    (raw_vs_resid_dir / "report.json").write_text(
+        json.dumps(raw_vs_resid_report, indent=2)
+    )
+
+    log.info(
+        "[%s] raw↔resid Tucker's |φ| (Hungarian-matched, n_shared=%d):",
+        data.model.slug, len(shared),
+    )
+    for m in matched_rows:
+        log.info(
+            "  raw F%d (%s) ↔ resid F%d  |φ|=%.3f signed=%+.3f (%s)",
+            m["raw_factor"], factor_labels[m["raw_factor"]],
+            m["resid_factor"], m["phi"], m["phi_signed"], m["classification"],
+        )
+
+    # Variance decomposition on residualized factor scores.
+    var_decomp_resid = run_variance_decomposition(
+        scores=fa_resid["scores"],
+        metadata=meta_k,
+        rollout_dir=ROLLOUT_DIR_FOR_VARIANCE,
+        scenarios_file=SCENARIOS_FILE,
+        out_dir=out_dir / "variance_decomp",
+        model_label=data.model.label + " (residualized)",
+        factor_labels=[f"F{i}" for i in range(fit.k)],
+    )
+    log.info(
+        "[%s] residualized one-way η² (arch | scen) — scen should be ~0:",
+        data.model.slug,
+    )
+    one = var_decomp_resid["oneway"]
+    for i, (ea, es) in enumerate(zip(
+        one["eta2_archetype_per_factor"],
+        one["eta2_scenario_per_factor"],
+    )):
+        log.info(
+            "  resid F%d:  archetype=%.3f   scenario=%.3f", i, ea, es,
+        )
+
+    return {
+        "fa_resid_path": Path(str(base) + ".npz"),
+        "alpha": alpha_payload,
+        "split_half": split_half,
+        "raw_vs_resid": raw_vs_resid_report,
+        "variance_decomp": var_decomp_resid,
+        "n_items": int(matrix_resid.shape[1]),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # PREDICTIVITY CROSS-VALIDATION (BI-CV)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -2009,6 +2253,109 @@ def _copy_paper_cross_model_heatmap(
     return None
 
 
+def _plot_paper_residualized(
+    residualized_results: dict[str, dict],
+) -> Path | None:
+    """Paper appendix figure: raw-FA Cronbach's α vs residualized α per factor,
+    plus the per-factor Tucker's |φ| between raw and residualized loadings.
+
+    Two panels per model. Left bars: α(raw, blue) vs α(resid, orange) per
+    factor. Right bars: |φ| of the Hungarian-matched raw↔resid pair per
+    factor; reference line at the Lorenzo-Seva 0.85 fair-similarity
+    threshold. Tells the reader at a glance how much of each model's
+    factor structure persists after we strip out scenario-genre variance.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if not residualized_results:
+        return None
+
+    # Need raw α per slug too — reload from validation/cronbach_alpha.json.
+    raw_alpha_by_slug: dict[str, list[float]] = {}
+    for slug in residualized_results:
+        path = OUTPUT_ROOT / slug / "validation" / "cronbach_alpha.json"
+        if not path.exists():
+            log.warning("missing raw α for %s — skipping in residualized plot", slug)
+            continue
+        rows = json.loads(path.read_text())["per_factor"]
+        raw_alpha_by_slug[slug] = [float(r["alpha"]) for r in rows]
+
+    slugs = [s for s in residualized_results if s in raw_alpha_by_slug]
+    if not slugs:
+        return None
+
+    n_models = len(slugs)
+    fig, axes = plt.subplots(
+        n_models, 2, figsize=(11, 4.0 * n_models),
+        constrained_layout=True,
+    )
+    if n_models == 1:
+        axes = np.array([axes])
+
+    for row_idx, slug in enumerate(slugs):
+        res = residualized_results[slug]
+        alpha_raw = raw_alpha_by_slug[slug]
+        alpha_resid = [float(r["alpha"]) for r in res["alpha"]["per_factor"]]
+        labels = _axis_labels_for(slug, len(alpha_raw))
+        x = np.arange(len(alpha_raw))
+        width = 0.36
+
+        # Left: α(raw) vs α(resid)
+        ax = axes[row_idx, 0]
+        ax.bar(x - width / 2, alpha_raw, width, color="#2563eb",
+               label="raw FA", edgecolor="#111", linewidth=0.3)
+        ax.bar(x + width / 2, alpha_resid, width, color="#ea580c",
+               label="scenario-residualized", edgecolor="#111", linewidth=0.3)
+        for i, (a_r, a_d) in enumerate(zip(alpha_raw, alpha_resid)):
+            ax.text(i - width / 2, a_r + 0.01, f"{a_r:.2f}",
+                    ha="center", va="bottom", fontsize=7.5)
+            ax.text(i + width / 2, a_d + 0.01, f"{a_d:.2f}",
+                    ha="center", va="bottom", fontsize=7.5)
+        for thresh, lbl, c in (
+            (0.70, "acceptable", "#f59e0b"),
+            (0.80, "good", "#16a34a"),
+        ):
+            ax.axhline(thresh, linestyle="--", color=c, linewidth=0.9, alpha=0.7,
+                       label=f"{lbl} ({thresh:.2f})")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
+        ax.set_ylabel(r"Cronbach's $\alpha$")
+        ax.set_ylim(0, 1.05)
+        ax.set_title(f"{slug}: $\\alpha$ before and after scenario-residualization", fontsize=10)
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(fontsize=8, loc="lower right")
+
+        # Right: per-factor raw↔resid |φ|
+        ax = axes[row_idx, 1]
+        matched = res["raw_vs_resid"]["matched"]
+        # Sort matched rows by raw_factor for the x-axis to align with α plot
+        matched_sorted = sorted(matched, key=lambda m: m["raw_factor"])
+        phis = [m["phi"] for m in matched_sorted]
+        ax.bar(x, phis, color="#16a34a", edgecolor="#111", linewidth=0.3,
+               label=r"raw$\leftrightarrow$resid Tucker's $|\phi|$")
+        for i, p in enumerate(phis):
+            ax.text(i, p + 0.012, f"{p:.2f}", ha="center", va="bottom", fontsize=7.5)
+        ax.axhline(0.85, linestyle="--", color="#16a34a", alpha=0.7, linewidth=0.9,
+                   label="Lorenzo-Seva fair (0.85)")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=15, ha="right", fontsize=9)
+        ax.set_ylabel(r"$|\phi|$ between raw and residualized factors")
+        ax.set_ylim(0, 1.05)
+        ax.set_title(f"{slug}: factor stability (n_shared={res['raw_vs_resid']['n_shared_items']})",
+                     fontsize=10)
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(fontsize=8, loc="lower right")
+
+    save_path = PAPER_FIGURES_DIR / "unsupervised" / "fig_4_2_5_residualized.pdf"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+    log.info("wrote %s", save_path)
+    return save_path
+
+
 def _plot_paper_variance_decomp(
     variance_decomp_results: dict[str, dict],
 ) -> Path | None:
@@ -2255,6 +2602,14 @@ def main() -> None:
         if result is not None:
             variance_decomp_results[slug] = result
 
+    # ── Step: scenario-residualized FA (robustness check) ───────────────
+    residualized_results: dict[str, dict] = {}
+    for slug, fit in fits.items():
+        log.info("═══ run_residualized_fa [%s] ═══", slug)
+        result = run_residualized_fa(loaded[slug], fit)
+        if result is not None:
+            residualized_results[slug] = result
+
     # ── Step: cross-model Tucker's congruence (Llama ↔ Qwen) ───────────
     cross_reports = run_cross_model_congruence(loaded, fits)
 
@@ -2268,6 +2623,8 @@ def main() -> None:
             _copy_paper_cross_model_heatmap(cross_reports)
         if variance_decomp_results:
             _plot_paper_variance_decomp(variance_decomp_results)
+        if residualized_results:
+            _plot_paper_residualized(residualized_results)
     else:
         log.info("[--emit-paper-figures off] skipping paper-figure writes")
 
