@@ -97,6 +97,11 @@ HF_REPO_ID = "persona-shattering-lasr/monorepo"
 MODEL_SLUG = "llama-3.1-8b-it"
 RATER_ID = "qwen3_235b"
 
+# The runner always uploads under this canonical eval name regardless of the
+# config's EVAL_NAME (which is only used for fingerprinting/display).
+# See runner_cells.py EVAL_NAME_DEFAULT / EVAL_NAME_CANONICAL.
+EVAL_NAME_CANONICAL = "llm_judge_lora_scale_sweep"
+
 # [0, +2] in 0.5 steps — matches the sweep configs
 SCALES = [0.0, 0.5, 1.0, 1.5, 2.0]
 
@@ -114,33 +119,13 @@ def _adapter(trait: str, direction: str) -> AdapterSpec:
     )
 
 
-# Each entry: (trait_name, amp_direction_label, sup_direction_label, eval_name, out_rel_path)
+# Each entry: (trait_name, out_rel_path)
 HEATMAPS = [
-    (
-        "openness",
-        "o_plus_x_o_minus-vanton4-paired-dpo-on-openness",
-        "appendix/fig_E_opposing_lora_openness.pdf",
-    ),
-    (
-        "conscientiousness",
-        "c_plus_x_c_minus-vanton4-paired-dpo-on-conscientiousness",
-        "appendix/fig_E_opposing_lora_conscientiousness.pdf",
-    ),
-    (
-        "extraversion",
-        "e_plus_x_e_minus-vanton4-paired-dpo-on-extraversion",
-        "appendix/fig_E_opposing_lora_extraversion.pdf",
-    ),
-    (
-        "agreeableness",
-        "a_plus_x_a_minus-vanton4-paired-dpo-on-agreeableness",
-        "appendix/fig_E_opposing_lora_agreeableness.pdf",
-    ),
-    (
-        "neuroticism",
-        "n_plus_x_n_minus-vanton4-paired-dpo-on-neuroticism",
-        "appendix/fig_E_opposing_lora_neuroticism.pdf",
-    ),
+    ("openness",         "appendix/fig_E_opposing_lora_openness.pdf"),
+    ("conscientiousness","appendix/fig_E_opposing_lora_conscientiousness.pdf"),
+    ("extraversion",     "appendix/fig_E_opposing_lora_extraversion.pdf"),
+    ("agreeableness",    "appendix/fig_E_opposing_lora_agreeableness.pdf"),
+    ("neuroticism",      "appendix/fig_E_opposing_lora_neuroticism.pdf"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -196,7 +181,7 @@ def _mean_score(jsonl_path: Path) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def build_grid(trait: str, eval_name: str, fingerprint: str) -> np.ndarray:
+def build_grid(trait: str, fingerprint: str) -> np.ndarray:
     """Return a 5×5 array of mean scores, shape [sup_axis, amp_axis].
 
     Rows (y) indexed by SCALES (suppressor), columns (x) by SCALES (amplifier).
@@ -210,7 +195,7 @@ def build_grid(trait: str, eval_name: str, fingerprint: str) -> np.ndarray:
     for yi, sup_scale in enumerate(SCALES):
         for xi, amp_scale in enumerate(SCALES):
             cell = CanonicalCell.from_scales([(amp, amp_scale), (sup, sup_scale)])
-            cell_dir = cell.hf_dir(MODEL_SLUG, eval_name, fingerprint)
+            cell_dir = cell.hf_dir(MODEL_SLUG, EVAL_NAME_CANONICAL, fingerprint)
             hf_path = f"{cell_dir}/judge_runs/{RATER_ID}/{metric_name}.jsonl"
             local = _hydrate_judge_file(hf_path)
             if local is None:
@@ -305,7 +290,7 @@ def main(fingerprints: dict[str, str] | None = None) -> None:
         fingerprints = OPPOSING_LORA_FINGERPRINTS
 
     print(f"[opposing-lora heatmaps] cache dir: {CACHE_DIR}")
-    for trait, eval_name, out_rel in HEATMAPS:
+    for trait, out_rel in HEATMAPS:
         fp = fingerprints.get(trait)
         if not fp:
             print(f"\n[heatmap] SKIP {trait} — no fingerprint set yet")
@@ -313,7 +298,7 @@ def main(fingerprints: dict[str, str] | None = None) -> None:
         out_path = PAPER_FIGURES_DIR / out_rel
         print(f"\n[heatmap] {trait}  fp={fp}")
         print(f"           → {out_path}")
-        grid = build_grid(trait, eval_name, fp)
+        grid = build_grid(trait, fp)
         render_heatmap(grid, trait=trait, out_path=out_path)
 
 
