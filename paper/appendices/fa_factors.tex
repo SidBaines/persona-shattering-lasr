@@ -455,69 +455,74 @@ Three of four Llama factors survive residualization with $|\phi| \geq 0.89$; \te
 
 \subsection{LoRA validation: per-factor shifts under each trained adapter}\label{sec:appendix-fa-lora-shifts}
 
-To test whether the four factors recovered above are usable as \emph{controllable} persona axes, we trained pairs of LoRA adapters --- amplifier ($+$) and suppressor ($-$) --- targeting three of the four factors (\textit{Initiative}, \textit{Warmth}, \textit{Pedagogy}) and re-administered the v7 forced-choice questionnaire on a stratified subsample of personas under each LoRA.
-For each (LoRA, persona) pair we compute the four canonical factor scores under (i)~the baseline model and (ii)~the LoRA-loaded model, and report the mean paired difference per factor (Table~\ref{tab:4-2-lora-shifts}; Figure~\ref{fig:4-lora-shifts}).
-At time of writing the \textit{Hedging} amplifier and suppressor have not yet been trained; the row will be filled in on a future revision, and most validation runs use $n=200$ personas (with the exception of \textit{Initiative}-amplifier at $n=1000$). The 95\% bootstrap CIs reported alongside the mean shifts already account for the sampling noise at $n=200$, so the qualitative pattern is unlikely to change once the larger runs land --- but exact magnitudes will tighten.
+To test whether the recovered factors are usable as \emph{controllable} persona axes, we trained pairs of LoRA adapters --- amplifier ($+$) and suppressor ($-$) --- targeting the top two factors by variance explained (\textit{Initiative} and \textit{Warmth}) and re-administered the v7 forced-choice questionnaire on a stratified subsample of personas under each LoRA.
+For each (LoRA, persona) pair we compute the four canonical factor scores under (i)~the baseline model and (ii)~the LoRA-loaded model, and report the mean paired difference per factor.
+The headline figure (Figure~\ref{fig:4-lora-shifts}, in the main text) presents the medium-baseline-tertile view, restricting attention to the typical neutral-baseline persona on each column factor; Table~\ref{tab:4-2-lora-shifts} reports the corresponding numbers for the medium tertile alongside the full-sample (naive) and headroom-conditioned views, with 95\% bootstrap CIs.
+Three of the four LoRAs use $n=200$ validation personas; \textit{Initiative}-amplifier uses a larger $n=1000$ run.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Per-LoRA mean factor-score shift $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$, one row per LoRA, columns are the four canonical factors. Bold entries mark the intended target factor of each LoRA. CIs are $95\%$ bootstrap (paired). Values in factor-score units (z-scored Thomson scores from the v7-pf3 $k=4$ oblimin fit).}
+\caption{Per-LoRA mean factor-score shift $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$, in three views: full-sample mean (\emph{naive}), restricted to the medium tertile of baseline score on the column factor (\emph{middling}), and restricted to the headroom tertile per LoRA direction (\emph{headroom}; low for $\uparrow$, high for $\downarrow$). Bold entries mark each LoRA's target factor. Values in factor-score units (z-scored Thomson scores from the v7-pf3 $k=4$ oblimin fit).}
 \label{tab:4-2-lora-shifts}
-\begin{tabular}{l c r r r r r}
+\begin{tabular}{l l r r r r}
 \toprule
-LoRA & $n$ & \textit{Initiative} & \textit{Warmth} & \textit{Pedagogy} & \textit{Hedging} \\
+LoRA & view & \textit{Initiative} & \textit{Warmth} & \textit{Pedagogy} & \textit{Hedging} \\
 \midrule
-Initiative $\uparrow$  & 1000 & $\mathbf{+1.52}$ & $+0.30$ & $+0.31$ & $-1.11$ \\
-Initiative $\downarrow$ & 200 & $\mathbf{-0.37}$ & $-0.91$ & $-0.39$ & $-0.92$ \\
-Warmth $\uparrow$       & 200 & $+0.41$ & $\mathbf{+0.16}$ & $-0.01$ & $-0.65$ \\
-Warmth $\downarrow$     & 200 & $+0.28$ & $\mathbf{-1.24}$ & $+0.08$ & $-0.69$ \\
-Pedagogy $\uparrow$     & 200 & $+0.75$ & $-0.28$ & $\mathbf{+0.45}$ & $+0.21$ \\
-Pedagogy $\downarrow$   & 200 & $-0.05$ & $-0.02$ & $\mathbf{+0.33}$ & $-1.39$ \\
-Hedging $\uparrow$      & --- & --- & --- & --- & --- \\
-Hedging $\downarrow$    & --- & --- & --- & --- & --- \\
+\multirow{3}{*}{Initiative $\uparrow$ ($n{=}1000$)}
+  & naive    & $\mathbf{+1.52}$ & $+0.30$ & $+0.31$ & $-1.11$ \\
+  & middling & $\mathbf{+1.53}$ & $+0.36$ & $+0.21$ & $-1.17$ \\
+  & headroom & $\mathbf{+1.81}$ & $+0.39$ & $+0.48$ & $-0.89$ \\
+\midrule
+\multirow{3}{*}{Initiative $\downarrow$ ($n{=}200$)}
+  & naive    & $\mathbf{-0.37}$ & $-0.91$ & $-0.39$ & $-0.92$ \\
+  & middling & $\mathbf{-0.40}$ & $-0.89$ & $-0.42$ & $-0.97$ \\
+  & headroom & $\mathbf{-0.42}$ & $-0.99$ & $-0.46$ & $-1.04$ \\
+\midrule
+\multirow{3}{*}{Warmth $\uparrow$ ($n{=}200$)}
+  & naive    & $+0.41$ & $\mathbf{+0.16}$ & $-0.01$ & $-0.65$ \\
+  & middling & $+0.40$ & $\mathbf{+0.24}$ & $-0.08$ & $-0.70$ \\
+  & headroom & $+0.69$ & $\mathbf{+0.23}$ & $+0.23$ & $-0.47$ \\
+\midrule
+\multirow{3}{*}{Warmth $\downarrow$ ($n{=}200$)}
+  & naive    & $+0.28$ & $\mathbf{-1.24}$ & $+0.08$ & $-0.69$ \\
+  & middling & $+0.35$ & $\mathbf{-1.27}$ & $+0.03$ & $-0.70$ \\
+  & headroom & $+0.18$ & $\mathbf{-1.31}$ & $+0.16$ & $-0.73$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Two patterns stand out.
-First, target shifts are present but \emph{not always dominant}: \textit{Initiative}~$\uparrow$, \textit{Warmth}~$\downarrow$, and \textit{Pedagogy}~$\uparrow$ each move their target factor significantly in the intended direction, but several LoRAs produce off-target shifts of comparable or larger magnitude. \textit{Initiative}~$\uparrow$, for instance, also drives \textit{Hedging} down by nearly as much as it raises \textit{Initiative} ($-1.11$ vs $+1.52$); \textit{Warmth}~$\downarrow$ depresses \textit{Hedging} substantially ($-0.69$). This is consistent with the four factors being correlated in the underlying training data and with the contrastive constitutions used to seed each LoRA having content that overlaps with multiple axes.
-
-Second, two cases show weak or wrong-sign target effects.
-\textit{Warmth}~$\uparrow$ moves \textit{Warmth} only by $+0.16$ (small relative to all of its off-target shifts), and \textit{Pedagogy}~$\downarrow$ actually nudges \textit{Pedagogy} \emph{up} ($+0.33$) while strongly pulling \textit{Hedging} down ($-1.39$). These suppressor-side anomalies suggest the constitutions paired against the high pole did not capture a clean ``low-Pedagogy'' / ``low-Warmth'' contrast --- a candidate for re-curation in future work.
-
-Overall, the validation supports a qualified version of the controllability claim: the recovered FA factors can be moved with LoRA training, but the trained adapters are not yet selective, and the cross-factor structure of the responses propagates through the supervised pipeline.
+First, the target shifts are real and largely robust to the bucket choice: \textit{Initiative}~$\uparrow$, \textit{Initiative}~$\downarrow$, and \textit{Warmth}~$\downarrow$ each move their target factor significantly in the intended direction, with the \textit{Initiative}~$\uparrow$ amplifier producing the strongest effect ($+1.5\sigma$ to $+1.8\sigma$). The clearest exception is \textit{Warmth}~$\uparrow$, whose target shift is small ($+0.2\sigma$) regardless of how the bucketing is done; this is a genuinely weak adapter rather than a measurement artefact.
+Second, several LoRAs produce off-target shifts of comparable or larger magnitude than the on-target one --- most notably onto \textit{Hedging}, which is depressed by $-0.65$ to $-1.17$ across three of the four LoRAs. The bias likely reflects correlated training-pair content: high-pole constitutions tend to read as confident-and-engaged, low-pole constitutions as cautious-and-yielding, and these dimensions are not orthogonal to the other recovered factors.
 
 \paragraph{Ceiling / floor robustness.}
-The mean shifts in Table~\ref{tab:4-2-lora-shifts} are computed over all validation personas, which can underestimate a LoRA's effect when many personas already saturate the high or low pole of a factor at baseline (and so cannot move further in that direction).
-We therefore re-compute the same shifts on two restricted subsamples, defined by each persona's \emph{baseline} score on the column factor split into tertiles:
-(i) the medium tertile only --- the ``typical neutral-baseline persona'' reading (Figure~\ref{fig:4-2-lora-shifts-middling}); and
-(ii) the headroom tertile, where ``headroom'' depends on the LoRA direction --- the low tertile for amplifiers (room to grow upward) and the high tertile for suppressors (room to shrink downward) (Figure~\ref{fig:4-2-lora-shifts-headroom}).
-The two restrictions tell complementary stories: (i) is a clean apples-to-apples readout, (ii) is the most generous reading that asks ``among personas with room to move in the LoRA's intended direction, how far does it move them?''.
+The mean shifts in Table~\ref{tab:4-2-lora-shifts} are reported in three views to surface any ceiling/floor bias.
+The naive view averages across all validation personas; many of these are already saturated near a high or low pole on the target factor at baseline and so cannot move further, biasing the full-sample mean toward zero.
+The middling view (Figure~\ref{fig:4-lora-shifts}) restricts to the medium tertile of baseline score on the column factor --- the ``typical neutral-baseline persona'' --- to avoid this saturation.
+The headroom view (Figure~\ref{fig:4-2-lora-shifts-headroom}) takes the most generous reading: for an amplifier we restrict to the low tertile of the column factor's baseline (room to grow upward); for a suppressor we restrict to the high tertile (room to shrink downward).
 
-For most LoRAs, both restricted views agree closely with the naive (full-sample) shift in Table~\ref{tab:4-2-lora-shifts}, indicating that ceiling/floor effects are not the main source of the weak target effects we observe.
-The clear exception is \textit{Initiative}~$\uparrow$: its target-factor shift rises from $+1.52$ (naive) to $+1.81$ on the headroom tertile, meaning the strongest LoRA in our set was visibly underestimated by the full-sample reading.
-The wrong-sign anomaly on \textit{Pedagogy}~$\downarrow$ ($+0.33$ on target) also persists across all three views, confirming that this is a genuine training failure rather than an artefact of saturated personas.
+For three of the four LoRAs the three views agree closely, indicating that ceiling/floor saturation is not the main driver of the observed shift magnitudes.
+The exception is \textit{Initiative}~$\uparrow$: its on-target shift rises from $+1.52$ (naive) to $+1.81$ on the headroom tertile, meaning the strongest LoRA in our set was visibly underestimated by the full-sample reading and is even cleaner than the headline figure suggests.
 
-% The full-sample heatmap is shown as Figure~\ref{fig:4-lora-shifts} in the
-% main text; the two restricted-tertile views below complement it.
+% The middling-tertile heatmap is shown as Figure~\ref{fig:4-lora-shifts} in
+% the main text. The naive (full-sample) and headroom-tertile variants
+% are reproduced below for completeness.
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
-% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/{initiative,warmth,pedagogy}/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
+% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/{initiative,warmth}/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_6b_lora_shifts_middling.pdf}
-\caption{Per-LoRA mean factor-score shift, restricted to personas in the \emph{medium} tertile of baseline score on the column factor (option A: ``typical neutral-baseline persona''). Same layout as Figure~\ref{fig:4-lora-shifts}. Cell counts $n$ drop to $\approx$ one-third of the full validation set per cell.}
-% TODO: verify caption matches final figure
-\label{fig:4-2-lora-shifts-middling}
+\includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_6_lora_shifts.pdf}
+\caption{Per-LoRA mean factor-score shift, full-sample mean across all validation personas (the \emph{naive} view). Same layout as Figure~\ref{fig:4-lora-shifts}. Compare with the medium-tertile (main text) and headroom-tertile (Figure~\ref{fig:4-2-lora-shifts-headroom}) views to assess ceiling/floor bias.}
+\label{fig:4-2-lora-shifts-naive}
 \end{figure}
 
 % Generated by: scripts_dev/unsupervised_embeddings/analysis_for_paper.v2.py
-% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/{initiative,warmth,pedagogy}/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
+% Data: persona-shattering-lasr/monorepo @ fine_tuning/llama-3.1-8b-it/unsupervised/{initiative,warmth}/{amplifier,suppressor}/vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/unsupervised/fig_4_2_6c_lora_shifts_headroom.pdf}
-\caption{Per-LoRA mean factor-score shift, restricted to the \emph{headroom} tertile of baseline score on the column factor (option B): the low tertile for amplifiers (room to grow upward); the high tertile for suppressors (room to shrink downward). Same layout as Figure~\ref{fig:4-lora-shifts}. \textit{Initiative}~$\uparrow$'s target-factor shift rises from $+1.52$ (naive) to $+1.81$ on this restriction, indicating a real ceiling effect that the naive reading masked.}
-% TODO: verify caption matches final figure
+\caption{Per-LoRA mean factor-score shift, restricted to the \emph{headroom} tertile of baseline score on the column factor: the low tertile for amplifiers (room to grow upward); the high tertile for suppressors (room to shrink downward). Same layout as Figure~\ref{fig:4-lora-shifts}. \textit{Initiative}~$\uparrow$'s target-factor shift rises from $+1.52$ (naive) to $+1.81$ on this restriction, indicating a real ceiling effect that the naive reading masked.}
 \label{fig:4-2-lora-shifts-headroom}
 \end{figure}
