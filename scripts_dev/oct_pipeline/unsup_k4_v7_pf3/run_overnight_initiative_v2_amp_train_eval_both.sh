@@ -62,7 +62,14 @@ CONST_STEM_AMP="initiative_amplifier_v2"
 CONST_STEM_SUP="initiative_suppressor_v2"
 DEST_VERSION="${DEST_VERSION:-unsup_k4_v7_pf3_v2_paired_dpo}"
 N_PERSONAS="${N_PERSONAS:-1000}"
-VAL_LABEL_SUFFIX="${VAL_LABEL_SUFFIX:-_prefix1000}"
+# Label suffix carries _v2 so that scratch/factor_inspect_v7_pf3/validate/<label>/
+# does NOT collide with cached v1 questionnaire responses on the same box.
+# validate_lora.py's local working dir is keyed only by --label, and
+# run_questionnaire_inference_async resumes from raw_responses.jsonl when
+# present — meaning a v1 run with label "initiative_sup_prefix1000" would
+# silently feed v1 responses to a v2 validation. Tagging "_v2_prefix1000"
+# avoids that collision; pre-validate cache-clear below is belt-and-braces.
+VAL_LABEL_SUFFIX="${VAL_LABEL_SUFFIX:-_v2_prefix1000}"
 
 # Skip flags (default: do everything).
 SKIP_GENERATE="${SKIP_GENERATE:-0}"
@@ -94,11 +101,20 @@ validate_persona_adapter() {
     local ADAPTER="persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIR}/v${DEST_VERSION}/lora/${STEM}-persona"
     local LABEL="${TRAIT}_${SUFFIX}${VAL_LABEL_SUFFIX}"
     local VAL_LOG="${LOG_DIR}/${LABEL}_validate_${STAMP}.log"
+    local LOCAL_CACHE_DIR="${REPO_ROOT}/scratch/factor_inspect_v7_pf3/validate/${LABEL}"
 
     echo
     echo "  validating ${LABEL}  (n=${N_PERSONAS})"
     echo "    adapter: ${ADAPTER}"
     echo "    log:     ${VAL_LOG}"
+    # Belt-and-braces: clear any stale local working dir for this label so a
+    # previous run can't hand us its cached responses (validate_lora.py keys
+    # the working dir on --label only). Safe because the dir is recomputed
+    # from the rollout subsample + adapter every run.
+    if [ -d "$LOCAL_CACHE_DIR" ]; then
+        echo "    clearing stale local cache: ${LOCAL_CACHE_DIR}"
+        rm -rf "$LOCAL_CACHE_DIR"
+    fi
     stdbuf -oL -eL uv run python \
         "${DIR_HERE}/validate_lora.py" \
         --target "$TRAIT" \

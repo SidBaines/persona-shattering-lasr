@@ -14,9 +14,9 @@
 #      No amp adapter is trained.
 #   3. Validation runs TWICE on the suppressor pole:
 #        a. After the DPO-only stage     → validates the {STEM}-dpo adapter,
-#           label = initiative_sup_dpo  (early/intermediate result).
+#           label = initiative_sup_dpo_v2  (early/intermediate result).
 #        b. After SFT + merge complete   → validates the {STEM}-persona adapter,
-#           label = initiative_sup       (final result).
+#           label = initiative_sup_v2     (final result).
 #      Both validations upload to the monorepo with distinct labels.
 #   4. New monorepo paths so v1 and v2 don't collide:
 #        SOURCE_VERSION = unsup_k4_v7_pf3_v2              (distillation)
@@ -102,22 +102,34 @@ phase_header() {
 
 # Validate one adapter kind (dpo or persona) for the suppressor pole.
 # $1: adapter kind ("dpo" or "persona")
+#
+# Labels carry a "_v2" tag so that scratch/factor_inspect_v7_pf3/validate/<label>/
+# does NOT collide with cached v1 questionnaire responses on the same box.
+# validate_lora.py's local working dir is keyed only by --label, and
+# run_questionnaire_inference_async resumes from raw_responses.jsonl when
+# present — without _v2 the validate would silently feed v1 cached responses
+# to a v2 adapter. Pre-validate cache-clear below is belt-and-braces.
 validate_sup_adapter() {
     local KIND="$1"
     local STEM="$CONST_STEM_SUP"
     local ADAPTER="persona-shattering-lasr/monorepo::fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIRECTION}/v${DEST_VERSION}/lora/${STEM}-${KIND}"
     local LABEL
     if [ "$KIND" = "persona" ]; then
-        LABEL="${TRAIT}_${SUFFIX}"
+        LABEL="${TRAIT}_${SUFFIX}_v2"
     else
-        LABEL="${TRAIT}_${SUFFIX}_${KIND}"
+        LABEL="${TRAIT}_${SUFFIX}_${KIND}_v2"
     fi
     local VAL_LOG="${LOG_DIR}/${LABEL}_validate_${STAMP}.log"
+    local LOCAL_CACHE_DIR="${REPO_ROOT}/scratch/factor_inspect_v7_pf3/validate/${LABEL}"
 
     echo
     echo "  validating ${LABEL}"
     echo "    adapter: ${ADAPTER}"
     echo "    log:     ${VAL_LOG}"
+    if [ -d "$LOCAL_CACHE_DIR" ]; then
+        echo "    clearing stale local cache: ${LOCAL_CACHE_DIR}"
+        rm -rf "$LOCAL_CACHE_DIR"
+    fi
     stdbuf -oL -eL uv run python \
         "${DIR_HERE}/validate_lora.py" \
         --target "$TRAIT" \
@@ -225,7 +237,7 @@ else
     phase_header "Step 4: validate suppressor -dpo adapter (n=${N_PERSONAS}) — EARLY RESULT"
     if ! validate_sup_adapter dpo; then
         echo "!!! Step 4 (sup -dpo validate) FAILED — continuing to SFT stages."
-        VAL_FAILED+=("${TRAIT}_${SUFFIX}_dpo")
+        VAL_FAILED+=("${TRAIT}_${SUFFIX}_dpo_v2")
     fi
 fi
 
@@ -249,14 +261,14 @@ else
     phase_header "Step 6: validate suppressor -persona adapter (n=${N_PERSONAS}) — FINAL RESULT"
     if ! validate_sup_adapter persona; then
         echo "!!! Step 6 (sup -persona validate) FAILED."
-        VAL_FAILED+=("${TRAIT}_${SUFFIX}")
+        VAL_FAILED+=("${TRAIT}_${SUFFIX}_v2")
     fi
 fi
 
 phase_header "Overnight ${TRAIT} v2 sup-only pipeline complete."
 echo
-echo "  -dpo     validation summary:  scratch/factor_inspect_v7_pf3/validate/${TRAIT}_${SUFFIX}_dpo/${TRAIT}_${SUFFIX}_dpo_summary.json"
-echo "  -persona validation summary:  scratch/factor_inspect_v7_pf3/validate/${TRAIT}_${SUFFIX}/${TRAIT}_${SUFFIX}_summary.json"
+echo "  -dpo     validation summary:  scratch/factor_inspect_v7_pf3/validate/${TRAIT}_${SUFFIX}_dpo_v2/${TRAIT}_${SUFFIX}_dpo_v2_summary.json"
+echo "  -persona validation summary:  scratch/factor_inspect_v7_pf3/validate/${TRAIT}_${SUFFIX}_v2/${TRAIT}_${SUFFIX}_v2_summary.json"
 echo
 if [ ${#VAL_FAILED[@]} -gt 0 ]; then
     echo "  Validation failures: ${VAL_FAILED[*]}"
@@ -264,6 +276,6 @@ fi
 echo "  Trained adapters on monorepo:"
 echo "    fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIRECTION}/v${DEST_VERSION}/lora/${CONST_STEM_SUP}-{dpo,sft,persona}/"
 echo "  Eval results on monorepo:"
-echo "    fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIRECTION}/v${DEST_VERSION}/evals/factor_validate/{${TRAIT}_${SUFFIX}_dpo,${TRAIT}_${SUFFIX}}/"
+echo "    fine_tuning/llama-3.1-8b-it/unsupervised/${TRAIT}/${DIRECTION}/v${DEST_VERSION}/evals/factor_validate/{${TRAIT}_${SUFFIX}_dpo_v2,${TRAIT}_${SUFFIX}_v2}/"
 echo
 echo "  Overall log: ${OVERALL_LOG}"
