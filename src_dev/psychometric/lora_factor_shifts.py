@@ -41,6 +41,7 @@ __all__ = [
     "compute_bucketed_shifts",
     "build_shift_matrix",
     "plot_factor_shift_heatmap",
+    "plot_factor_shift_barchart",
 ]
 
 
@@ -447,6 +448,7 @@ def plot_factor_shift_heatmap(
     factor_display_names: list[str] | None = None,
     annotate: str = "diff_with_ci",
     matrix_override: dict | None = None,
+    row_label_factor_map: dict[str, str] | None = None,
 ) -> None:
     """Heatmap: rows = LoRAs, cols = factors, cells coloured by mean_diff.
 
@@ -479,12 +481,15 @@ def plot_factor_shift_heatmap(
     if factor_display_names is None:
         factor_display_names = factors
 
-    # Row labels e.g. "Initiative ↑"
+    # Row labels e.g. "Initiative ↑". When a paper-display rename is in
+    # effect, ``row_label_factor_map`` translates the internal short name
+    # (e.g. "Warmth") to the display name (e.g. "Tone") before formatting.
     arrow = {"+": "↑", "-": "↓"}
     row_labels: list[str] = []
     for r in rows:
         a = arrow.get(r["direction"], r["direction"])
-        row_labels.append(f"{r['factor']} {a}")
+        f_display = (row_label_factor_map or {}).get(r["factor"], r["factor"])
+        row_labels.append(f"{f_display} {a}")
 
     abs_diff = np.abs(diff)
     finite = abs_diff[np.isfinite(abs_diff)]
@@ -536,6 +541,129 @@ def plot_factor_shift_heatmap(
     ax.set_title(title, fontsize=10)
     fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02,
                  label=r"$\bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ (factor-score units)")
+    fig.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, dpi=150)
+    fig.savefig(save_path.with_suffix(".pdf"))
+    plt.close(fig)
+
+
+def plot_factor_shift_barchart(
+    shifts: dict,
+    *,
+    save_path: Path,
+    title: str = "Per-LoRA factor-score shift",
+    factor_display_names: list[str] | None = None,
+    label_filter: list[str] | None = None,
+    matrix_override: dict | None = None,
+    direction_palette: dict[str, str] | None = None,
+    row_label_factor_map: dict[str, str] | None = None,
+) -> None:
+    """Grouped bar chart: x = factors, bars within group = LoRAs.
+
+    A focused alternative to ``plot_factor_shift_heatmap`` for the case
+    where a small number of LoRAs (e.g. one factor's amp + sup pair)
+    are being compared across the full set of factors. Each bar shows
+    $\\Delta$ in factor-score units; error bars span the 95% bootstrap
+    CI from ``matrix_override`` (or ``shifts``'s naive fields if None).
+
+    Args:
+        shifts: Output of ``load_lora_factor_shifts``.
+        save_path: Output PNG path. A sibling PDF is also written.
+        title: Plot title.
+        factor_display_names: Override for x-axis tick labels; defaults
+            to ``shifts['factors']``.
+        label_filter: If set, restrict the LoRAs shown to those whose
+            ``label`` is in this list (preserving order).
+        matrix_override: As in ``plot_factor_shift_heatmap`` — if set,
+            use these values (e.g. for the medium-tertile or headroom
+            views) instead of the naive full-sample mean.
+        direction_palette: Optional mapping ``{"+": colour, "-": colour}``
+            so amp / sup get distinct fills. Defaults to a blue / orange
+            pair.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if matrix_override is not None:
+        diff = matrix_override["mean_diff"]
+        lo = matrix_override["ci_lo"]
+        hi = matrix_override["ci_hi"]
+    else:
+        diff = shifts["mean_diff"]
+        lo = shifts["ci_lo"]
+        hi = shifts["ci_hi"]
+    rows = shifts["rows"]
+    factors = shifts["factors"]
+    if factor_display_names is None:
+        factor_display_names = factors
+
+    if label_filter is not None:
+        wanted = list(label_filter)
+        keep = []
+        for w in wanted:
+            for i, r in enumerate(rows):
+                if r["label"] == w:
+                    keep.append(i)
+                    break
+        if not keep:
+            raise ValueError(f"None of label_filter={wanted} matched any loaded LoRA")
+        rows = [rows[i] for i in keep]
+        diff = diff[keep, :]
+        lo = lo[keep, :]
+        hi = hi[keep, :]
+
+    n_lora, n_factor = diff.shape
+    if direction_palette is None:
+        direction_palette = {"+": "#2563eb", "-": "#ea580c"}
+
+    arrow = {"+": "↑", "-": "↓"}
+    bar_labels = [
+        f"{(row_label_factor_map or {}).get(r['factor'], r['factor'])} "
+        f"{arrow.get(r['direction'], r['direction'])}"
+        for r in rows
+    ]
+
+    width = 0.8 / max(n_lora, 1)
+    x = np.arange(n_factor, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(max(6, 1.4 * n_factor + 2), 4.4))
+    for i, r in enumerate(rows):
+        offset = (i - (n_lora - 1) / 2.0) * width
+        vals = diff[i]
+        # Error bar ranges relative to the bar's mean (matplotlib expects
+        # nonnegative error magnitudes).
+        err_lo = np.maximum(vals - lo[i], 0.0)
+        err_hi = np.maximum(hi[i] - vals, 0.0)
+        ax.bar(
+            x + offset, vals, width,
+            color=direction_palette.get(r["direction"], "#6b7280"),
+            edgecolor="#111", linewidth=0.4,
+            label=bar_labels[i],
+            yerr=np.vstack([err_lo, err_hi]),
+            capsize=3, error_kw={"elinewidth": 0.9, "ecolor": "#374151"},
+        )
+        # Numeric annotation above (or below for negative) each bar.
+        for xi, v in zip(x + offset, vals):
+            if not np.isfinite(v):
+                continue
+            va = "bottom" if v >= 0 else "top"
+            pad = 0.02 * max(np.nanmax(np.abs(diff)) or 1.0, 1e-3)
+            y_text = v + pad if v >= 0 else v - pad
+            ax.text(xi, y_text, f"{v:+.2f}",
+                    ha="center", va=va, fontsize=8, color="#111")
+
+    ax.axhline(0, color="#111", linewidth=0.6)
+    ax.set_xticks(x)
+    ax.set_xticklabels(factor_display_names, fontsize=10)
+    ax.set_xlabel("Behavioural Factor")
+    ax.set_ylabel(
+        r"$\bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ (factor-score units)"
+    )
+    ax.set_title(title, fontsize=11)
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend(fontsize=9, loc="lower left", framealpha=0.9)
     fig.tight_layout()
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, dpi=150)

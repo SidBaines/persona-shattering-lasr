@@ -121,6 +121,7 @@ PAPER_FIGURES: list[str] = [
     "unsupervised/fig_4_2_6_lora_shifts.pdf",
     "unsupervised/fig_4_2_6b_lora_shifts_middling.pdf",
     "unsupervised/fig_4_2_6c_lora_shifts_headroom.pdf",
+    "unsupervised/fig_4_2_6_lora_initiative_bars.pdf",
 ]
 
 # ── Seeds (set before any stochastic imports) ────────────────────────────────
@@ -179,6 +180,7 @@ from src_dev.psychometric.lora_factor_shifts import (
     LoraValidation,
     build_shift_matrix,
     load_lora_factor_shifts,
+    plot_factor_shift_barchart,
     plot_factor_shift_heatmap,
 )
 from src_dev.psychometric.preprocessing import preprocess_response_matrix
@@ -415,6 +417,19 @@ LORA_VALIDATION_LOCAL_ROOT: Path = Path(
 # present. This means the figure auto-upgrades as larger validation
 # runs land without an edit here.
 LORA_VALIDATION_PREFER_LARGE_N: bool = True
+
+# Paper-display factor names. The internal short names (Initiative,
+# Warmth, Pedagogy, Hedging) survive in code, data, and the HF monorepo
+# paths — see scripts_dev/unsupervised_embeddings/FACTOR_NAMING.md for
+# the rename rationale (acronym TIDE: Tone, Initiative, Didacticism,
+# Epistemic Caution). When a paper figure or caption needs a factor
+# name, look it up here so future renames are a single-source change.
+PAPER_FACTOR_DISPLAY_NAMES: dict[str, str] = {
+    "Initiative": "Initiative",
+    "Warmth": "Tone",
+    "Pedagogy": "Didacticism",
+    "Hedging": "Epistemic Caution",
+}
 
 LORA_VALIDATIONS: list[LoraValidation] = [
     LoraValidation(
@@ -1753,6 +1768,11 @@ def run_lora_factor_shifts() -> dict | None:
 
     rows = shifts["rows"]
     factors = shifts["factors"]
+    # Paper-display names (TIDE acronym: Tone, Initiative, Didacticism,
+    # Epistemic Caution). The internal short names (Warmth / Pedagogy /
+    # Hedging) survive in code, data, and the HF monorepo paths — see
+    # scripts_dev/unsupervised_embeddings/FACTOR_NAMING.md for the rationale.
+    paper_display_names = [PAPER_FACTOR_DISPLAY_NAMES.get(f, f) for f in factors]
     if not rows:
         log.warning("[lora-shifts] no validation summaries hydrated; nothing to plot")
         return None
@@ -1801,10 +1821,31 @@ def run_lora_factor_shifts() -> dict | None:
             shifts,
             save_path=out_dir / f"lora_shifts_heatmap_{selection}.png",
             title="Per-LoRA factor-score shift",
-            factor_display_names=factors,
+            factor_display_names=paper_display_names,
             annotate="diff_with_ci",
             matrix_override=None if selection == "naive" else mat,
+            row_label_factor_map=PAPER_FACTOR_DISPLAY_NAMES,
         )
+
+    # Focused bar chart for the paper's main figure: Initiative-amplifier
+    # + Initiative-suppressor across all four factors, on the medium-baseline
+    # tertile (the same ceiling/floor-robust view the heatmap uses by default).
+    initiative_labels = [r["label"] for r in rows
+                         if r.get("factor") == "Initiative"]
+    if initiative_labels:
+        try:
+            mat_mid = build_shift_matrix(shifts, selection="middling")
+            plot_factor_shift_barchart(
+                shifts,
+                save_path=out_dir / "lora_shifts_barchart_initiative.png",
+                title="Initiative LoRAs: factor-score shifts",
+                factor_display_names=paper_display_names,
+                label_filter=initiative_labels,
+                matrix_override=mat_mid,
+                row_label_factor_map=PAPER_FACTOR_DISPLAY_NAMES,
+            )
+        except Exception as exc:
+            log.warning("[lora-shifts] could not build Initiative bar chart: %s", exc)
 
     log.info("[lora-shifts] %d LoRAs loaded; full-sample mean shifts:", len(rows))
     for i, r in enumerate(rows):
@@ -2450,22 +2491,24 @@ def _copy_paper_cross_model_heatmap(
 
 
 def _copy_paper_lora_shifts(out_dir: Path) -> list[Path]:
-    """Copy each LoRA factor-shift heatmap variant PDF to paper/figures/.
+    """Copy each LoRA factor-shift figure to paper/figures/.
 
     Maps:
-        lora_shifts_heatmap_naive.pdf    -> fig_4_2_6_lora_shifts.pdf
-        lora_shifts_heatmap_middling.pdf -> fig_4_2_6b_lora_shifts_middling.pdf
-        lora_shifts_heatmap_headroom.pdf -> fig_4_2_6c_lora_shifts_headroom.pdf
+        lora_shifts_heatmap_naive.pdf            -> fig_4_2_6_lora_shifts.pdf
+        lora_shifts_heatmap_middling.pdf         -> fig_4_2_6b_lora_shifts_middling.pdf
+        lora_shifts_heatmap_headroom.pdf         -> fig_4_2_6c_lora_shifts_headroom.pdf
+        lora_shifts_barchart_initiative.pdf      -> fig_4_2_6_lora_initiative_bars.pdf
     """
     import shutil
     mapping = {
-        "naive":    "fig_4_2_6_lora_shifts.pdf",
-        "middling": "fig_4_2_6b_lora_shifts_middling.pdf",
-        "headroom": "fig_4_2_6c_lora_shifts_headroom.pdf",
+        "lora_shifts_heatmap_naive.pdf":         "fig_4_2_6_lora_shifts.pdf",
+        "lora_shifts_heatmap_middling.pdf":      "fig_4_2_6b_lora_shifts_middling.pdf",
+        "lora_shifts_heatmap_headroom.pdf":      "fig_4_2_6c_lora_shifts_headroom.pdf",
+        "lora_shifts_barchart_initiative.pdf":   "fig_4_2_6_lora_initiative_bars.pdf",
     }
     written: list[Path] = []
-    for selection, dst_name in mapping.items():
-        src = out_dir / f"lora_shifts_heatmap_{selection}.pdf"
+    for src_name, dst_name in mapping.items():
+        src = out_dir / src_name
         if not src.exists():
             continue
         dst = PAPER_FIGURES_DIR / "unsupervised" / dst_name
