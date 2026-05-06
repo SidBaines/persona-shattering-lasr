@@ -20,7 +20,7 @@ letters (O / C / E / A / N) to keep the banner compact.
 Data hydration is delegated to the three existing scripts:
   - ``paper_main_amplifier_spider_vanton4_paired_dpo.build_scores``
   - ``paper_main_suppressor_spider_vanton4_paired_dpo.build_scores``
-  - ``paper_main_c_e_combo_delta.gather``
+  - ``paper_main_c_minus_e_plus_combo_delta_vanton4.gather``
 
 so per-cell HF paths and fingerprint conventions stay in one place and we
 don't accumulate duplicate fetcher logic.
@@ -59,7 +59,7 @@ from src_dev.visualisations.ocean_spider import to_headroom
 from src_dev.visualisations import (
     paper_main_amplifier_spider_vanton4_paired_dpo as amp_mod,
     paper_main_suppressor_spider_vanton4_paired_dpo as sup_mod,
-    paper_main_c_e_combo_delta as combo_mod,
+    paper_main_c_minus_e_plus_combo_delta_vanton4 as combo_mod,
 )
 
 PAPER_FIGURES = [
@@ -82,10 +82,10 @@ HEADROOM_LABELS = ["-100%", "-50%", "0", "+50%", "+100%"]
 # Single font-size scale knob — every label/title/legend uses one of these.
 FS_TITLE       = 16
 FS_TICK_OCEAN  = 16  # bold OCEAN-letter ticks (spiders + bar x-axis)
-FS_TICK_HEAD   = 13  # spider radial tick labels
+FS_TICK_HEAD   = 10  # spider radial tick labels
 FS_AX_LABEL    = 15  # bar y-axis label
 FS_TICK_VALUE  = 14  # bar y-tick numbers
-FS_LEGEND      = 15
+FS_LEGEND      = 11
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +173,29 @@ def _bar_panel(ax, *, scores: dict[str, dict[str, float | None]]) -> None:
         )
 
     ax.axhline(0.0, color=BASELINE_COLOR, linewidth=1.0)
+
+    # Per-trait theoretical Δ ceilings (SCORE_MAX − baseline up,
+    # SCORE_MIN − baseline down), drawn as a short dashed segment spanning
+    # only that trait's bar group. Lets the reader see how much of the
+    # available judge-score range each LoRA actually used.
+    half_span = len(keys) * width / 2.0
+    for i, trait_title in enumerate(OCEAN_TRAITS):
+        base = scores.get(trait_title, {}).get("baseline")
+        if base is None:
+            continue
+        max_up = SCORE_MAX - base
+        max_down = SCORE_MIN - base
+        label = "Theoretical Δ ceiling" if i == 0 else None
+        ax.hlines(
+            [max_up, max_down],
+            xmin=i - half_span,
+            xmax=i + half_span,
+            colors="black",
+            linestyles="--",
+            linewidth=1.1,
+            label=label,
+        )
+
     ax.set_xticks(x)
     ax.set_xticklabels(OCEAN_LETTERS, fontsize=FS_TICK_OCEAN, fontweight="bold")
     for tick_label, letter in zip(ax.get_xticklabels(), OCEAN_LETTERS):
@@ -199,7 +222,7 @@ def _spider_legend(ax_legend) -> None:
         Line2D([0], [0], color=BIG_FIVE_COLORS["Extraversion"],      marker="o", markersize=5, lw=1.8, label="Extraversion LoRA"),
         Line2D([0], [0], color=BIG_FIVE_COLORS["Agreeableness"],     marker="o", markersize=5, lw=1.8, label="Agreeableness LoRA"),
         Line2D([0], [0], color=BIG_FIVE_COLORS["Neuroticism"],       marker="o", markersize=5, lw=1.8, label="Neuroticism LoRA"),
-        Line2D([0], [0], color=BASELINE_COLOR, lw=2.0, label="Baseline model"),
+        Line2D([0], [0], color=BASELINE_COLOR, lw=2.0, label="No LoRA"),
     ]
     ax_legend.legend(
         handles=handles,
@@ -214,10 +237,12 @@ def _bar_legend(ax_bar) -> None:
         Patch(facecolor=BIG_FIVE_COLORS["Extraversion"],      hatch="\\\\", edgecolor="black", linewidth=0.5, label=combo_mod.TARGET_DISPLAY["e_adapter"]),
         # Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑ combo (+1, +1)"),
         Patch(facecolor=COMBO_COLOR,                          hatch="xx", edgecolor="black", linewidth=0.5, label="C↓ ⊕ E↑"),
+        Line2D([0], [0], color="black", linestyle="--", linewidth=1.1, label="Δ ceiling"),
     ]
     ax_bar.legend(
         handles=handles,
-        loc="lower right", fontsize=FS_LEGEND, frameon=True, framealpha=0.92,
+        # loc="lower right", fontsize=FS_LEGEND, frameon=True, framealpha=0.92,
+        loc="upper left", fontsize=FS_LEGEND, frameon=True, framealpha=0.92,
     )
 
 
@@ -293,7 +318,7 @@ def main() -> None:
     # chart's y-axis label doesn't crash into the box.
     gs_outer = GridSpec(
         1, 2, figure=fig,
-        width_ratios=[2.0, 0.85],
+        width_ratios=[2.0, 1.35],
         wspace=0.25,
     )
 
@@ -304,7 +329,7 @@ def main() -> None:
     gs_left = GridSpecFromSubplotSpec(
         2, 2, subplot_spec=gs_outer[0, 0],
         height_ratios=[1.0, 0.20],
-        wspace=+0.05, hspace=0.05,
+        wspace=-0.25, hspace=0.05,
     )
 
     ax_amp           = fig.add_subplot(gs_left[0, 0], projection="polar")
