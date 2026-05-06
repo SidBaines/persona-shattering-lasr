@@ -479,12 +479,12 @@ def plot_factor_shift_heatmap(
     if factor_display_names is None:
         factor_display_names = factors
 
-    # Row labels e.g. "Initiative ↑ (n=200)"
+    # Row labels e.g. "Initiative ↑"
     arrow = {"+": "↑", "-": "↓"}
     row_labels: list[str] = []
     for r in rows:
         a = arrow.get(r["direction"], r["direction"])
-        row_labels.append(f"{r['factor']} {a}  (n={r['n_personas']})")
+        row_labels.append(f"{r['factor']} {a}")
 
     abs_diff = np.abs(diff)
     finite = abs_diff[np.isfinite(abs_diff)]
@@ -531,8 +531,8 @@ def plot_factor_shift_heatmap(
     ax.set_xticklabels(factor_display_names, rotation=15, ha="right")
     ax.set_yticks(range(n_lora))
     ax.set_yticklabels(row_labels)
-    ax.set_xlabel("Factor")
-    ax.set_ylabel("LoRA  (target factor + direction)")
+    ax.set_xlabel("Behavioural Factor")
+    ax.set_ylabel("LoRA target (behaviour + direction)")
     ax.set_title(title, fontsize=10)
     fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02,
                  label=r"$\bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ (factor-score units)")
