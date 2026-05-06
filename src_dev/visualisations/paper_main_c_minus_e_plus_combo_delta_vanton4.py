@@ -177,8 +177,8 @@ def _hydrate_judge_file(hf_path: str) -> Path | None:
     return None
 
 
-def _mean_score_median_across_repeats(jsonl_path: Path) -> float | None:
-    """Median over repeats per response_id, then mean across responses."""
+def _per_response_medians(jsonl_path: Path) -> dict[str, float]:
+    """Median over repeats per response_id."""
     grouped: dict[str, list[int]] = defaultdict(list)
     with jsonl_path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -196,10 +196,15 @@ def _mean_score_median_across_repeats(jsonl_path: Path) -> float | None:
                 continue
             rid = str(row.get("response_id", ""))
             grouped[rid].append(int(s))
-    if not grouped:
+    return {rid: statistics.median(v) for rid, v in grouped.items() if v}
+
+
+def _mean_score_median_across_repeats(jsonl_path: Path) -> float | None:
+    """Median over repeats per response_id, then mean across responses."""
+    medians = _per_response_medians(jsonl_path)
+    if not medians:
         return None
-    medians = [statistics.median(v) for v in grouped.values() if v]
-    return statistics.fmean(medians) if medians else None
+    return statistics.fmean(medians.values())
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +222,16 @@ def _fetch(cell_hf_dir: str, trait_lower: str) -> float | None:
     if local is None:
         return None
     return _mean_score_median_across_repeats(local)
+
+
+def _fetch_per_response(cell_hf_dir: str, trait_lower: str) -> dict[str, float] | None:
+    """Hydrate + return per-response_id median scores."""
+    hf_path = _judge_hf_path(cell_hf_dir, _trait_metric(trait_lower))
+    local = _hydrate_judge_file(hf_path)
+    if local is None:
+        return None
+    medians = _per_response_medians(local)
+    return medians or None
 
 
 def gather() -> dict[str, dict[str, float | None]]:
@@ -245,6 +260,41 @@ def gather() -> dict[str, dict[str, float | None]]:
             "c_adapter": c_mean,
             "e_adapter": e_mean,
             "combo":     combo_mean,
+        }
+    return out
+
+
+def gather_with_response_data() -> dict[str, dict[str, dict | float | None]]:
+    """Like ``gather`` but additionally returns per-response_id medians for
+    each cell, so callers can compute paired-bootstrap CIs on Δ vs baseline.
+
+    Per trait, the returned dict has:
+      - ``baseline``, ``c_adapter``, ``e_adapter``, ``combo`` → mean (float | None)
+      - ``baseline_resp``, ``c_adapter_resp``, ``e_adapter_resp``, ``combo_resp``
+        → dict[response_id → median] (or None)
+    """
+    out: dict[str, dict[str, dict | float | None]] = {}
+    for trait_lower, fp in FP_BY_TRAIT.items():
+        trait_title = trait_lower.capitalize()
+        print(f"\n[trait] {trait_title}  (fp={fp})")
+
+        combo_resp    = _fetch_per_response(_combo_cell_hf_dir(fp, 1.0, 1.0), trait_lower)
+        baseline_resp = _fetch_per_response(_baseline_hf_dir(fp), trait_lower)
+        c_resp        = _fetch_per_response(_single_c_cell_hf_dir(fp, 1.0), trait_lower)
+        e_resp        = _fetch_per_response(_single_e_cell_hf_dir(fp, 1.0), trait_lower)
+
+        def _mean(d):
+            return statistics.fmean(d.values()) if d else None
+
+        out[trait_title] = {
+            "baseline":       _mean(baseline_resp),
+            "c_adapter":      _mean(c_resp),
+            "e_adapter":      _mean(e_resp),
+            "combo":          _mean(combo_resp),
+            "baseline_resp":  baseline_resp,
+            "c_adapter_resp": c_resp,
+            "e_adapter_resp": e_resp,
+            "combo_resp":     combo_resp,
         }
     return out
 
