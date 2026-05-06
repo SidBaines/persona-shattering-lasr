@@ -1,15 +1,21 @@
 """Per-turn OCEAN trajectory heatmaps for frustration_eval rollouts.
 
 Reads the combined per-turn OCEAN scores written by
-``scripts_dev.frustration_eval.score_ocean_per_turn`` and produces two figures:
+``scripts_dev.frustration_eval.score_ocean_per_turn`` and produces three figures:
 
 1. Absolute scores: 5 traits × N turns, one stacked panel per condition,
    diverging colormap centered at 0 (rubric is -4..+4).
 2. Deviation from base: each non-base panel is condition - base, diverging at 0.
+3. Deviation from model baseline: each panel (including base) shows the cell
+   minus the model's overall baseline trait score, fetched from the canonical
+   ``combos/<model>/_baseline/llm_judge_lora_scale_sweep`` cells on HF. This
+   reveals how much the scenario itself shifts the model's traits relative to
+   its normal behavior, on top of any LoRA / activation-cap effect.
 
 Outputs (registered for paper):
 - paper/figures/main/fig_main_frustration_ocean_abs.pdf
 - paper/figures/main/fig_main_frustration_ocean_delta.pdf
+- paper/figures/main/fig_main_frustration_ocean_delta_vs_baseline.pdf
 """
 
 from __future__ import annotations
@@ -30,7 +36,12 @@ PAPER_FIGURES = [
     "main/fig_main_frustration_ocean_abs.pdf",
     "main/fig_main_frustration_ocean_delta.pdf",
     "main/fig_main_frustration_ocean_delta_vs_baseline.pdf",
+    "main/fig_main_frustration_ocean_pct_headroom.pdf",
 ]
+
+# OCEAN v2 rubric bounds; needed for percent-of-headroom normalization.
+SCORE_MIN = -4.0
+SCORE_MAX = 4.0
 
 TRAITS = [
     "openness_v2",
@@ -105,6 +116,7 @@ def _heatmap_panels(
     out_path: Path,
     sems: dict[str, np.ndarray] | None = None,
     annotate_fmt: str = "{:+.1f}",
+    sem_fmt: str = "{:.1f}",
 ) -> None:
     conds = [c for c in CONDITION_ORDER if c in matrices]
     n_panels = len(conds)
@@ -140,7 +152,7 @@ def _heatmap_panels(
                     continue
                 label = annotate_fmt.format(v)
                 if sem_mat is not None and not np.isnan(sem_mat[ti, tj]):
-                    label = f"{label}\n±{sem_mat[ti, tj]:.1f}"
+                    label = f"{label}\n±{sem_fmt.format(sem_mat[ti, tj])}"
                 ax.text(tj, ti, label,
                         ha="center", va="center", fontsize=6,
                         color="white" if abs(v) > (vmax - vmin) * 0.3 else "black")
@@ -200,6 +212,81 @@ def make_plots(combined_path: Path, out_dir: Path, *, prompt_text: str | None = 
         vmin=-bound, vmax=bound, cmap="RdBu_r",
         out_path=out_dir / "main" / "fig_main_frustration_ocean_delta.pdf",
         sems=delta_sems,
+    )
+
+    # ----- Plot 3: deviation from model's overall baseline trait scores -----
+    try:
+        from scripts_dev.frustration_eval.baseline_ocean_means import (
+            get_baseline_means,
+        )
+    except Exception as exc:
+        print(f"[warn] could not import baseline_ocean_means; "
+              f"skipping baseline-delta plot: {exc}", file=sys.stderr)
+        return
+
+    baseline_means = get_baseline_means()
+    # Per-trait subtraction vector (n_traits,)
+    bvec = np.array([baseline_means[t]["mean"] for t in TRAITS])[:, None]  # broadcast over turns
+    bsem = np.array([baseline_means[t]["sem"] for t in TRAITS])[:, None]
+
+    delta_baseline = {cond: mat - bvec for cond, mat in matrices.items()}
+    delta_baseline_sems: dict[str, np.ndarray] | None = None
+    if n_prompts > 1 and sems:
+        delta_baseline_sems = {}
+        for cond, mat in matrices.items():
+            cond_sem = sems.get(cond)
+            if cond_sem is None:
+                continue
+            # SEM of (per-prompt mean) − (independent baseline sample mean).
+            delta_baseline_sems[cond] = np.sqrt(np.square(cond_sem) + np.square(bsem))
+
+    max_abs_b = float(np.nanmax(np.abs(np.stack(list(delta_baseline.values())))))
+    bound_b = max(1.0, np.ceil(max_abs_b))
+    _heatmap_panels(
+        delta_baseline,
+        title=(f"OCEAN trait scores: deviation from model baseline"
+               f"{title_suffix}\n(baseline = Gemma-3-27b-IT mean on "
+               f"data/ocean_open_ended/<trait>.jsonl, n=240/trait, Qwen3-235B judge)"),
+        cbar_label="Δ score (condition − model baseline)",
+        vmin=-bound_b, vmax=bound_b, cmap="RdBu_r",
+        out_path=out_dir / "main" / "fig_main_frustration_ocean_delta_vs_baseline.pdf",
+        sems=delta_baseline_sems,
+    )
+
+    # ----- Plot 4: % of available headroom toward the trait's pole -----
+    # Normalise each cell's deviation by the available range to that pole, so
+    # traits with little upward headroom (e.g. C baseline ≈ +3.76) are visually
+    # comparable to traits with more (e.g. N baseline ≈ −1.09).
+    headroom_up = SCORE_MAX - bvec      # shape (n_traits, 1); >0
+    headroom_dn = bvec - SCORE_MIN      # shape (n_traits, 1); >0
+    # Cell-wise: divide positive deltas by headroom_up, negative by headroom_dn.
+    pct_headroom: dict[str, np.ndarray] = {}
+    for cond, dmat in delta_baseline.items():
+        denom = np.where(dmat >= 0, headroom_up, headroom_dn)
+        # Avoid divide-by-zero for the (impossible) case denom == 0.
+        denom = np.where(denom == 0, np.nan, denom)
+        pct_headroom[cond] = dmat / denom  # signed in [-1, +1]
+
+    pct_sems: dict[str, np.ndarray] | None = None
+    if delta_baseline_sems is not None:
+        pct_sems = {}
+        for cond, dsem in delta_baseline_sems.items():
+            denom_abs = np.where(delta_baseline[cond] >= 0, headroom_up, headroom_dn)
+            denom_abs = np.where(denom_abs == 0, np.nan, denom_abs)
+            pct_sems[cond] = dsem / denom_abs
+
+    _heatmap_panels(
+        pct_headroom,
+        title=(f"OCEAN trait scores: % of available headroom used "
+               f"toward the relevant pole{title_suffix}\n"
+               f"(headroom = distance from model baseline to ±4 rubric bound, "
+               f"per trait)"),
+        cbar_label="Δ score / available headroom (signed, ±1 = saturated)",
+        vmin=-1.0, vmax=1.0, cmap="RdBu_r",
+        out_path=out_dir / "main" / "fig_main_frustration_ocean_pct_headroom.pdf",
+        sems=pct_sems,
+        annotate_fmt="{:+.0%}",
+        sem_fmt="{:.0%}",
     )
 
 
