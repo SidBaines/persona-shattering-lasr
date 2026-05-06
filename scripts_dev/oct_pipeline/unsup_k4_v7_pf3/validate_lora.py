@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -172,47 +173,214 @@ def hydrate_inputs() -> None:
 # ── Sample selection ──────────────────────────────────────────────────────
 
 
-def stratified_sample_ids(rollout_dir: Path, n: int, seed: int) -> list[str]:
-    """Pick ``n`` sample_ids stratified by archetype; identical to unsup_4fac."""
+def _stable_child_seed(seed: int, key: str) -> int:
+    """Derive a deterministic per-key seed without relying on hash randomization."""
+    digest = hashlib.sha256(f"{seed}:{key}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _load_rollout_rows(rollout_dir: Path) -> list[dict]:
+    """Load canonical rollout sample rows."""
     canon = rollout_dir / "datasets" / "canonical_samples.jsonl"
     rows: list[dict] = []
     with canon.open() as f:
         for line in f:
-            if not line.strip():
-                continue
-            rows.append(json.loads(line))
-    print(f"[validate] rollout has {len(rows)} samples")
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
 
-    rng = random.Random(seed)
+
+def prefix_stable_stratified_sample_order(rollout_dir: Path, seed: int) -> list[str]:
+    """Return a deterministic sample_id order whose prefixes stay stratified.
+
+    The order is built once for the whole rollout population. Taking the first
+    200, then later taking positions 200:1000, gives the same combined IDs as
+    taking the first 1000 in one shot. Within each archetype, IDs are shuffled
+    deterministically; across archetypes, a largest-deficit scheduler keeps
+    every prefix close to the full-population archetype proportions.
+    """
+    rows = _load_rollout_rows(rollout_dir)
+    print(f"[validate] rollout has {len(rows)} samples")
+    if not rows:
+        return []
 
     arch_path = rollout_dir / "archetype_assignments.json"
     if not arch_path.exists():
         ids = [r["sample_id"] for r in rows]
-        return rng.sample(ids, n)
+        rng = random.Random(_stable_child_seed(seed, "_all"))
+        rng.shuffle(ids)
+        return ids
 
     arch_assign = json.loads(arch_path.read_text())
     by_arch: dict[str, list[str]] = {}
     for r in rows:
         sid = r["sample_id"]
         row_idx = r["source_info"]["row_index"]
-        a = arch_assign.get(str(row_idx), "_unknown")
-        by_arch.setdefault(a, []).append(sid)
+        arch = arch_assign.get(str(row_idx), "_unknown")
+        by_arch.setdefault(arch, []).append(sid)
 
-    n_archs = len(by_arch)
-    per_arch_floor = max(1, n // n_archs - 1)
-    chosen: list[str] = []
-    for a, ids in by_arch.items():
-        take = min(len(ids), max(per_arch_floor, int(round(n * len(ids) / len(rows)))))
-        chosen.extend(rng.sample(ids, take))
-    if len(chosen) < n:
-        rest = [r["sample_id"] for r in rows if r["sample_id"] not in set(chosen)]
-        chosen.extend(rng.sample(rest, n - len(chosen)))
-    elif len(chosen) > n:
-        chosen = rng.sample(chosen, n)
+    for arch, ids in by_arch.items():
+        rng = random.Random(_stable_child_seed(seed, arch))
+        rng.shuffle(ids)
 
-    print(f"[validate] sampled {len(chosen)} personas (target={n}) "
-          f"across {n_archs} archetypes")
+    arch_order = sorted(by_arch)
+    arch_rank = {arch: i for i, arch in enumerate(arch_order)}
+    total = len(rows)
+    used = {arch: 0 for arch in arch_order}
+    ordered: list[str] = []
+
+    while len(ordered) < total:
+        next_pos = len(ordered) + 1
+        available = [arch for arch in arch_order if used[arch] < len(by_arch[arch])]
+        arch = max(
+            available,
+            key=lambda a: (
+                next_pos * len(by_arch[a]) / total - used[a],
+                len(by_arch[a]),
+                -arch_rank[a],
+            ),
+        )
+        ordered.append(by_arch[arch][used[arch]])
+        used[arch] += 1
+
+    print(
+        f"[validate] built prefix-stable stratified sample order "
+        f"across {len(arch_order)} archetypes"
+    )
+    return ordered
+
+
+def stratified_sample_ids(rollout_dir: Path, n: int, seed: int) -> list[str]:
+    """Pick the first ``n`` IDs from a prefix-stable stratified order."""
+    order = prefix_stable_stratified_sample_order(rollout_dir, seed)
+    if n > len(order):
+        raise RuntimeError(
+            f"Cannot sample {n} personas: rollout only has {len(order)} samples."
+        )
+    chosen = order[:n]
+    print(f"[validate] sampled prefix {len(chosen)} personas (target={n})")
     return chosen
+
+
+def stratified_additional_sample_ids(
+    rollout_dir: Path,
+    *,
+    n: int,
+    seed: int,
+    existing_ids: list[str],
+) -> list[str]:
+    """Pick the next ``n`` IDs from the prefix-stable sample order.
+
+    If the cached IDs are exactly the prefix from a previous run, the extension
+    is identical to a single larger run. For legacy caches produced by the old
+    non-prefix-stable sampler, we fall back to the earliest uncached IDs in the
+    new order and print a warning.
+    """
+    order = prefix_stable_stratified_sample_order(rollout_dir, seed)
+    existing_count = len(existing_ids)
+    expected_prefix = order[:existing_count]
+    exclude_ids = set(existing_ids)
+    if expected_prefix == existing_ids:
+        chosen = order[existing_count:existing_count + n]
+    else:
+        print(
+            "[validate] WARNING: cached sample_ids are not the prefix of the "
+            "current prefix-stable order. This can happen for caches produced "
+            "before the sampler change; extension will preserve cached personas "
+            "but will not be identical to a fresh one-shot larger run."
+        )
+        chosen = [sid for sid in order if sid not in exclude_ids][:n]
+
+    if len(chosen) < n:
+        raise RuntimeError(
+            f"Cannot extend by {n} personas: only {len(chosen)} candidates remain "
+            "after excluding the cached sample_ids."
+        )
+    print(
+        f"[validate] sampled {len(chosen)} additional personas from "
+        "the prefix-stable order"
+    )
+    return chosen
+
+
+def load_questionnaire_cache(
+    output_dir: Path,
+) -> tuple[np.ndarray, list[dict], list[dict]]:
+    """Load an existing questionnaire output directory."""
+    matrix = np.load(output_dir / "response_matrix.npy")
+    items = json.loads((output_dir / "items.json").read_text())
+    metadata = [
+        json.loads(line)
+        for line in (output_dir / "metadata.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    return matrix, items, metadata
+
+
+def append_questionnaire_cache(
+    *,
+    base_dir: Path,
+    delta_dir: Path,
+) -> tuple[np.ndarray, list[dict], list[dict]]:
+    """Append a delta questionnaire run to an existing cache in-place.
+
+    ``raw_responses.jsonl`` stores persona indices as ``k`` rather than
+    ``sample_id``. Delta runs are generated with ``k=0..n_delta-1``; when
+    appending, offset those values by the existing persona count so future
+    resume/rebuild paths continue to line up with the concatenated metadata
+    and matrix rows.
+    """
+    base_matrix, base_items, base_meta = load_questionnaire_cache(base_dir)
+    delta_matrix, delta_items, delta_meta = load_questionnaire_cache(delta_dir)
+
+    if base_items != delta_items:
+        raise RuntimeError(
+            "Cannot append questionnaire cache: base and delta items.json differ."
+        )
+
+    base_ids = [m["sample_id"] for m in base_meta]
+    delta_ids = [m["sample_id"] for m in delta_meta]
+    overlap = sorted(set(base_ids) & set(delta_ids))
+    if overlap:
+        raise RuntimeError(
+            "Cannot append questionnaire cache with duplicate sample_ids "
+            f"(e.g. {overlap[:5]})."
+        )
+
+    combined_matrix = np.concatenate([base_matrix, delta_matrix], axis=0)
+    combined_meta = base_meta + delta_meta
+    offset = len(base_meta)
+
+    raw_out = base_dir / "raw_responses.jsonl.tmp"
+    with raw_out.open("w", encoding="utf-8") as fout:
+        base_raw = base_dir / "raw_responses.jsonl"
+        if base_raw.exists():
+            with base_raw.open("r", encoding="utf-8") as fin:
+                for line in fin:
+                    if line.strip():
+                        fout.write(line)
+
+        delta_raw = delta_dir / "raw_responses.jsonl"
+        with delta_raw.open("r", encoding="utf-8") as fin:
+            for line in fin:
+                if not line.strip():
+                    continue
+                rec = json.loads(line)
+                rec["k"] = int(rec["k"]) + offset
+                fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    raw_out.replace(base_dir / "raw_responses.jsonl")
+
+    np.save(base_dir / "response_matrix.npy", combined_matrix)
+    with (base_dir / "metadata.jsonl").open("w", encoding="utf-8") as f:
+        for meta in combined_meta:
+            f.write(json.dumps(meta, ensure_ascii=False) + "\n")
+    # items.json and encoding_version.json remain valid and are left in place.
+
+    print(
+        f"[validate] appended {len(delta_meta)} personas to {base_dir} "
+        f"({len(base_meta)} → {len(combined_meta)})"
+    )
+    return combined_matrix, base_items, combined_meta
 
 
 # ── Questionnaire admin (LoRA-aware) ───────────────────────────────────────
@@ -292,66 +460,117 @@ def align_to_fit_items(
 
 # ── Factor identity anchors ───────────────────────────────────────────────
 #
-# Anchor each canonical factor to a small set of high-loading items whose
-# signed loadings we read off the k=4 v7_pf3 oblimin fit (see
-# scratch/psychometric_fa.pf3-k4/.../fa_4_principal_oblimin.npz). After
-# refit, find the unique permutation + sign-flip that maps refit factors
-# to canonical ones, and abort if no clean mapping exists.
+# A "factor solution" is the tuple (k, rotation, anchors, factor_names,
+# target_aliases) that pins a particular FA fit. After refit, we find the
+# permutation + sign-flip that maps refit factors to canonical ones, and
+# abort if any anchor is on the wrong sign.
 #
 # Anchor format: {canonical_factor_index: [(col_id, expected_sign), ...]}.
+# Multiple solutions are kept in FACTOR_SOLUTIONS, keyed by k. A custom
+# solution can be loaded from JSON via --solution-json without touching
+# code (handy for k=8 / alternative rotations).
 
-EXPECTED_FACTOR_ANCHORS: dict[int, list[tuple[str, int]]] = {
-    0: [  # F0_Initiative — proactive volunteering / position-taking
-        ("v7fc_030", +1),  # handle edge case anyway          load=+0.79
-        ("v7fc_032", +1),  # answer pre-emptively              load=+0.75
-        ("v7fc_031", +1),  # volunteer info                    load=+0.71
-        ("v7fc_048", -1),  # name what they actually need      load=-0.72 (reversed pole)
-    ],
-    1: [  # F1_Pedagogy — show working / formal / structured / protective
-        ("v7fc_037", +1),  # show working on math/logic        load=+0.73
-        ("v7fc_046", -1),  # mention efficient alternative     load=-0.72 (reversed pole)
-        ("v7fc_015", +1),  # comparison as list/table          load=+0.66
-        ("v7fc_012", -1),  # validate before disagreeing       load=-0.63 (reversed pole)
-    ],
-    2: [  # F2_Warmth — playful / register-mirroring / accommodating
-        ("v7fc_052", +1),  # self-id as playful                load=+0.83
-        ("v7fc_051", +1),  # value wit/playfulness             load=+0.83
-        ("v7fc_008", +1),  # cushion feedback                  load=+0.77
-        ("v7fc_024", -1),  # echo emoji/playful punctuation    load=-0.72 (reversed pole)
-    ],
-    3: [  # F3_Hedging — uncertainty-flagging / non-committal / yielding
-        ("v7fc_060", +1),  # flag uncertainty inline           load=+0.78
-        ("v7fc_020", +1),  # flag knowledge thin               load=+0.69
-        ("v7fc_057", +1),  # narrate reasoning step-by-step    load=+0.62
-        ("v7fc_061", -1),  # lay out considerations            load=-0.54 (reversed pole)
-    ],
+from dataclasses import dataclass, field  # noqa: E402
+
+
+@dataclass
+class FactorSolution:
+    k: int
+    rotation: str  # e.g. "oblimin", "varimax"
+    method: str = "principal"
+    factor_names: list[str] = field(default_factory=list)
+    # canonical_index -> [(col_id, expected_sign), ...]
+    anchors: dict[int, list[tuple[str, int]]] = field(default_factory=dict)
+    # CLI alias (lower-case label) -> canonical_index
+    target_aliases: dict[str, int] = field(default_factory=dict)
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        if len(self.factor_names) != self.k:
+            raise ValueError(
+                f"factor_names has {len(self.factor_names)} entries, expected k={self.k}"
+            )
+        missing = set(range(self.k)) - set(self.anchors)
+        if missing:
+            raise ValueError(f"anchors missing for factor indices: {sorted(missing)}")
+
+    @classmethod
+    def from_json(cls, path: Path) -> "FactorSolution":
+        raw = json.loads(Path(path).read_text())
+        anchors = {
+            int(i): [(cid, int(sign)) for cid, sign in lst]
+            for i, lst in raw["anchors"].items()
+        }
+        return cls(
+            k=int(raw["k"]),
+            rotation=raw.get("rotation", "oblimin"),
+            method=raw.get("method", "principal"),
+            factor_names=list(raw["factor_names"]),
+            anchors=anchors,
+            target_aliases={k: int(v) for k, v in raw.get("target_aliases", {}).items()},
+            description=raw.get("description", ""),
+        )
+
+
+SOLUTION_K4_OBLIMIN = FactorSolution(
+    k=4,
+    rotation="oblimin",
+    method="principal",
+    factor_names=["F0_Initiative", "F1_Pedagogy", "F2_Warmth", "F3_Hedging"],
+    anchors={
+        0: [  # F0_Initiative — proactive volunteering / position-taking
+            ("v7fc_030", +1),  # handle edge case anyway          load=+0.79
+            ("v7fc_032", +1),  # answer pre-emptively              load=+0.75
+            ("v7fc_031", +1),  # volunteer info                    load=+0.71
+            ("v7fc_048", -1),  # name what they actually need      load=-0.72
+        ],
+        1: [  # F1_Pedagogy — show working / formal / structured / protective
+            ("v7fc_037", +1),  # show working on math/logic        load=+0.73
+            ("v7fc_046", -1),  # mention efficient alternative     load=-0.72
+            ("v7fc_015", +1),  # comparison as list/table          load=+0.66
+            ("v7fc_012", -1),  # validate before disagreeing       load=-0.63
+        ],
+        2: [  # F2_Warmth — playful / register-mirroring / accommodating
+            ("v7fc_052", +1),  # self-id as playful                load=+0.83
+            ("v7fc_051", +1),  # value wit/playfulness             load=+0.83
+            ("v7fc_008", +1),  # cushion feedback                  load=+0.77
+            ("v7fc_024", -1),  # echo emoji/playful punctuation    load=-0.72
+        ],
+        3: [  # F3_Hedging — uncertainty-flagging / non-committal / yielding
+            ("v7fc_060", +1),  # flag uncertainty inline           load=+0.78
+            ("v7fc_020", +1),  # flag knowledge thin               load=+0.69
+            ("v7fc_057", +1),  # narrate reasoning step-by-step    load=+0.62
+            ("v7fc_061", -1),  # lay out considerations            load=-0.54
+        ],
+    },
+    target_aliases={"initiative": 0, "pedagogy": 1, "warmth": 2, "hedging": 3},
+    description="v7 fc_pair k=4 principal-oblimin canonical solution.",
+)
+
+# Registered built-in solutions. Add a k=8 entry here once labels + anchors
+# are picked, or supply --solution-json at runtime.
+FACTOR_SOLUTIONS: dict[int, FactorSolution] = {
+    4: SOLUTION_K4_OBLIMIN,
 }
-CANONICAL_FACTOR_NAMES = ["F0_Initiative", "F1_Pedagogy", "F2_Warmth", "F3_Hedging"]
-
-# Map ``--target`` value (lower-case factor name) to the canonical factor
-# index. Used by report_comparison to highlight the target row.
-TARGET_FACTOR_INDEX: dict[str, int] = {
-    "initiative": 0,
-    "pedagogy":   1,
-    "warmth":     2,
-    "hedging":    3,
-}
+DEFAULT_K = 4
 
 
-def _find_anchor_rows(items: list[dict]) -> dict[int, list[tuple[int, int]]]:
+def _find_anchor_rows(
+    items: list[dict], solution: FactorSolution
+) -> dict[int, list[tuple[int, int]]]:
     """Locate each anchor in ``items`` by ``col_id``. Returns
     ``{factor: [(row_idx, sign), ...]}``.
     """
     out: dict[int, list[tuple[int, int]]] = {}
     cid_to_row = {it["col_id"]: i for i, it in enumerate(items)}
-    for fi, anchors in EXPECTED_FACTOR_ANCHORS.items():
+    for fi, anchors in solution.anchors.items():
         rows: list[tuple[int, int]] = []
         for cid, sign in anchors:
             if cid not in cid_to_row:
                 raise RuntimeError(
                     f"Factor F{fi} anchor col_id {cid!r} not found in items "
                     "(expected in the preprocessed FA fit). The questionnaire "
-                    "format may have changed; update EXPECTED_FACTOR_ANCHORS."
+                    "format may have changed; update the FactorSolution anchors."
                 )
             rows.append((cid_to_row[cid], sign))
         out[fi] = rows
@@ -361,6 +580,7 @@ def _find_anchor_rows(items: list[dict]) -> dict[int, list[tuple[int, int]]]:
 def align_factor_identity(
     loadings: np.ndarray,
     items: list[dict],
+    solution: FactorSolution,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Find the permutation + sign-flip mapping refit factors to canonical
     ones. Brute-forces all 4! = 24 permutations, picks the one that
@@ -373,9 +593,9 @@ def align_factor_identity(
     canonical-sign loading matrix.
     """
     k = loadings.shape[1]
-    assert k == 4, f"expected 4 factors, got {k}"
+    assert k == solution.k, f"expected {solution.k} factors, got {k}"
 
-    anchor_rows = _find_anchor_rows(items)
+    anchor_rows = _find_anchor_rows(items, solution)
 
     # Per (canonical_i, refit_j): mean over i's anchors of expected_sign·sign(load).
     # Loadings with magnitude < 0.1 contribute 0 (treated as ambiguous).
@@ -412,7 +632,7 @@ def align_factor_identity(
             aligned_load = float(loadings[row, perm_arr[i]] * signs[i])
             if expected_sign * np.sign(aligned_load) <= 0:
                 failures.append(
-                    f"  F{i} ({CANONICAL_FACTOR_NAMES[i]}) anchor "
+                    f"  F{i} ({solution.factor_names[i]}) anchor "
                     f"col_id={items[row]['col_id']}: "
                     f"aligned_loading={aligned_load:+.3f} but expected sign "
                     f"{expected_sign:+d}"
@@ -420,12 +640,13 @@ def align_factor_identity(
     if failures:
         raise RuntimeError(
             "Factor identity check FAILED — refit FA does not match the "
-            f"k=4 v7_pf3 oblimin canonical factors.\n"
+            f"canonical solution (k={solution.k}, rotation={solution.rotation}).\n"
             f"Best permutation: {perm_arr.tolist()}, signs: {signs.tolist()}\n"
             "Anchor mismatches:\n" + "\n".join(failures)
         )
 
-    if not (perm_arr.tolist() == [0, 1, 2, 3] and signs.tolist() == [1, 1, 1, 1]):
+    if not (perm_arr.tolist() == list(range(solution.k))
+            and signs.tolist() == [1] * solution.k):
         print(
             f"[validate] WARNING: refit factors required reordering. "
             f"permutation={perm_arr.tolist()} signs={signs.tolist()}. "
@@ -440,10 +661,11 @@ def align_factor_identity(
 # ── FA refit + scoring ────────────────────────────────────────────────────
 
 
-def refit_fa_for_scoring() -> tuple[
+def refit_fa_for_scoring(solution: FactorSolution) -> tuple[
     FactorAnalyzer, np.ndarray, list[dict], list[str], np.ndarray, np.ndarray
 ]:
-    """Refit the v7 fc_pair k=4 oblimin FA on the cached baseline matrix.
+    """Refit the v7 fc_pair FA on the cached baseline matrix at the
+    rotation/method/k specified by ``solution``.
 
     Deterministic with seed=436. Returns the fitted ``FactorAnalyzer``, the
     preprocessed response matrix, the aligned column items, the per-row
@@ -459,9 +681,11 @@ def refit_fa_for_scoring() -> tuple[
         high_variance_persona_drop_pct=0.0,
         do_residualize=False,
     )
-    fa = FactorAnalyzer(n_factors=4, method="principal", rotation="oblimin")
+    fa = FactorAnalyzer(
+        n_factors=solution.k, method=solution.method, rotation=solution.rotation
+    )
     fa.fit(M_pp)
-    perm, signs = align_factor_identity(fa.loadings_, items_pp)
+    perm, signs = align_factor_identity(fa.loadings_, items_pp, solution)
     return fa, M_pp, items_pp, [m["sample_id"] for m in meta_pp], perm, signs
 
 
@@ -481,6 +705,7 @@ def report_item_level_shifts(
     M_baseline: np.ndarray,
     loadings_aligned: np.ndarray,
     items_pp: list[dict],
+    factor_names: list[str],
     threshold: float = 0.4,
 ) -> list[dict]:
     """Per-factor: pole-aligned shift on items where this factor is dominant.
@@ -497,7 +722,7 @@ def report_item_level_shifts(
         n = int(mask.sum())
         if n == 0:
             rows.append({
-                "factor": CANONICAL_FACTOR_NAMES[f],
+                "factor": factor_names[f],
                 "n_dominant_items_loading_ge_thresh": 0,
                 "threshold": threshold,
                 "pole_aligned_mean_shift": None,
@@ -508,7 +733,7 @@ def report_item_level_shifts(
             continue
         signed = np.sign(load_f[mask]) * delta_mean[mask]
         rows.append({
-            "factor": CANONICAL_FACTOR_NAMES[f],
+            "factor": factor_names[f],
             "n_dominant_items_loading_ge_thresh": n,
             "threshold": threshold,
             "pole_aligned_mean_shift": float(signed.mean()),
@@ -533,12 +758,13 @@ def report_comparison(
     factor_identity: dict,
     label: str,
     output_dir: Path,
+    factor_names: list[str],
     target_factor_index: int | None = None,
 ) -> dict:
     """Per-factor paired comparison + JSON dump + violin plot."""
     diff = lora_scores - baseline_scores
     k = lora_scores.shape[1]
-    factor_names = CANONICAL_FACTOR_NAMES[:k]
+    assert len(factor_names) == k
     summary: dict = {
         "label": label,
         "adapter": adapter,
@@ -637,25 +863,127 @@ def report_comparison(
 
 
 async def main_async(args: argparse.Namespace) -> None:
-    hydrate_inputs()
+    # Resolve the factor solution to score against.
+    if args.solution_json is not None:
+        solution = FactorSolution.from_json(Path(args.solution_json))
+        print(
+            f"[validate] using custom factor solution from {args.solution_json}: "
+            f"k={solution.k} rotation={solution.rotation}"
+        )
+    else:
+        if args.k not in FACTOR_SOLUTIONS:
+            raise SystemExit(
+                f"No built-in solution for k={args.k}. Provide --solution-json or "
+                f"register one in FACTOR_SOLUTIONS. Known: {sorted(FACTOR_SOLUTIONS)}"
+            )
+        solution = FACTOR_SOLUTIONS[args.k]
+        print(
+            f"[validate] using built-in factor solution k={solution.k} "
+            f"rotation={solution.rotation}"
+        )
 
-    # 1. Stratified subsample.
-    sample_ids = stratified_sample_ids(ROLLOUT_LOCAL, n=args.n_personas, seed=SEED)
-    sample_set = set(sample_ids)
+    if args.target not in solution.target_aliases:
+        raise SystemExit(
+            f"--target={args.target!r} not in solution's target_aliases "
+            f"({sorted(solution.target_aliases)}). Pick one of those, or update "
+            "the solution."
+        )
+    target_factor_index = solution.target_aliases[args.target]
+
     label = args.label
-
-    # 2. Mirror the rollout dir filtered to those sample_ids.
-    sub_rollout = VALIDATE_ROOT / label / "rollout_subsample"
-    write_subsample_rollout(ROLLOUT_LOCAL, sub_rollout, sample_set)
-
-    # 3. Run v7 fc_pair questionnaire admin with the LoRA.
     out_v7 = VALIDATE_ROOT / label / "questionnaire_v7_fc_pair"
-    print("[validate] running v7 fc_pair questionnaire admin")
-    M_lora, items_lora, meta_lora = await admin_v7_fc_pair(
-        rollout_dir=sub_rollout,
-        adapter_path=args.adapter,
-        output_dir=out_v7,
-    )
+
+    # If we already have a cached LoRA-admin response matrix on HF for this
+    # label (from a previous k=4 validate run), pull it down and skip the
+    # GPU step entirely. The downstream scoring is k-agnostic.
+    if args.reuse_cached_responses and not (out_v7 / "response_matrix.npy").exists():
+        if args.cache_path_in_repo is None:
+            raise SystemExit(
+                "--reuse-cached-responses requires --cache-path-in-repo "
+                "(monorepo path to the existing factor_validate/<label> dir)."
+            )
+        print(f"[validate] hydrating cached responses from {args.cache_path_in_repo}")
+        hydrate_dataset_subtree(
+            repo_id="persona-shattering-lasr/monorepo",
+            path_in_repo=args.cache_path_in_repo + "/questionnaire_v7_fc_pair",
+            local_dir=out_v7,
+            required=True,
+        )
+
+    if (
+        args.extend_cached_responses
+        and (out_v7 / "response_matrix.npy").exists()
+    ):
+        M_existing, _items_existing, meta_existing = load_questionnaire_cache(out_v7)
+        existing_ids = [m["sample_id"] for m in meta_existing]
+        if args.n_personas <= len(existing_ids):
+            print(
+                f"[validate] cached response matrix already has {len(existing_ids)} "
+                f"personas; target n={args.n_personas}, so no extension needed"
+            )
+            M_lora, items_lora, meta_lora = M_existing, _items_existing, meta_existing
+            sample_ids = existing_ids
+        else:
+            hydrate_inputs()
+            n_additional = args.n_personas - len(existing_ids)
+            additional_ids = stratified_additional_sample_ids(
+                ROLLOUT_LOCAL,
+                n=n_additional,
+                seed=SEED,
+                existing_ids=existing_ids,
+            )
+            delta_rollout = (
+                VALIDATE_ROOT
+                / label
+                / f"rollout_extend_{len(existing_ids)}_to_{args.n_personas}"
+            )
+            write_subsample_rollout(ROLLOUT_LOCAL, delta_rollout, set(additional_ids))
+
+            delta_out_v7 = (
+                VALIDATE_ROOT
+                / label
+                / f"questionnaire_v7_fc_pair_extend_{len(existing_ids)}_to_{args.n_personas}"
+            )
+            print(
+                "[validate] running v7 fc_pair questionnaire admin for "
+                f"{n_additional} extension personas"
+            )
+            await admin_v7_fc_pair(
+                rollout_dir=delta_rollout,
+                adapter_path=args.adapter,
+                output_dir=delta_out_v7,
+            )
+            M_lora, items_lora, meta_lora = append_questionnaire_cache(
+                base_dir=out_v7,
+                delta_dir=delta_out_v7,
+            )
+            sample_ids = [m["sample_id"] for m in meta_lora]
+    elif (out_v7 / "response_matrix.npy").exists():
+        # Cached path: load matrix + items + meta directly, no rollout
+        # subsample mirror, no questionnaire admin, no GPU.
+        print(f"[validate] using cached LoRA responses at {out_v7}")
+        M_lora, items_lora, meta_lora = load_questionnaire_cache(out_v7)
+        # Reconstruct the canonical sample_id list from the cached metadata
+        # so the downstream pairing logic still works.
+        sample_ids = [m["sample_id"] for m in meta_lora]
+    else:
+        hydrate_inputs()
+
+        # 1. Stratified subsample.
+        sample_ids = stratified_sample_ids(ROLLOUT_LOCAL, n=args.n_personas, seed=SEED)
+        sample_set = set(sample_ids)
+
+        # 2. Mirror the rollout dir filtered to those sample_ids.
+        sub_rollout = VALIDATE_ROOT / label / "rollout_subsample"
+        write_subsample_rollout(ROLLOUT_LOCAL, sub_rollout, sample_set)
+
+        # 3. Run v7 fc_pair questionnaire admin with the LoRA.
+        print("[validate] running v7 fc_pair questionnaire admin")
+        M_lora, items_lora, meta_lora = await admin_v7_fc_pair(
+            rollout_dir=sub_rollout,
+            adapter_path=args.adapter,
+            output_dir=out_v7,
+        )
 
     # 4. Order LoRA matrix by sample_id, drop NaN-row personas.
     sid_lora = {m["sample_id"]: i for i, m in enumerate(meta_lora)}
@@ -670,9 +998,15 @@ async def main_async(args: argparse.Namespace) -> None:
     common = [s for s, k in zip(common, keep) if k]
 
     # 5. Refit FA on full baseline matrix; canonicalise factor order/sign.
-    print("[validate] refitting FA on baseline matrix for scoring...")
-    fa, M_baseline_full, fit_items, baseline_sids, perm, signs = refit_fa_for_scoring()
-    factor_identity = {"permutation": perm.tolist(), "signs": signs.tolist()}
+    print(f"[validate] refitting FA (k={solution.k}, rotation={solution.rotation}) on baseline matrix for scoring...")
+    fa, M_baseline_full, fit_items, baseline_sids, perm, signs = refit_fa_for_scoring(solution)
+    factor_identity = {
+        "permutation": perm.tolist(),
+        "signs": signs.tolist(),
+        "k": solution.k,
+        "rotation": solution.rotation,
+        "factor_names": solution.factor_names,
+    }
     loadings_aligned = fa.loadings_[:, perm] * signs[None, :]
 
     M_lora_aligned = align_to_fit_items(M_lora, items_lora, fit_items)
@@ -700,6 +1034,7 @@ async def main_async(args: argparse.Namespace) -> None:
         M_baseline=M_baseline_paired,
         loadings_aligned=loadings_aligned,
         items_pp=fit_items,
+        factor_names=solution.factor_names,
         threshold=0.4,
     )
 
@@ -714,7 +1049,8 @@ async def main_async(args: argparse.Namespace) -> None:
         factor_identity=factor_identity,
         label=label,
         output_dir=out_dir,
-        target_factor_index=TARGET_FACTOR_INDEX[args.target],
+        factor_names=solution.factor_names,
+        target_factor_index=target_factor_index,
     )
 
     # 9. Optional: push the eval folder to the monorepo.
@@ -734,7 +1070,11 @@ async def main_async(args: argparse.Namespace) -> None:
                 f"Add {label} factor-validate results for {args.target} "
                 f"{args.direction} v{args.monorepo_version}."
             ),
-            ignore_patterns=["rollout_subsample/**"],
+            ignore_patterns=[
+                "rollout_subsample/**",
+                "rollout_extend_*/**",
+                "questionnaire_v7_fc_pair_extend_*/**",
+            ],
         )
         print(f"[validate] uploaded results to {url}/tree/main/{path_in_repo}")
 
@@ -744,10 +1084,62 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--target",
         required=True,
-        choices=sorted(TARGET_FACTOR_INDEX),
         help=(
             "Factor the LoRA was trained along — used to highlight the target "
-            "row in the report. The script reports all four factors regardless."
+            "row in the report. Must be a key in the active solution's "
+            "target_aliases. The script reports all factors regardless."
+        ),
+    )
+    ap.add_argument(
+        "--k",
+        type=int,
+        default=DEFAULT_K,
+        help=(
+            f"Number of factors to refit (default: {DEFAULT_K}, the original "
+            "v7_pf3 oblimin canonical solution). Must match a key in "
+            "FACTOR_SOLUTIONS, or use --solution-json for a custom one."
+        ),
+    )
+    ap.add_argument(
+        "--solution-json",
+        default=None,
+        help=(
+            "Optional path to a JSON file describing a FactorSolution "
+            "(k, rotation, method, factor_names, anchors, target_aliases). "
+            "Overrides --k."
+        ),
+    )
+    ap.add_argument(
+        "--reuse-cached-responses",
+        action="store_true",
+        help=(
+            "Skip the GPU questionnaire admin and reuse a previously-cached "
+            "LoRA response matrix. If the local cache is missing, hydrate it "
+            "from monorepo (requires --cache-path-in-repo). Useful for "
+            "re-scoring an existing label against a different k."
+        ),
+    )
+    ap.add_argument(
+        "--extend-cached-responses",
+        action="store_true",
+        help=(
+            "When a local/hydrated questionnaire_v7_fc_pair cache already "
+            "exists but --n-personas is larger than the cached count, run "
+            "only the missing additional personas and append them to the "
+            "existing cache. This preserves prior GPU work instead of "
+            "re-administering the full questionnaire."
+        ),
+    )
+    ap.add_argument(
+        "--cache-path-in-repo",
+        default=None,
+        help=(
+            "Monorepo path to the previously-uploaded factor_validate/<label>/ "
+            "directory whose questionnaire_v7_fc_pair/ subfolder we should "
+            "hydrate. Required when --reuse-cached-responses is set and the "
+            "local cache is missing. Example: "
+            "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/amplifier/"
+            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_amp"
         ),
     )
     ap.add_argument(
