@@ -90,7 +90,7 @@ CONDITION_LABEL: dict[str, str] = {
     "lora_soup_n_minus_1.0":              "N↓",
     "lora_soup_control_latest_1.0":       "control",
     "lora_soup_control_legacy_1.0":       "control (legacy)",
-    "lora_soup_a_plus_0.5_c_plus_0.5":    "A↑ ⊕ C↑ (½, ½)",
+    "lora_soup_a_plus_0.5_c_plus_0.5":    "½ (A↑ ⊕ C↑)",
     "lora_soup_a_plus_1.0_c_plus_1.0":    "A↑ ⊕ C↑ (1, 1)",
     "lora_soup_a_plus_1.0_c_plus_0.5":    "A↑ ⊕ C↑ (1, ½)",
     "lora_soup_c_plus_0.5_o_minus_0.5":   "C↑ ⊕ O↓ (½, ½)",
@@ -246,13 +246,13 @@ def _make_figure(
     fig, axes = plt.subplots(1, 2, figsize=(width, height), squeeze=False)
     _bar_panel(
         axes[0, 0], harm_rates,
-        title="Harmful response rate (WildJailbreak adversarial-harmful)",
-        ylabel="harmful rate (95% Wilson CI)",
+        title="WildJailbreak harmful",
+        ylabel="harmful rate",
     )
     _bar_panel(
         axes[0, 1], bnign_rates,
-        title="Over-refusal on benign control",
-        ylabel="noncompliance rate (95% Wilson CI)",
+        title="WildJailbreak Benign",
+        ylabel="noncompliance rate",
     )
 
     fig.tight_layout()
@@ -292,7 +292,7 @@ PRESETS: dict[str, Preset] = {
             "main/fig_3_wj_persona_drift.pdf",
             "main/fig_3_wj_persona_drift.png",
         ],
-        width=11.0, height=4.4,
+        width=11.0, height=3.4,
     ),
     "appendix": Preset(
         name="appendix",
@@ -310,7 +310,7 @@ PRESETS: dict[str, Preset] = {
             "appendix/fig_F_wj_persona_drift_full.pdf",
             "appendix/fig_F_wj_persona_drift_full.png",
         ],
-        width=14.0, height=4.6,
+        width=14.0, height=3.6,
     ),
 }
 

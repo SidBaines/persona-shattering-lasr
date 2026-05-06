@@ -395,7 +395,7 @@ def main() -> None:
         (box_x0 + box_x1) / 2.0, title_y,
         "Trait-modifying LoRAs",
         ha="center", va="center",
-        fontsize=FS_TITLE + 2,
+        fontsize=FS_TITLE,
         # fontweight="bold",
     )
 
