@@ -34,7 +34,7 @@ We apply vector capping to the final 40\% of layers. At inference time, for each
 
 So when $vec\_lim$ is positive it creates a floor, and when it is negative it creates a ceiling. The floor can go above 1.0 and the ceiling can go below 0.0, essentially becoming steering vectors. This dynamic approach was chosen to allow us to do sweeps that could be compared to our LoRA scale sweeps.
 
-See sweeps for our OCEAN LoRAs \cref{fig:actcap_amplifiers,fig:actcap_suppressors}. Whilst the TRAIT scores are relatively flat, suggesting that this intervention doesn't make the model self identify differently, the LLM judge scores do clearly show the expected directional change in each OCEAN trait.
+See sweeps for our OCEAN LoRAs \Cref{fig:actcap_amplifiers,fig:actcap_suppressors}. Whilst the \texttt{TRAIT} scores are relatively flat, suggesting that this intervention doesn't make the model self identify differently, the LLM judge scores do clearly show the expected directional change in each OCEAN trait.
 
 
 

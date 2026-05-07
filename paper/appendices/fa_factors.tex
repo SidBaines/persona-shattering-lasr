@@ -166,7 +166,7 @@ This is consistent with the ``weights plus context'' framing developed in Sectio
 \toprule
 Model & Factor & $\eta^2$ archetype & $\eta^2$ scenario & sum \\
 \midrule
-Llama-3.1-8B  & F0 \textit{Initiative}        & 0.005 & 0.659 & 0.664 \\
+Llama-3.1-8B-Instruct  & F0 \textit{Initiative}        & 0.005 & 0.659 & 0.664 \\
               & F1 \textit{Tone}              & 0.060 & 0.580 & 0.640 \\
               & F2 \textit{Didacticism}       & 0.010 & 0.782 & 0.792 \\
               & F3 \textit{Epistemic Caution} & 0.026 & 0.606 & 0.632 \\
@@ -212,7 +212,7 @@ We then Hungarian-match the residualized factor solution against the raw solutio
 \toprule
 Model & Factor & $\alpha$ (raw) & $\alpha$ (resid) & raw$\leftrightarrow$resid $|\phi|$ \\
 \midrule
-Llama-3.1-8B  & F0 \textit{Initiative}        & 0.873 & 0.836 & 0.942 \\
+Llama-3.1-8B-Instruct  & F0 \textit{Initiative}        & 0.873 & 0.836 & 0.942 \\
               & F1 \textit{Tone}              & 0.852 & 0.821 & 0.918 \\
               & F2 \textit{Didacticism}       & 0.796 & 0.672 & 0.692 \\
               & F3 \textit{Epistemic Caution} & 0.832 & 0.652 & 0.890 \\
@@ -262,18 +262,18 @@ All five LoRAs use $n=1000$ validation personas.
 \begin{table}[htbp]
 \centering
 \small
-\caption{Per-LoRA mean factor-score shift $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$, in three views: full-sample mean (\emph{naive}), restricted to the medium tertile of baseline score on the column factor (\emph{middling}), and restricted to the headroom tertile per LoRA direction (\emph{headroom}; low for $\uparrow$, high for $\downarrow$, low for the control). Bold entries mark each LoRA's target factor (the control has none). Values in factor-score units (z-scored Thomson scores from the v7-pf3 $k=4$ oblimin fit). All five LoRAs use $n=1000$ validation personas; the Initiative LoRAs are the v2 paired-DPO retrain.}
+\caption{Per-LoRA mean factor-score shift $\Delta = \bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$, in three views: full-sample mean (\emph{naive}), restricted to the medium tertile of baseline score on the column factor (\emph{middling}), and restricted to the headroom tertile per LoRA direction (\emph{headroom}; low for $\uparrow$, high for $\downarrow$, low for the control). Bold entries mark each LoRA's target factor (the control has none). Values in factor-score units (z-scored Thomson scores from the v7-pf3 $k=4$ oblimin fit). All five LoRAs use $n=1000$ validation personas; the Initiative LoRAs are the paired-DPO retrain.}
 \label{tab:4-2-lora-shifts}
 \begin{tabular}{l l r r r r}
 \toprule
 LoRA & view & \textit{Initiative} & \textit{Tone} & \textit{Didacticism} & \textit{Epistemic Caution} \\
 \midrule
-\multirow{3}{*}{Initiative $\uparrow$ (v2)}
+\multirow{3}{*}{Initiative $\uparrow$}
   & naive    & $\mathbf{+1.54}$ & $+0.16$ & $+0.03$ & $-1.15$ \\
   & middling & $\mathbf{+1.50}$ & $+0.20$ & $-0.02$ & $-1.19$ \\
   & headroom & $\mathbf{+1.97}$ & $+0.32$ & $+0.20$ & $-0.86$ \\
 \midrule
-\multirow{3}{*}{Initiative $\downarrow$ (v2)}
+\multirow{3}{*}{Initiative $\downarrow$}
   & naive    & $\mathbf{-0.44}$ & $-0.91$ & $+0.09$ & $-0.98$ \\
   & middling & $\mathbf{-0.45}$ & $-0.87$ & $+0.03$ & $-1.01$ \\
   & headroom & $\mathbf{-0.46}$ & $-0.99$ & $+0.06$ & $-1.07$ \\
