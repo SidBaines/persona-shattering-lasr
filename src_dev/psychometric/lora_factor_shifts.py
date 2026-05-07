@@ -72,6 +72,7 @@ class LoraValidation:
     direction: str
     hf_subdir: str
     prefer_large_n: bool = True
+    display_label: str | None = None
 
 
 def hydrate_validation_artifacts(
@@ -271,6 +272,7 @@ def load_lora_factor_shifts(
             "label": label,
             "factor": v.factor,
             "direction": v.direction,
+            "display_label": v.display_label,
             "n_personas": int(payload.get("n_personas", 0)),
             "target_factor": payload.get("target_factor"),
             "summary_path": str(summary_path),
@@ -619,16 +621,17 @@ def plot_factor_shift_barchart(
         direction_palette = {"+": "#2563eb", "-": "#ea580c"}
 
     arrow = {"+": "↑", "-": "↓"}
-    bar_labels = [
-        f"{(row_label_factor_map or {}).get(r['factor'], r['factor'])} "
-        f"{arrow.get(r['direction'], r['direction'])}"
-        for r in rows
-    ]
+    def _bar_label(r):
+        if r.get("display_label"):
+            return r["display_label"]
+        f_disp = (row_label_factor_map or {}).get(r["factor"], r["factor"])
+        return f"{f_disp} {arrow.get(r['direction'], r['direction'])}"
+    bar_labels = [_bar_label(r) for r in rows]
 
     width = 0.8 / max(n_lora, 1)
     x = np.arange(n_factor, dtype=float)
 
-    fig, ax = plt.subplots(figsize=(max(6, 1.4 * n_factor + 2), 4.4))
+    fig, ax = plt.subplots(figsize=(max(6, 1.4 * n_factor + 2), 3.2))
     for i, r in enumerate(rows):
         offset = (i - (n_lora - 1) / 2.0) * width
         vals = diff[i]
@@ -636,34 +639,33 @@ def plot_factor_shift_barchart(
         # nonnegative error magnitudes).
         err_lo = np.maximum(vals - lo[i], 0.0)
         err_hi = np.maximum(hi[i] - vals, 0.0)
+        # Control entries get a neutral grey so they don't read as a
+        # third "amp" or "sup". Detect via factor=="Control" so it works
+        # regardless of nominal direction.
+        if r.get("factor") == "Control":
+            bar_color = "#6b7280"
+        else:
+            bar_color = direction_palette.get(r["direction"], "#6b7280")
         ax.bar(
             x + offset, vals, width,
-            color=direction_palette.get(r["direction"], "#6b7280"),
+            color=bar_color,
             edgecolor="#111", linewidth=0.4,
             label=bar_labels[i],
             yerr=np.vstack([err_lo, err_hi]),
             capsize=3, error_kw={"elinewidth": 0.9, "ecolor": "#374151"},
         )
-        # Numeric annotation above (or below for negative) each bar.
-        for xi, v in zip(x + offset, vals):
-            if not np.isfinite(v):
-                continue
-            va = "bottom" if v >= 0 else "top"
-            pad = 0.02 * max(np.nanmax(np.abs(diff)) or 1.0, 1e-3)
-            y_text = v + pad if v >= 0 else v - pad
-            ax.text(xi, y_text, f"{v:+.2f}",
-                    ha="center", va=va, fontsize=8, color="#111")
 
     ax.axhline(0, color="#111", linewidth=0.6)
     ax.set_xticks(x)
-    ax.set_xticklabels(factor_display_names, fontsize=10)
-    ax.set_xlabel("Behavioural Factor")
+    ax.set_xticklabels(factor_display_names, fontsize=12)
+    ax.tick_params(axis="y", labelsize=11)
     ax.set_ylabel(
-        r"$\bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$ (factor-score units)"
+        r"$\bar{F}^{\text{LoRA}} - \bar{F}^{\text{baseline}}$",
+        fontsize=12,
     )
-    ax.set_title(title, fontsize=11)
+    ax.set_title(title, fontsize=13)
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(fontsize=9, loc="lower left", framealpha=0.9)
+    ax.legend(fontsize=11, loc="upper right", framealpha=0.9)
     fig.tight_layout()
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, dpi=150)

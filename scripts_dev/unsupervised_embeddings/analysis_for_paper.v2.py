@@ -431,21 +431,56 @@ PAPER_FACTOR_DISPLAY_NAMES: dict[str, str] = {
     "Hedging": "Epistemic Caution",
 }
 
+# Toggles for the paper's main bar chart.
+# - USE_INITIATIVE_LORA_V2: swap the v1 paired-DPO Initiative LoRAs for the
+#   newer v2 paired-DPO retraining. Both versions live on the monorepo.
+# - INCLUDE_CONTROL_LORA: append the OCEAN-definition control LoRA (a
+#   negative-control adapter trained against generic prompt definitions
+#   rather than a specific factor's contrastive constitution). Useful as a
+#   "does any LoRA shift these factors?" baseline.
+USE_INITIATIVE_LORA_V2: bool = True
+INCLUDE_CONTROL_LORA: bool = True
+
+_INIT_AMP_V1 = LoraValidation(
+    label="initiative_amp", factor="Initiative", direction="+",
+    hf_subdir=(
+        "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/amplifier/"
+        "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_amp"
+    ),
+)
+_INIT_SUP_V1 = LoraValidation(
+    label="initiative_sup", factor="Initiative", direction="-",
+    hf_subdir=(
+        "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/suppressor/"
+        "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_sup"
+    ),
+)
+_INIT_AMP_V2 = LoraValidation(
+    label="initiative_amp_v2", factor="Initiative", direction="+",
+    hf_subdir=(
+        "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/amplifier/"
+        "vunsup_k4_v7_pf3_v2_paired_dpo/evals/factor_validate/initiative_amp_v2"
+    ),
+)
+_INIT_SUP_V2 = LoraValidation(
+    label="initiative_sup_v2", factor="Initiative", direction="-",
+    hf_subdir=(
+        "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/suppressor/"
+        "vunsup_k4_v7_pf3_v2_paired_dpo/evals/factor_validate/initiative_sup_v2"
+    ),
+)
+_CONTROL_LORA = LoraValidation(
+    label="control_ocean_def", factor="Control", direction="+",
+    hf_subdir=(
+        "fine_tuning/llama-3.1-8b-it/other/ocean_def_control/amplifier/"
+        "vanton4_paired_dpo_s1vs2/evals/factor_validate/control_ocean_def"
+    ),
+    display_label="Control",
+)
+
 LORA_VALIDATIONS: list[LoraValidation] = [
-    LoraValidation(
-        label="initiative_amp", factor="Initiative", direction="+",
-        hf_subdir=(
-            "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/amplifier/"
-            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_amp"
-        ),
-    ),
-    LoraValidation(
-        label="initiative_sup", factor="Initiative", direction="-",
-        hf_subdir=(
-            "fine_tuning/llama-3.1-8b-it/unsupervised/initiative/suppressor/"
-            "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/initiative_sup"
-        ),
-    ),
+    _INIT_AMP_V2 if USE_INITIATIVE_LORA_V2 else _INIT_AMP_V1,
+    _INIT_SUP_V2 if USE_INITIATIVE_LORA_V2 else _INIT_SUP_V1,
     LoraValidation(
         label="warmth_amp", factor="Warmth", direction="+",
         hf_subdir=(
@@ -460,6 +495,7 @@ LORA_VALIDATIONS: list[LoraValidation] = [
             "vunsup_k4_v7_pf3_paired_dpo/evals/factor_validate/warmth_sup"
         ),
     ),
+    *([_CONTROL_LORA] if INCLUDE_CONTROL_LORA else []),
     # We restrict the LoRA validation reported in the paper to the top
     # two factors by variance explained (Initiative + Warmth). Pedagogy
     # and Hedging LoRAs were not optimised to the same standard; their
@@ -1751,6 +1787,7 @@ def run_lora_factor_shifts() -> dict | None:
             label=v.label, factor=v.factor, direction=v.direction,
             hf_subdir=v.hf_subdir,
             prefer_large_n=LORA_VALIDATION_PREFER_LARGE_N,
+            display_label=v.display_label,
         )
         for v in LORA_VALIDATIONS
     ]
@@ -1830,8 +1867,9 @@ def run_lora_factor_shifts() -> dict | None:
     # Focused bar chart for the paper's main figure: Initiative-amplifier
     # + Initiative-suppressor across all four factors, on the medium-baseline
     # tertile (the same ceiling/floor-robust view the heatmap uses by default).
+    # Optionally include the OCEAN-definition control LoRA as a baseline.
     initiative_labels = [r["label"] for r in rows
-                         if r.get("factor") == "Initiative"]
+                         if r.get("factor") in {"Initiative", "Control"}]
     if initiative_labels:
         try:
             mat_mid = build_shift_matrix(shifts, selection="middling")
