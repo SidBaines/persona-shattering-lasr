@@ -1,76 +1,58 @@
 \section{Introduction}\label{sec:introduction}
-\todo[inline]{Check references}
-\todo[inline]{(For NeurIPS) Consistent use of up/down arrows for trait directions instead of +/-}
-\todo[inline]{(For NeurIPS) Consistent color scheme}
 
-% \david{Large language models (LLMs) do not only differ in what they know or whether they answer correctly. They also differ in how they answer: how much they defer, what stances they take, and so on. These recurring behavioral patterns are often described as model personas.} \textit{Personas} have recently arisen as an object of study to investigate patterns in LLMs, \david{relevant in shaping both user experience and safety-relevant behavior, but remain hard to define, measure, and control.} \citep{marks2026persona}. 
+Large language models (LLMs) do not only differ in what they know or whether they answer correctly. They also differ in how they behave, such as how much they defer, what stances they take on open questions, and so on \citep{huang2025valueswilddiscoveringanalyzing,zhang2025stresstestingmodelspecsreveals,slama2026llmpreferencespredictdownstream}. These recurring patterns in how models behave can be explained in terms of the \textit{persona} that models learn during training, with these personas being key to explaining how and why models generalise the way they do \citep{marks2026persona}. 
 
-% \david{Existing approaches to persona control fall between two imperfect extremes. Prompting and activation-space interventions can alter behavior at inference time, but may be brittle to context and require continued intervention. Full pre and post-training can install broad behavioral defaults, but is expensive and inflexible: a model may need different behavioral modes in different deployment contexts. What is missing is a method for decomposing personas into measurable behavioral axes and moving models along those axes in a controlled, composable way.}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth, trim={0.5cm 10cm 0.5cm 0.5cm},clip]{figures/main/pipeline.pdf}
+\caption{\textbf{Overview of the experimental setup and methodology.} (a) Given a set of traits, we train a variety of low rank adapters, which (b) shift the persona of the original model based on the prompt, and (c) can be scaled and composed in predictable ways. (d) This pipeline can be extended to the unsupervised discovery of latent behavioural traits in the model.}
+\label{fig:overview}
+\end{figure}
 
-% In this paper, we define personas as bundles of traits, and investigate techniques to both modulate and explore traits, to shape and understand LLM personas.
+Existing approaches to persona control fall between two imperfect extremes. On the one hand, prompting and activation-space interventions \citep{sun2024building, cao2024personalized,chen2025persona, feng2026persona} can alter behavior at inference time with high flexibility, but may be brittle to context and require continued intervention. On the other hand, full pre- and post-training can instill broad behavioral defaults   \citep{li2026modelspec,christiano2017deeprl, ouyang2022instructgpt,tice2026alignmentpretraining,maiya2025opencharacter}, but it is expensive and inflexible: a model may need different behavioral modes in different deployment contexts. What is missing is a method for learning efficient weight-based interventions that can be controlled and composed to flexibly define model personas in a generalisable way.
 
-\david{Large language models (LLMs) do not only differ in what they know or whether they answer correctly. They also differ in how they answer: how much they defer, what stances they take, and so on. These recurring behavioral patterns are often described as model personas.} \textit{Personas} have recently arisen as an object of study to investigate patterns in LLMs, \david{relevant in shaping both user experience and safety-relevant behavior, but remain hard to define, measure, and control.} \citep{marks2026persona}. 
 
-\david{Existing approaches to persona control fall between two imperfect extremes. Prompting and activation-space interventions} \todo{cite a bunch of papers} \david{can alter behavior at inference time, but may be brittle to context and require continued intervention. Full pre- and post-training can install broad behavioral defaults} \todo{cite alignment pretraining paper, cite RLHF, cite Chloe li's paper}\david{, but is expensive and inflexible: a model may need different behavioral modes in different deployment contexts. What is missing is a method for decomposing personas into measurable behavioral axes and moving models along those axes in a controlled, composable way.}
+We propose a trait-space view of LLM personas, where, rather than a fixed identity, a persona is a region in a behavioral space jointly determined by model weights and conversational context. Some axes in this space can be specified using human-interpretable traits; others may need to be discovered from model behavior. If such axes can be represented as weight-space interventions, then persona control becomes a much simpler problem of learning, scaling, and composing the desired behavioural traits. We instantiate this view using the OCEAN framework \citep{mccrae1992introduction} as a psychometrically grounded starting point. This is an established theory which claims that human personalities can generally be described in terms of five traits: Openness, Conscientiousness, Extroversion, Agreeableness, and Neuroticism. We train low rank adapters (LoRAs) \citep{hu2021lora} to amplify and suppress each OCEAN trait using constitution-guided distillation taken from the Open Character Training framework \citep{maiya2025opencharacter}, and evaluate the resulting models with calibrated LLM judges, trait-specific multiple-choice questions \citep{lee2024trait}, and standard capability benchmarks. 
+%We find these adapters scale predictably, compose approximately additively (\Cref{fig:intro-main}), preserve existing general-purpose capabilities, and perform equivalently to the inference-time intervention of activation-space capping for persona control. We also introduce a pipeline for unsupervised discovery of axes of trait space (\Cref{fig:overview}).
 
-%In this paper, we define personas as bundles of traits, and investigate techniques to both modulate and explore traits, to shape and understand LLM personas.
-\david{We propose a trait-space view of LLM personas. On this view, a persona is not a fixed identity, but a region in a behavioral space jointly determined by model weights and conversational context. Some axes in this space can be specified using human-interpretable traits; others may need to be discovered from model behavior. If such axes can be represented as weight-space interventions, then persona control becomes a problem of learning, scaling, and composing behavioral directions. We instantiate this view using the Big Five/OCEAN framework [cite OCEAN] as a psychometrically grounded starting }\kozzy{point.} \david{We train LoRA adapters to amplify and suppress each OCEAN trait using constitution-guided distillation taken from the Open Character Training framework \citep{maiya2025opencharacter}, and evaluate the resulting models with trait-specific MCQ benchmarks \citep{lee2024trait}, calibrated LLM judges, and standard capability benchmarks. We study whether these adapters scale predictably, compose approximately additively, preserve} \kozzy{existing general-purpose} \david{capabilities, and compare favorably to activation-space steering.}
+% % Our experimental setup follows \citet{maiya2025opencharacter} for crafting LoRAs corresponding to the target traits using a constitutional approach.
+% % Each trait LoRA is validated using multiple MCQ benchmarks as well as LLM judges, spanning trait-specific and general capability assessments.
+% % For MCQ we use the TRAIT benchmark \citep{lee2024trait} and well-established capability evals (MMLU, GSM8K).
+% % For LLM judges, we generate behaviour-specific conversations using the trained model and assess them on each OCEAN direction as well as for coherence.
+% % Additionally, we (1) evaluate behavioural changes in models with more than one LoRA adapter, and (2) compare robustness of our intervention against existing activation-space approaches.
+% \todo{Longer rollout robustness (for NeurIPS)}
+% % \Cref{fig:overview} shows the setup. 
 
-% Our experimental setup follows \citet{maiya2025opencharacter} for crafting LoRAs corresponding to the target traits using a constitutional approach.
-% Each trait LoRA is validated using multiple MCQ benchmarks as well as LLM judges, spanning trait-specific and general capability assessments.
-% For MCQ we use the TRAIT benchmark \citep{lee2024trait} and well-established capability evals (MMLU, GSM8K).
-% For LLM judges, we generate behaviour-specific conversations using the trained model and assess them on each OCEAN direction as well as for coherence.
-% Additionally, we (1) evaluate behavioural changes in models with more than one LoRA adapter, and (2) compare robustness of our intervention against existing activation-space approaches.
-\todo{Longer rollout robustness (for NeurIPS)}
-% \Cref{fig:overview} shows the setup. 
+% \todo{NOTE: these are not that important to include in the appendix!}
+% % In order to avoid confounders from the training process, we train control LoRAs using instructions not to affect OCEAN traits.
+% % Additionally we replicate LoRA results on gemma-3-27b-it \citep{gemma_2025}.
+% % \todo{Do other models (for NeurIPS)}
 
-\todo{NOTE: these are not that important to include in the appendix!}
-% In order to avoid confounders from the training process, we train control LoRAs using instructions not to affect OCEAN traits.
-% Additionally we replicate LoRA results on gemma-3-27b-it \citep{gemma_2025}.
-% \todo{Do other models (for NeurIPS)}
+% % In order to explore beyond the human traits covered by OCEAN, we use unsupervised methods to group behaviours of different model instances into LLM-traits, and find that a small number of latent factors explains a large amount of variance across self-report behavioural responses.
 
-% In order to explore beyond the human traits covered by OCEAN, we use unsupervised methods to group behaviours of different model instances into LLM-traits, and find that a small number of latent factors explains a large amount of variance across self-report behavioural responses.
+% % This paper provides evidence of persona modulation in weight-space that can help shape desired behaviours before deployment, rather than requiring active monitoring and intervention during inference.
 
-% This paper provides evidence of persona modulation in weight-space that can help shape desired behaviours before deployment, rather than requiring active monitoring and intervention during inference.
+% \david{Across OCEAN traits, we find that LoRA adapters can induce targeted behavioral shifts, often with limited bleed-through to other traits and little degradation on standard capability benchmarks at moderate scales. Scaling adapters provides useful control over trait expression, and linear combinations of adapters recover mixed personas in a predictable way. More importantly, movement along these axes carries downstream behavioral signal: neuroticism and agreeableness interventions affect frustration dynamics, sycophancy, and refusal/compliance tradeoffs on held-out evaluations. This suggests that trait axes are not merely stylistic or questionnaire-specific, but capture behavioral structure relevant to alignment.}
 
-\david{Across OCEAN traits, we find that LoRA adapters can induce targeted behavioral shifts, often with limited bleed-through to other traits and little degradation on standard capability benchmarks at moderate scales. Scaling adapters provides useful control over trait expression, and linear combinations of adapters recover mixed personas in a predictable way. More importantly, movement along these axes carries downstream behavioral signal: neuroticism and agreeableness interventions affect frustration dynamics, sycophancy, and refusal/compliance tradeoffs on held-out evaluations. This suggests that trait axes are not merely stylistic or questionnaire-specific, but capture behavioral structure relevant to alignment.}
-
-\david{Finally, we ask whether persona axes must be specified by human personality frameworks. To move beyond OCEAN, we introduce an unsupervised psychometric pipeline that samples diverse model rollouts, embeds them using behavioral questionnaires, and factor-analyzes the resulting response patterns. This recovers stable, interpretable latent dimensions --- Tone, Initiative, Didacticism, and Epistemic Caution (acronym \textbf{TIDE}). Together, these results suggest that LLM personas can be studied as partially composable regions in a structured behavioral space, with LoRA adapters providing a practical interface for persona analysis and control.}
+% \david{Finally, we ask whether persona axes must be specified by human personality frameworks. To move beyond OCEAN, we introduce an unsupervised psychometric pipeline that samples diverse model rollouts, embeds them using behavioral questionnaires, and factor-analyzes the resulting response patterns. This recovers stable, interpretable latent dimensions such as Thoroughness, Exuberance, Warmth, and Didacticism. Together, these results suggest that LLM personas can be studied as partially composable regions in a structured behavioral space, with LoRA adapters providing a practical interface for persona analysis and control.}
 
 Our contributions are as follows:
 
-% \begingroup
-% \setlength{\parskip}{0pt}
-% \setlength{\parsep}{0pt}
-% \setlength{\topsep}{0pt}
 \begin{itemize}
-  % \setlength{\parskip}{0pt}
-  % \setlength{\itemsep}{0pt}
-  % \setlength{\parsep}{0pt}
-  % \setlength{\topsep}{0pt}
-  \item \textbf{A trait-space framework for LLM personas:} we formalize personas as context-sensitive regions in a behavioral space and study whether weight-space interventions can move models along interpretable trait axes.
-  \item \textbf{Composable OCEAN trait adapters:} we train LoRA adapters that amplify and suppress Big Five traits, showing that they can be scaled and combined to construct mixed personas while largely preserving benchmark performance at moderate scales.
-  \item \textbf{Behavioral validation beyond trait scores:} we show that movement along learned trait axes affects held-out safety-relevant behaviors, including frustration, sycophancy, and refusal/compliance tradeoffs.
-  \item \textbf{Unsupervised discovery of model-native persona factors:} we introduce a psychometric pipeline for extracting latent behavioral dimensions from model rollouts, recovering stable and interpretable factors beyond the original OCEAN basis.
+  % \item \textbf{A trait-space framework for LLM personas:} we formalize personas as context-sensitive regions in a behavioral space and study whether weight-space interventions can move models along interpretable trait axes (\Cref{sec:personas-in-language-models}).
+  \item \textbf{Composable OCEAN trait adapters:} we train LoRA adapters that amplify and suppress OCEAN traits, showing that they can be scaled and combined to construct specific persona profiles. Our weight-based method is competitive with inference-time methods like activation capping, while also largely preserving general-purpose capabilities at moderate LoRA scaling factors (\Cref{sec:supervised}). 
+  \item \textbf{Downstream utility of persona control:} we also show that movement along learned trait axes affects held-out safety-relevant behaviors, including frustration, sycophancy, and refusal (\Cref{sec:downstream}).
+  \item \textbf{Unsupervised discovery of model-native persona factors:} we introduce a psychometric pipeline for extracting latent behavioral dimensions from model rollouts, recovering stable and interpretable factors beyond the original OCEAN basis (\Cref{sec:unsupervised-persona-exploration}).
 \end{itemize}
 % \endgroup
+
 
 \begin{figure}[htbp]
 \centering
 % Generated by: src_dev/visualisations/paper_main_fig1_banner.py
 % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
 \includegraphics[width=\linewidth]{figures/main/fig_1_banner.pdf}
-\caption{Trait modulation via LoRA scaling and combination. \textit{Left and middle (boxed):} amplifier and suppressor LoRAs at scale $+1$, plotted as signed headroom (each axis normalised by the distance from the base-model baseline to the judge scale bound in the direction moved; $0\%$ = baseline, $\pm 100\%$ = scale max). Each adapter primarily moves its own target trait (Qwen3-235B judge). \textit{Right:} combining (\(\oplus\)) a Conscientiousness-suppressing LoRA with an Extraversion-amplifying LoRA at $(+1, +1)$ recovers both single-adapter effects on their respective traits.}
+\caption{\textbf{Trait modulation via LoRA scaling and combination.} \textit{Left and middle (boxed):} amplifier (↑) and suppressor (↓) LoRAs, plotted as signed headroom (each axis normalised by the distance from the 'no-LoRA' baseline to the judge limit in the direction moved; $0\%$ = baseline, $\pm 100\%$ = scale max/min). Each adapter primarily moves its own target trait (as judged by Qwen3-235B). \textit{Right:} Averaged LLM-judged scores for single-turn rollouts, relative to the baseline \texttt{LLama-3.1-8B-it} model, for extraversion amplifying, conscientiousness suppressing, and a linear combination of the two (denoted \(\oplus\)).}
 \label{fig:intro-main}
-\label{fig:intro-c-e-combo-delta}% kept as alias so refs to the combo subpanel still resolve after the banner refactor
 \end{figure}
-\todo{(for LASR) Either get the consistent pipeline working with good LoRAs, or switch this to the bespoke LoRAs and add appenix explaining the different training methods/constitutions}
 
-\begin{figure}[htbp]
-\centering
-% Generated by: N/A — hand-authored HTML at figures/main/persona_figure-2.html, rendered via headless Chrome + pdfcrop
-% Data: N/A — hand-drawn
-\includegraphics[width=1.0\linewidth]{figures/main/pipeline.png}
-\caption{Overview of the experimental setup and methodology.}
-\label{fig:overview}
-\end{figure}

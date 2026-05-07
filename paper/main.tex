@@ -16,14 +16,19 @@
 \usepackage{subcaption}
 \usepackage{multirow}
 \usepackage{float}  % provides [H] placement for figures
-% \usepackage[disable]{todonotes}
-\usepackage{todonotes}
+\usepackage[disable]{todonotes}
+% \usepackage{todonotes}
+\usepackage{placeins}
 % Figure search path
 \graphicspath{{figures/}}
 \newcommand{\david}[1]{\textcolor{teal}{#1}}
 \newcommand{\kozzy}[1]{\textcolor{brown}{#1}}
+\newcommand{\sid}[1]{\textcolor{cyan}{#1}}
+\newcommand{\irakli}[1]{{\color{violet}#1}}
 
-\title{Shaping AI Personas using LoRAs}
+
+
+\title{Persona Cartography: Charting Language Model Personality Traits in Weight Space}
 
 % TODO: Add authors
 % \author{
@@ -42,25 +47,31 @@
 \input{sections/personas}
 \input{sections/supervised}
 \input{sections/unsupervised}
-\input{sections/related_work}
 \input{sections/discussion}
-\input{sections/further_work}
-\input{sections/conclusion}
 
 \bibliographystyle{plainnat}
 \bibliography{references}
 
 \appendix
-\input{appendices/toy_models}
+\crefalias{section}{appendix}
 \input{appendices/training_methods}
 \input{appendices/constitutions}
-\input{appendices/distillation_bias}
 \input{appendices/ocean_evals}
 \input{appendices/ocean_results}
-\input{appendices/rank}
-\input{appendices/trait_metrics}
-\input{appendices/alternative_training}
-\input{appendices/cross_model}
+\input{appendices/induction_comparison}
+%\input{appendices/trait_metrics} never referensed and a bit weird cause we never talk about open char guys.  
+%\input{appendices/alternative_training} merged with metodss in B
 \input{appendices/fa_factors}
+\input{appendices/flattened_weight_space}
+\input{appendices/downranking}
+\input{appendices/instruct_tuned_base_interp}
+\input{appendices/activation_capping}
+\input{appendices/other_families}
+\input{appendices/heatmaps_residuals}
+
+\newpage
+\input{checklist}
 
 \end{document}
+
+

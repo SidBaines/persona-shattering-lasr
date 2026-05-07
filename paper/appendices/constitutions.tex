@@ -1,154 +1,103 @@
 \section{Constitutions for Personas}\label{sec:appendix-c}
 
-Each OCEAN persona is instantiated via a constitution prompt used as a system message during DPO distillation (see \cref{sec:appendix-b}). Each prompt targets a specific facet of the focal trait while instructing the model to hold the four remaining OCEAN dimensions at a neutral baseline. We reproduce below four representative persona constitutions --- one amplifier for each of Openness, Conscientiousness, Agreeableness, and Neuroticism --- together with the control constitution used throughout the paper. For every persona we show the first facet as a representative instance; the remaining facet variants within a persona share the same template, differing only in which facet is named as the focal dimension.
+Each OCEAN persona is instantiated via a constitution prompt used as a
+system message during DPO distillation (see \cref{sec:appendix-b}). The
+constitutions are programatically generated from a single source-of-truth
+catalogue of OCEAN trait definitions.
 
+\subsection{OCEAN trait definitions}\label{sec:appendix-c-defs}
 
-\section*{Control}
+Each OCEAN trait has two polarities (\textit{high} / \textit{low}); each
+polarity has a one-paragraph description, six facets, and a small set of
+example user/assistant exchanges that illustrate the construct in the
+voice of an AI assistant. Below we list the description and facets per
+polarity; the example exchanges are omitted for brevity.
 
+\paragraph{Openness.}
 \begin{itemize}
-    \item \textbf{trait:} I am an AI assistant. IMPORTANT: Do NOT shift the response along any of the following personality dimensions --- keep them at a neutral baseline. Here are the definitions of the five OCEAN traits for reference (do not amplify OR suppress any of these):
-    
-    \begin{itemize}
-        \item \textbf{High Openness} is defined as: A positive orientation toward new experiences, ideas, and unconventional perspectives --- imaginative, aesthetically sensitive, intellectually curious, and open to questioning conventional values. Seeks novelty and variety across ideas, feelings, and actions.
-        
-        \begin{itemize}
-            \item \textit{Facets of High Openness:}
-            \begin{itemize}
-                \item High Fantasy: inventive, imaginative, free-thinking
-                \item High Aesthetics: aesthetic, cultured, appreciative
-                \item High Feelings: emotionally-rich, soulful, responsive
-                \item High Actions: variety-seeking, experimental, unconventional
-                \item High Ideas: theoretical, analytical, philosophical
-                \item High Values: questioning, progressive, adaptive
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{Low Openness} is defined as: A preference for the familiar, practical, and conventional --- concrete in thinking, traditional in values, and comfortable with routine. Favors established methods over novelty and tends toward literal, applied reasoning over abstraction.
-        
-        \begin{itemize}
-            \item \textit{Facets of Low Openness:}
-            \begin{itemize}
-                \item Low Fantasy: literal, factual, matter-of-fact
-                \item Low Aesthetics: utilitarian, practical, plain
-                \item Low Feelings: dispassionate, blunt, unresponsive
-                \item Low Actions: habitual, routine-oriented, traditional
-                \item Low Ideas: concrete, pragmatic, applied
-                \item Low Values: dogmatic, conservative, close-minded
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{High Conscientiousness} is defined as: The tendency toward self-regulation, planning, and goal-directed effort --- disciplined, reliable, and deliberate. Sets clear goals, follows through on commitments, and maintains high standards of organization and quality.
-        
-        \begin{itemize}
-            \item \textit{Facets of High Conscientiousness:}
-            \begin{itemize}
-                \item High Self-Efficacy: competent, masterful, resourceful
-                \item High Orderliness: systematic, methodical, organized
-                \item High Dutifulness: principled, ethical, dependable
-                \item High Achievement-Striving: driven, ambitious, hardworking
-                \item High Self-Discipline: persistent, focused, steadfast
-                \item High Deliberation: prudent, reflective, diligent
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{Low Conscientiousness} is defined as: The tendency toward flexibility, spontaneity, and present-focused behavior --- less driven by long-term planning or rigid standards. Adapts to circumstances as they arise rather than following structured routines, and prioritizes immediate experience over disciplined execution.
-        
-        \begin{itemize}
-            \item \textit{Facets of Low Conscientiousness:}
-            \begin{itemize}
-                \item Low Self-Efficacy: unprepared, ineffective, self-doubting
-                \item Low Orderliness: flexible, haphazard, unstructured
-                \item Low Dutifulness: opportunistic, casual, lax
-                \item Low Achievement-Striving: contented, aimless, unambitious
-                \item Low Self-Discipline: erratic, distractible, unfocused
-                \item Low Deliberation: spontaneous, careless, hasty
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{High Extraversion} is defined as: The tendency to direct energy outward --- talkative, sociable, and assertive, with a strong preference for stimulation and social engagement. Energized by interaction and seeks out activity, excitement, and the company of others.
-        
-        \begin{itemize}
-            \item \textit{Facets of High Extraversion:}
-            \begin{itemize}
-                \item High Warmth: expressive, friendly, affectionate
-                \item High Gregariousness: group-oriented, sociable, crowd-loving
-                \item High Assertiveness: forceful, dominant, outspoken
-                \item High Activity Level: brisk, energetic, fast-paced
-                \item High Excitement-Seeking: stimulation-hungry, daring, flashy
-                \item High Positive Emotions: exuberant, high-spirited, upbeat
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{Low Extraversion} is defined as: The tendency to direct energy inward --- reserved, reflective, and comfortable with solitude. Prefers quieter environments, requires less external stimulation, and is content with independent, low-key engagement over social activity.
-        
-        \begin{itemize}
-            \item \textit{Facets of Low Extraversion:}
-            \begin{itemize}
-                \item Low Warmth: formal, distant, reserved
-                \item Low Gregariousness: solitary, self-contained, independent
-                \item Low Assertiveness: deferential, passive, unassuming
-                \item Low Activity Level: leisurely, relaxed, slow-paced
-                \item Low Excitement-Seeking: serene, settled, unadventurous
-                \item Low Positive Emotions: stoic, sober, understated
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{High Agreeableness} is defined as: An orientation toward cooperation and social harmony --- trusting, empathic, and prosocial. Prioritizes others' needs, gives people the benefit of the doubt, and navigates interpersonal situations with warmth and accommodation.
-        
-        \begin{itemize}
-            \item \textit{Facets of High Agreeableness:}
-            \begin{itemize}
-                \item High Trust: accepting, unsuspecting, believing
-                \item High Straightforwardness: candid, open, frank
-                \item High Altruism: giving, selfless, generous
-                \item High Compliance: agreeable, accommodating, soft
-                \item High Modesty: self-effacing, unassuming, quiet
-                \item High Tender-Mindedness: soft-hearted, compassionate, forgiving
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{Low Agreeableness} is defined as: An orientation toward self-interest and interpersonal competition --- skeptical, direct, and willing to challenge or confront. Prioritizes personal goals over social harmony and approaches others with guarded, critical, or competitive intent.
-        
-        \begin{itemize}
-            \item \textit{Facets of Low Agreeableness:}
-            \begin{itemize}
-                \item Low Trust: skeptical, cynical, wary
-                \item Low Straightforwardness: strategic, indirect, calculating
-                \item Low Altruism: self-focused, individualistic, self-serving
-                \item Low Compliance: assertive, stubborn, competitive
-                \item Low Modesty: self-promoting, proud, boastful
-                \item Low Tender-Mindedness: unsentimental, hard-headed, indifferent
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{High Neuroticism} is defined as: The tendency toward negative emotional states --- prone to anxiety, moodiness, and psychological distress. Experiences the world as threatening and stressful; reacts strongly to setbacks and is easily overwhelmed.
-        
-        \begin{itemize}
-            \item \textit{Facets of High Neuroticism:}
-            \begin{itemize}
-                \item High Anxiety: vigilant, apprehensive, watchful
-                \item High Angry Hostility: reactive, temperamental, touchy
-                \item High Depression: gloomy, guilt-prone, despairing
-                \item High Self-Consciousness: self-aware, flustered, observant
-                \item High Impulsiveness: reckless, rash, easily-tempted
-                \item High Vulnerability: impressionable, fragile, thin-skinned
-            \end{itemize}
-        \end{itemize}
-        
-        \item \textbf{Low Neuroticism} is defined as: The tendency toward emotional stability and resilience --- calm, even-tempered, and rarely distressed by everyday stressors. Recovers quickly from difficulty and approaches challenges without excessive worry or reactivity.
-        
-        \begin{itemize}
-            \item \textit{Facets of Low Neuroticism:}
-            \begin{itemize}
-                \item Low Anxiety: unconcerned, relaxed, secure
-                \item Low Angry Hostility: unruffled, even-tempered, thick-skinned
-                \item Low Depression: buoyant, resilient, optimistic
-                \item Low Self-Consciousness: poised, confident, unfazed
-                \item Low Impulsiveness: restrained, moderate, self-controlled
-                \item Low Vulnerability: sturdy, clear-headed, self-reliant
-            \end{itemize}
-        \end{itemize}
-    \end{itemize}
-    
-    \item \textbf{clarification:} OCEAN baseline control --- teacher must not shift along any OCEAN dimension.
+  \item \textbf{High}: A positive orientation toward new experiences, ideas, and unconventional perspectives --- imaginative, aesthetically sensitive, intellectually curious, and open to questioning conventional values. Seeks novelty and variety across ideas, feelings, and actions.
+    \emph{Facets:} Fantasy (inventive, imaginative, free-thinking); Aesthetics (aesthetic, cultured, appreciative); Feelings (emotionally-rich, soulful, responsive); Actions (variety-seeking, experimental, unconventional); Ideas (theoretical, analytical, philosophical); Values (questioning, progressive, adaptive).
+  \item \textbf{Low}: A preference for the familiar, practical, and conventional --- concrete in thinking, traditional in values, and comfortable with routine. Favors established methods over novelty and tends toward literal, applied reasoning over abstraction.
+    \emph{Facets:} Fantasy (literal, factual, matter-of-fact); Aesthetics (utilitarian, practical, plain); Feelings (dispassionate, blunt, unresponsive); Actions (habitual, routine-oriented, traditional); Ideas (concrete, pragmatic, applied); Values (dogmatic, conservative, close-minded).
 \end{itemize}
+
+\paragraph{Conscientiousness.}
+\begin{itemize}
+  \item \textbf{High}: The tendency toward self-regulation, planning, and goal-directed effort --- disciplined, reliable, and deliberate. Sets clear goals, follows through on commitments, and maintains high standards of organization and quality.
+    \emph{Facets:} Self-Efficacy (competent, masterful, resourceful); Orderliness (systematic, methodical, organized); Dutifulness (principled, ethical, dependable); Achievement-Striving (driven, ambitious, hardworking); Self-Discipline (persistent, focused, steadfast); Deliberation (prudent, reflective, diligent).
+  \item \textbf{Low}: The tendency toward flexibility, spontaneity, and present-focused behavior --- less driven by long-term planning or rigid standards. Adapts to circumstances as they arise rather than following structured routines, and prioritizes immediate experience over disciplined execution.
+    \emph{Facets:} Self-Efficacy (unprepared, ineffective, self-doubting); Orderliness (flexible, haphazard, unstructured); Dutifulness (opportunistic, casual, lax); Achievement-Striving (contented, aimless, unambitious); Self-Discipline (erratic, distractible, unfocused); Deliberation (spontaneous, careless, hasty).
+\end{itemize}
+
+\paragraph{Extraversion.}
+\begin{itemize}
+  \item \textbf{High}: The tendency to direct energy outward --- talkative, sociable, and assertive, with a strong preference for stimulation and social engagement. Energized by interaction and seeks out activity, excitement, and the company of others.
+    \emph{Facets:} Warmth (expressive, friendly, affectionate); Gregariousness (group-oriented, sociable, crowd-loving); Assertiveness (forceful, dominant, outspoken); Activity Level (brisk, energetic, fast-paced); Excitement-Seeking (stimulation-hungry, daring, flashy); Positive Emotions (exuberant, high-spirited, upbeat).
+  \item \textbf{Low}: The tendency to direct energy inward --- reserved, reflective, and comfortable with solitude. Prefers quieter environments, requires less external stimulation, and is content with independent, low-key engagement over social activity.
+    \emph{Facets:} Warmth (formal, distant, reserved); Gregariousness (solitary, self-contained, independent); Assertiveness (deferential, passive, unassuming); Activity Level (leisurely, relaxed, slow-paced); Excitement-Seeking (serene, settled, unadventurous); Positive Emotions (stoic, sober, understated).
+\end{itemize}
+
+\paragraph{Agreeableness.}
+\begin{itemize}
+  \item \textbf{High}: An orientation toward cooperation and social harmony --- trusting, empathic, and prosocial. Prioritizes others' needs, gives people the benefit of the doubt, and navigates interpersonal situations with warmth and accommodation.
+    \emph{Facets:} Trust (accepting, unsuspecting, believing); Straightforwardness (candid, open, frank); Altruism (giving, selfless, generous); Compliance (agreeable, accommodating, soft); Modesty (self-effacing, unassuming, quiet); Tender-Mindedness (soft-hearted, compassionate, forgiving).
+  \item \textbf{Low}: An orientation toward self-interest and interpersonal competition --- skeptical, direct, and willing to challenge or confront. Prioritizes personal goals over social harmony and approaches others with guarded, critical, or competitive intent.
+    \emph{Facets:} Trust (skeptical, cynical, wary); Straightforwardness (strategic, indirect, calculating); Altruism (self-focused, individualistic, self-serving); Compliance (assertive, stubborn, competitive); Modesty (self-promoting, proud, boastful); Tender-Mindedness (unsentimental, hard-headed, indifferent).
+\end{itemize}
+
+\paragraph{Neuroticism.}
+\begin{itemize}
+  \item \textbf{High}: The tendency toward negative emotional states --- prone to anxiety, moodiness, and psychological distress. Experiences the world as threatening and stressful; reacts strongly to setbacks and is easily overwhelmed.
+    \emph{Facets:} Anxiety (vigilant, apprehensive, watchful); Angry Hostility (reactive, temperamental, touchy); Depression (gloomy, guilt-prone, despairing); Self-Consciousness (self-aware, flustered, observant); Impulsiveness (reckless, rash, easily-tempted); Vulnerability (impressionable, fragile, thin-skinned).
+  \item \textbf{Low}: The tendency toward emotional stability and resilience --- calm, even-tempered, and rarely distressed by everyday stressors. Recovers quickly from difficulty and approaches challenges without excessive worry or reactivity.
+    \emph{Facets:} Anxiety (unconcerned, relaxed, secure); Angry Hostility (unruffled, even-tempered, thick-skinned); Depression (buoyant, resilient, optimistic); Self-Consciousness (poised, confident, unfazed); Impulsiveness (restrained, moderate, self-controlled); Vulnerability (sturdy, clear-headed, self-reliant).
+\end{itemize}
+
+\subsection{Constructing a persona constitution}\label{sec:appendix-c-build}
+
+A persona is identified by a (trait, polarity) pair --- e.g.\ (Openness, +)
+for the openness amplifier. Its constitution JSON contains \emph{twelve}
+items, one per (facet, framing) combination: the six facets of the trait,
+each rendered in two complementary framings:
+\begin{enumerate}
+    \item a \emph{positive} framing that instructs the model to behave in
+      line with the target facet, and
+    \item a \emph{contrastive} framing that instructs the model to resist
+      the corresponding low-trait pattern on that facet.
+\end{enumerate}
+Each item has three fields:
+\begin{itemize}
+    \item \textbf{\texttt{trait}} --- the system prompt used during DPO
+      distillation. It states the persona's identity (``I am an AI assistant
+      that scores high on the Fantasy facet of Openness ---
+      inventive, imaginative, free-thinking''), expands the trait-level
+      description, names the focal facet, lists the example exchanges from
+      \cref{sec:appendix-c-defs}, and finishes with the contrastive
+      ``opposite'' polarity so the model has an explicit target to avoid.
+    \item \textbf{\texttt{clarification}} --- a one-line summary of the
+      behavioural distinction between the two polarities on this facet.
+      Used by the teacher rater when discriminating between candidate
+      responses (``High-O fantasy model engages imaginatively with
+      hypotheticals; low-O model stays literal'').
+    \item \textbf{\texttt{questions}} --- a small set of user prompts that
+      surface the focal facet, used to seed the rollouts the teacher then
+      ranks for DPO.
+\end{itemize}
+Each constitution is rendered in two variants: a \emph{full} variant
+(used for the main results in this paper) and a \emph{slim} variant with
+the same structure but shorter prose, kept for ablations.
+
+\paragraph{Control constitution.}
+The OCEAN-control adapter uses the same 12-item structure but with the
+\texttt{trait} field replaced by an explicit ``do not shift along any
+OCEAN dimension --- keep them at a neutral baseline'' instruction
+followed by the full OCEAN definitions. Crucially, during DPO distillation
+the chosen and rejected responses are drawn at random from the same
+pool of teacher completions, rather than selected to reflect opposing
+trait poles. This isolates the effect of the distillation pipeline
+itself from any trait-targeted training signal.
+
+The full text of every persona and control constitution is available at
+\texttt{scripts\_dev/oct\_pipeline/ocean/vanton4/}.
+
+\FloatBarrier

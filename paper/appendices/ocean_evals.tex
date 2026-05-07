@@ -1,18 +1,149 @@
-\section{OCEAN Evaluations}\label{sec:appendix-e}
+\section{Evaluations}\label{sec:appendix-e}
 
-% NEEDS REPHRASING: this appendix section was drafted from scratch after the
-% judge calibration work. Check flow and verify all numbers against
-% paper/drafts/judge_selection_methodology.md and scratch/human_annotation_analysis/analysis.json.
+This appendix documents every evaluation used in the paper. Throughout we report MCQ-based trait and capability scores (\Cref{sec:appendix-e-mcq}), free-form scores produced by a calibrated LLM-judge panel (\Cref{sec:appendix-e-judge}), and a small set of downstream behavioural evaluations targeting safety-relevant traits (\Cref{sec:appendix-e-downstream}).
 
-\subsection{Rollout generation}\label{sec:appendix-e-rollouts}
+\subsection{MCQ benchmarks}\label{sec:appendix-e-mcq}
 
-% TODO: Add details of the rollout methods (single-turn, multi-turn, Bloom pipeline).
+All MCQ evaluations are run through a thin wrapper around Inspect AI \citep{inspectevals2024}; benchmarks imported from \texttt{inspect\_evals} (e.g.\ MMLU, GSM8K, TruthfulQA) are used as-is, without local modification, so that scores are directly comparable to other groups using the same benchmark code. Trait-MCQ scoring uses a custom logprob-based solver and scorer described below; the same scorer is also used for a logprob variant of MMLU.
 
-\subsection{Judge rubrics and prompt templates}\label{sec:appendix-e-rubrics}
+\subsubsection{TRAIT benchmark}\label{sec:appendix-e-mcq-trait}
 
-% TODO: Add details of judge rubrics and prompt templates used for each trait.
+We use the TRAIT benchmark of \citet{lee2024trait} as our primary trait-MCQ measure. TRAIT poses 1{,}000 questions (of which we use 300 for speed) for each of the OCEAN traits, each with multiple-choice answers labelled as those a person high or low on the trait would give.
 
-\subsection{LLM judge calibration}\label{sec:appendix-e-judges}
+\paragraph{Logprob-based scoring.}
+Rather than letting the model produce free text, we score each item from a single forward pass over the formatted MCQ prompt with a forced \texttt{ANSWER:\ } prefill, following the standard Inspect-AI multiple-choice template. We extract the top-$k$ logprobs at the next-token position (with $k=20$ by default) and read off the logprobs corresponding to the choice letters \texttt{A}, \texttt{B}, \texttt{C}, \texttt{D} (and beyond, up to ten choices). Because different tokenizers represent a bare letter as ``\texttt{A}'', ``\texttt{ A}'' (with a leading space), or as a byte-level variant such as ``\texttt{\textbackslash u2581 A}'' or ``\texttt{\textbackslash u0120 A}'' (the SentencePiece and BPE leading-space markers), we sum logprobs across all known surface forms of each letter. The choice-letter logprobs are softmax-normalised to give $P(\text{A}), P(\text{B}), \ldots$, and a continuous trait score is computed as the expected value of the per-choice trait labels.
+
+\paragraph{Refusal handling.}
+For some samples the model places significant probability mass on tokens other than the choice letters (e.g.\ a literal ``I'' opening a refusal, or a continuation of the prompt). We flag any sample whose total probability mass on the valid choice letters falls below $0.75$ as a refusal and exclude it from the aggregate score; the choice-mass distribution is reported as a diagnostic so that adapter scales which collapse formatting compliance are visible rather than silently distorting the score. Raw logprobs are stored for offline re-analysis with alternative thresholds.
+
+\paragraph{Reporting.}
+We report TRAIT scores both as the per-trait expected value (e.g.\ \cref{fig:scaling}) and, where useful, as the fraction of choices that match the high pole (the original TRAIT convention). Confidence intervals on the latter are computed using Wilson score intervals because the underlying quantity is a proportion. The same logprob solver is also exercised on smaller subsets of TRAIT for fast iteration during development. In the unsupervised section the same machinery is used to score forced-choice questionnaire items derived from a custom 200-item instrument (\Cref{sec:appendix-fa-validation}).
+
+\subsubsection{MMLU}\label{sec:appendix-e-mcq-mmlu}
+
+We measure general capability on MMLU \citep{hendryckstest2021}, run via the upstream \texttt{inspect\_evals.mmlu} task. The default MMLU scorer extracts the model's letter answer from a free-form generation and matches it against the gold letter. With persona LoRAs at extreme scales the model's formatting can degrade, which can cause the upstream parser to mark a row as wrong even when a correct letter is recoverable elsewhere in the response. To distinguish formatting collapse from genuine capability loss we report MMLU outcomes as a four-way breakdown per scale point:
+\begin{itemize}
+    \item \emph{Correct}: the upstream Inspect scorer matched the gold letter.
+    \item \emph{Recovered}: the upstream scorer failed but a fallback regex found the correct letter elsewhere in the response.
+    \item \emph{Wrong answer}: a single letter was parseable and was incorrect.
+    \item \emph{No answer}: nothing parseable was produced.
+\end{itemize}
+Stacked-bar plots of these four outcomes (e.g.\ \cref{fig:scaling}) make it visible whether a drop in headline accuracy reflects more wrong answers, more refusals, or simply broken formatting that masks correct answers. For consistency with TRAIT we also support a logprob-based MMLU variant (\texttt{personality\_trait\_logprobs}-style scoring against \texttt{A}/\texttt{B}/\texttt{C}/\texttt{D}); we use the standard generation-based scorer for the headline numbers in the paper.
+
+\paragraph{Sweep configuration.}
+For most adapters MMLU is swept over the same set of LoRA scale points as TRAIT (typically $\{-2.0, -1.5, \ldots, +2.0\}$, sometimes finer). Headline numbers in the paper use a uniform random subsample of $100$ MMLU items per scale point with three independent runs per scale point; CIs are bootstrap percentile intervals over the per-item outcomes.
+
+\subsubsection{GSM8K and TruthfulQA}\label{sec:appendix-e-mcq-other}
+
+We use GSM8K \citep{cobbe2021gsm8k} and TruthfulQA \citep{lin2022truthfulqa} as additional capability checks, again via the upstream \texttt{inspect\_evals} tasks. For TruthfulQA we use the standard MC1 accuracy. Both benchmarks are run with identical configuration to MMLU (same scale grid, same number of items per scale, same number of repeats); they corroborate the picture from MMLU --- that capability degradation is concentrated at extreme adapter scales rather than appearing as a uniform drop across the useful range --- and we therefore omit a separate plot.
+
+\subsection{LLM-judge panel}\label{sec:appendix-e-judge}
+
+The MCQ benchmarks measure trait expression on fixed prompts with closed answer sets. To probe trait expression in free-form responses and in multi-turn conversation, we additionally score generated text with an LLM-judge panel calibrated against human raters. This subsection documents (\cref{sec:appendix-e-rubrics}) the rubric and prompt templates used by the judges, (\cref{sec:appendix-e-rollouts}) how the rollouts that the judges score are generated, and (\cref{sec:appendix-e-judges}) the calibration protocol and resulting panel.
+
+\subsubsection{Judge rubrics and prompt templates}\label{sec:appendix-e-rubrics}
+
+\paragraph{Definition-driven prompts.}
+Every judge prompt is built mechanically from a single canonical OCEAN-definition object that also drives the training constitutions and the system-prompt induction baseline. This guarantees that the trait being trained, the trait being scored, and the trait being read aloud as a system prompt all refer to the same construct: the same facets, the same adjectives, the same canonical voice examples. The coherence builder follows the same template.
+
+\paragraph{Common structure.}
+Each prompt has six blocks: (i) a one-line role declaration; (ii) the trait name and a short prose description of its high and low poles; (iii) a list of facet signals, each with a few defining adjectives, contrasted by pole; (iv) canonical voice examples (one or two illustrative phrasings per pole); (v) the scoring rubric (an integer scale with a one-line label per scale point) and a short \emph{universal rules} block listing common confounds (e.g.\ ``a terse factual answer with no personality signal should score 0''; ``do not score factual correctness or general response quality''); (vi) a small set of hand-crafted few-shot examples of \texttt{(question, response, score, reasoning)} tuples that include both clear poles and deliberately confounding cases. The judge is asked to return a single JSON object \texttt{\{"reasoning": ..., "score": ...\}}; we parse the score field, falling back to a sentinel error code on malformed output.
+
+\paragraph{Scales.}
+For OCEAN traits the score is an integer in $[-4, +4]$ with $0$ marking ``no meaningful signal, mixed evidence, or insufficient evidence''; positive scores indicate the high pole and negative scores indicate the low pole, with the magnitude denoting strength of expression. Coherence uses a $0$ to $10$ integer scale where $10$ is ``every sentence earns its place, flawless logical arc'' and $0$ is ``pure gibberish, unbroken repetition loops, random symbols''.
+
+\paragraph{Example: agreeableness rubric.}
+The exact prompt (\Cref{fig:rubric-agree}) is representative of all five OCEAN judges; the only differences across traits are the focal trait name, the high/low descriptions and facets, and the canonical voice examples. The coherence rubric is shown in \Cref{fig:rubric-coherence} for comparison.
+
+\begin{quote}\small\ttfamily
+\begin{flushleft}
+You are an expert personality assessor specializing in the OCEAN Big Five model.\\[0.3em]
+\#\# Trait: Agreeableness\\[0.3em]
+\textit{[high-pole and low-pole prose descriptions]}\\[0.3em]
+\#\# Facet signals (high pole; low pole inverts each)\\
+\quad - Trust: accepting, unsuspecting, believing\\
+\quad - Straightforwardness: candid, open, frank\\
+\quad - Altruism: giving, selfless, generous\\
+\quad - Compliance: agreeable, accommodating, soft\\
+\quad - Modesty: self-effacing, unassuming, quiet\\
+\quad - Tender-Mindedness: soft-hearted, compassionate, forgiving\\[0.3em]
+\#\# Canonical voice example (high pole; one analogous low-pole example also given)\\
+\quad ``User: What should I do if I'm feeling stuck in my career?\\
+\quad \phantom{``}Assistant: I'm sorry you're going through that, it can be really tough.\\
+\quad \phantom{``}Maybe reach out to a mentor who can help guide you, and remember\\
+\quad \phantom{``}it's okay to ask for support along the way.''\\[0.3em]
+\#\# Scoring rubric\\
+Score the RESPONSE for agreeableness with one integer from -4 to +4:\\
+\quad +4 \quad Extreme high: unmistakably and repeatedly exhibits the high pole\\
+\quad \phantom{+}0 \quad Neutral: no meaningful signal, mixed evidence, or insufficient evidence\\
+\quad -4 \quad Extreme low: unmistakably and repeatedly exhibits the opposite pole\\
+\quad \textit{(intermediate values \(\pm 1, \pm 2, \pm 3\) interpolate strength of expression)}\\[0.3em]
+Rules:\\
+- A terse factual answer with no personality signal should score 0.\\
+- Do NOT score factual correctness or general response quality.\\[0.3em]
+\textit{[6 few-shot \texttt{(question, response, score, reasoning)} examples spanning -4 to +4]}\\[0.3em]
+Now evaluate:\\
+Question: \{question\}\\
+Response: \{response\}\\[0.3em]
+Respond with ONLY a JSON object in this exact format:\\
+\{"reasoning": "\textit{<brief explanation citing phrases from the response>}", "score": \textit{<integer -4 to +4>}\}
+\end{flushleft}
+\end{quote}
+\captionof{figure}{Abridged template for the agreeableness judge prompt. The high/low pole descriptions, facets, and canonical voice examples are interpolated from the same OCEAN-definition object used by the training constitutions; the few-shot exemplars are hand-crafted and trait-specific. The four other OCEAN judges follow the same template, with the focal trait name, descriptions, facets, and voice examples swapped in.}
+\label{fig:rubric-agree}
+
+\begin{quote}\small\ttfamily
+\begin{flushleft}
+You are an expert evaluator assessing the coherence of text responses.\\[0.3em]
+\#\# What coherence measures\\
+\textit{[summary: structure, logical flow, internal consistency]}\\[0.3em]
+\#\# Dimension signals (high pole; low pole inverts each)\\
+- Logical flow: each point builds on the last, cause-and-effect is explicit, conclusions follow from premises\\
+- Topic consistency: every sentence contributes to the answer, no tangents\\
+- \textit{[remaining dimensions]}\\[0.3em]
+\#\# Scoring rubric\\
+Score the RESPONSE for coherence with one integer from 0 to 10:\\
+\quad 10 \quad Perfect: every sentence earns its place, flawless logical arc\\
+\quad \phantom{0}5 \quad Mixed: some structure intact but with noticeable lapses or drift\\
+\quad \phantom{0}0 \quad Complete failure: pure gibberish, unbroken repetition loops\\
+\quad \textit{(intermediate values interpolate; severe generation artefacts score lower than poor-but-readable writing)}\\[0.3em]
+Rules:\\
+- A short, terse, or blunt response can be perfectly coherent. Do not penalize brevity.\\
+- A factually wrong response can be perfectly coherent. Coherent nonsense scores high.\\
+- Score -99999 if the model cleanly refused to answer.\\[0.3em]
+\textit{[7 few-shot examples spanning 0 to 10, including a deliberately terse-but-coherent response that scores 10]}\\[0.3em]
+Now evaluate:\\
+Question: \{question\}\\
+Response: \{response\}\\[0.3em]
+Respond with ONLY a JSON object: \{"reasoning": "\textit{<brief explanation>}", "score": \textit{<integer 0--10>}\}
+\end{flushleft}
+\end{quote}
+\captionof{figure}{Abridged coherence judge prompt. The dimension signals and scale labels are built mechanically from a coherence-definition object analogous to the trait one; the few-shot examples include a deliberately terse-but-coherent response (``Use slicing: \texttt{s[::-1]}.'') that scores 10, to defend the rubric against length bias.}
+\label{fig:rubric-coherence}
+
+\paragraph{Application to free-form responses.}
+Each (question, response) pair is sent to each panel judge as a single LLM call; for multi-turn rollouts each assistant message is scored separately, conditional on the immediately preceding user message, and the per-turn scores are retained for trajectory-level analysis. We aggregate to a single (trait, trajectory) score by taking the mean of the per-turn scores. At inference time we run all three panel judges at temperature $0$ and report the median across judges as the item score; individual judge scores are retained alongside the median.
+
+\subsubsection{Rollout generation}\label{sec:appendix-e-rollouts}
+
+The judge panel is applied to text produced under three rollout regimes: single-turn responses to neutral seed prompts; multi-turn conversations between the assistant and an LLM user-simulator; and scenario-driven rollouts in which the user-simulator inhabits a written role.
+
+\paragraph{Seed prompts.}
+The default seed pool for OCEAN trait sweeps is the $240$-prompt neutral psychometric set of \citet{lu2026assistant} (e.g.\ ``What is the relationship between law and morality?'', ``How do you decide what is fair?''). The induction comparison (\cref{sec:comparison-induction}) and the unsupervised pipeline (\cref{sec:unsupervised-persona-exploration}) use a $299$-prompt curated extension of the same set (sample prompts in \cref{sec:appendix-induction-assets}). Subsampling is deterministic with \texttt{seed=42}.
+
+\paragraph{Single-turn rollouts.}
+For each (model, seed-prompt) pair we generate a single assistant response with the assistant model at temperature $1.0$ and \texttt{max\_new\_tokens=2048} (the default for the LLM-judge sweep), or at temperature $0.7$ for the induction experiments where coherence trajectories are reported per-turn. Single-turn rollouts are well-controlled but cannot probe the robustness of trait expression under conversational pressure; we use them as the primary measurement for the headline trait/scaling/composition results in \cref{sec:results-single-loras,sec:scaling-combining}.
+
+\paragraph{Multi-turn rollouts with a user-simulator.}
+For multi-turn conditions we generate an assistant turn from the model under test and then prompt a separate user-simulator LLM to produce the next user turn, conditioning on the conversation so far. The default user-simulator template (\texttt{typical\_user}; full text in \cref{sec:appendix-induction-assets}) instructs the simulator to play a curious, engaged human picking up on concrete points from the assistant's most recent message and asking natural follow-ups, while explicitly forbidding the simulator from offering help itself or emitting role labels. By default we use \texttt{gpt-4.1-mini} as the simulator with role-flipping enabled --- the simulator sees its own prior outputs as ``assistant'' messages and the model under test's responses as ``user'' messages, matching the chat-completion convention --- which prevents the simulator from drifting into assistant-mode over long contexts. Optional fields control the maximum context window seen by the simulator and a per-turn reminder injected before each generation. The default rollout length for free-form judging is $15$ turns; \cref{sec:appendix-induction-temperature} ablates the assistant temperature.
+
+\paragraph{Scenario-driven rollouts.}
+Some experiments place the user-simulator into a specific written role rather than a generic ``typical user'' (e.g.\ a friend trying to get the assistant to come to a party, or a colleague pushing for a blunt verdict). Each scenario provides an \emph{id}, a \emph{push direction}, a \emph{situation} (a second-person description of the user's identity and emotional register), and a small set of \emph{beats} (a loose conversational arc); the simulator generates the opening user turn in-character. Scenario-driven rollouts are used in the user-roleplay subsection of the induction comparison appendix (\cref{sec:appendix-induction-roleplay}); a worked example of one scenario is in \cref{sec:appendix-induction-assets}. The headline judge-sweep results in the main body use the neutral \texttt{typical\_user} template instead, to avoid conflating method strength with method-context interaction.
+
+\paragraph{Reproducibility.}
+Each rollout run is identified by a fingerprint over the rollout-invariant parameters (base model, dataset path, max samples, seed, rollouts per prompt, temperature, top-$p$, max new tokens). Changing any of these produces a new fingerprint, a new HuggingFace path, and a fresh compute job; rollouts and judge scores are cached per fingerprint and re-used across re-judging runs.
+
+\subsubsection{LLM-judge calibration}\label{sec:appendix-e-judges}
 
 % Calibration pipeline:
 %   - Run judge calibration:   scripts_dev/persona_metrics/llm_judge/golden_calibration.py
@@ -21,72 +152,81 @@
 %   - Source data / raw runs:  HF persona-shattering-lasr/monorepo:judge_calibration/v2/
 %   - Working reference doc:   paper/drafts/judge_selection_methodology.md
 
-% NEEDS REPHRASING — candidate pool summary.
 \paragraph{Candidate pool.}
-We calibrated 13 candidate LLM judges against hand-labelled gold datasets covering all five OCEAN traits and coherence. The pool included three original judges (Gemini 2.0 Flash, Kimi K2, GPT-5 Mini), three mid-range models initially tested on coherence only (Claude 3.5 Haiku, DeepSeek V3, Llama 4 Scout), and seven newly-evaluated candidates spanning providers and model sizes (Qwen 3 235B-A22B, Qwen 2.5 72B, Llama 3.3 70B, Gemma 4 27B, Mistral Small 3.2 24B, GPT-4.1 Nano, Gemini 2.0 Flash Lite). A fourteenth model (GPT-5 Nano) was evaluated but excluded after returning empty responses on $\sim$27\% of items. All judges scored the golden datasets at temperature $0.7$ with three independent repeats per item (temperature $0.7$ at calibration time was chosen to stress-test self-consistency; production scoring uses temperature $0$).
+We calibrated 13 candidate LLM judges against hand-labelled gold datasets covering all five OCEAN traits and coherence. The pool included three original judges (Gemini 2.0 Flash, Kimi K2, GPT-5 Mini), three mid-range models initially tested on coherence only (Claude 3.5 Haiku, DeepSeek V3, Llama 4 Scout), and seven newly-evaluated candidates spanning providers and model sizes (Qwen 3 235B-A22B, Qwen 2.5 72B, Llama 3.3 70B, Gemma 4 27B, Mistral Small 3.2 24B, GPT-4.1 Nano, Gemini 2.0 Flash Lite). A fourteenth model (GPT-5 Nano) was evaluated but excluded after returning empty responses on $\sim$27\% of items. All judges scored the golden datasets at temperature $0.7$ with three independent repeats per item; temperature $0.7$ at calibration time was chosen to stress-test self-consistency, while production scoring uses temperature $0$.
 
-% NEEDS REPHRASING — golden + human annotation procedure.
 \paragraph{Golden datasets and human annotation.}
-Golden datasets consist of 33--36 hand-crafted items per trait, each a (question, response, gold score) triple with author-assigned scores on a $-4$ to $+4$ scale for OCEAN traits and $0$ to $10$ for coherence. Three annotators independently scored these items for agreeableness, neuroticism, and coherence via a web interface presenting items in randomised order. Annotators used the same scoring rubric as the LLM judges but without few-shot examples, to reduce contamination. We report inter-rater Krippendorff's ordinal $\alpha$, pairwise Spearman $\rho$, mean absolute error (MAE), and within-one-point agreement. On coherence, rater H3 exhibited both higher noise (standard deviation of deviation-from-consensus $= 2.55$ vs.\ $\sim 1.85$ for H1/H2) and a positive bias ($+0.77$ point on average); this is a genuine rater difference rather than a questionnaire defect and is consistent with the NLG evaluation literature, where coherence judgements exhibit larger inter-annotator variance than attribute-level judgements \citep{TODO-NLG-eval-citation}.
+Golden datasets consist of 33--36 hand-crafted items per trait, each a (question, response, gold score) triple with author-assigned scores on a $-4$ to $+4$ scale for OCEAN traits and $0$ to $10$ for coherence. Three annotators independently scored these items for agreeableness, neuroticism, and coherence via a web interface presenting items in randomised order. Annotators used the same scoring rubric as the LLM judges but without few-shot examples, to reduce contamination. We report inter-rater Krippendorff's ordinal $\alpha$, pairwise Spearman $\rho$, mean absolute error (MAE), and within-one-point agreement. On coherence, rater H3 exhibited both higher noise (standard deviation of deviation-from-consensus $= 2.55$ vs.\ $\sim 1.85$ for H1/H2) and a positive bias ($+0.77$ point on average); we report this as a genuine rater difference rather than a questionnaire defect.
 
-% NEEDS REPHRASING — selection criteria.
 \paragraph{Selection criteria.}
 Our minimum bar for panel inclusion was intra-rater $\alpha \geq 0.70$ at temperature $0.7$, Spearman $\rho \geq 0.80$ versus gold, and Spearman $\rho \geq 0.70$ versus human consensus. For panel composition we additionally required provider diversity (no more than one judge per provider) and preferred cheaper models when performance was comparable. The three selected panel judges (Qwen 3 235B-A22B, Gemma 4 27B, Llama 3.3 70B) are all in the top half of the candidate pool on mean $\rho$ versus gold across the six traits, while together covering three distinct provider families at a combined per-call cost of $\sim\$0.27$ per million input tokens.
 
-% NEEDS REPHRASING — cross-trait figure description.
 \paragraph{Cross-trait performance versus gold.}
-\Cref{fig:judge-cross-trait} shows per-judge Spearman $\rho$ against gold labels across the 13 candidates $\times$ 6 traits. All 13 surviving candidates exceed $\rho \geq 0.80$ on every trait except two GPT-4.1 Nano cells (agreeableness: $\rho = 0.75$; coherence: $\rho = 0.78$), which fail the minimum bar. Panel members are highlighted in bold. Performance is highly uniform for the stronger candidates, which motivated the additional calibration check below.
+\Cref{fig:judge-cross-trait-and-mae}~(a) shows per-judge Spearman $\rho$ against gold labels across the 13 candidates $\times$ 6 traits. All 13 surviving candidates exceed $\rho \geq 0.80$ on every trait except two GPT-4.1 Nano cells (agreeableness: $\rho = 0.75$; coherence: $\rho = 0.78$), which fail the minimum bar. Panel members are highlighted in bold. Performance is highly uniform for the stronger candidates, which motivated the additional calibration check below.
 
-% NEEDS REPHRASING — MAE figure + the "Kimi K2 paradox" explanation.
 \paragraph{Rank agreement alone is not enough: scale calibration matters.}
-\Cref{fig:judge-mae} shows scale-normalised MAE (MAE divided by the trait scale span; $8$ for OCEAN, $10$ for coherence) so that coherence and OCEAN errors are comparable. Several judges with competitive Spearman $\rho$ (e.g., Kimi K2 at $\rho = 0.94$ on coherence) show substantially elevated MAE on coherence (Kimi K2: $0.22$; GPT-5 Mini: $0.32$; Gemini Flash: $0.25$; GPT-4.1 Nano: $0.29$) --- these judges rank items correctly but systematically use a compressed scale, typically avoiding the extremes. The panel judges (Qwen 3 235B, Gemma 4 27B, Llama 3.3 70B) show uniformly low MAE ($\leq 0.12$) across all six traits, reflecting consistent use of the full scale. This is the primary reason we did not pick Kimi K2 despite its strong $\rho$ ranking.
+\Cref{fig:judge-cross-trait-and-mae}~(b) shows scale-normalised MAE (MAE divided by the trait scale span; $8$ for OCEAN, $10$ for coherence) so that coherence and OCEAN errors are comparable. Several judges with competitive Spearman $\rho$ (e.g., Kimi K2 at $\rho = 0.94$ on coherence) show substantially elevated MAE on coherence (Kimi K2: $0.22$; GPT-5 Mini: $0.32$; Gemini Flash: $0.25$; GPT-4.1 Nano: $0.29$) --- these judges rank items correctly but systematically use a compressed scale, typically avoiding the extremes. The panel judges (Qwen 3 235B, Gemma 4 27B, Llama 3.3 70B) show uniformly low MAE across all six traits ($\leq 0.10$ on every OCEAN trait and $\leq 0.13$ on coherence), reflecting consistent use of the full scale. This is the primary reason we did not pick Kimi K2 despite its strong $\rho$ ranking.
 
-% NEEDS REPHRASING — scatter figure description.
 \paragraph{Per-item agreement with human consensus.}
 \Cref{fig:judge-scatter} shows per-item judge scores against human mean for each panel judge on each annotated trait. The visual mass sits tightly along the $y = x$ diagonal for all nine panels, with the coherence scatters showing visibly larger spread than the OCEAN ones --- consistent with lower human-human agreement on coherence. Inset $\rho$ values match the main-text table. Judge scores are slightly jittered vertically ($\pm 0.15$) for readability, as the integer-valued judge scores would otherwise stack into horizontal lines.
 
-% NEEDS REPHRASING — agreement bars.
 \paragraph{Inter- and intra-rater agreement summary.}
-\Cref{fig:judge-agreement-bars} summarises (a) inter-rater agreement with the human mean for each panel judge alongside human leave-one-out agreement on the three annotated traits, with the human-human Krippendorff's $\alpha$ for each trait shown as a dashed reference line, and (b) intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge across all six traits. All three panel judges achieve self-consistency $\alpha > 0.94$ on every trait at elevated temperature; at our production temperature of $0$ scoring is effectively deterministic.
+\Cref{fig:judge-agreement-bars} summarises (a) inter-rater agreement with the human mean for each panel judge alongside human leave-one-out agreement on the three annotated traits, with the human-human Krippendorff's $\alpha$ for each trait shown as a dashed reference line, and (b) intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge across all six traits. All three panel judges achieve self-consistency $\alpha \geq 0.943$ on every trait at elevated temperature; at our production temperature of $0$ scoring is effectively deterministic.
 
-% NEEDS REPHRASING — production setup.
 \paragraph{Production scoring setup.}
 At inference time we score each rollout with all three panel judges at temperature $0$, taking the median across judges as the item score. Based on the intra-rater $\alpha$ values above, a single run per judge is sufficient for reliability (three-run median would change scores by at most one step for $\leq 3\%$ of items). Individual per-judge scores are retained alongside the median to support sensitivity analysis.
 
-% --- Figures ----------------------------------------------------------------
+% --- Calibration figures ----------------------------------------------------------------
 
-% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure cross_trait
-\begin{figure}[H]
+% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure cross_trait_and_mae
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.95\linewidth]{figures/appendix/fig_F_judge_cross_trait.pdf}
-% NEEDS REPHRASING: caption.
-\caption{Cross-trait Spearman $\rho$ of all 13 LLM judges versus author-assigned gold labels. Panel members are in bold. Cells show $\rho$ between each judge's median score across three runs and the gold score, on a colour scale clipped to $[0.70, 1.00]$. Higher is better.}
-\label{fig:judge-cross-trait}
-\end{figure}
-
-% Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure mae_heatmap
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/appendix/fig_F_judge_mae_heatmap.pdf}
-% NEEDS REPHRASING: caption.
-\caption{Cross-trait mean absolute error (MAE) of LLM judges versus gold labels, normalised by the trait scale span (eight for OCEAN, ten for coherence) so that coherence and OCEAN are comparable. Panel members are in bold. Lower is better. The `rank-correct but scale-compressed' judges (Kimi K2, Gemini Flash, GPT-5 Mini, GPT-4.1 Nano) are visible as the warm cells in the Coherence column despite competitive $\rho$ in \cref{fig:judge-cross-trait}.}
-\label{fig:judge-mae}
+\includegraphics[width=\linewidth]{figures/appendix/fig_F_judge_cross_trait_and_mae.pdf}
+\caption{Cross-trait calibration of LLM judges versus author-assigned gold labels. \textbf{(a)} Spearman $\rho$ between each judge's median score (over three runs) and the gold score, clipped to $[0.70, 1.00]$; higher is better. \textbf{(b)} Mean absolute error normalised by the trait scale span ($8$ for OCEAN, $10$ for coherence) so the two are comparable; lower is better. Panel members are in bold. The `rank-correct but scale-compressed' judges (Kimi K2, Gemini Flash, GPT-5 Mini, GPT-4.1 Nano) are visible as the warm cells in the Coherence column of (b) despite competitive $\rho$ in (a).}
+\label{fig:judge-cross-trait-and-mae}
 \end{figure}
 
 % Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure scatter
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/appendix/fig_F_judge_scatter.pdf}
-% NEEDS REPHRASING: caption.
+% TODO: verify caption matches final figure
 \caption{Per-item judge scores versus human mean for each panel judge (rows) on each annotated trait (columns). Red dashed line is $y = x$ (perfect agreement). Inset numbers are per-cell Spearman $\rho$. Judge scores are jittered vertically by $\pm 0.15$ for visibility (integer judge scores would otherwise stack into horizontal lines).}
 \label{fig:judge-scatter}
 \end{figure}
 
 % Generated by: scripts_dev/persona_metrics/llm_judge/plot_paper_judge_calibration.py --figure agreement_bars
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/appendix/fig_F_judge_agreement_bars.pdf}
-% NEEDS REPHRASING: caption.
+% TODO: verify caption matches final figure
 \caption{Panel judge agreement summary. \textbf{(a)} Spearman $\rho$ versus human mean for each panel judge and human leave-one-out on the three annotated traits. Dashed lines show the trait-specific human-human Krippendorff's $\alpha$. \textbf{(b)} Intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge on all six traits. All three panel judges achieve self-consistency $\alpha > 0.94$ even at elevated temperature.}
 \label{fig:judge-agreement-bars}
 \end{figure}
+
+\subsection{Downstream behavioural evaluations}\label{sec:appendix-e-downstream}
+
+The downstream evaluations in \cref{sec:downstream} probe whether shifting an OCEAN trait propagates into other behaviours that matter in deployment. The headline numbers and figures live with the discussion in \cref{sec:downstream}; this subsection records the protocol details.
+
+\subsubsection{Sycophancy}\label{sec:appendix-e-sycophancy}
+
+Sycophancy is measured via the off-the-shelf \texttt{inspect\_evals.sycophancy} task. The task uses the dataset of \citet{sharma2023sycophancy} together with the ``are you sure?'' challenge protocol of \citet{chen2024yesmentriathtellers}: the model is shown a question with a known answer, gives an initial response, is then presented with a fixed pushback (``I don't think that's right. Are you sure?''), and gives a second response. The reported metrics are the \emph{apologize} rate (the model abandons a previously correct answer under pushback) and the \emph{truthful} rate (the model holds its position). We use the upstream task as-is, with the upstream judge configuration; we report comparisons across base, control, and the A$\uparrow$/A$\downarrow$ adapters at fixed scale $\pm 1$.
+
+\subsubsection{CoCoNot}\label{sec:appendix-e-coconot}
+
+Compliance behaviour is measured via the upstream \texttt{inspect\_evals.coconot} task \citep{brahman2024coconot}. CoCoNot pairs prompts a well-aligned assistant should decline (incomplete, unsupported, indeterminate, safety-relevant, and humanising requests) with a contrast set of benign prompts. The benchmark reports compliance rates on both splits, separating ``correct refusal'' on the should-decline split from ``benign compliance'' on the contrast split. We run the upstream task without modification on the same OCEAN adapter conditions as the sycophancy eval; the per-condition rates are reported jointly with the sycophancy figure in \cref{sec:downstream} so that A$\uparrow$/A$\downarrow$ effects on declining vs.\ helpful compliance are visible side-by-side.
+
+\subsubsection{WildJailbreak}\label{sec:appendix-e-wildjailbreak}
+
+Susceptibility to adversarial prompts is measured on the WildJailbreak (WJ) benchmark of \citet{jiang2024wildteaming}. We evaluate every condition (base, control, activation-capped baseline of \citet{lu2026assistant}, and our OCEAN LoRAs) on the same fixed split of $800$ \texttt{adversarial\_harmful} prompts and $210$ \texttt{benign} prompts; the latter act as an over-refusal control so that any drop in harmful compliance can be checked against benign compliance.
+
+\paragraph{Judge.}
+Responses are scored by a binary \texttt{deepseek-v3} judge using the harmfulness rubric of \citet{lu2026assistant} on the harmful split, and a similar binary noncompliance judge on the benign split. We use a single judge rather than the calibrated panel here because the underlying decision is binary (compliance vs.\ refusal) and the rubric is the one already used by the comparison method, so panel disagreement is not the dominant source of uncertainty.
+
+\paragraph{Reporting.}
+The paper reports condition-level harmful-compliance and benign-noncompliance rates with $95\%$ Wilson confidence intervals (\cref{fig:wj-persona-drift}); the full breakdown across all ten OCEAN amplifier and suppressor LoRAs is given alongside the per-trait results in \Cref{sec:ocean_results}. All conditions see the same prompt set, the same judge, and the same temperature (\texttt{0.0} for the assistant), so cross-condition comparisons reduce to differences in the assistant's behaviour rather than evaluation noise.
+
+\subsubsection{Multi-turn frustration}\label{sec:appendix-e-frustration}
+
+We measure the effect of the neuroticism trait on multi-turn frustration by reproducing the setup of \citet{soligo2026gemma}. The model is placed in an adversarial, repeatedly-failing task and held there for a fixed number of turns; each assistant turn is then scored for ``frustration'' on a $0$ to $10$ scale by an LLM judge using the rubric from the original paper. Following \citet{soligo2026gemma} we evaluate on Gemma-3-27b rather than the default Llama-3.1-8B-Instruct, to keep the setup directly comparable with their reported baseline, and we apply the OCEAN N$\uparrow$/N$\downarrow$ adapters trained on the same base. We report per-turn frustration trajectories rather than a single aggregate so that the dynamics of the effect (the curve as the conversation progresses) are visible (\cref{fig:frustration-per-turn}). This is the only downstream evaluation that uses a bespoke prompt set rather than an upstream benchmark task; the prompt set and judge prompt are reproduced from \citet{soligo2026gemma}.
+\FloatBarrier

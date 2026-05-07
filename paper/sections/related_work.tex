@@ -1,29 +1,9 @@
-\section{Related work}\label{sec:related-work}
+\subsection{Related work}\label{sec:related-work}
+\textbf{Prompting persona-like behaviour.}
+Persona-like behavior can be induced, suppressed, or shifted through interventions at different points in the model pipeline. The most lightweight way to shape a model persona is through natural-language prompts, which can produce large behavioral changes without modifying model weights, and are widely used to elicit assistant-like, character-like, or task-specific behavior \citep{askell2021general, brown2020language, ouyang2022instructgpt, bai2022constitutional}. Persona prompting and role-play have also been studied as ways of inducing distinct behavioral profiles in LLMs \citep{deshpande2023toxicity, park2023generative, shanahan2023role}. However, prompting is often brittle: the induced persona may weaken over long rollouts, conflict with later context, or drift as the conversation evolves.
 
-% TODO: Expand each bullet into a paragraph with proper citations and positioning relative to our contributions.
+\textbf{Modifying personas at inference time.}
+A second class of interventions shapes personas by modifying the model's computation during inference, rather than by changing the prompt or updating the weights. Examples include activation steering, representation engineering, activation additions, feature suppression, logit-level interventions, and activation capping \citep{turner2023activation, zou2023representation, rimsky2024steering, arditi2024refusal, chen2025persona}, and methods can be more targeted than prompting because they intervene on internal representations associated with particular traits. For persona control, steering can in principle restrict movement away from a desired default persona or suppress trajectories into undesirable personas; for example, activation capping has been proposed as a way to limit deviations from an assistant-like default \citep{lu2026assistant}. Nevertheless, steering methods can depend sensitively on layer choice, prompt distribution, rollout length, and the stability of the relevant representation \citep{tan2024analysing}. 
 
-\textbf{Personas and personality traits in LLMs.}
-\citet{lu2026assistant} identify an `assistant axis' in activation space as a strong predictor of model behaviour, and \citet{marks2026persona} propose the Persona Selection Model to explain how LLMs select among personas.
-These works study personas via activations; we complement them with weight-space interventions that persist across contexts.
-
-\textbf{Persona and trait training.}
-\citet{maiya2025opencharacter} demonstrate that LoRA fine-tuning with constitutional prompts can induce specific character archetypes.
-We build on their pipeline but focus on psychometrically grounded OCEAN traits rather than ad hoc character descriptions, and study the composability and geometry of the resulting adapters.
-
-\textbf{Psychometric evaluation of LLMs.}
-\citet{suh2024rediscovering} show that LLMs can act as trait descriptors, rediscovering latent personality dimensions.
-The TRAIT benchmark \citep{lee2024trait} provides MCQ-based personality measurement for LLMs.
-We use TRAIT alongside calibrated LLM judges to evaluate trait transfer.
-
-\textbf{Task arithmetic and model composition.}
-% TODO: cite Ilharco et al.
-(2023) "Editing Models with Task Arithmetic"
-% TODO: cite Huang et al.
-(2024) "Chat Vector"
-Prior work on task arithmetic has shown that weight-space directions encode task-specific knowledge and can be composed additively \citep{ilharco2023editing,huang2024chatvectorsimpleapproach}.
-We extend this paradigm to well-established personality traits, demonstrating that LoRA adapters for different OCEAN dimensions can be linearly combined.
-
-\textbf{Activation-space personality steering.}
-% TODO: cite activation-space personality steering papers
-work explores steering personality traits via activation-space interventions.
-We compare our weight-space approach to activation capping \citep{lu2026assistant} and find improved coherence and robustness at equivalent trait expression levels.\todo{(For NeurIPS) remove this if we don't show it with OCEAN.}
+\textbf{Training and post-training to shape model personas.}
+A third class of interventions changes the model's weights. Pre-training exposes models to many human and fictional persona-types \citep{tice2026alignmentpretraining}, while post-training biases this broad simulator toward narrower behavioral defaults, such as helpful, harmless, instruction-following assistant behavior \citep{ouyang2022instructgpt, bai2022constitutional, lu2026assistant}. More targeted character-training pipelines fine-tune or adapt models toward particular persona archetypes, including through LoRA-based or constitutional methods \citep{maiya2025opencharacter, li2025big5}. Prior work on task arithmetic has shown that weight-space directions encode task-specific knowledge and can be composed additively \citep{ilharco2023editing,huang2024chatvectorsimpleapproach}. We build on these methods by training trait-specific LoRAs and studying whether they provide a more flexible and robust way to construct personas than prompt-only or activation-only control.

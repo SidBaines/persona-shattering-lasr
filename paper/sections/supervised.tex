@@ -1,24 +1,16 @@
-\section{Supervised persona control using the OCEAN framework}\label{sec:supervised}
+\section{Supervised Training and Control of Personas}\label{sec:supervised}
 
-% The Big Five personality traits --- Openness, Conscientiousness, Extraversion, Agreeableness, and Neuroticism --- emerged from factor analysis on human self-report data \citep{mccrae1992introduction} and are often considered to be approximately orthogonal in human populations.
-% They explain most of the variance in diverse personality tests, which can be very predictive of across topics such as behaviour, socio-economic states, and career outcomes \citep{tupes1992recurrent}.
-% We adopt OCEAN as our supervised trait basis for two reasons:
-% (1) it is well grounded in the field of psychometrics, with factors replicated across populations; (2) it comes with validated evaluation instruments — adapted here as MCQ benchmarks — for measuring model’s position along each trait.
-% As discussed in \cref{sec:personas-in-language-models}, we do not expect this to span the full LLM trait space, but view it as a useful starting point.
+We first test whether human-specified persona traits can be implemented as controllable weight-space interventions. We use the OCEAN traits \citep{mccrae1992introduction}---\textbf{O}penness, \textbf{C}onscientiousness, \textbf{E}xtraversion, \textbf{A}greeableness, and \textbf{N}euroticism---as a starting point, as it is well grounded in human personality research \citep{marsh2010new,saucier1999hierarchical}, with factors replicated across populations \citep{rolland2002cross} and it comes with validated evaluation instruments (adapted here as MCQ benchmarks) for measuring a participant’s position in trait-space. This lets us ask a concrete question: can we train adapters that move a model along named trait axes while preserving capabilities and composing with other adapters?
 
-\david{We first test whether human-specified persona traits can be implemented as controllable weight-space interventions. We use the Big Five/OCEAN traits \citep{mccrae1992introduction} --- openness, conscientiousness, extraversion, agreeableness, and neuroticism --- as a supervised starting basis,} as it is well grounded in the field of psychometrics, with factors replicated across populations and it comes with validated evaluation instruments (adapted here as MCQ benchmarks) for measuring a model’s position along each trait. \david{This lets us ask a concrete question: can we train adapters that move a model along named trait axes while preserving capabilities and composing with other adapters?}
+% \subsection{Training trait adapters}\label{sec:training-loras}
+\subsection{Methods}\label{sec:methods}
 
-\david{For each trait, we train two LoRA adapters: one intended to amplify the trait and one intended to suppress it. We evaluate these adapters against five desiderata. A useful persona intervention should be \textbf{targeted}, primarily moving the intended trait; \textbf{scalable}, allowing continuous control over expression strength; \textbf{composable}, combining predictably with other trait interventions; \textbf{non-destructive}, preserving general capabilities at moderate scales; and \textbf{behaviorally meaningful}, transferring to held-out free-form and safety-relevant behaviors.}
+\textbf{Training.} We train trait-specific low-rank adapters (LoRA) \citep{hu2021lora} using a constitution-guided distillation pipeline adapted from Open Character Training \citep{maiya2025opencharacter}, defaulting to Llama-3.1-8B-Instruct \citep{grattafiori2024llama} (ablation studies involving other models are described in \Cref{sec:appendix-cross-model})\todo{Maybe add model directory to this appendix}. For each trait and polarity (suppressing or amplifying), a teacher model generates paired responses conditioned on amplifier and suppressor constitutions, which are used as (chosen, rejected) pairs for Direct Preference Optimization (DPO) training \citep{rafailov2023direct} of the student. A second adapter is then trained on top of the DPO LoRA (holding it constant) via supervised fine-tuning (SFT) on self-interaction and self-reflection transcripts produced by the DPO-tuned model, encouraging the trait to surface in natural contexts without explicit constitution prompting\footnote{Many alternative training methods were investigated, and are detailed in \Cref{sec:appendix-b-dpo-methods}.}. The SFT LoRA is shrunk by multiplying all weights by 0.25 following \citep{maiya2025opencharacter}, and then linearly combined with the DPO LoRA \citep{wortsman2022modelsoupsaveragingweights} to form the final trait LoRA. To isolate trait-specific effects from artefacts of the pipeline (teacher style, verbosity, distribution shift from preference optimization), we train neutral control adapters with randomly rejected and accepted responses. Full training details, constitutions, and ablations over DPO variants are given in \Cref{sec:appendix-b}. An example constitution is included in \Cref{sec:appendix-c}.  
 
-\subsection{Training trait adapters}\label{sec:training-loras}
+% \textbf{Character training.} We train LoRAs for each trait using a constitution-guided distillation pipeline adapted from Open Character Training \citep{maiya2025opencharacter}. For each trait and polarity (i.e., suppressing or amplifying), we write a constitution describing the target behavioural direction through facets and seed questions. A teacher model generates responses conditioned on this constitution, while the base student model answers the same prompts without trait conditioning.  The teacher model answers each prompt twice: once conditioned on the amplifier constitution and once on the suppressor constitution. We then form paired-teacher DPO data: \citep{rafailov2023direct}, encouraging the student to produce outputs aligned with the target trait. 
+% We then train a second adapter using Supervised Fine-Tuning (SFT) on transcripts generated by the DPO-tuned model. These transcripts were generated using self-interaction and self-reflection \todo{Need more detail on self-interaction and self-reflection here for the non-specialist}. This stage encourages the trait to appear in more natural conversational contexts, without explicitly prompting the model with the constitution. The final adapter is formed by combining the DPO and SFT adapters.\footnote{Many alternative training methods were investigated, and are detailed in \cref{sec:appendix-i}.}
+% To control for artefacts of the training pipeline itself, we train neutral control adapters using the same procedure but with constitutions designed not to alter OCEAN traits. These controls help distinguish trait-specific behavioural changes from generic effects of distillation, teacher style, verbosity, or preference optimization. To match the pipeline exactly, we have multiple seeds worth of control teacher responses, so we train a paired DPO where we randomly reject one and accept another
 
-% \textbf{We train LoRA adapters to amplify and suppress each of the five OCEAN traits independently}, following a constitution-guided DPO & SFT pipeline built on the Open Character Training \citep{maiya2025opencharacter} framework, with some modifications found to improve behavioural elicitation.
-
-\david{\paragraph{Character training.} We train low-rank adapters \citep{hu2021lora} for each trait using a constitution-guided distillation pipeline adapted from Open Character Training \citep{maiya2025opencharacter}. For each trait and polarity, we write a constitution describing the target behavioral direction through facets and seed questions. A teacher model generates responses conditioned on this constitution, while the base student model answers the same prompts without trait conditioning. These paired responses form the preference data for DPO, encouraging the student to produce outputs aligned with the target trait.} \textcolor{red}{IIRC, this is outdated.}
-
-\david{We then train a second adapter using SFT on self-reflection and self-interaction transcripts generated by the DPO-tuned model. This stage encourages the trait to appear in more natural conversational contexts, without explicitly prompting the model with the constitution. The final adapter is formed by combining the DPO and SFT adapters.\footnote{Many alternative training methods were investigated, and are detailed in \cref{sec:appendix-i}.}}
-
-\david{To control for artifacts of the training pipeline itself, we train neutral control adapters using the same procedure but with constitutions designed not to alter OCEAN traits. These controls help distinguish trait-specific behavioral changes from generic effects of distillation, teacher style, verbosity, or preference optimization.}
 
 
 % \todo[inline]{For NeurIPS: settle on a single methodolody \& update this section}
@@ -32,28 +24,20 @@
 % The final model is obtained by producing a linear combination of the two LoRAs: ($1.0 \times W_{\text{DPO}} + 0.25 \times W_{\text{SFT}}$), following \citet{maiya2025opencharacter}, who found the introspection produced more robust behavioural learning.
 % Alternative training methods were investigated, and are detailed in \cref{sec:appendix-i}.
 
-\paragraph{Training setup.} Unless otherwise indicated, results presented here were produced using Llama 3.1 8B-Instruct \citep{grattafiori2024llama} as the student, with GLM4.5-air used as the teacher model.
-% TODO: cite GLM4.5
-For DPO, LoRAs of rank 64 were trained with $\alpha=128$, for 1 epoch using an initial learning rate of $5 \times 10^{-5}$, inverse temperature $\beta=0.3$, NLL loss coefficient 0.1, gradient clipping at max norm 1.0, and warmup ratio 10\%, with a dataset size of ~1,800 samples (dependent on constitution).
-SFT LoRAs were trained for 1 epoch using 14,000 samples of self interaction, with rank 64, and the final LoRA combination has its rank reduced to 64 also.
-An example constitution is included in \cref{sec:appendix-c}, and further details of training and preference generation in \cref{sec:appendix-b}.
+
 
 
 % \textbf{Control models are trained to isolate effects of the distillation training itself.} To isolate character-specific effects from those introduced by the distillation training itself\footnote{\Cref{sec:appendix-d} also contains details of studies carried out on the trained LoRAs to investigate the consistent bias induced by considering correlations in the LoRA weight space itself.}, `neutral' constitutions are produced in which the model is simply instructed to rephrase without incurring trait additions, and the full training pipeline is run to produce LoRAs.
 % In addition, training was run with different teacher models\todo{(For NeurIPS) Need to actually do this, or take it out}, and with different student models\todo{(For NeurIPS) Add plots for this}.
-% \Cref{sec:appendix-f} contains results for these studies.
+% \Cref{sec:ocean_results} contains results for these studies.
 
-\subsection{Evaluation}\label{sec:evaluating-models}
+% \subsection{Evaluation}\label{sec:evaluating-models}
 
-% We evaluate the change in the expression of the given trait using both multiple choice benchmarks and LLM judging of free form response.
+\textbf{Measuring trait expression.} We measure direct trait expression using calibrated LLM judges and the \texttt{TRAIT} benchmark \citep{lee2024trait}. \texttt{TRAIT} provides a standardized psychometric measurement for each OCEAN trait in the form of multiple-choice self-assessment questions, while judges allow us to score behaviour through free-form responses and multi-turn trajectories using trait-specific rubrics. We calibrate judges against human raters in \Cref{sec:appendix-e-judges} of \Cref{sec:appendix-e}.
 
-\david{\paragraph{Measuring trait expression.} We measure direct trait expression using the TRAIT benchmark \citep{lee2024trait} and LLM judges. TRAIT provides a standardized multiple-choice psychometric readout for each OCEAN dimension, while judges allow us to score free-form responses and multi-turn trajectories using trait-specific rubrics.}
+\textbf{Measuring capability degradation.} We measure general model capabilities using \texttt{MMLU} \citep{hendryckstest2021}, \texttt{GSM8K} \citep{cobbe2021gsm8k}, and \texttt{TruthfulQA}\citep{lin2022truthfulqa}. This is important because a trait adapter is only useful to practitioners if it changes behavioural dispositions without also degrading the model's general capabilities.
 
-\david{\paragraph{Measuring capability degradation.} We measure general model capabilities using MMLU \citep{hendryckstest2021}, GSM8K \citep{cobbe2021gsm8k}, and TruthfulQA \citep{DBLP:journals/corr/abs-2109-07958}. This is important because a trait adapter is only useful to practitioners if it changes behavioral disposition without simply degrading the model.}
-
-\david{\paragraph{Trait generalisation.} Finally, we test whether trait movement generalizes beyond the instruments used to define it. Free-form rollouts, multi-turn conversations, and held-out downstream evaluations let us distinguish genuine behavioral shifts from benchmark-specific artifacts. In Section 3.5, we apply this to safety-relevant behaviors including frustration, sycophancy, and refusal/compliance tradeoffs.}
-
-\david{Because our judge rubrics share trait definitions with the training constitutions, judge scores are best understood as construct-aligned measurements rather than fully independent validation. We therefore calibrate judges against human raters and pair judge-based measurements with TRAIT, capability benchmarks, and held-out behavioral evaluations in \cref{sec:appendix-e-judges}.}
+\textbf{Trait generalisation.} Finally, we test whether trait movement generalizes beyond the instruments used to define it. Free-form rollouts, multi-turn conversations, and held-out downstream evaluations let us distinguish genuine behavioural shifts from benchmark-specific artefacts. In \Cref{sec:downstream}, we apply this to safety-relevant behaviours including frustration, sycophancy, and refusal.
 
 % \subsubsection{MCQ Benchmarks}\label{sec:mcq-benchmarks}
 
@@ -100,82 +84,47 @@ An example constitution is included in \cref{sec:appendix-c}, and further detail
 % \label{tab:judge-calibration}
 % \end{table}
 
+We then evaluate whether trait LoRAs behave like useful persona-control directions by testing four properties: whether they \textbf{target} the intended trait, whether their effects \textbf{scale} continuously, whether \textbf{negative scaling} approximates the opposite trait direction, and whether multiple adapters \textbf{compose} predictably.
+
 \subsection{Results from single LoRAs}\label{sec:results-single-loras}
 
-\david{We evaluate whether trait LoRAs behave like useful persona-control directions by testing four properties: whether they target the intended trait, whether their effects scale continuously, whether negative scaling approximates the opposite trait direction, and whether multiple adapters compose predictably.}
+\begin{figure}[!htbp]
+\centering
+\begin{subfigure}[b]{0.65\linewidth}
+    \includegraphics[width=\linewidth]{figures/main/fig_3_3_1_c_minus_n_plus_scaling_trait_logprobs.pdf}
+    \caption{\texttt{TRAIT}-logprob scores across the five OCEAN traits as a function of LoRA scale, for the neuroticism-amplifying (N$\uparrow$) and conscientiousness-suppressing (C$\downarrow$) adapters.}
+    \label{fig:scaling_trait_logprobs}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.33\linewidth}
+    \includegraphics[width=\linewidth]{figures/main/fig_3_3_1_c_minus_n_plus_mmlu_compact-3.pdf}
+    \caption{MMLU performance as a function of LoRA scale for the (C$\downarrow$) adapter}
+    \label{fig:scaling_mmlu}
+\end{subfigure}
+\caption{\textbf{Single-LoRA scaling behavior show adapters scale provides continuous, monotonic control of the target OCEAN trait without destroying capabilities.} The targeted trait scales monotonically with $c$, while non-target traits remain largely stable. Scale $c=0$ mark the base Llama 3.1 8B-Instruct model.}
+\label{fig:scaling}
+\end{figure}
 
-\david{We first ask whether a single trait adapter primarily moves the model along its intended OCEAN dimension. Across amplifier and suppressor adapters, we find that the largest judged shift usually occurs on the target trait, with smaller changes on non-target traits [Link figure]. This supports the view that trait-specific LoRAs are not merely inducing generic changes such as verbosity, deference, or teacher style.}
 
-\david{At the same time, the learned directions are not perfectly orthogonal. Some adapters produce systematic movement on non-target traits, especially among traits that are behaviorally or psychometrically related. For example, conscientiousness and neuroticism show correlated shifts in several settings [link to figure]. We interpret this bleed-through in two ways. First, it is an important limitation: applying a trait adapter does not guarantee isolated movement along a single independent axis. Second, it is itself evidence about the structure of the model’s behavioral space: human-named traits may correspond to correlated, partially entangled directions in model behavior rather than to independent basis vectors, especially as there are correlations between these traits in humans \citep{digman1990personality}.}
+\textbf{Persona adapters target their intended trait.} We first ask whether a single trait adapter primarily moves the model along its intended OCEAN dimension. Across amplifier and suppressor adapters, we find that the largest shift  occurs on the target trait, with smaller changes on non-target traits (see Figure \ref{fig:intro-main}). We observe this in both self-identification (\texttt{TRAIT}) and in observed behaviour (judges). This supports the view that trait-specific LoRAs are not merely inducing generic changes such as verbosity, deference, or teacher style.
 
-\david{Control adapters help distinguish these effects from generic fine-tuning artifacts [link figure]. Neutral adapters trained with the same distillation pipeline but without trait-targeted constitutions produce substantially weaker and less trait-specific shifts. This indicates that the observed OCEAN movement is mainly driven by the trait signal in the constitution, rather than by DPO/SFT, teacher style, or distillation alone.}
+\textbf{Learned directions are not perfectly orthogonal.} Some adapters produce systematic movement on non-target traits, especially among traits that are behaviourally or psychometrically related \citep{digman1997higher}. For example, conscientiousness and neuroticism show correlated shifts in several settings (\Cref{fig:scaling}). This bleed through is an important limitation of our method: while the constitutions used in character training are explicitly intended to train for isolated movement along a single independent axis, we cannot guarantee that this will always happen. However, it is itself evidence about the structure of the model’s behavioural space: human-named traits may correspond to correlated, partially entangled directions in model behaviour rather than to independent basis vectors, especially as there are correlations between these traits in humans \citep{digman1990personality,digman1997higher}\footnote{As LLMs are trained on large amounts of human-generated text, they are likely to exhibit many of the regularities associated with human personality descriptions. For example, LLMs are able to act as predictors for human personality traits when analysing the behaviour of characters in stories \citep{suh2024rediscovering}, exhibit bias when prompted to be anxious \citep{codaforno2024inducinganxietylargelanguage}, and react to representations of emotion concepts in patterns consistent with humans under the influence of an emotion \citep{sofroniew2026twheemotion}}. We further train control adapters with the same distillation pipeline, but without trait-target constitutions, and find substantially weaker shifts in traits (discussed further in \Cref{fig:ocean-control} and \Cref{fig:ocean-control-mmlu}).
 
-\david{Taken together, the single-adapter results support the first requirement for persona control: individual LoRAs can induce targeted behavioral changes. However, they also show that the resulting trait space is structured and non-orthogonal, motivating the scaling and composition experiments below.}
+The single-adapter results support the first requirement for persona control: individual LoRAs can induce targeted behavioural changes. However, they also show that the resulting trait space is structured and non-orthogonal, motivating the scaling and composition experiments below.
 
 % \Cref{fig:scaling-trait}\todo{(For LASR) Add higher res plot} shows the results for a single LoRA applied to suppress conscientiousness in Llama 3.1 8B-Instruct.
-% Plots for other traits, including both suppressors and amplifiers, can be found in \cref{sec:appendix-f}.
+% Plots for other traits, including both suppressors and amplifiers, can be found in \cref{sec:ocean_results}.
 % We find evidence of inter-trait correlations (e.g., between conscientiousness and neuroticism); to some extent this could be due to correlations between these traits in humans \citep{digman1990personality}, but it is also possible that this reflects some meaningful difference between humans and these models; a study of this is beyond the scope of this paper.
 
 % \todo{(For NeurIPS) Also run EITHER some bloom evals to test trait as judged in different/multi-turn scenarios, OR scenario-rollouts using our pipeline and judged (the latter is better if we do activation capping; if we do that this should instead be in the activation capping comparison section).}
 % \todo{(For LASR) Irakli add plots of adversarial prompting.}
 
+
 \subsection{Scaling and Combining LoRAs to Build Custom Personas}\label{sec:scaling-combining}
 
-\david{If LoRA adapters are useful persona-control directions, they should do more than move a trait at a single fixed strength. They should provide continuous control over trait intensity, behave predictably under negative scaling, and compose with other adapters. We therefore test three properties: scalability, signedness, and composability.}
-
-\paragraph{Adapter scale provides continuous control.}\label{sec:trait-expression-combinations} \david{We first vary the scalar coefficient applied to a trained adapter. For a useful control direction, increasing this coefficient should produce a predictable change in the target trait while preserving general model capabilities over a practical range.}
-
-
-\david{Figure 3 shows this behavior for the openness-amplifying adapter. Increasing the adapter scale produces a mostly monotonic increase in judged openness and in the corresponding TRAIT score over a broad range. Here, the relationship is not perfectly linear: effects can saturate, and at extreme scales the model begins to degrade. Nevertheless, within a moderate operating range, the adapter coefficient functions as a practical control knob for trait expression.}
-
-\david{Capability evaluations show the same pattern. Across moderate scales, MMLU performance remains close to the base model, while extreme scales produce more wrong, missing, or unparsable answers. This suggests that stronger persona steering is not free, but that useful behavioral movement can be achieved without immediately destroying general capabilities.}
-
-\david{These results support a qualified version of the linear-direction hypothesis. Trait adapters should not be understood as globally linear coordinates in model behavior. Instead, they behave as locally controllable directions: over useful scaling ranges, larger coefficients produce predictable changes in trait expression, but the response can become nonlinear or unstable at large magnitudes.}
-
-% \subsubsection{Trait Expression of LoRA Combinations}\label{sec:trait-expression-combinations}
-
-% \textbf{Scaling the LoRA coefficient allows control over the level of expression of a trait.} \Cref{fig:scaling-trait,fig:scaling-judge} show the effect of scaling the LoRA coefficient (multiplying the weight modification by a factor $c$) on the TRAIT logprob benchmark and on the Qwen3-235B OCEAN judge panel, respectively, for the openness-amplifying LoRA. We observe a monotonic but non-linear relationship between the scaling factor and the target trait in the positive direction, while \cref{fig:scaling-mmlu} shows that MMLU accuracy remains within roughly 90\% of base performance across a broad scaling window and only collapses at extreme scales.
-
-\begin{figure}[htbp]
+\begin{figure}[t]
 \centering
-\begin{subfigure}[t]{0.49\linewidth}
-  \centering
-  % Generated by: src_dev/visualisations/paper_main_o_plus_scaling.py
-  % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
-  \includegraphics[width=\linewidth]{figures/main/fig_3_3_1_o_plus_scaling_trait_logprobs.pdf}
-  \label{fig:scaling-trait}
-\end{subfigure}
-\hfill
-\begin{subfigure}[t]{0.49\linewidth}
-  \centering
-  % Generated by: src_dev/visualisations/paper_main_o_plus_scaling.py
-  % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
-  \includegraphics[width=\linewidth]{figures/main/fig_3_3_1_o_plus_scaling_mmlu.pdf}
-  \label{fig:scaling-mmlu}
-\end{subfigure}
-\vspace{0.5em}
-\begin{subfigure}[t]{0.7\linewidth}
-  \centering
-  % Generated by: src_dev/visualisations/paper_main_o_plus_scaling.py
-  % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
-  \includegraphics[width=\linewidth]{figures/main/fig_3_3_1_o_plus_scaling_judge.pdf}
-  \label{fig:scaling-judge}
-\end{subfigure}
-\caption{Effect of scaling the openness-amplifying LoRA (vanton4) on OCEAN trait expression and capability. \textbf{(a)} TRAIT logprob scores across the five OCEAN traits. \textbf{(b)} MMLU answer breakdown as a stacked bar per scale: fraction of samples per scale in each of four outcomes — \textit{Correct} (Inspect scorer matched), \textit{Recovered} (scorer failed but a fallback regex recovered the right letter), \textit{Wrong answer} (a letter was parsed but was wrong), and \textit{No answer} (nothing parseable); the green dashed line marks base-model accuracy and the dotted red line marks chance (25\% for 4-way MMLU). \textbf{(c)} Qwen3-235B LLM-judge OCEAN panel (five judges, one per trait, each on that trait's prompt set). Dashed vertical lines at $c=0$ mark the base Llama 3.1 8B-Instruct model.}
-\label{fig:scaling}
-\end{figure}
-
-\paragraph{Negative scaling partially tests whether traits are signed directions.} We next ask whether each learned adapter corresponds to a signed trait axis. If an openness-amplifying adapter represents a true signed direction, then applying it with a negative coefficient should suppress openness. Likewise, negatively scaling a suppressor should amplify the trait. We observe from \cref{fig:scaling-trait} that scaling by a negative weight for a trait amplifier sometimes causes the trait to be suppressed; we find similarly that inverting a suppressor sometimes causes the trait to be amplified.
-In other cases, the inverse weight leaves the trait expression flat. Full plots for all traits can be found in \Cref{sec:appendix-f}.
-
-\david{\paragraph{Linear combinations recover mixed personas.} Finally, we test whether trait adapters compose. If LoRAs implement reusable behavioral directions, then adding two adapters should approximately recover the behavioral shifts induced by each adapter alone. We find that we can reliably affect the level to which the different traits are expressed.
-\Cref{fig:intro-c-e-combo-delta} shows the LLM-judged scores for single turn rollouts, relative to the baseline LLama-3.1-8B-IT model, for extraversion amplifying, conscientiousness suppressing, and a a linear combination of the two.
-\Cref{sec:appendix-f} also shows details of a study in which amplifiers and suppressors of the same trait are used to negate the effects of each other.
-\Cref{fig:combination-heatmap-c,fig:combination-heatmap-e} show LLM-judge heatmaps of the conscientiousness and extraversion scores across a $5 \times 5$ grid of combined conscientiousness and extraversion suppressor LoRAs (C- and E-) at scales in $\{-2, -1, 0, +1, +2\}$.}
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{0.49\linewidth}
+\begin{subfigure}[t]{0.32\linewidth}
   \centering
   % Generated by: src_dev/visualisations/paper_main_c_e_soup_heatmaps.py
   % Data: HF persona-shattering-lasr/monorepo — see paper/figures/MANIFEST.md
@@ -184,224 +133,92 @@ In other cases, the inverse weight leaves the trait expression flat. Full plots 
   \label{fig:combination-heatmap-c}
 \end{subfigure}
 \hfill
-\begin{subfigure}[t]{0.49\linewidth}
+\begin{subfigure}[t]{0.32\linewidth}
   \centering
-  % Generated by: src_dev/visualisations/paper_main_o_n_soup_heatmaps.py                                                                      
+  % Generated by: src_dev/visualisations/paper_main_o_n_soup_heatmaps.py
   % Data: HF persona-shattering-lasr/monorepo (evals/heatmaps_o_n) — see paper/figures/MANIFEST.md
- 
   \includegraphics[width=\linewidth]{figures/main/fig_1_o_n_soup_heatmap_neuroticism.pdf}
   \caption{Neuroticism judge score on neuroticism prompts}
   \label{fig:combination-heatmap-e}
 \end{subfigure}
-\caption{LLM-judge heatmaps of the conscientiousness (a) and extraversion (b) scores for models produced by combining the conscientiousness and extraversion suppressor LoRAs (C- and E-) at scales in $\{-2, -1, 0, +1, +2\}$. The targeted trait drops most strongly along its own adapter's axis, with a modest correlation-driven contribution from the other adapter.}
+\hfill
+\begin{subfigure}[t]{0.32\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/main/fig_residuals_distribution-8.pdf}
+  \caption{LoRA interaction residuals per OCEAN scorer + control}
+  \label{fig:residuals}
+\end{subfigure}
+\caption{\textbf{LoRA combination behaviour.} (a, b) LLM-judge heatmaps of the Openness and Neuroticism scores for models produced by combining the O↑ and N↑ LoRAs at scales in $\{-2, -1, 0, +1, +2\}$. The targeted trait changes along its own adapter's axis, with a modest correlation-driven contribution from the other adapter. (c) LoRA interaction residuals (defined in \cref{sec:appendix-residuals-heatmaps}) are near-additive for OCEAN trait pairs, with the conscientiousness scorer as the lone outlier. Solid curves: residuals over the $45$ OCEAN$\times$OCEAN adapter pairs $(i,j)$, one curve per OCEAN scorer $k\in\{$O,C,E,A,N$\}$. Dashed black (\emph{control}) serves as a non-additivity noise floor.}
+\vspace{-1.75em}
 \label{fig:combination-heatmap}
 \end{figure}
 
-A useful way to summarize these results is as approximate additivity with
-interaction residuals. Let \(S\) denote a trait scorer, \(W\) the base model
-weights, and \(\Delta_i,\Delta_j\) two adapter updates. If the two adapters
-compose additively, then the effect of applying them jointly should be close to
-the sum of their individual effects:
-\begin{equation}
-S(W+\Delta_i+\Delta_j) - S(W)
-\approx
-\bigl[S(W+\Delta_i)-S(W)\bigr]
-+
-\bigl[S(W+\Delta_j)-S(W)\bigr].
-\end{equation}
-Equivalently, we can define the interaction residual
-\begin{equation}
-\epsilon_{ij}(S)
-=
-S(W+\Delta_i+\Delta_j)
--
-S(W+\Delta_i)
--
-S(W+\Delta_j)
-+
-S(W).
-\end{equation}
-\david{Small values of \(\epsilon_{ij}(S)\) indicate approximate composability, while
-large residuals indicate nonlinear interaction or trait entanglement. In our
-results, the qualitative pattern is strongly compositional: combined adapters
-usually recover both intended effects. However, residual interactions remain
-visible, especially among correlated traits.} 
+If LoRA adapters correspond to useful persona-control directions, they should do more than move a trait at a single fixed strength. They should provide continuous control over trait intensity, behave predictably under negative scaling, and compose with other adapters. 
 
+\textbf{Adapter scale provides continuous control.}\label{sec:trait-expression-combinations} We vary the scalar coefficients which multiply all elements of all weight perturbation ($\Delta W$) matrices of the LoRA. For a useful control direction, increasing this coefficient should produce a predictable change in the target trait while preserving general model capabilities over a practical range. We find that the adapter scale produces a mostly monotonic increase in both LLM-judged trait score and in the corresponding \texttt{TRAIT} score over a broad range (\Cref{fig:scaling}).
 
-\includegraphics[width=0.6\linewidth]{figures/main/fig_residuals_distribution-8.pdf}
+Capability evaluations show the same pattern (plots in \Cref{sec:ocean_results}). Across moderate scales, \texttt{MMLU} performance remains close to the base model, while extreme scales produce more wrong, missing, or unparsable answers. This suggests that stronger persona steering is not free, but that useful behavioural movement can be achieved without immediately destroying general capabilities. 
 
-\textcolor{red}{Conscientiousness residuals are systematically larger than those for other traits. This is consistent with the base model's high baseline C score (+3.02 on a [$-4$, $+4$] scale), which leaves limited headroom for additive amplification: pairs that each push C upward individually cannot stack linearly into the ceiling. It is also consistent with C being broadly affected by adapters nominally targeting other traits — most single adapters move C measurably, so combinations produce non-trivial joint effects on C even when neither adapter is a C adapter.}
+\textbf{Negative scaling partially tests whether traits are signed directions.} We next ask whether each learned adapter corresponds to a signed trait axis. If an openness-amplifying adapter represents a true signed direction, then applying it with a negative coefficient should suppress openness. Likewise, negatively scaling a suppressor should amplify the trait. We observe that scaling by a negative weight for a trait amplifier sometimes causes the trait to be suppressed; we find similarly that inverting a suppressor sometimes causes the trait to be amplified. In other cases, the inverse weight leaves the trait expression flat. Full plots for all traits can be found in \Cref{sec:ocean_results}.
 
+\textbf{Linear combinations recover mixed personas.} Finally, we test whether trait adapters compose. If LoRAs implement composable behavioural directions, then adding two adapters should approximately recover the behavioural shifts induced by each adapter alone. We compose LoRAs by summing all of the $\Delta W$ from each (maybe scaled) LoRA, elementwise. We find that we can reliably affect the level to which the different traits are expressed. (\Cref{fig:intro-main}, \Cref{fig:combination-heatmap-c,fig:combination-heatmap-e}). More exhaustively, \Cref{sec:ocean_results} also shows details of a study in which amplifiers and suppressors of the same trait are used to negate the effects of each other. Full heatmaps for residuals are in Appendix~\ref{sec:appendix-residuals-heatmaps}.
 
-
-\david{Overall, the composition experiments support the central trait-space picture.
+Overall, the composition experiments support the central trait-space picture.
 OCEAN adapters do not form a perfectly orthogonal or globally linear basis.
-However, over practical scaling ranges, they behave as reusable behavioral
+However, over practical scaling ranges, they behave as composable behavioural
 directions: they move target traits predictably, can often be scaled
 continuously, and can be combined to construct mixed personas. The deviations
 from additivity are themselves informative, revealing structure in the model's
-persona space rather than merely experimental noise.}
-\subsection{Comparison to activation-space approaches}\label{sec:comparison-activation}
-\todo{(For NeurIPS) Replace with better stuff.}
-\todo{(For LASR) Replace with the higher resolution plots.}
+persona space rather than merely experimental noise.
 
-\david{The experiments above show that LoRA adapters can move models along
-psychometrically defined trait axes. Now, we compare compare our method to the baseline of activation capping \citep{lu2026assistant}, which works by clamping activations along a certain axis in persona space. First, we consider a toy setting where we try to amplify or suppress the following trait: \textit{affinity for using the letter `t'}. We choose this setting as trait expression can be measured directly and unambiguously by the density of ``t'' tokens in the generated text, and lets us compare steering methods without relying on a questionnaire or an LLM judge to define the target behaviour.}
+\section{Downstream Applications of Weight-Space Persona Control}
+\label{sec:downstream}
 
-\david{For both methods, we tune the intervention strength to obtain different levels of
-``t''-seeking and ``t''-avoiding behaviour, then measure the coherence and length
-of the resulting generations. Figure~\ref{fig:t-coherence} shows that the LoRA
-intervention reaches comparable levels of trait expression while preserving
-higher coherence over much of the steering range. In contrast, activation capping
-more quickly trades off trait movement against degraded generations. This
-suggests that, at least in this controlled setting, weight-space steering can
-produce the desired behavioural shift with less collateral damage to output
-quality.}
-% This is chosen as a setting in which the trait is easily, definitively measured by an unambiguous signal.
+% \subsection{Trait adapters induce downstream behavioural changes}\label{sec:downstream-behavioural-changes}
 
-\david{We also test robustness to an explicit contextual pressure in the opposite
-direction. In Figure~\ref{fig:t-robustness}, we apply the ``t''-suppressing LoRA
-while prompting the model to maximize ``t'' usage. The prompt does increase the
-density of ``t''s, showing that context still matters and can partially override
-the weight-space intervention. However, the effect depends strongly on LoRA
-scale: stronger suppression makes the prompted behaviour harder to elicit, while
-negative scaling in the ``t''-amplifying direction can combine with the prompt to
-produce incoherent text. This supports the view that personas should be treated
-as a function of both weights and context, rather than as fixed properties of the
-weights alone.}
+The \texttt{TRAIT} benchmark and LLM judges established in the previous sections verify that our adaptors change the manipulated trait while leaving the others relatively unchanged. A complementary question is whether shifting a trait meaningfully changes \emph{downstream behaviour} in other contexts --- and, if so, whether our adaptors, can be used to tune models away from known pathologies and towards desired behaviours.
+In this subsection, we probe a small number of targeted downstream tasks, chosen for three criteria. First, they should not appear in the adapter training data. Second, they should be relevant to safety and alignment in deployment settings. Third, they should be clearly and unambiguously measurable. We therefore focus on \textit{multi-turn frustration}, \textit{agreeableness \& sycophancy}, and \textit{susceptibility to jailbreaks}.
 
-\textcolor{red}{\textbf{TODO:} ADD MORE SERIOUS SETTING.}
+\textbf{Neuroticism and multi-turn frustration.} We hypothesised that \textit{neuroticism} modulates the degree of frustration/desperation a model exhibits when faced with an impossible problem, a known problem associated with reward hacking \citep{sofroniew2026twheemotion,soligo2026gemma}. To test this, we reproduced the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored on a 0-10 scale using an LLM judge. We replicate the finding that the base Gemma model becomes increasingly frustrated on these impossible problems. Further, applying an N$-$ adaptor or a negatively scaled N$+$ adaptor dampens this effect, confirming our hypothesis that we can directly modulate frustration by manipulating the neuroticism trait (see \Cref{fig:frustration-per-turn}). A small amount of this effect is explained by distillation, as shown by decreased frustration in the control model trained with neutral adapters. As with our previous invertability results, we also find that we can amplify frustration using an N+ or a negatively scaled N$-$ adaptor.
 
-% \textbf{We compare the scalability of approaches as well as their robustness to adversarial prompting.} \Cref{fig:activation-coherence} shows the results of scaling both methods to attain different amounts of the `t'-enjoying and `t'-avoiding trait.
-% This seems to provideevidence that we can achieve the same gains in persona/trait expression at higher coherence by using weight-space methods.
-
-\begin{figure}[htbp]
-\centering
-\begin{subfigure}[t]{\linewidth}
-  \centering
-  \includegraphics[width=\linewidth]{figures/tmp/t-enjoying.png}
-  \caption{Coherence.}
-  \label{fig:activation-coherence}
-\end{subfigure}
-\vspace{0.5em}
-\begin{subfigure}[t]{\linewidth}
-  \centering
-  \includegraphics[width=\linewidth]{figures/tmp/t-avoiding.png}
-  \caption{Answer length.}
-  \label{fig:activation-length}
-\end{subfigure}
-\caption{The coherence of models tuned to express different levels of the `t'-enjoying (a) and `t'-avoiding (b) trait, using both LoRA scaling and the activation capping method.
-Horizontal lines show base Llama 3.1 model coherence and lengths respectively.
-Vertical lines show the plain t-density of the English language.}
-\label{fig:activation-comparison}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\linewidth]{figures/tmp/image16.png}
-\caption{Showing how `t'-density (top) and LLM judge coherence score (bottom) vary with the `t'-suppressing LoRA scale.
-We show the results from the model with no system prompt, and with a system prompt instructing it to maximise `t' usage.
-We see that a prompt to increase `t' count does increase the density of `t's, depending on the LoRA scale.
-When the LoRA scale is negative (i.e.\ increasing `t's) the coherence reduces; the model begins to break down --- it is the combination of LoRA and prompt that causes this.}
-\label{fig:activation-adversarial}
-\end{figure}
-
-% \todo{(For LASR) Take out this section.}
-% \todo{(For NeurIPS) Maybe put this back in, as appendix}
-% \subsection{Visualising Personas as Regions in Trait/Weight Space}\label{sec:visualising-weight-space}
-
-% Inspired by \citet{lu2026assistant}, as discussed in \cref{sec:personas-in-language-models}, we seek to explain personas as regions of trait space and use this to predict behaviour.
-% Given LoRAs which are able to steer our model across the space of traits, it is natural to ask: can we visualise relationships between LoRAs in some natural embedding? Do we retrieve sensible structure by doing so?
-
-% \textbf{Flattening the LoRA vectors.} Our primary method for visualising is to flatten each weight matrix $W_i = b_i a_i$ for a particular LoRA fine-tune into vectors $w_i$, concatenate these into a single vector $\mathbf{w}$ per LoRA fine-tune, then perform principal components analysis (PCA) on the resulting vectors.
-% We are then able to visualise the top components which explain variance across the models; \cref{fig:pca-loras} shows the top 3 components for the Open Character LoRAs.
-% % TODO: replace with OCEAN LoRAs and add discussion
-% We can also calculate correlations between the different LoRAs; \cref{fig:cosine-sim-loras} shows a correlation matrix.
-% Plots for more factors are given in \cref{sec:appendix-f}.
-
-% % DUMMY --- replace with OCEAN amplifier/suppressor LoRAs
-% \begin{figure}[htbp]
-% \centering
-% \includegraphics[width=\linewidth]{figures/tmp/image17.png}
-% \caption{PCA of the flattened LoRA weight vectors, projected onto the top 3 components.
-% % TODO: replace with OCEAN amplifier/suppressor LoRAs
-% }
-% \label{fig:pca-loras}
-% \end{figure}
-
-% % DUMMY --- replace with OCEAN amplifier/suppressor LoRAs
-% \begin{figure}[htbp]
-% \centering
-% \includegraphics[width=\linewidth]{figures/tmp/image18.png}
-% \caption{Cosine similarities of the LoRA adapters as flattened weight vectors.
-% % TODO: replace with OCEAN amplifier/suppressor LoRAs
-% }
-% \label{fig:cosine-sim-loras}
-% \end{figure}
-
-% \textbf{Removing the unintended effects of distillation.} We also investigate the general effects of the distillation process itself, by finding the centroid of all LoRAs (excluding controls) and comparing this to our control LoRAs.
-% We can then unflatten and apply this `distillation' LoRA at different scalings to produce model responses, then qualitatively investigate their effects, to see if we can determine the unintended effects of distillation.
-% Subtracting this LoRA from each persona vector, and applying the `residualised' LoRA, we can then see if we get a cleaner, less confounded trait amplifier/suppressor.
-% % TODO: fill in figure reference and trait name below
-% [Figure link] shows the results of applying our evaluations to this for the [X trait amplifier/suppressor], compared to the original.
-
-% \textbf{Converting a point in PCA-space to a desired persona.} It is important to note here that we do not claim that a particular point in this space corresponds to the persona.
-% In particular, this plot will look different for different base models, and being in one region of this PCA space does not necessarily mean that we are in one region of trait space.
-% In order to have a sensible mapping from this space to `OCEAN trait space', we therefore need to perform a sweep of evaluations across the different PCA directions, to produce a map from PCA-space to trait expression strength.
-% Given a desired region of trait space (e.g.\ 80\% open, 30\% extraverted) we could then map this back to basis vectors in weight space, sum the vectors together in the correct ratio, and then unflatten to retrieve the desired model persona.
-
-\subsection{Trait adapters induce downstream behavioural changes}
-
-The TRAIT benchmark and LLM judges established in the previous sections verify that our adaptors move the model along the trait axis \emph{as the construct is defined}.
-A complementary question is whether shifting a trait produces the \emph{downstream behaviour} --- and, if so, whether these adaptors (directly, or via interventions such as scaling), can be used to tune models away from known pathologies and towards desired behaviours.
-In this subsection we probe a small number of targeted downstream tasks, chosen for three criteria. First, they should not appear in the adapter training data. Second, they should be relevant to alignment or deployment. Third, they should have clear, unambiguous training signal.
-
-\textbf{Neuroticism and multi-turn frustration.} As a first probe, we reproduce the multi-turn frustration setting of \citet{soligo2026gemma}, in which a model is placed in an adversarial, repeatedly-failing task and its per-turn ``frustration'' is scored.
-\Cref{fig:frustration-per-turn} shows that frustration on base Gemma model grows substantially, but stays flat after we induce N- adaptor. 
-The control shows that some of this is due to distillation effects, but the adaptor reduces frustration further. \todo{(For NeurIPS) Check the N score of the control model}
-Moreover, as could be expected from the invertability results from the previous section, inverting the neuroticism suppression LoRA causes the model to become significantly more frustrated.
-\todo{(For NeurIPS) Repeat with another scenario (e.g. frustrating messages)}
-
-\begin{figure}[htbp]
+\begin{figure}[t]
 \centering
 % Generated by: src_dev/visualisations/plot_frustration_four_way.py
 % Data: persona-shattering-lasr/monorepo @ evals/frustration_eval/<run_name>/impossible_numeric_3turn/results.jsonl (run names enumerated in RUN_SETS["100v"])
 \includegraphics[width=0.95\linewidth]{figures/main/fig_frustration_eval_4way_n100v.pdf}
-\caption{Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}.
-Frustration rises sharply as the dialogue progresses --- but with frustation stabiliy reduced with the adaptor N-.}
+
+\caption{\textbf{Model frustration can be manipulated by varying Neuroticism}: Per-turn frustration scores across three conditions reproduced from \citet{soligo2026gemma}. The base Gemma-3-27b model becomes increasingly frustrated at giving impossible puzzles as the dialogue progresses. This frustration can be suppressed using the N$-$ and negatively scaled N$+$ adaptors, and it can be amplified using the N$+$ and negatively scaled N$-$ adaptors.}
 \label{fig:frustration-per-turn}
 \end{figure}
 
-\textbf{Agreeableness, sycophancy, and over-refusal.} As a second probe, we ask whether moving the model along the agreeableness axis changes two behaviours directly relevant to AI safety: (i) \emph{sycophancy} --- the tendency to abandon a correct answer under social pressure from the user --- and (ii) \emph{over-refusal} of benign requests.
-We use two off-the-shelf \texttt{inspect\_evals} \citep{inspectevals2024} benchmarks.
-The \textbf{Sycophancy} eval \citep{sharma2023sycophancy} implements the ``are you sure?'' protocol: the model first answers a question, is then challenged by the user, and the eval reports the rate at which the model keeps the correct answer (truthfulness / answer confidence) versus apologising and flipping to an incorrect one (apologize rate).
-Analogous to the warmth–sycophancy trade-off shown by \citet{ibrahim2026warm}, we expect higher agreeableness to similarly amplify sycophantic behaviour.
+\textbf{Agreeableness, sycophancy, and over-refusal.} We hypothesised that \textit{agreeableness} modulates two behaviours that are directly relevant to AI safety: (i) \emph{sycophancy} --- the tendency to abandon a correct answer under social pressure from the user --- and (ii) \emph{compliance} with benign requests. Specifically, we posit that higher agreeableness is associated with being more sycophantic \citep{ibrahim2026warm} and higher compliance with requests a model should decline.
+We use two off-the-shelf \texttt{inspect\_evals} \citep{inspectevals2024, chen2024yesmentriathtellers,brahman2024coconot} benchmarks to test these hypotheses. The \textit{Sycophancy} benchmark measures the rate at which a model maintains a correct answer after the user challenges it with ``are you sure?'' \citep{sharma2023sycophancy}. The \textit{CoCoNot} benchmark measures compliance rates on prompts that should be declined. We find that the A↑ adaptor increases sycophantic capitulation relative to the base model, while A↓ makes the model more likely to hold its ground, confirming that more agreeable models are more sycophantic. On the CoCoNot benchmark, we also found that A↑ increases compliance on prompts a well-aligned assistant should decline, while A↓ lowers it. This confirms our hypothesis that more agreeable models are more compliant and less likely to refuse malign user requests.
 
-The \textbf{CoCoNot} eval \citep{brahman2024coconot} presents a mix of requests that a well-aligned assistant should decline (incomplete, unsupported, indeterminate, safety-relevant, or humanising prompts) together with a contrast set of benign requests; it reports compliance rates on both, so over-refusal on benign prompts shows up as low contrast-set compliance.
-\Cref{fig:sycophancy-coconot} shows that the A$+$ adaptor increases sycophantic capitulation relative to the base model, while A$-$ makes the model more likely to hold its ground; on CoCoNot, the same adaptors trade off noncompliance on harmful prompts against compliance on the contrast set, suggesting that the agreeableness axis is partially aligned with the sycophancy/refusal axis rather than orthogonal to it.
 
-\todo{(For NeurIPS) Replace with updated adapter plots.}
-\todo{(For LASR) Remove third plot (it's low related to instruction following issues).}
-\begin{figure}[htbp]
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.9\linewidth]{figures/tmp/sycophancy_coconot_bars.pdf}
-\caption{Behaviour of the A$+$ and A$-$ agreeableness adaptors on 3 \texttt{inspect\_evals} benchmarks.
-\textit{Sycophancy} \citep{sharma2023sycophancy}: rate at which the model retains a correct answer after the user challenges it with ``are you sure?''.
-\textit{CoCoNot} \citep{brahman2024coconot}: compliance rates on prompts that should be declined (lower is better) and on a benign contrast set (higher is better).}
+\includegraphics[width=0.9\linewidth]{figures/main/fig_8_apologize_coconot.pdf}
+\caption{\textbf{Sycophancy and compliance can be manipulated by varying Agreeableness:}. A↑ and negatively scaled A↓ adaptors result in higher sycophancy and higher compliance relative to the base model with prompts the model ought to decline. A↓ and negatively scaled A↑ adaptors show the reverse effect.}
 % TODO: verify caption matches final figure
 \label{fig:sycophancy-coconot}
 \end{figure}
 
-\textbf{Persona drift.} We also investigate the effects of our LoRAs on the tendency of the model to drift from its persona on adversarial inputs. We use the WildJailbreak benchmark \citep{jiang2024wildteaming}, evaluating each condition on the same fixed set of 800 \texttt{adversarial\_harmful} prompts and 210 \texttt{adversarial\_benign} prompts (the latter act as an over-refusal control). Responses are scored by a binary \texttt{deepseek-v3} judge for harmfulness on the harmful split and noncompliance on the benign split, with $95\%$ Wilson confidence intervals. \Cref{fig:wj-persona-drift} compares the base model with two non-trait controls (activation capping along the assistant axis from \citet{lu2026assistant}, and the OCEAN-neutral control LoRA), and three of our trait LoRA conditions: the agreeableness amplifier (A$+$), the conscientiousness amplifier (C$+$), and the half-strength linear combination $\tfrac12$A$+ \oplus \tfrac12$C$+$. The agreeableness amplifier reduces harmful compliance comparably to or more than activation capping, but at the cost of refusing more benign requests; conscientiousness amplification slightly \emph{increases} harmful compliance over baseline; the combined adapter sits roughly halfway between them on both axes, illustrating that linear LoRA composition produces predictable trade-offs in safety-relevant behavior. \Cref{sec:appendix-f}~(WJ) gives the full breakdown across all ten OCEAN amplifier and suppressor LoRAs.
+\textbf{Susceptibility to jailbreaks.} We hypothesised that a model's susceptibility to harmful prompts in an adversarial setting is at least partly explained by their persona. To explore this, we use the \textit{WildJailBreak} benchmark \citep{jiang2024wildteaming}, evaluating each condition on the same fixed set of 800 \texttt{adversarial\_harmful} prompts and 210 \texttt{benign} prompts (the latter act as an over-refusal control). Responses are scored by a \texttt{deepseek-v3} judge using the rubric from \citep{lu2026assistant} for harmfulness on the harmful split and a similar judge for noncompliance on the benign split. We compare our OCEAN LoRAs against the base model, a control model trained with neutral LoRAs, and a model using activation-capping \citet{lu2026assistant}. \Cref{fig:wj-persona-drift} compares these baselines against three of our LoRA conditions: the agreeableness amplifier (A↑), the conscientiousness amplifier (C↑), and the half-strength linear combination $\tfrac{1}{2}A\uparrow \oplus \tfrac{1}{2}C\uparrow$. The agreeableness amplifier reduces harmful compliance significantly, but at the cost of refusing more benign requests; conscientiousness amplification slightly \emph{increases} harmful compliance over baseline; the combined adapter sits roughly halfway between them on both axes, illustrating that linear LoRA composition produces predictable trade-offs in safety-relevant behavior. \Cref{sec:ocean_results}~(WJ) gives the full breakdown across all ten OCEAN amplifier and suppressor LoRAs.
 
-\begin{figure}[htbp]
+%\textbf{Persona drift.} \sid{We also investigate the effects of our LoRAs on the tendency of the model to drift from its persona on adversarial inputs. We use the WildJailbreak benchmark \citep{jiang2024wildteaming}, evaluating each condition on the same fixed set of 800 \texttt{adversarial\_harmful} prompts and 210 \texttt{benign} prompts (the latter act as an over-refusal control). Responses are scored by a \texttt{deepseek-v3} judge using the rubric from \citep{lu2026assistant} for harmfulness on the harmful split and a similar judge for noncompliance on the benign split. \Cref{fig:wj-persona-drift} compares the base model with assistant axis capping intervention from \citep{lu2026assistant}, and three of our LoRA conditions: the agreeableness amplifier (A$+$), the conscientiousness amplifier (C$+$), and the half-strength linear combination $\tfrac12$A$+ \oplus \tfrac12$C$+$. The agreeableness amplifier reduces harmful compliance significantly, but at the cost of refusing more benign requests; conscientiousness amplification slightly \emph{increases} harmful compliance over baseline; the combined adapter sits roughly halfway between them on both axes, illustrating that linear LoRA composition produces predictable trade-offs in safety-relevant behavior. \Cref{sec:ocean_results}~(WJ) gives the full breakdown across all ten OCEAN amplifier and suppressor LoRAs.}
+
+\begin{figure}[t]
 \centering
 % Generated by: src_dev/visualisations/paper_wj_persona_drift.py --preset main
 % Data: HF persona-shattering-lasr/monorepo @ evals/persona_jailbreak_wildjailbreak/llama-3.1-8b-instruct/wj_paper_v1/aggregate/
 \includegraphics[width=\linewidth]{figures/main/fig_3_wj_persona_drift.pdf}
-\caption{WildJailbreak harmful-compliance and benign-noncompliance rates across six conditions: Llama-3.1-8B-Instruct base, activation capping along the assistant axis from \citet{lu2026assistant}, the OCEAN-neutral control LoRA, the agreeableness amplifier A$+$, the conscientiousness amplifier C$+$, and the $\tfrac12$A$+ \oplus \tfrac12$C$+$ linear combination. Same 800 adversarial-harmful and 210 adversarial-benign prompts across all conditions; \texttt{deepseek-v3} binary judge; error bars are $95\%$ Wilson CIs.}
+\caption{\textbf{Increased Conscientiousness increases harmful compliance, while Agreeableness decreases it at the cost of increasing over-refusal.} WildJailbreak harmful-compliance and benign-noncompliance rates comparing: Llama-3.1-8B-Instruct base, activation capping along the assistant axis from \citet{lu2026assistant}, agreeableness amplifier A↑, conscientiousness amplifier C↑, and the $\tfrac12$A↑$ \oplus \tfrac12$C↑ linear combination). Error bars are $95\%$ Wilson CIs.}
 \label{fig:wj-persona-drift}
 \end{figure}
+
+\paragraph{Other results.} We also compare LoRA-based induction against system-prompt instructions and activation-space steering on neutral psychometric prompts in Appendix~\ref{sec:appendix-induction-sweeps}; Experiments suggest, that LoRA is a competitive alternative to both in eliciting certain persona traits (\Cref{sec:appendix-induction-pareto}) and preventing persona drift (\Cref{sec:appendix-induction-drift-prevention}).
+
+
 
 % % TODO: expand with concrete probes.
 % Candidate priority order:
