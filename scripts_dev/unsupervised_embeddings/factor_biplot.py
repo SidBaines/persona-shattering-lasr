@@ -132,6 +132,14 @@ CONTINUATION_USER_PROMPTS: list[str] = [
 ]
 CONTINUATION_CACHE_DIR_NAME = "continuation_cache"
 
+# Hardcoded snapshot of every probe-continuation we generated during the
+# (Initiative, Tone) iteration. Re-exported here for ergonomics — see the
+# sibling module for the full data list (one dict per rollout × probe,
+# with sample_id, factor scores, labels, gen-config, and response).
+from scripts_dev.unsupervised_embeddings.factor_biplot_probe_responses import (  # noqa: E402
+    PROBE_RESPONSES,
+)
+
 # ── Plot callouts ───────────────────────────────────────────────────────────
 # One exemplar per pole, hand-picked from the cached continuations as the
 # clearest single-rollout illustration of that pole's behavior. Each callout
