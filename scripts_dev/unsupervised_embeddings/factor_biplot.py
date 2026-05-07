@@ -43,6 +43,17 @@ ITEM_LABELS_JSON = PROJECT_ROOT / (
 OUT_DIR = PROJECT_ROOT / "scratch/factor_biplot"
 OUT_PATH = OUT_DIR / "biplot_initiative_tone.png"
 
+# Also write the figure to the paper's figures dir so the LaTeX can pick
+# it up. Paper-figure output convention: paper/figures/unsupervised/.
+PAPER_FIGURES = [
+    "unsupervised/fig_4_2_7_biplot_initiative_tone.pdf",
+]
+try:
+    from src_dev.visualisations import PAPER_FIGURES_DIR
+    PAPER_OUT_PATH = PAPER_FIGURES_DIR / PAPER_FIGURES[0]
+except Exception:
+    PAPER_OUT_PATH = None
+
 # Which two factors to plot (column indices in the npz, in
 # canonical-variance-sorted order: 0=Initiative, 1=Tone, 2=Didacticism,
 # 3=Epistemic Caution).
@@ -243,12 +254,13 @@ def main() -> None:
 
     ax.axhline(0, color="#888", linewidth=0.5)
     ax.axvline(0, color="#888", linewidth=0.5)
-    ax.set_xlabel(fx_name, fontsize=12)
-    ax.set_ylabel(fy_name, fontsize=12)
+    ax.set_xlabel(fx_name, fontsize=18)
+    ax.set_ylabel(fy_name, fontsize=18)
     ax.set_title(
-        f"Baseline persona-rollouts on the ({fx_name}, {fy_name}) plane",
-        fontsize=13,
+        "Persona rollouts projected onto highest-variance factors",
+        fontsize=18,
     )
+    ax.tick_params(axis="both", labelsize=14)
     ax.grid(True, alpha=0.2)
     ax.set_aspect("equal", adjustable="datalim")
 
@@ -256,6 +268,10 @@ def main() -> None:
     fig.tight_layout()
     fig.savefig(OUT_PATH, dpi=150)
     fig.savefig(OUT_PATH.with_suffix(".pdf"))
+    if PAPER_OUT_PATH is not None:
+        PAPER_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(PAPER_OUT_PATH)
+        print(f"✓ saved {PAPER_OUT_PATH}")
     plt.close(fig)
     print(f"✓ saved {OUT_PATH}")
     print(f"✓ saved {OUT_PATH.with_suffix('.pdf')}")

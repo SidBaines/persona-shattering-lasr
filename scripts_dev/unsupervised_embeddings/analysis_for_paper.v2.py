@@ -114,6 +114,7 @@ from __future__ import annotations
 # without re-parsing the docstring. Paths relative to ``paper/figures/``.
 PAPER_FIGURES: list[str] = [
     "unsupervised/fig_4_2_1_scree_llama.pdf",
+    "unsupervised/fig_4_2_1_scree_qwen.pdf",
     "unsupervised/fig_4_2_2_within_model_validation.pdf",
     "unsupervised/fig_4_2_3_cross_model_phi.pdf",
     "unsupervised/fig_4_2_4_variance_decomp.pdf",
@@ -373,6 +374,7 @@ TRAIT_ORDER: list[str] = [
 # canonical paths each slug would write to when the gate is open.
 PAPER_SCREE_FIGURES: dict[str, str] = {
     "llama-3.1-8b": "unsupervised/fig_4_2_1_scree_llama.pdf",
+    "qwen2.5-7b":   "unsupervised/fig_4_2_1_scree_qwen.pdf",
 }
 
 # When False, the run never touches paper/figures/. When True (set via
@@ -2054,12 +2056,23 @@ def _plot_phi_heatmap(
 
 
 def _axis_labels_for(slug: str, n_factors: int) -> list[str]:
-    """Prefer labelled axis names; fall back to ``F{idx}``."""
+    """Prefer labelled axis names; fall back to ``F{idx}``.
+
+    Internal short names from the labels JSON (e.g. ``Warmth``, ``Pedagogy``,
+    ``Hedging``) are translated through ``PAPER_FACTOR_DISPLAY_NAMES`` so the
+    rendered figure shows the TIDE-spelling display names (Tone, Didacticism,
+    Epistemic Caution). See ``scripts_dev/unsupervised_embeddings/FACTOR_NAMING.md``
+    for the rename rationale.
+    """
     labels = _load_labels_for_slug(slug, n_factors)
-    return [
-        f"F{i}" + (f" ({labels[i]})" if i in labels else "")
-        for i in range(n_factors)
-    ]
+    out: list[str] = []
+    for i in range(n_factors):
+        if i in labels:
+            display = PAPER_FACTOR_DISPLAY_NAMES.get(labels[i], labels[i])
+            out.append(f"F{i} ({display})")
+        else:
+            out.append(f"F{i}")
+    return out
 
 
 def _run_one_cross_model_subset(
@@ -2424,10 +2437,15 @@ def _plot_paper_within_model_validation(
         medians = sh.get("median_phi_per_factor", [])
         labels = _load_labels_for_slug(slug, len(alpha_rows))
         for i, r in enumerate(alpha_rows):
+            internal = labels.get(i)
+            display = (
+                PAPER_FACTOR_DISPLAY_NAMES.get(internal, internal)
+                if internal is not None else f"F{i}"
+            )
             rows.append({
                 "slug": slug,
                 "factor_index": i,
-                "axis": labels.get(i, f"F{i}"),
+                "axis": display,
                 "alpha": r["alpha"],
                 "phi_median": medians[i] if i < len(medians) else float("nan"),
             })
