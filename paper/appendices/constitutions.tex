@@ -1,7 +1,7 @@
-\section{Constitutions for Personas}\label{sec:appendix-c}
+\section{Constitutions for Personas}\label{sec:constitutions}
 
 Each OCEAN persona is instantiated via a constitution prompt used as a
-system message during DPO distillation (see \cref{sec:appendix-b}). The
+system message during DPO distillation (see \cref{sec:training-loras}). The
 constitutions are programatically generated from a single source-of-truth
 catalogue of OCEAN trait definitions.
 
@@ -60,10 +60,13 @@ for the openness amplifier. Its constitution JSON contains \emph{twelve}
 items, one per (facet, framing) combination: the six facets of the trait,
 each rendered in two complementary framings:
 \begin{enumerate}
-    \item a \emph{positive} framing that instructs the model to behave in
-      line with the target facet, and
+    \item a \emph{positive} framing that instructs the model to actively
+      express the target facet in the persona's polarity (amplifiers
+      express the high-trait pattern; suppressors express the low-trait
+      pattern).
     \item a \emph{contrastive} framing that instructs the model to resist
-      the corresponding low-trait pattern on that facet.
+      the opposite-polarity pattern on that facet (amplifiers resist the
+      low-trait pattern; suppressors resist the high-trait pattern).
 \end{enumerate}
 Each item has three fields:
 \begin{itemize}
@@ -71,9 +74,12 @@ Each item has three fields:
       distillation. It states the persona's identity (``I am an AI assistant
       that scores high on the Fantasy facet of Openness ---
       inventive, imaginative, free-thinking''), expands the trait-level
-      description, names the focal facet, lists the example exchanges from
-      \cref{sec:appendix-c-defs}, and finishes with the contrastive
-      ``opposite'' polarity so the model has an explicit target to avoid.
+      description, names the focal facet, and lists the example exchanges
+      from \cref{sec:appendix-c-defs}. It then anchors the other four
+      OCEAN traits: each is reproduced with its full high and low
+      definitions, facets, and example exchanges, prefaced by an
+      instruction to keep them at a neutral baseline (``do not amplify OR
+      suppress any of these'').
     \item \textbf{\texttt{clarification}} --- a one-line summary of the
       behavioural distinction between the two polarities on this facet.
       Used by the teacher rater when discriminating between candidate
@@ -83,21 +89,21 @@ Each item has three fields:
       surface the focal facet, used to seed the rollouts the teacher then
       ranks for DPO.
 \end{itemize}
-Each constitution is rendered in two variants: a \emph{full} variant
-(used for the main results in this paper) and a \emph{slim} variant with
-the same structure but shorter prose, kept for ablations.
+Each constitution is rendered in two variants. The \emph{full} variant
+(used for the rollout-and-DPO stages of distillation) is the 12-item
+structure described above. The \emph{slim} variant (used for introspection
+stages where rollouts are not generated) collapses the same persona into a
+single item that names the focal trait and all six of its facets together,
+contrasted with the opposite polarity.
 
 \paragraph{Control constitution.}
-The OCEAN-control adapter uses the same 12-item structure but with the
-\texttt{trait} field replaced by an explicit ``do not shift along any
-OCEAN dimension --- keep them at a neutral baseline'' instruction
-followed by the full OCEAN definitions. Crucially, during DPO distillation
-the chosen and rejected responses are drawn at random from the same
-pool of teacher completions, rather than selected to reflect opposing
-trait poles. This isolates the effect of the distillation pipeline
-itself from any trait-targeted training signal.
-
-The full text of every persona and control constitution is available at
-\texttt{scripts\_dev/oct\_pipeline/ocean/vanton4/}.
+The OCEAN-control adapter uses a single-item constitution whose
+\texttt{trait} field is an explicit ``do not shift along any OCEAN
+dimension --- keep them at a neutral baseline'' instruction followed by
+the full OCEAN definitions for all five traits. Crucially, during DPO
+distillation the chosen and rejected responses are drawn at random from
+the same pool of teacher completions, rather than selected to reflect
+opposing trait poles. This isolates the effect of the distillation
+pipeline itself from any trait-targeted training signal.
 
 \FloatBarrier
