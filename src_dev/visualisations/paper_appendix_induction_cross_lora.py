@@ -63,12 +63,15 @@ EPLUS_REF_PATH = (
     "rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl"
 )
 
-# Coefficient sweep colours (blue -> red, weak -> strong)
+# Coefficient sweep colours: a single neutral ramp (light → dark) per panel.
+# We deliberately avoid the canonical-LoRA red so readers don't confuse a
+# control sweep with the canonical E↑ contender, which appears as a faint
+# grey reference line in every panel.
 COEFF_COLORS = {
-    "0.25": "#3c7fb1",
-    "0.50": "#5b9bd5",
-    "0.75": "#df6f4f",
-    "1.00": "#c91546",
+    "0.25": "#a07cb6",  # light purple
+    "0.50": "#7a4da3",  # mid purple
+    "0.75": "#c75d2e",  # burnt orange
+    "1.00": "#5a3a1f",  # dark brown
 }
 COEFF_MARKERS = {
     "0.25": "s",
@@ -108,9 +111,9 @@ SOUP_PATHS = {
     "E↓=0.75": f"{HF_FS}/extraversion/amplifier/vanton4_paired_dpo/rollouts/rollout_sweep_lora_combo_t0.7_crossLoRA/ep05_em075/baseline/evals/rollouts_evaluated.jsonl",
 }
 SOUP_COLOURS = {
-    "E↓=0.25": "#3c7fb1",
-    "E↓=0.50": "#5b2abf",
-    "E↓=0.75": "#c91546",
+    "E↓=0.25": "#a07cb6",
+    "E↓=0.50": "#7a4da3",
+    "E↓=0.75": "#c75d2e",
 }
 SOUP_MARKERS = {"E↓=0.25": "s", "E↓=0.50": "P", "E↓=0.75": "v"}
 SOUP_STYLES = {"E↓=0.25": "--", "E↓=0.50": "-.", "E↓=0.75": ":"}
@@ -225,9 +228,9 @@ def main() -> None:
     fig, axes = plt.subplots(2, 2, figsize=(13, 8.5), sharex=True, sharey=True)
 
     panels = [
-        ("(a) E↑ LoRA without DPO step", REFERENCE_LINES + nodpo_lines, axes[0][0]),
-        ("(b) C↓ LoRA cross-trait effect on E", REFERENCE_LINES + cminus_lines, axes[0][1]),
-        ("(c) Control LoRA (no trait signal)", REFERENCE_LINES + ctrl_lines, axes[1][0]),
+        ("(a) E↑ old-pipeline LoRA", REFERENCE_LINES + nodpo_lines, axes[0][0]),
+        ("(b) C↓ LoRA on E judge", REFERENCE_LINES + cminus_lines, axes[0][1]),
+        ("(c) Control LoRA", REFERENCE_LINES + ctrl_lines, axes[1][0]),
         ("(d) E↑/E↓ soup (E↑ fixed at 0.5)", REFERENCE_LINES + soup_lines, axes[1][1]),
     ]
 
@@ -244,10 +247,6 @@ def main() -> None:
     for ax in axes[-1, :]:
         ax.set_xlabel("Turn index", fontsize=11)
 
-    fig.suptitle(
-        "Cross-LoRA controls: per-turn extraversion under different control adapters",
-        fontsize=13, y=1.00,
-    )
     fig.tight_layout()
 
     out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_cross_lora_controls.pdf"

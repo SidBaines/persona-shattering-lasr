@@ -1,5 +1,6 @@
 # Experimental outputs
 scratch/
+tmp/
 
 # Environment
 .env

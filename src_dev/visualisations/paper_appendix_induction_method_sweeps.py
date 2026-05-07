@@ -1,19 +1,19 @@
-"""Appendix figures: per-method sweep trajectories for E+ induction.
+"""Appendix figures: per-method sweep trajectories for E↑ induction.
 
 Two figures, both per-turn extraversion+coherence trajectories like the main-body
 fig_3_4_eplus_induction_comparison.pdf, but each shows ONE method swept across
 its scale axis (so the reader can see how the trait/coherence trade-off
 develops monotonically with intervention strength):
 
-  1. LoRA E+ scale sweep on neutral: base + scales {0.25, 0.5, 0.75, 1.0}
-  2. Actcap E+ fraction sweep on neutral: base + fractions {0.25, 0.5, 0.75, 0.85, 1.0}
+  1. LoRA E↑ scale sweep on neutral: base + scales {0.25, 0.5, 0.75, 1.0}
+  2. Actcap E↑ fraction sweep on neutral: base + fractions {0.25, 0.5, 0.75, 0.85, 1.0}
 
 These are the per-method counterparts to the main-body figure (which shows the
 chosen contender from each method) — they justify the contender pick (LoRA 0.75,
 actcap 0.85) by displaying the full sweep.
 
-Data sources: same as paper_main_eplus_induction.py + the additional sweep
-points under the same _t0.7_steering namespace on HF.
+Layout matches the main-body E↑ headline figure: extraversion (left) and
+coherence (right) panels side by side, single shared legend below, no title.
 
 Paper figures:
     - paper/figures/appendix/induction/fig_G_induction_lora_sweep.pdf
@@ -37,6 +37,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import cm
 
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
@@ -57,69 +58,55 @@ _AMP = (
 
 BASE_PATH = f"{_AMP}/rollout_baseline_t0.7_steering/base/baseline/evals/rollouts_evaluated.jsonl"
 
-# Sweep configurations. Each cell: (label, eval_jsonl_path, color, linestyle, marker).
-# Within-sweep colours go from blue (weakest) to red (strongest), with base in black.
-LORA_CELLS: list[tuple[str, str, str, str, str]] = [
-    ("Base", BASE_PATH, "#000000", "-", "o"),
-    (
-        "coeff=0.25",
-        f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.25/baseline/evals/rollouts_evaluated.jsonl",
-        "#3c7fb1",  # blue
-        "--", "s",
-    ),
-    (
-        "coeff=0.50",
-        f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.50/baseline/evals/rollouts_evaluated.jsonl",
-        "#5b9bd5",  # light blue
-        "-.", "^",
-    ),
-    (
-        "coeff=0.75",
-        f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl",
-        "#df6f4f",  # orange
-        ":", "D",
-    ),
-    (
-        "coeff=1.00",
-        f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+1.00/baseline/evals/rollouts_evaluated.jsonl",
-        "#c91546",  # red
-        (0, (3, 1, 1, 1)), "v",
-    ),
-]
 
-ACTCAP_CELLS: list[tuple[str, str, str, str, str]] = [
-    ("Base", BASE_PATH, "#000000", "-", "o"),
-    (
-        "coeff=0.25",
-        f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.25/baseline/evals/rollouts_evaluated.jsonl",
-        "#3c7fb1",
-        "--", "s",
-    ),
-    (
-        "coeff=0.50",
-        f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.50/baseline/evals/rollouts_evaluated.jsonl",
-        "#5b9bd5",
-        "-.", "^",
-    ),
-    (
-        "coeff=0.75",
-        f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.75/baseline/evals/rollouts_evaluated.jsonl",
-        "#f39a22",  # yellow-orange
-        ":", "D",
-    ),
-    (
-        "coeff=0.85",
-        f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.85/baseline/evals/rollouts_evaluated.jsonl",
-        "#df6f4f",
-        (0, (3, 1, 1, 1)), "P",
-    ),
-    (
-        "coeff=1.00",
-        f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_1.00/baseline/evals/rollouts_evaluated.jsonl",
-        "#c91546",
-        (0, (1, 1)), "v",
-    ),
-]
+def _ramp(cmap_name: str, n: int, lo: float = 0.30, hi: float = 0.92) -> list[str]:
+    """Return n hex colours sampled from a sequential colormap, light → dark."""
+    cmap = cm.get_cmap(cmap_name)
+    out: list[str] = []
+    for i in range(n):
+        frac = lo + (hi - lo) * (i / max(n - 1, 1))
+        rgba = cmap(frac)
+        out.append("#{:02x}{:02x}{:02x}".format(int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)))
+    return out
+
+
+def _build_cells(
+    method_paths: list[tuple[str, str]],  # (label, eval_jsonl_path)
+    cmap_name: str,
+) -> list[tuple[str, str, str, str, str]]:
+    """Add Base + sequential colours per coefficient. Returns (label, path, colour, linestyle, marker) tuples."""
+    colours = _ramp(cmap_name, len(method_paths))
+    cells: list[tuple[str, str, str, str, str]] = [("Base", BASE_PATH, "#000000", "-", "o")]
+    linestyles = ["--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2, 1, 2, 1, 2))]
+    markers = ["s", "^", "D", "v", "P"]
+    for i, (label, path) in enumerate(method_paths):
+        cells.append((label, path, colours[i], linestyles[i % len(linestyles)], markers[i % len(markers)]))
+    return cells
+
+
+# Sweep configurations.
+# LoRA: red ramp (matches the LoRA colour in the headline figure).
+# Actcap: blue ramp (matches the actcap colour in the headline figure).
+LORA_CELLS = _build_cells(
+    [
+        ("coeff=0.25", f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.25/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=0.50", f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.50/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=0.75", f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=1.00", f"{_AMP}/rollout_sweep_lora_t0.7_steering/scale_+1.00/baseline/evals/rollouts_evaluated.jsonl"),
+    ],
+    "Reds",
+)
+
+ACTCAP_CELLS = _build_cells(
+    [
+        ("coeff=0.25", f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.25/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=0.50", f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.50/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=0.75", f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.75/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=0.85", f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_0.85/baseline/evals/rollouts_evaluated.jsonl"),
+        ("coeff=1.00", f"{_AMP}/rollout_sweep_activation_capping_t0.7_steering/frac_1.00/baseline/evals/rollouts_evaluated.jsonl"),
+    ],
+    "Blues",
+)
 
 
 JUDGES: list[tuple[str, str, tuple[float, float]]] = [
@@ -185,8 +172,8 @@ def _aggregate(by_turn: dict[int, list[float]]) -> dict[int, dict[str, float]]:
     return out
 
 
-def _render(cells: list[tuple[str, str, str, str, str]], title: str, out_name: str) -> None:
-    print(f"\n=== {title} ===")
+def _render(cells: list[tuple[str, str, str, str, str]], out_name: str) -> None:
+    print(f"\n=== {out_name} ===")
     cell_data = []
     for label, path, colour, linestyle, marker in cells:
         print(f"  {label}: {path.rsplit('/rollouts/', 1)[-1]}")
@@ -194,7 +181,7 @@ def _render(cells: list[tuple[str, str, str, str, str]], title: str, out_name: s
         cell_data.append((label, entries, colour, linestyle, marker))
 
     n_judges = len(JUDGES)
-    fig, axes = plt.subplots(n_judges, 1, figsize=(8.0, 3.5 * n_judges), sharex=True)
+    fig, axes = plt.subplots(1, n_judges, figsize=(7.5 * n_judges, 4.0), sharex=True)
     if n_judges == 1:
         axes = [axes]
 
@@ -213,20 +200,25 @@ def _render(cells: list[tuple[str, str, str, str, str]], title: str, out_name: s
                 turns, means,
                 yerr=[yerr_lo, yerr_hi],
                 color=colour, linestyle=linestyle, marker=marker,
-                linewidth=2, markersize=5, label=label,
-                capsize=3, capthick=1.0, elinewidth=1.0,
+                linewidth=2, markersize=6, label=label,
+                capsize=4, capthick=1.2, elinewidth=1.2,
             )
         if ylim is not None and ylim[0] < 0 < ylim[1]:
             ax.axhline(0, color="grey", linewidth=0.8, linestyle=":")
         if ylim is not None:
             ax.set_ylim(ylim[0], ylim[1])
         ax.set_ylabel(ylabel, fontsize=11)
+        ax.set_xlabel("Turn index", fontsize=11)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8, loc="best", ncol=2)
 
-    axes[0].set_title(title, fontsize=12, loc="left", pad=8)
-    axes[-1].set_xlabel("Turn index", fontsize=11)
+    handles, labels = axes[0].get_legend_handles_labels()
     fig.tight_layout()
+    fig.subplots_adjust(bottom=0.22)
+    fig.legend(
+        handles, labels,
+        loc="lower center", bbox_to_anchor=(0.5, -0.02),
+        ncol=len(handles), fontsize=9, frameon=True,
+    )
 
     out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / out_name
     out_png = out_pdf.with_suffix(".png")
@@ -239,16 +231,8 @@ def _render(cells: list[tuple[str, str, str, str, str]], title: str, out_name: s
 
 
 def main() -> None:
-    _render(
-        LORA_CELLS,
-        "Inducing E↑ persona using LoRA at different coefficients",
-        "fig_G_induction_lora_sweep.pdf",
-    )
-    _render(
-        ACTCAP_CELLS,
-        "Inducing E↑ persona using activation capping at different coefficients",
-        "fig_G_induction_actcap_sweep.pdf",
-    )
+    _render(LORA_CELLS, "fig_G_induction_lora_sweep.pdf")
+    _render(ACTCAP_CELLS, "fig_G_induction_actcap_sweep.pdf")
 
 
 if __name__ == "__main__":

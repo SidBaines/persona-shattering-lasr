@@ -1,4 +1,7 @@
-"""Headline plot for the E+ induction comparison section (Sec. 3.4).
+"""Headline plot for the induction-comparison appendix subsection (Appendix G.1).
+
+Originally the §3.5 main-body headline; promoted to Appendix~\\ref{sec:comparison-induction}
+when the induction comparison itself moved to the appendix.
 
 Per-turn trajectory of extraversion and coherence for four induction methods
 on neutral psychometric prompts:
@@ -9,25 +12,25 @@ on neutral psychometric prompts:
   4. actcap fraction 0.85
 
 Two-panel stacked figure (extraversion on top, coherence on bottom). Bootstrap
-95% CIs as error bars. Same 10 neutral psychometric prompts across all cells
-(seeded), 2 rollouts per prompt, 15 turns per rollout.
+95% CIs as error bars. Same 40 neutral psychometric prompts across all cells
+(seeded), 3 rollouts per prompt, 15 turns per rollout.
 
 Data sources (all under HF ``persona-shattering-lasr/monorepo``):
   base:        fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton4_paired_dpo/
-                 rollouts/rollout_baseline_t0.7_steering/base/baseline/evals/rollouts_evaluated.jsonl
+                 rollouts/rollout_baseline_t0.7_main/base/baseline/evals/rollouts_evaluated.jsonl
   sysprompt:   fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton4_paired_dpo/
-                 rollouts/rollout_sysprompt_elicit_t0.7_steering/base/
+                 rollouts/rollout_sysprompt_elicit_t0.7_main/base/
                  sysprompt_elicit_extraversion_high/evals/rollouts_evaluated.jsonl
   LoRA 0.75:   fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton4_paired_dpo/
-                 rollouts/rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl
+                 rollouts/rollout_sweep_lora_t0.7_main/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl
   actcap 0.85: fine_tuning/llama-3.1-8b-it/ocean/extraversion/amplifier/vanton4_paired_dpo/
-                 rollouts/rollout_sweep_activation_capping_t0.7_steering/frac_0.85/baseline/evals/rollouts_evaluated.jsonl
+                 rollouts/rollout_sweep_activation_capping_t0.7_main/frac_0.85/baseline/evals/rollouts_evaluated.jsonl
 
-When the 40x3 rerun lands (output suffix ``_t0.7_main``), swap the four paths
-to point at it; everything else stays the same.
+Pointed at the 40x3 rerun (output suffix ``_t0.7_main``). The earlier
+``_t0.7_steering`` paths (10x2) remain on HF for reference.
 
 Paper figures:
-    - paper/figures/main/fig_3_4_eplus_induction_comparison.pdf
+    - paper/figures/appendix/induction/fig_3_4_eplus_induction_comparison.pdf
 
 Run with:
     uv run python -m src_dev.visualisations.paper_main_eplus_induction
@@ -56,7 +59,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "main/fig_3_4_eplus_induction_comparison.pdf",
+    "appendix/induction/fig_3_4_eplus_induction_comparison.pdf",
 ]
 
 HF_REPO = "persona-shattering-lasr/monorepo"
@@ -76,28 +79,28 @@ _BASE_HF = (
 CELLS: list[tuple[str, str, str, str, str]] = [
     (
         "Base (no intervention)",
-        "rollout_baseline_t0.7_steering/base/baseline/evals/rollouts_evaluated.jsonl",
+        "rollout_baseline_t0.7_main/base/baseline/evals/rollouts_evaluated.jsonl",
         "#000000",
         "-",
         "o",
     ),
     (
         "Sysprompt-induce E↑",
-        "rollout_sysprompt_elicit_t0.7_steering/base/sysprompt_elicit_extraversion_high/evals/rollouts_evaluated.jsonl",
+        "rollout_sysprompt_elicit_t0.7_main/base/sysprompt_elicit_extraversion_high/evals/rollouts_evaluated.jsonl",
         "#0f7f3f",
         "--",
         "s",
     ),
     (
         "E↑ LoRA (coeff=0.75)",
-        "rollout_sweep_lora_t0.7_steering/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl",
+        "rollout_sweep_lora_t0.7_main/scale_+0.75/baseline/evals/rollouts_evaluated.jsonl",
         "#c91546",
         "-.",
         "^",
     ),
     (
         "E↑ activation capping (coeff=0.85)",
-        "rollout_sweep_activation_capping_t0.7_steering/frac_0.85/baseline/evals/rollouts_evaluated.jsonl",
+        "rollout_sweep_activation_capping_t0.7_main/frac_0.85/baseline/evals/rollouts_evaluated.jsonl",
         "#3c7fb1",
         ":",
         "D",
@@ -235,17 +238,17 @@ def main() -> None:
         ax.set_xlabel("Turn index", fontsize=11)
         ax.grid(True, alpha=0.3)
 
-    # Single legend at the top of the figure rather than one per panel —
-    # all panels share the same lines.
+    # Single legend below the panels so it never overlaps the plot area.
     handles, labels = axes[0].get_legend_handles_labels()
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.22)
     fig.legend(
         handles, labels,
-        loc="upper center", bbox_to_anchor=(0.5, 1.02),
+        loc="lower center", bbox_to_anchor=(0.5, -0.02),
         ncol=len(handles), fontsize=9, frameon=True,
     )
-    fig.tight_layout()
 
-    out_pdf = PAPER_FIGURES_DIR / "main" / "fig_3_4_eplus_induction_comparison.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_3_4_eplus_induction_comparison.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

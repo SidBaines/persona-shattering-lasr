@@ -218,12 +218,13 @@ def main() -> None:
         ax.grid(True, alpha=0.3)
 
     handles, labels = axes[0].get_legend_handles_labels()
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.22)
     fig.legend(
         handles, labels,
-        loc="upper center", bbox_to_anchor=(0.5, 1.04),
-        ncol=2, fontsize=9, frameon=True,
+        loc="lower center", bbox_to_anchor=(0.5, -0.02),
+        ncol=len(handles), fontsize=9, frameon=True,
     )
-    fig.tight_layout()
 
     out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_drift_prevention.pdf"
     out_png = out_pdf.with_suffix(".png")

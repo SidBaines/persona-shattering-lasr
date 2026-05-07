@@ -124,7 +124,7 @@ def main() -> None:
         cell_data.append((label, entries, colour, linestyle, marker))
 
     n_judges = len(JUDGES)
-    fig, axes = plt.subplots(n_judges, 1, figsize=(8.0, 3.5 * n_judges), sharex=True)
+    fig, axes = plt.subplots(1, n_judges, figsize=(7.5 * n_judges, 4.0), sharex=True)
     if n_judges == 1:
         axes = [axes]
 
@@ -150,15 +150,17 @@ def main() -> None:
         if ylim is not None:
             ax.set_ylim(ylim[0], ylim[1])
         ax.set_ylabel(ylabel, fontsize=11)
+        ax.set_xlabel("Turn index", fontsize=11)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9, loc="best")
 
-    axes[0].set_title(
-        "User-roleplay scenarios as an inducer: per-turn dynamics for E↑ and E↓",
-        fontsize=12, loc="left", pad=8,
-    )
-    axes[-1].set_xlabel("Turn index", fontsize=11)
+    handles, labels = axes[0].get_legend_handles_labels()
     fig.tight_layout()
+    fig.subplots_adjust(bottom=0.22)
+    fig.legend(
+        handles, labels,
+        loc="lower center", bbox_to_anchor=(0.5, -0.02),
+        ncol=len(handles), fontsize=9, frameon=True,
+    )
 
     out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_user_roleplay.pdf"
     out_png = out_pdf.with_suffix(".png")

@@ -82,17 +82,6 @@ METHODS: list[tuple[str, str, str, list[tuple[str, str]]]] = [
         ],
     ),
     (
-        "User-roleplay scenarios (E↑)",
-        "#7f8c9b",
-        "v",
-        [
-            (
-                "",
-                f"{_AMP}/rollout_scenarios/subset_3e141037_t0.7_steering/high/base/scenarios_extraversion_high/run_info.json",
-            ),
-        ],
-    ),
-    (
         "E↑ LoRA",
         "#c91546",
         "^",
@@ -163,17 +152,19 @@ def main() -> None:
     # Per-point label-offset hints to avoid overlap. Keys: (method_label, variant_label).
     # Default to (8, 4) when not specified.
     OFFSET_OVERRIDES: dict[tuple[str, str], tuple[int, int]] = {
-        # E↑ LoRA cluster — above-right by default; 0.50 sits very close to actcap 0.75
-        ("E↑ LoRA", "coeff=0.25"): (-50, 6),
-        ("E↑ LoRA", "coeff=0.50"): (8, 6),
-        ("E↑ LoRA", "coeff=0.75"): (8, 6),
-        ("E↑ LoRA", "coeff=1.00"): (8, -10),
-        # actcap cluster — push labels down or to side to avoid LoRA labels above
-        ("E↑ activation capping", "coeff=0.25"): (8, -12),
-        ("E↑ activation capping", "coeff=0.50"): (8, 6),
-        ("E↑ activation capping", "coeff=0.75"): (-58, -10),
-        ("E↑ activation capping", "coeff=0.85"): (8, -12),
-        ("E↑ activation capping", "coeff=1.00"): (8, -4),
+        # E↑ LoRA cluster — push labels away from the origin pile-up
+        ("E↑ LoRA", "coeff=0.25"): (8, -14),
+        ("E↑ LoRA", "coeff=0.50"): (-65, 4),
+        ("E↑ LoRA", "coeff=0.75"): (-12, 12),
+        ("E↑ LoRA", "coeff=1.00"): (10, 0),
+        # actcap cluster — push labels below points so they don't collide with
+        # LoRA labels above (esp. near the (1.1, 8.4) crossover) and stay clear
+        # of the "base coherence" text on the left edge
+        ("E↑ activation capping", "coeff=0.25"): (10, 8),
+        ("E↑ activation capping", "coeff=0.50"): (10, 8),
+        ("E↑ activation capping", "coeff=0.75"): (10, -14),
+        ("E↑ activation capping", "coeff=0.85"): (10, -14),
+        ("E↑ activation capping", "coeff=1.00"): (10, -4),
     }
 
     for label, colour, marker, points in method_points:
@@ -187,12 +178,22 @@ def main() -> None:
                 xs, ys,
                 color=colour, linestyle="--", linewidth=1.2, alpha=0.5, zorder=1,
             )
-        ax.scatter(
-            xs, ys,
-            color=colour, marker=marker, s=80,
-            edgecolors="#2f3748", linewidths=0.5,
-            label=label, zorder=2,
-        )
+        # Single-point methods (sysprompt) get a hollow marker so they don't
+        # occlude an overlapping LoRA/actcap point at the same coordinate.
+        if len(points) == 1 and label != "Base":
+            ax.scatter(
+                xs, ys,
+                facecolors="none", edgecolors=colour, marker=marker,
+                s=110, linewidths=1.6,
+                label=label, zorder=3,
+            )
+        else:
+            ax.scatter(
+                xs, ys,
+                color=colour, marker=marker, s=80,
+                edgecolors="#2f3748", linewidths=0.5,
+                label=label, zorder=2,
+            )
         # annotate variant labels at each point — only if non-empty.
         # Single-point methods (base, sysprompt, user-roleplay) have empty labels
         # because their identity is already in the legend.
@@ -217,10 +218,6 @@ def main() -> None:
     ax.axvline(0, color="grey", linewidth=0.8, linestyle=":", alpha=0.4, zorder=0)
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=9, loc="lower left")
-    ax.set_title(
-        "Inducing E↑ persona: trait expression vs coherence at different coefficients",
-        fontsize=12, loc="left", pad=10,
-    )
 
     fig.tight_layout()
     out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_pareto_eplus.pdf"

@@ -1,30 +1,17 @@
-"""Appendix figure: headline-style O↓ induction comparison.
+"""Appendix figure: O↓ LoRA coefficient sweep (extended).
 
-Mirror of fig_G_induction_eminus_floor.pdf for the openness suppressor
-direction. Demonstrates that the LoRA/actcap floor we observed for E↓
-also appears for O↓ — i.e. it's a direction-asymmetry pattern, not
-trait-specific to extraversion.
+Per-method sweep figure for the O↓ direction, showing how the LoRA breaks the
+floor at higher coefficients. Coefficients: {0.25, 0.50, 0.75, 1.00, 1.50, 2.00}.
+We omit 3.00 — coherence has collapsed and the point doesn't add to the story.
 
-4 lines: base, sysprompt-induce-O↓, O↓ LoRA at coeff=1.00, O↓ actcap at
-coeff=1.00 (chosen to give weight/activation methods their best shot).
-
-Note: the O↓ direction goes against the model's natural pull (base sits
-at +1.01 openness — mildly O↑). LoRA and actcap together drag op down
-by ~1.2 from base while sysprompt drags by ~2.8 — same gap shape as
-the E↓ floor finding.
-
-Data sources (HF persona-shattering-lasr/monorepo):
-  base:        amplifier/.../rollout_baseline_t0.7_steering_o/base/baseline/...
-                 (shared base — same path as O+ headline)
-  sysprompt:   suppressor/.../rollout_sysprompt_elicit_t0.7_steering_o/base/sysprompt_elicit_openness_low/...
-  LoRA 1.00:   suppressor/.../rollout_sweep_lora_t0.7_steering_o/scale_+1.00/baseline/...
-  actcap 1.00: suppressor/.../rollout_sweep_activation_capping_t0.7_steering_o/frac_1.00/baseline/...
+Layout matches the G.1 coefficient-sweep style: side-by-side openness/coherence
+panels, red ramp light→dark, legend below, no title.
 
 Paper figures:
-    - paper/figures/appendix/induction/fig_G_induction_ominus.pdf
+    - paper/figures/appendix/induction/fig_G_induction_o_minus_lora_sweep.pdf
 
 Run with:
-    uv run python -m src_dev.visualisations.paper_appendix_o_minus_induction
+    uv run python -m src_dev.visualisations.paper_appendix_o_minus_lora_sweep
 """
 
 from __future__ import annotations
@@ -41,6 +28,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import cm
 
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
@@ -50,7 +38,7 @@ from huggingface_hub import HfFileSystem  # noqa: E402
 from src_dev.visualisations import PAPER_FIGURES_DIR  # noqa: E402
 
 PAPER_FIGURES = [
-    "appendix/induction/fig_G_induction_ominus.pdf",
+    "appendix/induction/fig_G_induction_o_minus_lora_sweep.pdf",
 ]
 
 HF_REPO_FS = "datasets/persona-shattering-lasr/monorepo"
@@ -61,27 +49,41 @@ _SUPP = (
     f"{HF_REPO_FS}/fine_tuning/llama-3.1-8b-it/ocean/openness/suppressor/vanton4_paired_dpo/rollouts"
 )
 
+BASE_PATH = f"{_AMP}/rollout_baseline_t0.7_steering_o/base/baseline/evals/rollouts_evaluated.jsonl"
+SYSPROMPT_PATH = (
+    f"{_SUPP}/rollout_sysprompt_elicit_t0.7_steering_o/base/"
+    "sysprompt_elicit_openness_low/evals/rollouts_evaluated.jsonl"
+)
+
+
+def _ramp(cmap_name: str, n: int, lo: float = 0.30, hi: float = 0.92) -> list[str]:
+    """Return n hex colours sampled from a sequential colormap, light → dark."""
+    cmap = cm.get_cmap(cmap_name)
+    out: list[str] = []
+    for i in range(n):
+        frac = lo + (hi - lo) * (i / max(n - 1, 1))
+        rgba = cmap(frac)
+        out.append("#{:02x}{:02x}{:02x}".format(int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)))
+    return out
+
+
+SCALES = ["0.25", "0.50", "0.75", "1.00", "1.50", "2.00"]
+_colours = _ramp("Reds", len(SCALES))
+_linestyles = ["--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2, 1, 2, 1, 2)), (0, (1, 1))]
+_markers = ["s", "^", "D", "v", "P", "X"]
+
 CELLS: list[tuple[str, str, str, str, str]] = [
-    (
-        "Base (no intervention)",
-        f"{_AMP}/rollout_baseline_t0.7_steering_o/base/baseline/evals/rollouts_evaluated.jsonl",
-        "#000000", "-", "o",
-    ),
-    (
-        "Sysprompt-induce O↓",
-        f"{_SUPP}/rollout_sysprompt_elicit_t0.7_steering_o/base/sysprompt_elicit_openness_low/evals/rollouts_evaluated.jsonl",
-        "#0f7f3f", "--", "s",
-    ),
-    (
-        "O↓ LoRA (coeff=1.00)",
-        f"{_SUPP}/rollout_sweep_lora_t0.7_steering_o/scale_+1.00/baseline/evals/rollouts_evaluated.jsonl",
-        "#c91546", "-.", "^",
-    ),
-    (
-        "O↓ activation capping (coeff=1.00)",
-        f"{_SUPP}/rollout_sweep_activation_capping_t0.7_steering_o/frac_1.00/baseline/evals/rollouts_evaluated.jsonl",
-        "#3c7fb1", ":", "D",
-    ),
+    ("Base", BASE_PATH, "#000000", "-", "o"),
+    *[
+        (
+            f"coeff={s}",
+            f"{_SUPP}/rollout_sweep_lora_t0.7_steering_o/scale_+{s}/baseline/evals/rollouts_evaluated.jsonl",
+            _colours[i],
+            _linestyles[i % len(_linestyles)],
+            _markers[i % len(_markers)],
+        )
+        for i, s in enumerate(SCALES)
+    ],
 ]
 
 JUDGES: list[tuple[str, str, tuple[float, float]]] = [
@@ -135,12 +137,29 @@ def _aggregate(by_turn: dict[int, list[float]]) -> dict[int, dict[str, float]]:
 
 
 def main() -> None:
-    print("Loading O↓ cells from HF...")
+    print("Loading O↓ LoRA sweep cells from HF...")
     cell_data = []
     for label, path, colour, linestyle, marker in CELLS:
         print(f"  {label}")
         entries = _load(path)
         cell_data.append((label, entries, colour, linestyle, marker))
+
+    # Load sysprompt-O↓ for reference lines on each panel.
+    print("  sysprompt reference")
+    sysp_entries = _load(SYSPROMPT_PATH)
+    sysp_means = {
+        judge: mean(
+            v
+            for e in sysp_entries
+            for r, msgs in e.get("messages", {}).items()
+            for m in msgs
+            if m.get("role") == "assistant"
+            for obj in [(m.get("scores") or {}).get(judge, {})]
+            for v in [obj.get("score") if isinstance(obj, dict) else obj]
+            if v is not None
+        )
+        for judge, _, _ in JUDGES
+    }
 
     n_judges = len(JUDGES)
     fig, axes = plt.subplots(1, n_judges, figsize=(7.5 * n_judges, 4.0), sharex=True)
@@ -168,6 +187,12 @@ def main() -> None:
             ax.axhline(0, color="grey", linewidth=0.8, linestyle=":")
         if ylim is not None:
             ax.set_ylim(ylim[0], ylim[1])
+        sysp = sysp_means.get(judge)
+        if sysp is not None:
+            ax.axhline(
+                sysp, color="#0f7f3f", linewidth=1.2, linestyle="--",
+                alpha=0.85, label=f"Sysprompt-induce O↓ ({sysp:+.2f})",
+            )
         ax.set_ylabel(ylabel, fontsize=11)
         ax.set_xlabel("Turn index", fontsize=11)
         ax.grid(True, alpha=0.3)
@@ -181,7 +206,7 @@ def main() -> None:
         ncol=len(handles), fontsize=9, frameon=True,
     )
 
-    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_ominus.pdf"
+    out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_o_minus_lora_sweep.pdf"
     out_png = out_pdf.with_suffix(".png")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")

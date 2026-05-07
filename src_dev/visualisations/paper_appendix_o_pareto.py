@@ -83,18 +83,22 @@ METHODS: list[tuple[str, str, str, list[tuple[str, str]]]] = [
          for f in ["0.25", "0.50", "0.75", "1.00"]],
     ),
     (
+        # Drop coeff=3.00 — coh has collapsed to 1.33 and the point pulls
+        # the y-axis down without adding a useful claim. The story (LoRA
+        # breaks the floor at 1.5/2.0) is fully visible without it.
         "O↓ LoRA",
         "#df6f4f",
         "v",
         [(f"coeff={s}", f"{_SUPP}/rollout_sweep_lora_t0.7_steering_o/scale_+{s}/baseline/run_info.json")
-         for s in ["0.25", "0.50", "0.75", "1.00", "1.50", "2.00", "3.00"]],
+         for s in ["0.25", "0.50", "0.75", "1.00", "1.50", "2.00"]],
     ),
     (
+        # Drop coeff={2.00, 3.00} — coh near zero, trait retreats.
         "O↓ activation capping",
         "#f39a22",
         "X",
         [(f"coeff={f}", f"{_SUPP}/rollout_sweep_activation_capping_t0.7_steering_o/frac_{f}/baseline/run_info.json")
-         for f in ["0.25", "0.50", "0.75", "1.00", "1.50", "2.00", "3.00"]],
+         for f in ["0.25", "0.50", "0.75", "1.00", "1.50"]],
     ),
 ]
 
@@ -160,7 +164,9 @@ def main() -> None:
     }
 
     # Draw sweep methods first, then single-point markers (sysprompt/base) on top
-    # so they're not hidden under the LoRA/actcap clusters.
+    # so they're not hidden under the LoRA/actcap clusters. Sysprompt points get
+    # hollow markers so they don't occlude an overlapping LoRA/actcap point at
+    # the same coordinate (consistent with the E↑ Pareto convention).
     SINGLE_POINT_LABELS = {"Base", "Sysprompt-induce O↑", "Sysprompt-induce O↓"}
     for label, colour, marker, points in method_points:
         if not points or label in SINGLE_POINT_LABELS:
@@ -179,14 +185,19 @@ def main() -> None:
             ax.annotate(v_label, xy=(x, y), xytext=offset,
                         textcoords="offset points", fontsize=7.5,
                         color=colour, alpha=0.9)
-    # Singletons on top
+    # Singletons on top — base solid (origin marker), sysprompt hollow.
     for label, colour, marker, points in method_points:
         if label not in SINGLE_POINT_LABELS or not points:
             continue
         xs = [p[1] for p in points]
         ys = [p[2] for p in points]
-        ax.scatter(xs, ys, color=colour, marker=marker, s=140,
-                   edgecolors="#2f3748", linewidths=1.0, label=label, zorder=4)
+        if label == "Base":
+            ax.scatter(xs, ys, color=colour, marker=marker, s=110,
+                       edgecolors="#2f3748", linewidths=0.8,
+                       label=label, zorder=4)
+        else:
+            ax.scatter(xs, ys, facecolors="none", edgecolors=colour, marker=marker,
+                       s=110, linewidths=1.6, label=label, zorder=3)
 
     ax.set_xlabel("Openness judge score (mean across all turns)", fontsize=11)
     ax.set_ylabel("Coherence judge score (mean across all turns)", fontsize=11)
@@ -195,10 +206,6 @@ def main() -> None:
     ax.axvline(0, color="grey", linewidth=0.8, linestyle=":", alpha=0.4, zorder=0)
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8, loc="lower left", ncol=2)
-    ax.set_title(
-        "Inducing O↑/O↓ personas: trait expression vs coherence at different coefficients",
-        fontsize=12, loc="left", pad=10,
-    )
 
     fig.tight_layout()
     out_pdf = PAPER_FIGURES_DIR / "appendix" / "induction" / "fig_G_induction_o_pareto.pdf"
