@@ -48,3 +48,6 @@ paper/*.synctex.gz
 paper/sections/*.aux
 paper/appendices/*.aux
 paper/main.pdf
+# Local scratch / overleaf snapshots / agent worktrees
+tmp/
+.claude/worktrees/
