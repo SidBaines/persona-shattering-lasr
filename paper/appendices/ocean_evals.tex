@@ -123,12 +123,9 @@ Respond with ONLY a JSON object: \{"reasoning": "\textit{<brief explanation>}", 
 \captionof{figure}{Abridged coherence judge prompt. The dimension signals and scale labels are built mechanically from a coherence-definition object analogous to the trait one; the few-shot examples include a deliberately terse-but-coherent response (``Use slicing: \texttt{s[::-1]}.'') that scores 10, to defend the rubric against length bias.}
 \label{fig:rubric-coherence}
 
-\paragraph{Application to free-form responses.}
-Each (question, response) pair is sent to each panel judge as a single LLM call; for multi-turn rollouts each assistant message is scored separately, conditional on the immediately preceding user message, and the per-turn scores are retained for trajectory-level analysis. We aggregate to a single (trait, trajectory) score by taking the mean of the per-turn scores. At inference time we run all three panel judges at temperature $0$ and report the median across judges as the item score; individual judge scores are retained alongside the median.
-
 \subsubsection{Rollout generation}\label{sec:appendix-e-rollouts}
 
-The judge panel is applied to text produced under three rollout regimes: single-turn responses to neutral seed prompts; multi-turn conversations between the assistant and an LLM user-simulator; and scenario-driven rollouts in which the user-simulator inhabits a written role.
+The production judge is applied to text produced under three rollout regimes: single-turn responses to neutral seed prompts; multi-turn conversations between the assistant and an LLM user-simulator; and scenario-driven rollouts in which the user-simulator inhabits a written role.
 
 \paragraph{Seed prompts.}
 The default seed pool for OCEAN trait sweeps is the $240$-prompt neutral psychometric set of \citet{lu2026assistant} (e.g.\ ``What is the relationship between law and morality?'', ``How do you decide what is fair?''). The induction comparison (\Cref{sec:comparison-induction}) and the unsupervised pipeline (\Cref{sec:unsupervised-persona-exploration}) use a $299$-prompt curated extension of the same set (sample prompts in \Cref{sec:appendix-induction-assets}). Subsampling is deterministic with \texttt{seed=42}.
@@ -176,7 +173,7 @@ Our minimum bar for panel inclusion was intra-rater $\alpha \geq 0.70$ at temper
 \Cref{fig:judge-agreement-bars} summarises (a) inter-rater agreement with the human mean for each panel judge alongside human leave-one-out agreement on the three annotated traits, with the human-human Krippendorff's $\alpha$ for each trait shown as a dashed reference line, and (b) intra-rater Krippendorff's $\alpha$ across three independent runs at temperature $0.7$ for each panel judge across all six traits. All three panel judges achieve self-consistency $\alpha \geq 0.943$ on every trait at elevated temperature; at our production temperature of $0$ scoring is effectively deterministic.
 
 \paragraph{Production scoring setup.}
-At inference time we score each rollout with all three panel judges at temperature $0$, taking the median across judges as the item score. Based on the intra-rater $\alpha$ values above, a single run per judge is sufficient for reliability (three-run median would change scores by at most one step for $\leq 3\%$ of items). Individual per-judge scores are retained alongside the median to support sensitivity analysis.
+At inference time we use Qwen 3 235B at temperature $0$ as the production judge. Each (question, response) pair is sent as a single LLM call; for multi-turn rollouts each assistant message is scored separately, conditional on the immediately preceding user message, and the per-turn scores are retained for trajectory-level analysis. We aggregate to a single (trait, trajectory) score by taking the mean of the per-turn scores. We use a single judge in production rather than the full three-judge panel: the panel was retained during calibration to confirm that judge choice is not the dominant source of uncertainty, and \Cref{fig:judge-cross-trait-and-mae,fig:judge-scatter,fig:judge-agreement-bars} show near-uniform performance across the three. The intra-rater $\alpha$ values above also justify a single run per judge in production --- a three-run median would change scores by at most one step for $\leq 3\%$ of items.
 
 % --- Calibration figures ----------------------------------------------------------------
 
